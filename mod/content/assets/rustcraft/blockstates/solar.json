@@ -1,0 +1,8 @@
+{
+  "variants": {
+    "facing=north": {"model": "rustcraft:block/solar"},
+    "facing=east": {"model": "rustcraft:block/solar", "y": 90},
+    "facing=south": {"model": "rustcraft:block/solar", "y": 180},
+    "facing=west": {"model": "rustcraft:block/solar", "y": 270}
+  }
+}

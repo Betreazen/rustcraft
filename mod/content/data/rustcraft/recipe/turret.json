@@ -1,0 +1,19 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    "bwb",
+    "bdb",
+    "brb"
+  ],
+  "key": {
+    "b": "rustcraft:sparksteel",
+    "w": "minecraft:bow",
+    "d": "minecraft:dropper",
+    "r": "minecraft:redstone"
+  },
+  "result": {
+    "id": "rustcraft:turret",
+    "count": 1
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "variants": {
+    "facing=north,lit=false": {"model": "rustcraft:block/pump"},
+    "facing=north,lit=true": {"model": "rustcraft:block/pump"},
+    "facing=east,lit=false": {"model": "rustcraft:block/pump", "y": 90},
+    "facing=east,lit=true": {"model": "rustcraft:block/pump", "y": 90},
+    "facing=south,lit=false": {"model": "rustcraft:block/pump", "y": 180},
+    "facing=south,lit=true": {"model": "rustcraft:block/pump", "y": 180},
+    "facing=west,lit=false": {"model": "rustcraft:block/pump", "y": 270},
+    "facing=west,lit=true": {"model": "rustcraft:block/pump", "y": 270}
+  }
+}

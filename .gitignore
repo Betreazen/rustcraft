@@ -1,0 +1,6 @@
+target/
+*.blend1
+# Base-game textures taken from the local game client (tools/local-mc-assets); never commit them.
+docs/showcase/local/
+# The engine takes the crate's dependency versions from Horizon's own Cargo.lock.
+/Cargo.lock

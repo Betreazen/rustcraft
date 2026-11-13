@@ -1,0 +1,19 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    "aca",
+    "hsh",
+    "aca"
+  ],
+  "key": {
+    "a": "rustcraft:sparksteel",
+    "c": "minecraft:chest",
+    "h": "minecraft:hopper",
+    "s": "minecraft:amethyst_shard"
+  },
+  "result": {
+    "id": "rustcraft:module_storage",
+    "count": 1
+  }
+}

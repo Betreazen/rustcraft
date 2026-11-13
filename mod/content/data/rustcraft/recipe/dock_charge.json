@@ -1,0 +1,18 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    "brb",
+    "bsb",
+    "bbb"
+  ],
+  "key": {
+    "b": "rustcraft:sparksteel",
+    "r": "minecraft:redstone",
+    "s": "minecraft:amethyst_shard"
+  },
+  "result": {
+    "id": "rustcraft:dock_charge",
+    "count": 1
+  }
+}

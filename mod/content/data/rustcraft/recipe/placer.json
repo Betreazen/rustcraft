@@ -1,0 +1,18 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    "bbb",
+    "bdb",
+    "brb"
+  ],
+  "key": {
+    "b": "rustcraft:sparksteel",
+    "d": "minecraft:dropper",
+    "r": "minecraft:redstone"
+  },
+  "result": {
+    "id": "rustcraft:placer",
+    "count": 1
+  }
+}

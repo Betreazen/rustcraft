@@ -1,0 +1,19 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    "bgb",
+    "bsb",
+    "brb"
+  ],
+  "key": {
+    "b": "rustcraft:sparksteel",
+    "g": "minecraft:glass",
+    "s": "minecraft:amethyst_shard",
+    "r": "minecraft:redstone"
+  },
+  "result": {
+    "id": "rustcraft:terminal",
+    "count": 1
+  }
+}

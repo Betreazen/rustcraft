@@ -1,0 +1,741 @@
+# RustCraft for Horizon. Slice 1: the magistral's housing and node as blocks, the channel items
+# and the wrench, slots saved in the housing's block entity, and the diagnosis of a looked-at
+# housing (spec M1-M3, N3). Slice 2: the energy crystal and the electric furnace, items moved
+# along item channel nets between joints (M6-M8, M16, M17), energy by contact and through energy
+# channel nets (E2, E3, E10), the furnace's window and diagnoses (A1, A4). Slice 3: the
+# machines' own window (their content mod's menu types, drawn by rustcraft_screens), the work
+# modes (A1), the joint window with per-face, per-slot direction, filter and priority (M7), and
+# the crusher with its dusts. Slice 4: the fuel generator (16 E/s while a furnace fuel burns,
+# E17's circuit balance in its window), the alloy smelter (four inputs, fuel or energy, AL1's
+# «брать свой сплав») with the alloys, and the autocrafter (pages of 3×3 patterns matched by the
+# crafting table's own matcher, C1–C4) with the capacity module. Slice 5: the storage (cells in a
+# solid box keeping counts, S1–S8, and its terminal with pages, search, tabs and limits, TM1) on
+# the item nets, the tank (touching tanks are one) and the pump (water endless by the game's rules,
+# lava finite), and fluids along fluid channel nets (M13). Slice 6: the monorail (rails on any
+# face, their shape chosen from their neighbours, T1–T4), the station (its buffer of energy, its
+# window with the network's scheme, T6–T8) and the capsule, which carries the player along the
+# shortest way by the traversal prototype's method b2 (an invisible-to-the-rules seat mob the server
+# moves, spec 16) and which every client draws round its seat (T3, T9). See ../README.md.
+# Resources are the content mod in ../content, under the same id.
+#
+# Every hook below is a named hook point (SRC/native-hooks.json) with a HEAD injection into its
+# function, so it runs whatever mod_api::mods() holds: none of their callers checks for a trait
+# mod (mods.rs:57-75, game.rs:6966-6969 and 6481-6482 and 7246, levels.rs:511-560,
+# native_hooks.rs:11540-11555 and 11656, all under SRC/crates/horizon-client/src). Slice 2's:
+# right_click_block from `use_hand` (game.rs:6735-6750), block_entity_container from the
+# ticking table (game/block_entity_ticks.rs:24-34 through native_hooks.rs:11718-11748). Slice
+# 3's: screen from the menu's opening and `native_hidden_slots` (native_hooks.rs:11885-11950),
+# screen_draw, screen_click and screen_tooltip from the open mod screen (native_hooks.rs:
+# 12026-12060, 12160-12200), menu_button from `mod_menu_button` (native_hooks.rs:12133-12146),
+# menu_clicked and menu_closed from `run_native_menu_events` (game/native_menus.rs:441-468),
+# menu_slot_rules from the menu engine's `mod_slot` (menu.rs:1549-1560). Slice 4's:
+# menu_button_v2 from `mod_menu_button` right after menu_button (native_hooks.rs:12133-12146);
+# container_accepts, which has no catalog entry, by its target, from `mod_container_accepts`
+# (game/machines.rs:616-638), which every hopper move and `native_move_items` ask. Slice 5's:
+# menu_quick_move from `mod_menu_quick_move` (game/native_quick_move.rs:186-214),
+# player_container_open and _close from `tick_player_menus` (game/native_menus.rs:348-418),
+# net_from_server from `remote_native_net` (game/native_net.rs:160-165), screen_key_pressed_pre
+# and screen_char_typed_pre from `screen_key_pressed` and `screen_chars_typed`
+# (native_hooks.rs:4161-4245, control.rs:684 and 1050 for the control socket's keys and typing).
+# Slice 6's: state_for_placement from vanilla's placement (game/native_hooks.rs:1776, API 76),
+# net_from_client (native_hooks.rs:8397), player_logged_out (8487) and server_stopping (2547), and
+# on the client mob_submit (native_hooks.rs:3673, from game/creatures.rs:7636, asked for every mob
+# in view that is not invisible) and standalone_models (native_hooks.rs:3259); living_fall, which
+# stays silent for a bundle without a trait mod, by its target (landing.rs:32), as the traversal
+# prototype hooked it.
+[mod]
+id = "rustcraft"
+version = "0.8.0"
+
+# The commit the traversal prototype and path_of_craft_tree build on; every function used here
+# was checked in its source.
+[compatibility]
+horizon_revision = "7e4e421224743469035ba0c34fc21e569e64a17d"
+
+# The game-free rules, compiled and cached apart from the game. Helpers and modules call it by
+# its package name (`rustcraft-rules`, in code `rustcraft_rules`), the name the stage adds to horizon-client's [dependencies]
+# (SRC/docs/native-mods.md:550-552).
+[[crate]]
+id = "rules"
+path = "rules"
+
+# The glue: what is registered, and the server's side of the magistral.
+[[module]]
+id = "content"
+file = "crates/horizon-client/src/game.rs"
+name = "rustcraft_content"
+source = "content.rs"
+
+[[module]]
+id = "server"
+file = "crates/horizon-client/src/game.rs"
+name = "rustcraft_server"
+source = "server.rs"
+
+# Energy and the furnace, every tick.
+[[module]]
+id = "machines"
+file = "crates/horizon-client/src/game.rs"
+name = "rustcraft_machines"
+source = "machines.rs"
+
+# Joints, item moves and the wrench.
+[[module]]
+id = "transport"
+file = "crates/horizon-client/src/game.rs"
+name = "rustcraft_transport"
+source = "transport.rs"
+
+# The joint window: a server menu (M7).
+[[module]]
+id = "window"
+file = "crates/horizon-client/src/game.rs"
+name = "rustcraft_window"
+source = "window.rs"
+
+# The machines' own window on the client.
+[[module]]
+id = "screens"
+file = "crates/horizon-client/src/game.rs"
+name = "rustcraft_screens"
+source = "screens.rs"
+
+# Slice 4's machines: the fuel generator, the alloy smelter, the autocrafter, and their windows.
+[[module]]
+id = "generator"
+file = "crates/horizon-client/src/game.rs"
+name = "rustcraft_generator"
+source = "generator.rs"
+
+[[module]]
+id = "alloy"
+file = "crates/horizon-client/src/game.rs"
+name = "rustcraft_alloy"
+source = "alloy.rs"
+
+[[module]]
+id = "crafter"
+file = "crates/horizon-client/src/game.rs"
+name = "rustcraft_crafter"
+source = "crafter.rs"
+
+[[module]]
+id = "panels"
+file = "crates/horizon-client/src/game.rs"
+name = "rustcraft_panels"
+source = "panels.rs"
+
+# Slice 5: the storage on the server, the terminal's window on the client, the tanks, the pumps
+# and the fluid nets, and the tank's and the pump's windows.
+[[module]]
+id = "storage"
+file = "crates/horizon-client/src/game.rs"
+name = "rustcraft_storage"
+source = "storage.rs"
+
+[[module]]
+id = "terminal"
+file = "crates/horizon-client/src/game.rs"
+name = "rustcraft_terminal"
+source = "terminal.rs"
+
+[[module]]
+id = "fluids"
+file = "crates/horizon-client/src/game.rs"
+name = "rustcraft_fluids"
+source = "fluids.rs"
+
+[[module]]
+id = "fluid_panels"
+file = "crates/horizon-client/src/game.rs"
+name = "rustcraft_fluid_panels"
+source = "fluid_panels.rs"
+
+# Slice 6: the monorail on the server (rails, stations, trips) and on the client (the station's
+# window and the capsule).
+[[module]]
+id = "monorail"
+file = "crates/horizon-client/src/game.rs"
+name = "rustcraft_monorail"
+source = "monorail.rs"
+
+[[module]]
+id = "station"
+file = "crates/horizon-client/src/game.rs"
+name = "rustcraft_station"
+source = "station.rs"
+
+# The joint bench's in-world self-test (horizon-joint-dev, «Быстрые проверки»): the console
+# command `rustcraft_selftest run [filter]` and its scenarios from the level's tick; the scenarios
+# themselves are the rules crate's (rustcraft_rules::selftest).
+[[module]]
+id = "workers"
+file = "crates/horizon-client/src/game.rs"
+name = "rustcraft_workers"
+source = "workers.rs"
+
+[[module]]
+id = "base"
+file = "crates/horizon-client/src/game.rs"
+name = "rustcraft_base"
+source = "base.rs"
+
+# Slice 8: the energy sources and the battery (structures of crystals, panels and batteries), and
+# the miner, the block placer and the block breaker.
+[[module]]
+id = "power"
+file = "crates/horizon-client/src/game.rs"
+name = "rustcraft_power"
+source = "power.rs"
+
+[[module]]
+id = "mining"
+file = "crates/horizon-client/src/game.rs"
+name = "rustcraft_mining"
+source = "mining.rs"
+
+[[module]]
+id = "selftest"
+file = "crates/horizon-client/src/game.rs"
+name = "rustcraft_selftest"
+source = "selftest.rs"
+
+# The fall handling lives in the client library, below the game crate, so the list of riders
+# whose falls do no damage must live there too.
+[[module]]
+id = "falls"
+file = "crates/horizon-client/src/client_lib.rs"
+name = "rustcraft_falls"
+source = "falls.rs"
+visibility = "pub"
+
+# ---- Registries, asked once at start on every side (API 145) ----
+
+[[injection]]
+id = "blocks"
+hook = "blocks"
+hook_version = 1
+kind = "HEAD"
+helper = "hook_blocks.rs"
+bindings = [
+  { name = "blocks", ty = "&mut Vec<horizon_mods::content::Block>", value = "&mut *blocks" },
+]
+
+[[injection]]
+id = "items"
+hook = "items"
+hook_version = 1
+kind = "HEAD"
+helper = "hook_items.rs"
+bindings = [
+  { name = "items", ty = "&mut Vec<horizon_mods::content::Item>", value = "&mut *items" },
+]
+
+# Every side makes the block entity when the block is placed or loaded (API 15).
+[[injection]]
+id = "block_entity"
+hook = "block_entity"
+hook_version = 1
+kind = "HEAD"
+helper = "hook_block_entity.rs"
+bindings = [
+  { name = "block", ty = "&str", value = "block" },
+  { name = "entity", ty = "&mut Option<(String, horizon_world::nbt::Compound)>", value = "&mut *entity" },
+]
+
+# The furnace's slots and the menu they open in, asked once a block when a world's ticking table
+# is built, on every side (API 17; native_hooks.rs:3349-3364, block_entity_ticks.rs:24-34).
+[[injection]]
+id = "block_entity_container"
+hook = "block_entity_container"
+hook_version = 1
+kind = "HEAD"
+helper = "hook_block_entity_container.rs"
+bindings = [
+  { name = "block", ty = "&str", value = "block" },
+  { name = "container", ty = "&mut Option<horizon_client::containers::ModContainer>", value = "&mut *container" },
+]
+
+# ---- Server half ----
+
+# A right click with an item on a block, once the block let it through (API 13).
+[[injection]]
+id = "use_item_on"
+hook = "use_item_on"
+hook_version = 1
+kind = "HEAD"
+helper = "hook_use_item_on.rs"
+bindings = [
+  { name = "game", ty = "&mut crate::game::Game<'_>", value = "&mut *self" },
+  { name = "stack", ty = "&horizon_client::items::ItemStack", value = "stack" },
+  { name = "pos", ty = "[i32; 3]", value = "pos" },
+  { name = "claimed", ty = "&mut bool", value = "&mut *claimed" },
+]
+
+# A right click on a block, before the block's own use and the item's, cancellable (API 21):
+# the wrench on a housing, or on a block behind a joint, opens the joint window instead.
+[[injection]]
+id = "right_click_block"
+hook = "right_click_block"
+hook_version = 1
+kind = "HEAD"
+helper = "hook_right_click_block.rs"
+bindings = [
+  { name = "game", ty = "&mut crate::game::Game<'_>", value = "&mut *self" },
+  { name = "pos", ty = "[i32; 3]", value = "pos" },
+  { name = "face", ty = "[i32; 3]", value = "face" },
+  { name = "canceled", ty = "&mut bool", value = "&mut *canceled" },
+]
+
+# A press on a machine window's mode button, on the server (API 20).
+[[injection]]
+id = "menu_button"
+hook = "menu_button"
+hook_version = 1
+kind = "HEAD"
+helper = "hook_menu_button.rs"
+bindings = [
+  { name = "entity", ty = "&mut horizon_client::containers::ModBlockEntity", value = "&mut *entity" },
+  { name = "id", ty = "i32", value = "id" },
+]
+
+# The same press with the player's cursor stack (API 51): an autocrafter's pattern cell takes it,
+# and a terminal's place takes or gives a stack. The clicking player is swapped in
+# (game/lan_stations.rs:553-558), so `native_acting_player` and `native_give_stack` reach them.
+[[injection]]
+id = "menu_button_v2"
+hook = "menu_button_v2"
+hook_version = 1
+kind = "HEAD"
+helper = "hook_menu_button_v2.rs"
+bindings = [
+  { name = "game", ty = "&mut crate::game::Game<'_>", value = "&mut *self" },
+  { name = "pos", ty = "[i32; 3]", value = "pos" },
+  { name = "entity", ty = "&mut horizon_client::containers::ModBlockEntity", value = "&mut *entity" },
+  { name = "id", ty = "i32", value = "id" },
+  { name = "carried", ty = "&mut Option<horizon_client::items::ItemStack>", value = "&mut *carried" },
+]
+
+# A shift-click in a terminal's window (API 309): a stack of the inventory goes into the storage,
+# not into the menu's hidden slot (SRC/docs/native-mods.md:4636-4657).
+[[injection]]
+id = "menu_quick_move"
+hook = "menu_quick_move"
+hook_version = 1
+kind = "HEAD"
+helper = "hook_menu_quick_move.rs"
+bindings = [
+  { name = "game", ty = "&mut crate::game::Game<'_>", value = "&mut *self" },
+  { name = "pos", ty = "[i32; 3]", value = "pos" },
+  { name = "entity", ty = "&mut horizon_client::containers::ModBlockEntity", value = "&mut *entity" },
+  { name = "container_slots", ty = "usize", value = "container_slots" },
+  { name = "slot", ty = "usize", value = "slot" },
+  { name = "stack", ty = "&mut horizon_client::items::ItemStack", value = "&mut *stack" },
+  { name = "handled", ty = "&mut bool", value = "&mut *handled" },
+]
+
+# Who has a terminal open (API 152), so the server sends them its list when it changes.
+[[injection]]
+id = "container_open"
+hook = "player_container_open"
+hook_version = 1
+kind = "HEAD"
+helper = "hook_container_open.rs"
+bindings = [
+  { name = "player", ty = "u128", value = "player" },
+  { name = "dimension", ty = "&str", value = "dimension" },
+  { name = "menu", ty = "&str", value = "menu" },
+  { name = "pos", ty = "Option<[i32; 3]>", value = "pos" },
+]
+
+[[injection]]
+id = "container_close"
+hook = "player_container_close"
+hook_version = 1
+kind = "HEAD"
+helper = "hook_container_close.rs"
+bindings = [
+  { name = "player", ty = "u128", value = "player" },
+  { name = "menu", ty = "&str", value = "menu" },
+]
+
+# What a machine's input takes from a hopper or the net (NeoForge's IItemHandler.isItemValid):
+# fuel into a fuel slot, alloy ingredients into the smelter's inputs, one kind a slot.
+[[injection]]
+id = "container_accepts"
+target = "horizon_client::game::native_hooks::Game<'_>::native_container_accepts"
+kind = "HEAD"
+helper = "hook_container_accepts.rs"
+bindings = [
+  { name = "entity", ty = "&horizon_client::containers::ModBlockEntity", value = "entity" },
+  { name = "slot", ty = "usize", value = "slot" },
+  { name = "stack", ty = "&horizon_client::items::ItemStack", value = "stack" },
+  { name = "cancel", ty = "&mut bool", value = "&mut *cancel" },
+]
+
+# Clicks on and the closing of the joint window, a server menu (API 10).
+[[injection]]
+id = "menu_clicked"
+hook = "menu_clicked"
+hook_version = 1
+kind = "HEAD"
+helper = "hook_menu_clicked.rs"
+bindings = [
+  { name = "game", ty = "&mut crate::game::Game<'_>", value = "&mut *self" },
+  { name = "uuid", ty = "u128", value = "uuid" },
+  { name = "window", ty = "i32", value = "window" },
+  { name = "slot", ty = "i32", value = "slot" },
+  { name = "button", ty = "i32", value = "button" },
+  { name = "mode", ty = "i32", value = "mode" },
+]
+
+[[injection]]
+id = "menu_closed"
+hook = "menu_closed"
+hook_version = 1
+kind = "HEAD"
+helper = "hook_menu_closed.rs"
+bindings = [
+  { name = "uuid", ty = "u128", value = "uuid" },
+  { name = "window", ty = "i32", value = "window" },
+]
+
+# What a machine window's slots take, asked by the server's menu engine (API 130). The function
+# is horizon-client-lib's: its helper reaches neither the game nor the rules crate.
+[[injection]]
+id = "menu_slot_rules"
+hook = "menu_slot_rules"
+hook_version = 1
+kind = "HEAD"
+helper = "hook_menu_slot_rules.rs"
+bindings = [
+  { name = "menu", ty = "&str", value = "menu" },
+  { name = "slot", ty = "usize", value = "slot" },
+  { name = "stack", ty = "&horizon_client::items::ItemStack", value = "stack" },
+  { name = "may_place", ty = "&mut bool", value = "&mut *may_place" },
+]
+
+# ---- Client half: the machines' window (API 19, 20) ----
+
+# Its layout, asked by the client and the server alike.
+[[injection]]
+id = "screen"
+hook = "screen"
+hook_version = 1
+kind = "HEAD"
+helper = "hook_screen.rs"
+bindings = [
+  { name = "block", ty = "&str", value = "block" },
+  { name = "screen", ty = "&mut Option<horizon_client::mod_api::NativeScreen>", value = "&mut *screen" },
+]
+
+[[injection]]
+id = "screen_draw"
+hook = "screen_draw"
+hook_version = 1
+kind = "HEAD"
+helper = "hook_screen_draw.rs"
+bindings = [
+  { name = "game", ty = "&crate::game::Game<'_>", value = "&*self" },
+  { name = "block", ty = "&str", value = "block" },
+  { name = "data", ty = "&[i32]", value = "data" },
+  { name = "batch", ty = "&mut horizon_client::hud::HudBatch", value = "&mut *batch" },
+  { name = "origin", ty = "[f32; 2]", value = "origin" },
+]
+
+[[injection]]
+id = "screen_click"
+hook = "screen_click"
+hook_version = 1
+kind = "HEAD"
+helper = "hook_screen_click.rs"
+bindings = [
+  { name = "game", ty = "&crate::game::Game<'_>", value = "&*self" },
+  { name = "block", ty = "&str", value = "block" },
+  { name = "data", ty = "&[i32]", value = "data" },
+  { name = "at", ty = "[f32; 2]", value = "at" },
+  { name = "right", ty = "bool", value = "right" },
+  { name = "button", ty = "&mut Option<i32>", value = "&mut *button" },
+]
+
+# The terminal's list, sent by the server as a mod message (API 40).
+[[injection]]
+id = "net_from_server"
+hook = "net_from_server"
+hook_version = 1
+kind = "HEAD"
+helper = "hook_net_from_server.rs"
+bindings = [
+  { name = "channel", ty = "&str", value = "channel" },
+  { name = "data", ty = "&[u8]", value = "data" },
+]
+
+# Typing into the terminal's search (API 104): a mod screen has no text box, so the window keeps
+# the text and takes the keys while the search is focused.
+[[injection]]
+id = "screen_key"
+hook = "screen_key_pressed_pre"
+hook_version = 1
+kind = "HEAD"
+helper = "hook_screen_key.rs"
+bindings = [
+  { name = "game", ty = "&crate::game::Game<'_>", value = "&*self" },
+  { name = "screen", ty = "&horizon_client::mod_api::NativeScreenView<'_>", value = "screen" },
+  { name = "key", ty = "&str", value = "key" },
+  { name = "canceled", ty = "&mut bool", value = "&mut *canceled" },
+]
+
+[[injection]]
+id = "screen_char"
+hook = "screen_char_typed_pre"
+hook_version = 1
+kind = "HEAD"
+helper = "hook_screen_char.rs"
+bindings = [
+  { name = "game", ty = "&crate::game::Game<'_>", value = "&*self" },
+  { name = "screen", ty = "&horizon_client::mod_api::NativeScreenView<'_>", value = "screen" },
+  { name = "c", ty = "char", value = "c" },
+  { name = "canceled", ty = "&mut bool", value = "&mut *canceled" },
+]
+
+[[injection]]
+id = "screen_tooltip"
+hook = "screen_tooltip"
+hook_version = 1
+kind = "HEAD"
+helper = "hook_screen_tooltip.rs"
+bindings = [
+  { name = "game", ty = "&crate::game::Game<'_>", value = "&*self" },
+  { name = "block", ty = "&str", value = "block" },
+  { name = "data", ty = "&[i32]", value = "data" },
+  { name = "at", ty = "[f32; 2]", value = "at" },
+  { name = "lines", ty = "&mut Vec<String>", value = "&mut *lines" },
+]
+
+# A block placed from an item (API 14).
+[[injection]]
+id = "place_block"
+hook = "place_block"
+hook_version = 1
+kind = "HEAD"
+helper = "hook_place_block.rs"
+bindings = [
+  { name = "game", ty = "&mut crate::game::Game<'_>", value = "&mut *self" },
+  { name = "stack", ty = "&horizon_client::items::ItemStack", value = "stack" },
+  { name = "pos", ty = "[i32; 3]", value = "pos" },
+]
+
+# A player about to break a block, the block entity still there (API 14).
+[[injection]]
+id = "destroy_block"
+hook = "destroy_block"
+hook_version = 1
+kind = "HEAD"
+helper = "hook_destroy_block.rs"
+bindings = [
+  { name = "game", ty = "&mut crate::game::Game<'_>", value = "&mut *self" },
+  { name = "pos", ty = "[i32; 3]", value = "pos" },
+]
+
+# Each level after its tick, with that level in place (API 23).
+[[injection]]
+id = "level_tick"
+hook = "level_tick_post"
+hook_version = 1
+kind = "HEAD"
+helper = "hook_level_tick.rs"
+bindings = [
+  { name = "game", ty = "&mut crate::game::Game<'_>", value = "&mut *self" },
+  { name = "dimension", ty = "&str", value = "dimension" },
+]
+
+# Chunks that came and went: housings may be among them (API 57).
+[[injection]]
+id = "chunk_load"
+hook = "chunk_load"
+hook_version = 1
+kind = "HEAD"
+helper = "hook_chunk_changed.rs"
+bindings = [{ name = "dimension", ty = "&str", value = "dimension" }]
+
+[[injection]]
+id = "chunk_unload"
+hook = "chunk_unload"
+hook_version = 1
+kind = "HEAD"
+helper = "hook_chunk_changed.rs"
+bindings = [{ name = "dimension", ty = "&str", value = "dimension" }]
+
+# A level closed (API 134).
+[[injection]]
+id = "level_unload"
+hook = "level_unload"
+hook_version = 1
+kind = "HEAD"
+helper = "hook_level_unload.rs"
+bindings = [{ name = "dimension", ty = "&str", value = "dimension" }]
+
+# ---- Slice 6: the monorail ----
+
+# The state a monorail is placed in: its mount from the clicked face, its tier from the item.
+[[injection]]
+id = "state_for_placement"
+hook = "state_for_placement"
+hook_version = 1
+kind = "HEAD"
+helper = "hook_state_for_placement.rs"
+bindings = [
+  { name = "level", ty = "&crate::game::GameLevel<'_>", value = "&*self" },
+  { name = "state", ty = "horizon_world::registry::BlockStateId", value = "state" },
+  { name = "context", ty = "&horizon_world::level::PlacementContext", value = "context" },
+  { name = "answer", ty = "&mut Option<Option<horizon_world::registry::BlockStateId>>", value = "&mut *answer" },
+]
+
+# A station's new name from its window (API 40).
+[[injection]]
+id = "net_from_client"
+hook = "net_from_client"
+hook_version = 1
+kind = "HEAD"
+helper = "hook_net_from_client.rs"
+bindings = [
+  { name = "player", ty = "u128", value = "player" },
+  { name = "channel", ty = "&str", value = "channel" },
+  { name = "data", ty = "&[u8]", value = "data" },
+]
+
+# A rider who leaves, and a server that stops, leave no seat behind.
+[[injection]]
+id = "logged_out"
+hook = "player_logged_out"
+hook_version = 1
+kind = "HEAD"
+helper = "hook_logged_out.rs"
+bindings = [
+  { name = "game", ty = "&mut crate::game::Game<'_>", value = "&mut *self" },
+  { name = "player", ty = "u128", value = "player" },
+]
+
+[[injection]]
+id = "stopping"
+hook = "server_stopping"
+hook_version = 1
+kind = "HEAD"
+helper = "hook_stopping.rs"
+bindings = [
+  { name = "game", ty = "&mut crate::game::Game<'_>", value = "&mut *self" },
+]
+
+# ---- The self-test's console command (API 8, 99) ----
+
+[[injection]]
+id = "register_commands"
+hook = "register_commands"
+hook_version = 1
+kind = "HEAD"
+helper = "hook_register_commands.rs"
+bindings = [
+  { name = "commands", ty = "&mut Vec<crate::mod_api::NativeCommand>", value = "&mut *commands" },
+]
+
+[[injection]]
+id = "console_command"
+hook = "perform_console_command"
+hook_version = 1
+kind = "HEAD"
+helper = "hook_console_command.rs"
+bindings = [
+  { name = "game", ty = "&mut crate::game::Game<'_>", value = "&mut *self" },
+  { name = "command", ty = "&str", value = "command" },
+  { name = "ran", ty = "&mut bool", value = "&mut *ran" },
+]
+
+# A fall about to hurt (LivingFallEvent): a capsule's rider is spared. At the function, not the
+# named hook, which stays silent for a bundle with no regular mod (traversal prototype).
+[[injection]]
+id = "living_fall"
+target = "horizon_client_lib::landing::native_living_fall"
+kind = "HEAD"
+helper = "hook_living_fall.rs"
+bindings = [
+  { name = "entity", ty = "u32", value = "entity" },
+  { name = "cancel", ty = "&mut bool", value = "&mut *cancel" },
+]
+
+# The capsule drawn round its seat mob, and its parts baked as standalone models (API 110, 151).
+[[injection]]
+id = "mob_submit"
+hook = "mob_submit"
+hook_version = 1
+kind = "HEAD"
+helper = "hook_mob_submit.rs"
+bindings = [
+  { name = "game", ty = "&crate::game::Game<'_>", value = "&*self" },
+  { name = "mob", ty = "&crate::game::native_mob_draw::NativeMobRender<'_>", value = "mob" },
+  { name = "draw", ty = "&mut crate::game::native_block_entity_draw::BlockEntityDraw", value = "&mut *draw" },
+  { name = "drawn", ty = "&mut bool", value = "&mut *drawn" },
+]
+
+[[injection]]
+id = "standalone_models"
+hook = "standalone_models"
+hook_version = 1
+kind = "HEAD"
+helper = "hook_standalone_models.rs"
+bindings = [
+  { name = "models", ty = "&mut Vec<String>", value = "&mut *models" },
+]
+
+# Each tick of the window's game: a station's name typed in its window goes to the server (the
+# screen's key hook holds the game only to read it). Runs on a server's Game too; the helper keeps
+# to a client of a server.
+[[injection]]
+id = "tick"
+hook = "tick"
+hook_version = 1
+kind = "HEAD"
+helper = "hook_tick.rs"
+bindings = [
+  { name = "game", ty = "&mut crate::game::Game<'_>", value = "&mut *self" },
+]
+
+# Slice 7. A click on a worker's seat (API 29, native_hooks.rs:2728): its window, or the wrench
+# taking it back.
+[[injection]]
+id = "interact_entity"
+hook = "interact_entity"
+hook_version = 1
+kind = "HEAD"
+helper = "hook_interact_entity.rs"
+bindings = [
+  { name = "game", ty = "&mut crate::game::Game<'_>", value = "&mut *self" },
+  { name = "entity", ty = "i32", value = "entity" },
+  { name = "stack", ty = "Option<&horizon_client::items::ItemStack>", value = "stack" },
+  { name = "claimed", ty = "&mut bool", value = "&mut *claimed" },
+]
+
+# A mob's death: a turret's kill (D5, X8). The named hook living_death (native_hooks.rs:6603)
+# stays silent for a bundle without a trait mod: its caller `mob_death_canceled` returns before it
+# when mod_api::mods() is empty (game/creatures.rs:1585-1587), so the helper goes into that
+# function by its target, ahead of the check.
+[[injection]]
+id = "living_death"
+target = "horizon_client::game::creatures::Game<'_>::mob_death_canceled"
+kind = "HEAD"
+helper = "hook_living_death.rs"
+bindings = [
+  { name = "m", ty = "&horizon_client::mobs::Mob", value = "m" },
+]
+
+# Damage a player is about to take (native_hooks.rs:9238): a support turret's guard.
+[[injection]]
+id = "living_incoming_damage"
+hook = "living_incoming_damage"
+hook_version = 1
+kind = "HEAD"
+helper = "hook_incoming_damage.rs"
+bindings = [
+  { name = "entity", ty = "i32", value = "entity" },
+  { name = "kind", ty = "&str", value = "kind" },
+  { name = "amount", ty = "&mut f32", value = "&mut *amount" },
+]

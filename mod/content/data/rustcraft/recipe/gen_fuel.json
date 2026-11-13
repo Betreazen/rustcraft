@@ -1,0 +1,18 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    "a a",
+    "afa",
+    "aca"
+  ],
+  "key": {
+    "a": "rustcraft:coppersteel",
+    "f": "minecraft:furnace",
+    "c": "minecraft:copper_ingot"
+  },
+  "result": {
+    "id": "rustcraft:gen_fuel",
+    "count": 1
+  }
+}

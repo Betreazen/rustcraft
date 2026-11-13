@@ -1,0 +1,10 @@
+{
+  "parent": "minecraft:block/block",
+  "textures": {"particle": "rustcraft:block/seed", "p0": "rustcraft:block/seed"},
+  "elements": [
+    {"from": [5.5, 0, 5.5], "to": [10.5, 0.75, 10.5], "faces": {"down": {"uv": [0.5, 0.5, 1.5, 1.5], "texture": "#p0", "cullface": "down"}, "up": {"uv": [0.5, 0.5, 1.5, 1.5], "texture": "#p0"}, "north": {"uv": [0.5, 0.5, 1.5, 1.5], "texture": "#p0"}, "south": {"uv": [0.5, 0.5, 1.5, 1.5], "texture": "#p0"}, "west": {"uv": [0.5, 0.5, 1.5, 1.5], "texture": "#p0"}, "east": {"uv": [0.5, 0.5, 1.5, 1.5], "texture": "#p0"}}},
+    {"from": [6.75, 0.5, 6.75], "to": [9.25, 3.7, 9.25], "light_emission": 15, "faces": {"up": {"uv": [2.5, 0.5, 3.5, 1.5], "texture": "#p0"}, "north": {"uv": [2.5, 0.5, 3.5, 1.5], "texture": "#p0"}, "south": {"uv": [2.5, 0.5, 3.5, 1.5], "texture": "#p0"}, "west": {"uv": [2.5, 0.5, 3.5, 1.5], "texture": "#p0"}, "east": {"uv": [2.5, 0.5, 3.5, 1.5], "texture": "#p0"}}},
+    {"from": [7.25, 3.7, 7.25], "to": [8.75, 4.7, 8.75], "light_emission": 15, "faces": {"down": {"uv": [4.5, 0.5, 5.5, 1.5], "texture": "#p0"}, "up": {"uv": [4.5, 0.5, 5.5, 1.5], "texture": "#p0"}, "north": {"uv": [4.5, 0.5, 5.5, 1.5], "texture": "#p0"}, "south": {"uv": [4.5, 0.5, 5.5, 1.5], "texture": "#p0"}, "west": {"uv": [4.5, 0.5, 5.5, 1.5], "texture": "#p0"}, "east": {"uv": [4.5, 0.5, 5.5, 1.5], "texture": "#p0"}}},
+    {"from": [8.95, 0.5, 7.25], "to": [9.45, 2.42, 8.25], "light_emission": 15, "faces": {"up": {"uv": [6.5, 0.5, 7.5, 1.5], "texture": "#p0"}, "north": {"uv": [6.5, 0.5, 7.5, 1.5], "texture": "#p0"}, "south": {"uv": [6.5, 0.5, 7.5, 1.5], "texture": "#p0"}, "east": {"uv": [6.5, 0.5, 7.5, 1.5], "texture": "#p0"}}}
+  ]
+}

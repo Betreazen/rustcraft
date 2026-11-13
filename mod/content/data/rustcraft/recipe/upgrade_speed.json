@@ -1,0 +1,17 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    " x ",
+    " b ",
+    " x "
+  ],
+  "key": {
+    "b": "rustcraft:sparksteel",
+    "x": "minecraft:sugar"
+  },
+  "result": {
+    "id": "rustcraft:upgrade_speed",
+    "count": 1
+  }
+}

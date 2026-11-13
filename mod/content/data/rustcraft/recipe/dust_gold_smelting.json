@@ -1,0 +1,8 @@
+{
+  "type": "minecraft:smelting",
+  "category": "misc",
+  "ingredient": "rustcraft:dust_gold",
+  "result": { "id": "minecraft:gold_ingot" },
+  "experience": 0.5,
+  "cookingtime": 200
+}

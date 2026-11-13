@@ -1,0 +1,17 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    "a a",
+    "asa",
+    "a a"
+  ],
+  "key": {
+    "a": "rustcraft:crystallite",
+    "s": "minecraft:stick"
+  },
+  "result": {
+    "id": "rustcraft:monorail_3",
+    "count": 16
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    "axa",
+    "xsx",
+    "axa"
+  ],
+  "key": {
+    "a": "rustcraft:coppersteel",
+    "x": "minecraft:chest",
+    "s": "minecraft:amethyst_shard"
+  },
+  "result": {
+    "id": "rustcraft:module_capacity",
+    "count": 1
+  }
+}

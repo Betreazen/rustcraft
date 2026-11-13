@@ -1,0 +1,17 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    "sss",
+    "sas",
+    "sss"
+  ],
+  "key": {
+    "s": "minecraft:amethyst_shard",
+    "a": "rustcraft:coppersteel"
+  },
+  "result": {
+    "id": "rustcraft:crystal",
+    "count": 1
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    "aaa",
+    "g g",
+    "aaa"
+  ],
+  "key": {
+    "a": "rustcraft:coppersteel",
+    "g": "minecraft:glass"
+  },
+  "result": {
+    "id": "rustcraft:tank",
+    "count": 2
+  }
+}

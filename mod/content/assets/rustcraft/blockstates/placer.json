@@ -1,0 +1,8 @@
+{
+  "variants": {
+    "facing=north": {"model": "rustcraft:block/placer"},
+    "facing=east": {"model": "rustcraft:block/placer", "y": 90},
+    "facing=south": {"model": "rustcraft:block/placer", "y": 180},
+    "facing=west": {"model": "rustcraft:block/placer", "y": 270}
+  }
+}

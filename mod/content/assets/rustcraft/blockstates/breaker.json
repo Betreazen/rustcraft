@@ -1,0 +1,8 @@
+{
+  "variants": {
+    "facing=north": {"model": "rustcraft:block/breaker"},
+    "facing=east": {"model": "rustcraft:block/breaker", "y": 90},
+    "facing=south": {"model": "rustcraft:block/breaker", "y": 180},
+    "facing=west": {"model": "rustcraft:block/breaker", "y": 270}
+  }
+}

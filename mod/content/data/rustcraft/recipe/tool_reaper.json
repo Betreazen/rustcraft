@@ -1,0 +1,18 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    " x ",
+    "xbx",
+    " r "
+  ],
+  "key": {
+    "x": "minecraft:shears",
+    "b": "rustcraft:sparksteel",
+    "r": "minecraft:redstone"
+  },
+  "result": {
+    "id": "rustcraft:tool_reaper",
+    "count": 1
+  }
+}

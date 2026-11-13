@@ -1,0 +1,12 @@
+{
+  "type": "minecraft:crafting_shapeless",
+  "category": "misc",
+  "ingredients": [
+    "minecraft:copper_ingot",
+    "minecraft:iron_ingot"
+  ],
+  "result": {
+    "id": "rustcraft:coppersteel",
+    "count": 2
+  }
+}

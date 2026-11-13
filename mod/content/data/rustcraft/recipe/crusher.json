@@ -1,0 +1,17 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    "aia",
+    "i i",
+    "aaa"
+  ],
+  "key": {
+    "a": "rustcraft:coppersteel",
+    "i": "minecraft:iron_ingot"
+  },
+  "result": {
+    "id": "rustcraft:crusher",
+    "count": 1
+  }
+}

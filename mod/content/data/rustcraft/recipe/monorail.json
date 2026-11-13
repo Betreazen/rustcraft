@@ -1,0 +1,17 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    "a a",
+    "asa",
+    "a a"
+  ],
+  "key": {
+    "a": "rustcraft:coppersteel",
+    "s": "minecraft:stick"
+  },
+  "result": {
+    "id": "rustcraft:monorail",
+    "count": 16
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    "bbb",
+    "bkb",
+    "brb"
+  ],
+  "key": {
+    "b": "rustcraft:sparksteel",
+    "k": "minecraft:bucket",
+    "r": "minecraft:brick"
+  },
+  "result": {
+    "id": "rustcraft:gen_lava",
+    "count": 1
+  }
+}

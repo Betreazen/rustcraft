@@ -1,0 +1,17 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    "bcb",
+    "c c",
+    "bcb"
+  ],
+  "key": {
+    "b": "rustcraft:sparksteel",
+    "c": "minecraft:chest"
+  },
+  "result": {
+    "id": "rustcraft:cell",
+    "count": 1
+  }
+}

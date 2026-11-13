@@ -1,0 +1,18 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    "ala",
+    "lsl",
+    "ala"
+  ],
+  "key": {
+    "a": "rustcraft:coppersteel",
+    "l": "minecraft:lapis_lazuli",
+    "s": "minecraft:amethyst_shard"
+  },
+  "result": {
+    "id": "rustcraft:anchor",
+    "count": 1
+  }
+}

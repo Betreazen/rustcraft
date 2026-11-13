@@ -1,0 +1,17 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    "wbw",
+    " b ",
+    " b "
+  ],
+  "key": {
+    "w": "minecraft:white_wool",
+    "b": "rustcraft:sparksteel"
+  },
+  "result": {
+    "id": "rustcraft:windmill",
+    "count": 1
+  }
+}

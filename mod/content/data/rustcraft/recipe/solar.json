@@ -1,0 +1,18 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    "ggg",
+    "sss",
+    "aaa"
+  ],
+  "key": {
+    "g": "minecraft:glass",
+    "s": "minecraft:amethyst_shard",
+    "a": "rustcraft:coppersteel"
+  },
+  "result": {
+    "id": "rustcraft:solar",
+    "count": 1
+  }
+}

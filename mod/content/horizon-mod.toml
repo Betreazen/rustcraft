@@ -1,0 +1,12 @@
+# RustCraft's resources: models, textures, names, loot and tags for the blocks and items the
+# native bundle (../rustcraft) declares in code. Same id as the bundle, so its blocks join this
+# mod's files (docs/native-mods.md, API 145). No code here.
+id = "rustcraft"
+name = "RustCraft"
+version = "0.8.0"
+description = "Resources of the RustCraft native mod: the magistral's housing and node, channels, the wrench, the energy crystal, the electric furnace, the crusher and its dusts, the fuel generator, the alloy smelter, the alloys, the autocrafter, the capacity module, the storage cell and terminal, the tank, the pump, the monorail, the station and the capsule, the worker with its saw, reaper and docks, the turret with its modules, the base anchor, the solar panel, the windmill, the lava generator, the battery with its modules, the miner, the block placer and the block breaker."
+authors = ["RustCraft"]
+api = "0.2"
+# Both halves: the server compares id and version with each joining client (horizon:mod_list).
+side = "both"
+capabilities = ["registries"]

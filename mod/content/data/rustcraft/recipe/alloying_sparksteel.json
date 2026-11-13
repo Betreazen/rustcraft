@@ -1,0 +1,21 @@
+{
+  "type": "rustcraft:alloying",
+  "ingredients": [
+    {
+      "item": "rustcraft:coppersteel",
+      "count": 2
+    },
+    {
+      "item": "minecraft:gold_ingot",
+      "count": 1
+    },
+    {
+      "item": "minecraft:redstone",
+      "count": 1
+    }
+  ],
+  "result": {
+    "id": "rustcraft:sparksteel",
+    "count": 2
+  }
+}

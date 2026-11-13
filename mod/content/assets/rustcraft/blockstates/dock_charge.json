@@ -1,0 +1,8 @@
+{
+  "variants": {
+    "facing=north": {"model": "rustcraft:block/dock_charge"},
+    "facing=east": {"model": "rustcraft:block/dock_charge", "y": 90},
+    "facing=south": {"model": "rustcraft:block/dock_charge", "y": 180},
+    "facing=west": {"model": "rustcraft:block/dock_charge", "y": 270}
+  }
+}

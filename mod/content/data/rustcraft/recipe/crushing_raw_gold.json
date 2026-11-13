@@ -1,0 +1,6 @@
+{
+  "type": "rustcraft:crushing",
+  "ingredient": "minecraft:raw_gold",
+  "result": { "id": "rustcraft:dust_gold", "count": 2 },
+  "time": 100
+}

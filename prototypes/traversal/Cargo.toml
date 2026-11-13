@@ -1,0 +1,16 @@
+# Fast tests for the prototype's game-free code. The prototype itself is the bundle in
+# mixins/traversal and is compiled into the game by horizon-launcher (see dev.ps1).
+[package]
+name = "traversal-rules"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[lib]
+path = "lib.rs"
+
+[workspace]
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

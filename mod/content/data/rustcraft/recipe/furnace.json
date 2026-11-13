@@ -1,0 +1,18 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    "aca",
+    "afa",
+    "aaa"
+  ],
+  "key": {
+    "a": "rustcraft:coppersteel",
+    "c": "minecraft:copper_ingot",
+    "f": "minecraft:furnace"
+  },
+  "result": {
+    "id": "rustcraft:furnace",
+    "count": 1
+  }
+}

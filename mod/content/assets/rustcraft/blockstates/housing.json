@@ -1,0 +1,11 @@
+{
+  "multipart": [
+    {"apply": {"model": "rustcraft:block/housing_core"}},
+    {"when": {"north": "true"}, "apply": {"model": "rustcraft:block/housing_arm_north"}},
+    {"when": {"east": "true"}, "apply": {"model": "rustcraft:block/housing_arm_east"}},
+    {"when": {"south": "true"}, "apply": {"model": "rustcraft:block/housing_arm_south"}},
+    {"when": {"west": "true"}, "apply": {"model": "rustcraft:block/housing_arm_west"}},
+    {"when": {"up": "true"}, "apply": {"model": "rustcraft:block/housing_arm_up"}},
+    {"when": {"down": "true"}, "apply": {"model": "rustcraft:block/housing_arm_down"}}
+  ]
+}

@@ -1,0 +1,32 @@
+name = "RustCraft"
+tagline = "Технический мод для Horizon: магистраль для предметов, энергии и жидкостей, машины с модулями, склад с заказами и монорельс с капсулами."
+description = "site/description.md"
+showcase = "docs/showcase"
+
+# The first model is the mod's card. Parts the site animates by name: roll_* and drill* turn
+# (the crusher's rolls about their own X axis, opposite ways; the miner's drill about Y);
+# fire*, flame*, lit*, beam* glow; level_* rise and fall from the base.
+
+[[model]]
+file = "assets/models/crusher.glb"
+kind = "machine"
+
+[[model]]
+file = "assets/models/miner.glb"
+kind = "machine"
+
+[[model]]
+file = "assets/models/alloy.glb"
+kind = "machine"
+
+[[model]]
+file = "assets/models/disintegrator.glb"
+kind = "machine"
+
+[[model]]
+file = "assets/models/battery.glb"
+kind = "machine"
+
+[[model]]
+file = "assets/models/gen_fuel.glb"
+kind = "machine"

@@ -1,0 +1,9 @@
+{
+  "textures": {"particle": "rustcraft:block/monorail_t1", "p0": "rustcraft:block/monorail_t1"},
+  "elements": [
+    {"from": [0, 0, 6.5], "to": [6.5, 0.5, 9.5], "faces": {"down": {"uv": [0.5, 0.5, 1.5, 1.5], "texture": "#p0", "cullface": "down"}, "up": {"uv": [0.5, 0.5, 1.5, 1.5], "texture": "#p0"}, "north": {"uv": [0.5, 0.5, 1.5, 1.5], "texture": "#p0"}, "south": {"uv": [0.5, 0.5, 1.5, 1.5], "texture": "#p0"}, "west": {"uv": [0.5, 0.5, 1.5, 1.5], "texture": "#p0", "cullface": "west"}, "east": {"uv": [0.5, 0.5, 1.5, 1.5], "texture": "#p0"}}},
+    {"from": [0, 0.5, 7], "to": [7, 1.75, 9], "faces": {"down": {"uv": [2.5, 0.5, 3.5, 1.5], "texture": "#p0"}, "up": {"uv": [2.5, 0.5, 3.5, 1.5], "texture": "#p0"}, "north": {"uv": [2.5, 0.5, 3.5, 1.5], "texture": "#p0"}, "south": {"uv": [2.5, 0.5, 3.5, 1.5], "texture": "#p0"}, "west": {"uv": [2.5, 0.5, 3.5, 1.5], "texture": "#p0", "cullface": "west"}, "east": {"uv": [2.5, 0.5, 3.5, 1.5], "texture": "#p0"}}},
+    {"from": [0, 1.75, 7], "to": [7, 2, 9], "faces": {"down": {"uv": [4.5, 0.5, 5.5, 1.5], "texture": "#p0"}, "up": {"uv": [4.5, 0.5, 5.5, 1.5], "texture": "#p0"}, "north": {"uv": [4.5, 0.5, 5.5, 1.5], "texture": "#p0"}, "south": {"uv": [4.5, 0.5, 5.5, 1.5], "texture": "#p0"}, "west": {"uv": [4.5, 0.5, 5.5, 1.5], "texture": "#p0", "cullface": "west"}, "east": {"uv": [4.5, 0.5, 5.5, 1.5], "texture": "#p0"}}},
+    {"from": [2.5, 0, 5], "to": [4, 0.75, 11], "faces": {"down": {"uv": [6.5, 0.5, 7.5, 1.5], "texture": "#p0", "cullface": "down"}, "up": {"uv": [6.5, 0.5, 7.5, 1.5], "texture": "#p0"}, "north": {"uv": [6.5, 0.5, 7.5, 1.5], "texture": "#p0"}, "south": {"uv": [6.5, 0.5, 7.5, 1.5], "texture": "#p0"}, "west": {"uv": [6.5, 0.5, 7.5, 1.5], "texture": "#p0"}, "east": {"uv": [6.5, 0.5, 7.5, 1.5], "texture": "#p0"}}}
+  ]
+}

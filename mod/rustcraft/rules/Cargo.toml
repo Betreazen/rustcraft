@@ -1,0 +1,12 @@
+# RustCraft's game-free rules: the bundle's own crate ([[crate]] in ../horizon-mixin.toml).
+# No path dependencies and no [workspace] here: the engine stages this crate into its own
+# workspace and takes versions from Horizon's Cargo.lock.
+[package]
+name = "rustcraft-rules"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

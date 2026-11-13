@@ -1,0 +1,17 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    "bhb",
+    "b b",
+    "bbb"
+  ],
+  "key": {
+    "b": "rustcraft:sparksteel",
+    "h": "minecraft:hopper"
+  },
+  "result": {
+    "id": "rustcraft:dock_unload",
+    "count": 1
+  }
+}

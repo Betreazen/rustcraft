@@ -1,0 +1,25 @@
+{
+  "type": "rustcraft:alloying",
+  "ingredients": [
+    {
+      "item": "rustcraft:sparksteel",
+      "count": 2
+    },
+    {
+      "item": "minecraft:diamond",
+      "count": 1
+    },
+    {
+      "item": "minecraft:quartz",
+      "count": 1
+    },
+    {
+      "item": "minecraft:amethyst_shard",
+      "count": 1
+    }
+  ],
+  "result": {
+    "id": "rustcraft:crystallite",
+    "count": 2
+  }
+}

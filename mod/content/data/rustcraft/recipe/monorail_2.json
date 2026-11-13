@@ -1,0 +1,17 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    "a a",
+    "asa",
+    "a a"
+  ],
+  "key": {
+    "a": "rustcraft:sparksteel",
+    "s": "minecraft:stick"
+  },
+  "result": {
+    "id": "rustcraft:monorail_2",
+    "count": 16
+  }
+}

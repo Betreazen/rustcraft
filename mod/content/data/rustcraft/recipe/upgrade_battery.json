@@ -1,0 +1,17 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    " x ",
+    " b ",
+    " x "
+  ],
+  "key": {
+    "b": "rustcraft:sparksteel",
+    "x": "minecraft:redstone"
+  },
+  "result": {
+    "id": "rustcraft:upgrade_battery",
+    "count": 1
+  }
+}

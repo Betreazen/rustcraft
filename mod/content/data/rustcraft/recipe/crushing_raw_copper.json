@@ -1,0 +1,6 @@
+{
+  "type": "rustcraft:crushing",
+  "ingredient": "minecraft:raw_copper",
+  "result": { "id": "rustcraft:dust_copper", "count": 2 },
+  "time": 100
+}

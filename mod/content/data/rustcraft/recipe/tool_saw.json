@@ -1,0 +1,18 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    " x ",
+    "xbx",
+    " r "
+  ],
+  "key": {
+    "x": "minecraft:iron_ingot",
+    "b": "rustcraft:sparksteel",
+    "r": "minecraft:redstone"
+  },
+  "result": {
+    "id": "rustcraft:tool_saw",
+    "count": 1
+  }
+}

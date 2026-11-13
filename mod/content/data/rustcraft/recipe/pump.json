@@ -1,0 +1,18 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    "aba",
+    "a a",
+    "aha"
+  ],
+  "key": {
+    "a": "rustcraft:coppersteel",
+    "b": "minecraft:bucket",
+    "h": "minecraft:hopper"
+  },
+  "result": {
+    "id": "rustcraft:pump",
+    "count": 1
+  }
+}

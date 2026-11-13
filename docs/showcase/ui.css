@@ -1,0 +1,195 @@
+/* RustCraft only: mock-ups of block windows on entry pages (js/ui.js), and the sparks over the
+   page head. The windows are the drafts of the in-game windows, so every size here is counted in
+   GUI pixels (--gp, one pixel of the game's GUI) and every colour is a window token below.
+   docs/design/04-window-style.md maps these tokens and sizes to the game's drawing. */
+.win, .w-legend {
+  /* one GUI pixel; the game draws at GUI scale 2, the guide shows the same */
+  --gp: 2px;
+  /* frame, from the outside in: outline, brass line, bevel light and shade, face */
+  --w-outline: var(--sunken);
+  --w-frame: var(--brass-lo);
+  --w-bevel-hi: #4a3c31;
+  --w-bevel-lo: #140f0c;
+  --w-face: #2a221d;
+  /* wells: slots, bars, fields; dark top-left edge, light bottom-right edge */
+  --w-well: #110d0b;
+  --w-well-lo: #060504;
+  --w-well-hi: #4a3c31;
+  --w-text: var(--ink);
+  --w-value: var(--ink-hi);
+  --w-label: var(--muted);
+  --w-mark: var(--brass);
+  --w-on: var(--brass);
+  --w-on-text: var(--on-ember);
+  --w-hot: var(--ember-hi);
+  --w-progress: var(--ink);
+  /* energy keeps the resource colour of the scenes and their legend */
+  --w-energy: #ffe14a;
+  /* maps: parchment, ink, the brass of the line */
+  --w-paper: #e6d8bb;
+  --w-paper-ink: #22180f;
+  --w-paper-line: #a3762c;
+  --w-ok: var(--ok);
+  --w-warn: var(--warn);
+  --w-bad: var(--bad);
+  /* how long things move */
+  --w-cycle: 4s;
+  --w-blink: 1.06s;
+}
+
+.winbox { display: flex; flex-wrap: wrap; gap: 24px; align-items: flex-start; }
+.w-cap { margin: 22px 0 10px; font: 700 20px var(--font-display); color: var(--text); }
+.w-cap:first-child { margin-top: 0; }
+
+/* the window: outline, brass line, bevel, face; a soft ember light under it on the page */
+.win { position: relative; flex: 0 1 calc(206 * var(--gp)); min-width: 0; max-width: 100%; padding: calc(7 * var(--gp)); background: var(--w-face); color: var(--w-text);
+  box-shadow: 0 0 0 var(--gp) var(--w-bevel-hi) inset, calc(-1 * var(--gp)) calc(-1 * var(--gp)) 0 calc(var(--gp)) var(--w-bevel-lo) inset,
+    0 0 0 var(--gp) var(--w-frame), 0 0 0 calc(2 * var(--gp)) var(--w-outline), 0 calc(10 * var(--gp)) calc(24 * var(--gp)) rgba(0, 0, 0, 0.55), 0 calc(14 * var(--gp)) calc(40 * var(--gp)) -12px rgba(232, 100, 28, 0.18);
+  margin: calc(2 * var(--gp)); font: 13px/1.35 var(--mono); }
+.w-title { display: flex; align-items: baseline; gap: calc(4 * var(--gp)); margin: 0 0 calc(6 * var(--gp)); padding-bottom: calc(4 * var(--gp)); border-bottom: var(--gp) solid var(--w-bevel-lo); box-shadow: 0 var(--gp) 0 var(--w-bevel-hi); font-weight: 700; font-size: 14px; color: var(--w-value); }
+.w-title small { font: inherit; font-weight: 400; color: var(--w-label); }
+
+/* parts flow in rows; a wide part takes the whole row */
+.w-parts { display: flex; flex-wrap: wrap; gap: calc(6 * var(--gp)) calc(8 * var(--gp)); align-items: flex-start; }
+.w-part { position: relative; min-width: 0; padding: calc(2 * var(--gp)); margin: calc(-2 * var(--gp)); outline: var(--gp) solid transparent; transition: outline-color var(--dur-fast), background var(--dur-fast); }
+.w-part.w-wide { flex: 1 1 100%; }
+.w-part.w-hot { outline-color: var(--w-hot); background: rgba(255, 138, 61, 0.06); }
+.w-head { display: flex; align-items: center; gap: calc(3 * var(--gp)); min-height: calc(8 * var(--gp)); margin-bottom: calc(2 * var(--gp)); }
+.w-head label { font: 700 11px var(--mono); text-transform: uppercase; letter-spacing: 0.5px; color: var(--w-label); }
+.w-n { display: inline-flex; flex: none; align-items: center; justify-content: center; width: calc(8 * var(--gp)); height: calc(8 * var(--gp)); background: var(--w-mark); color: var(--w-on-text); font: 700 11px/1 var(--mono); }
+.w-part.w-hot .w-n, .w-legend li.w-hot::before { background: var(--w-hot); }
+.w-part.w-inline { display: flex; gap: calc(3 * var(--gp)); align-items: flex-start; }
+.w-part.w-inline > .w-body { flex: 1; min-width: 0; }
+.w-part.w-inline > .w-n { margin-top: calc(1 * var(--gp)); }
+.w-part small { display: block; margin-top: calc(2 * var(--gp)); font: 12px var(--mono); color: var(--w-label); }
+.w-part small b { color: var(--w-value); font-weight: 700; }
+/* the energy readout keeps its width while its numbers change, so the window does not reflow */
+.w-energy small { min-width: 25ch; white-space: nowrap; }
+
+/* a well: slots, bars, fields */
+.w-s, .w-sock, .w-bar, .w-tank, .w-find, .w-seg { background: var(--w-well); box-shadow: var(--gp) var(--gp) 0 var(--w-well-lo) inset, calc(-1 * var(--gp)) calc(-1 * var(--gp)) 0 var(--w-well-hi) inset; }
+
+/* slots: 18 x 18, touching like the game's inventory grid; the item fills 12 x 12 */
+.w-row { display: flex; flex-wrap: wrap; align-items: center; }
+.w-grid { display: grid; grid-template-columns: repeat(var(--cols), calc(18 * var(--gp))); }
+.w-s, .w-sock { position: relative; display: inline-flex; flex: none; align-items: center; justify-content: center; width: calc(18 * var(--gp)); height: calc(18 * var(--gp)); font-style: normal; }
+.w-s > b, .w-sock > b { width: calc(12 * var(--gp)); height: calc(12 * var(--gp)); background: var(--c); box-shadow: var(--gp) var(--gp) 0 rgba(255, 255, 255, 0.35) inset, calc(-1 * var(--gp)) calc(-1 * var(--gp)) 0 rgba(0, 0, 0, 0.35) inset; }
+.w-s.w-ghost > b { opacity: 0.35; }
+.w-s > em { position: absolute; right: var(--gp); bottom: 0; font: 700 11px/1.1 var(--mono); font-style: normal; color: #fff; text-shadow: 1px 1px 0 #000, 0 0 2px #000; }
+
+/* module sockets: a slot with a brass corner mark; empty shows a plus; hover shows a card */
+.w-sock { cursor: help; }
+.w-sock::before { content: ''; position: absolute; left: calc(2 * var(--gp)); top: calc(2 * var(--gp)); width: calc(3 * var(--gp)); height: calc(3 * var(--gp)); border-left: var(--gp) solid var(--w-mark); border-top: var(--gp) solid var(--w-mark); opacity: 0.8; }
+.w-sock.w-empty > b { width: calc(6 * var(--gp)); height: calc(6 * var(--gp)); background: linear-gradient(var(--w-well-hi), var(--w-well-hi)) center / 100% var(--gp) no-repeat, linear-gradient(var(--w-well-hi), var(--w-well-hi)) center / var(--gp) 100% no-repeat; box-shadow: none; }
+.w-sock + .w-sock { margin-left: calc(2 * var(--gp)); }
+.w-sock:hover, .w-sock:focus-visible { outline: var(--gp) solid var(--w-hot); outline-offset: 0; z-index: 2; }
+.w-card { position: absolute; left: 50%; bottom: calc(100% + 4 * var(--gp)); z-index: 4; width: max-content; max-width: 220px; padding: calc(3 * var(--gp)) calc(4 * var(--gp)); background: #100c0a; border: var(--gp) solid var(--w-frame); box-shadow: 0 0 0 var(--gp) var(--w-outline), 0 8px 24px rgba(0, 0, 0, 0.6); font: 12px/1.35 var(--mono); color: var(--w-label); text-align: left; transform: translate(-50%, 4px); opacity: 0; visibility: hidden; pointer-events: none; transition: opacity var(--dur-fast), transform var(--dur-fast) var(--ease-out), visibility 0s linear var(--dur-fast); }
+.w-card b { display: block; color: var(--w-value); }
+.w-sock:hover .w-card, .w-sock:focus-visible .w-card { opacity: 1; visibility: visible; transform: translate(-50%, 0); transition: opacity var(--dur-fast), transform var(--dur-fast) var(--ease-out); }
+
+/* bars: an 8-pixel-high well; energy has quarter ticks; the work arrow fills left to right */
+.w-bar { position: relative; width: calc(64 * var(--gp)); height: calc(8 * var(--gp)); padding: var(--gp); }
+.w-bar > b { display: block; height: 100%; width: calc(var(--p) * 1%); background: var(--c, var(--w-progress)); box-shadow: 0 var(--gp) 0 rgba(255, 255, 255, 0.35) inset; }
+.w-bar.w-en { --c: var(--w-energy); }
+.w-bar.w-en::after { content: ''; position: absolute; inset: var(--gp); background: linear-gradient(90deg, transparent calc(25% - 1px), rgba(0, 0, 0, 0.45) 0 25%, transparent 0 calc(50% - 1px), rgba(0, 0, 0, 0.45) 0 50%, transparent 0 calc(75% - 1px), rgba(0, 0, 0, 0.45) 0 75%, transparent 0); pointer-events: none; }
+.w-arrow { display: flex; align-items: center; height: calc(18 * var(--gp)); }
+.w-arrow .w-bar { width: calc(22 * var(--gp)); height: calc(6 * var(--gp)); }
+.w-arrow i { width: 0; height: 0; border-top: calc(6 * var(--gp)) solid transparent; border-bottom: calc(6 * var(--gp)) solid transparent; border-left: calc(6 * var(--gp)) solid var(--w-well-hi); }
+.w-arrow.w-going i { border-left-color: var(--w-progress); }
+@media (prefers-reduced-motion: no-preference) {
+  .w-arrow .w-bar > b { animation: w-work var(--w-cycle) linear infinite; animation-delay: calc(var(--p) * var(--w-cycle) / -100); }
+  .w-caret { animation: w-blink var(--w-blink) steps(1) infinite; }
+}
+@keyframes w-work { from { width: 0; } to { width: 100%; } }
+@keyframes w-blink { 50% { opacity: 0; } }
+
+/* tanks: a well 16 x 36 with marks every quarter; the fluid has a light top line */
+.w-tankrow { display: flex; align-items: flex-end; gap: calc(4 * var(--gp)); }
+.w-tank { position: relative; width: calc(16 * var(--gp)); height: calc(36 * var(--gp)); padding: var(--gp); }
+.w-tank > b { position: absolute; left: var(--gp); right: var(--gp); bottom: var(--gp); height: calc((100% - 2 * var(--gp)) * var(--p) / 100); background: var(--c); box-shadow: 0 var(--gp) 0 rgba(255, 255, 255, 0.4) inset; }
+.w-tank::after { content: ''; position: absolute; top: var(--gp); bottom: var(--gp); right: var(--gp); width: calc(4 * var(--gp)); background: linear-gradient(transparent calc(25% - 1px), rgba(0, 0, 0, 0.5) 0 25%, transparent 0 calc(50% - 1px), rgba(0, 0, 0, 0.5) 0 50%, transparent 0 calc(75% - 1px), rgba(0, 0, 0, 0.5) 0 75%, transparent 0); }
+.w-tankrow small { margin: 0; }
+
+/* the mode switch: one well, three segments, the chosen one raised in brass */
+.w-seg { display: inline-flex; padding: var(--gp); gap: var(--gp); }
+.w-seg button { padding: calc(2 * var(--gp)) calc(4 * var(--gp)); background: transparent; border: 0; color: var(--w-label); font: 700 12px/1.2 var(--mono); cursor: pointer; transition: background var(--dur-fast), color var(--dur-fast); }
+.w-seg button:hover { color: var(--w-value); background: rgba(255, 255, 255, 0.04); }
+.w-seg button[aria-checked='true'] { background: var(--w-on); color: var(--w-on-text); box-shadow: var(--gp) var(--gp) 0 rgba(255, 255, 255, 0.35) inset, calc(-1 * var(--gp)) calc(-1 * var(--gp)) 0 rgba(0, 0, 0, 0.3) inset; }
+.w-seg button:focus-visible { outline: var(--gp) solid var(--w-hot); outline-offset: 0; }
+
+/* toggles and tabs */
+.w-tog { display: inline-block; margin: 0 var(--gp) var(--gp) 0; padding: var(--gp) calc(4 * var(--gp)); background: var(--w-well); box-shadow: var(--gp) var(--gp) 0 var(--w-well-lo) inset; color: var(--w-label); font: 12px/1.6 var(--mono); }
+.w-tog.on { background: var(--w-on); color: var(--w-on-text); font-weight: 700; box-shadow: var(--gp) var(--gp) 0 rgba(255, 255, 255, 0.35) inset, calc(-1 * var(--gp)) calc(-1 * var(--gp)) 0 rgba(0, 0, 0, 0.3) inset; }
+.w-tabs { display: flex; flex-wrap: wrap; align-items: flex-end; gap: var(--gp); border-bottom: var(--gp) solid var(--w-frame); }
+.w-tabs span { padding: calc(2 * var(--gp)) calc(5 * var(--gp)); background: var(--w-well); color: var(--w-label); font: 12px/1.4 var(--mono); }
+.w-tabs span.on { position: relative; padding-bottom: calc(3 * var(--gp)); margin-bottom: calc(-1 * var(--gp)); background: var(--w-face); color: var(--w-value); font-weight: 700; box-shadow: 0 0 0 var(--gp) var(--w-frame) inset, 0 calc(-1 * var(--gp)) 0 var(--w-mark) inset; border-bottom: var(--gp) solid var(--w-face); }
+
+/* the search and name fields of the terminal and the station */
+.w-find { display: flex; align-items: center; gap: calc(3 * var(--gp)); min-height: calc(14 * var(--gp)); padding: calc(2 * var(--gp)) calc(4 * var(--gp)); color: var(--w-value); }
+.w-find svg { flex: none; width: calc(7 * var(--gp)); height: calc(7 * var(--gp)); color: var(--w-label); }
+.w-find em { font-style: normal; color: var(--w-label); }
+.w-caret { display: inline-block; width: var(--gp); height: 1.1em; margin-left: 1px; background: var(--w-hot); vertical-align: -0.15em; }
+
+/* key and value lines */
+.w-kv { display: flex; justify-content: space-between; gap: calc(6 * var(--gp)); padding: calc(1.5 * var(--gp)) 0; border-bottom: var(--gp) solid rgba(0, 0, 0, 0.28); }
+.w-kv:last-child { border-bottom: 0; }
+.w-kv > span { color: var(--w-label); }
+.w-kv > b { font: 700 12px var(--mono); color: var(--w-value); text-align: right; }
+
+/* the status line: a severity mark, the text, a stripe on the left */
+.w-status { display: flex; align-items: center; gap: calc(4 * var(--gp)); padding: calc(3 * var(--gp)) calc(4 * var(--gp)); background: color-mix(in srgb, var(--c) 14%, var(--w-well)); box-shadow: calc(2 * var(--gp)) 0 0 var(--c) inset; color: var(--c); font: 700 12px var(--mono); --c: var(--w-ok); }
+.w-status.warn { --c: var(--w-warn); }
+.w-status.bad { --c: var(--w-bad); }
+.w-status svg { flex: none; width: calc(7 * var(--gp)); height: calc(7 * var(--gp)); }
+.w-status span { color: var(--w-value); }
+.w-part.w-st { margin-top: calc(2 * var(--gp)); }
+
+/* the turret's role */
+.w-mode { display: inline-flex; align-items: center; gap: calc(3 * var(--gp)); padding: calc(2 * var(--gp)) calc(5 * var(--gp)); background: #4a1f1a; box-shadow: calc(2 * var(--gp)) 0 0 var(--bad) inset; color: var(--w-value); font: 700 12px var(--mono); }
+.w-mode.sup { background: #12403a; box-shadow: calc(2 * var(--gp)) 0 0 var(--soul) inset; }
+
+/* buttons, tables, crafting rows, maps inside raw parts */
+.w-btn { display: inline-block; margin: 0 var(--gp) var(--gp) 0; padding: var(--gp) calc(4 * var(--gp)); background: #3a2f27; box-shadow: var(--gp) var(--gp) 0 var(--w-bevel-hi) inset, calc(-1 * var(--gp)) calc(-1 * var(--gp)) 0 var(--w-bevel-lo) inset; color: var(--w-text); font: 12px/1.6 var(--mono); white-space: nowrap; }
+.w-btn.on { background: var(--w-on); color: var(--w-on-text); font-weight: 700; }
+.w-craft { display: flex; align-items: center; gap: calc(5 * var(--gp)); color: var(--w-label); font-size: 18px; }
+.w-g3 { display: grid; grid-template-columns: repeat(3, calc(18 * var(--gp))); }
+.w-tb { width: 100%; border-collapse: collapse; font-size: 12px; }
+.w-tb th, .w-tb td { padding: calc(1.5 * var(--gp)) calc(3 * var(--gp)); border: var(--gp) solid var(--w-bevel-lo); background: none; text-align: left; vertical-align: middle; }
+.w-tb th { color: var(--w-label); font-weight: 700; text-transform: uppercase; font-size: 11px; }
+.w-tb .w-btn { margin: 0; }
+/* maps are parchment insets with dark ink, so the notes about dark and light dots hold */
+.w-map { display: block; width: 100%; max-width: calc(165 * var(--gp)); background: var(--w-paper); box-shadow: var(--gp) var(--gp) 0 var(--w-well-lo) inset, calc(-1 * var(--gp)) calc(-1 * var(--gp)) 0 var(--w-well-hi) inset; }
+.w-map path { fill: none; stroke: var(--w-paper-line); stroke-width: 4; }
+.w-map circle { fill: var(--w-paper); stroke: var(--w-paper-ink); stroke-width: 3; }
+.w-map circle.here { fill: var(--w-paper-ink); }
+.w-map circle.sel { fill: #3fb6c8; }
+.w-map text { font: 700 11px var(--font-body); text-anchor: middle; fill: var(--w-paper-ink); }
+.w-map text.d { font-weight: 400; font-size: 10px; fill: #5c4c3a; }
+.w-map text.e { text-anchor: end; }
+
+/* the legend beside the window: the same numbers; a line and its part light together */
+.w-legend { flex: 1 1 300px; margin: 0; padding: 0; list-style: none; counter-reset: wl; max-width: 34em; }
+.w-legend li { position: relative; margin: 0 0 4px; padding: 6px 8px 6px 40px; border-radius: var(--r-2); counter-increment: wl; transition: background var(--dur-fast); }
+.w-legend li::before { content: counter(wl); position: absolute; left: 8px; top: 8px; width: calc(10 * var(--gp)); height: calc(10 * var(--gp)); display: flex; align-items: center; justify-content: center; background: var(--w-mark); color: var(--w-on-text); font: 700 12px var(--mono); transition: background var(--dur-fast); }
+.w-legend li.w-hot { background: var(--surface-2); }
+
+@media (max-width: 860px) {
+  .winbox { gap: 18px; }
+  .win { flex-basis: 100%; }
+  .w-part { cursor: pointer; }
+}
+@media (max-width: 420px) {
+  .win, .w-legend { --gp: 1.8px; }
+  .win { padding: calc(5 * var(--gp)); }
+}
+
+/* sparks rising over the page head, few and slow; none for people who ask for less motion */
+.head { position: relative; }
+.sparks { position: absolute; left: 0; right: 0; bottom: 0; height: 140px; overflow: hidden; pointer-events: none; z-index: -1; }
+.sparks i { position: absolute; bottom: -6px; left: var(--x); width: 3px; height: 3px; border-radius: 50%; background: var(--spark); box-shadow: 0 0 6px var(--spark), 0 0 12px var(--ember); opacity: 0; animation: spark-rise var(--d) linear var(--w) infinite; }
+@keyframes spark-rise {
+  0% { opacity: 0; transform: translate(0, 0); }
+  12% { opacity: 0.9; }
+  100% { opacity: 0; transform: translate(var(--dx), -130px); }
+}
+@media (prefers-reduced-motion: reduce) { .sparks { display: none; } }
