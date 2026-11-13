@@ -1,6 +1,6 @@
 # Workspace for running the tests of the mod's own crate. The engine stages the crate itself
-# (mod/rustcraft/horizon-mixin.toml, [[crate]]); the traversal prototype has its own workspace.
+# (mod/rustcraft/horizon-mixin.toml, [[crate]]).
 [workspace]
 resolver = "3"
 members = ["mod/rustcraft/rules"]
-exclude = ["prototypes"]
+

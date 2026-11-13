@@ -45,7 +45,7 @@
 # prototype hooked it.
 [mod]
 id = "rustcraft"
-version = "0.8.0"
+version = "0.8.1"
 
 # The commit the traversal prototype and path_of_craft_tree build on; every function used here
 # was checked in its source.
