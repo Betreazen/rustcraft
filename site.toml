@@ -8,11 +8,11 @@ showcase = "docs/showcase"
 # fire*, flame*, lit*, beam* glow; level_* rise and fall from the base.
 
 [[model]]
-file = "assets/models/crusher.glb"
+file = "assets/models/miner.glb"
 kind = "machine"
 
 [[model]]
-file = "assets/models/miner.glb"
+file = "assets/models/crusher.glb"
 kind = "machine"
 
 [[model]]
