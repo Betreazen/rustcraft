@@ -9,24 +9,30 @@ showcase = "docs/showcase"
 
 [[model]]
 file = "assets/models/miner.glb"
+name = "Добытчик"
 kind = "machine"
 
 [[model]]
 file = "assets/models/crusher.glb"
+name = "Дробилка"
 kind = "machine"
 
 [[model]]
 file = "assets/models/alloy.glb"
+name = "Плавильня сплавов"
 kind = "machine"
 
 [[model]]
 file = "assets/models/disintegrator.glb"
+name = "Дезинтегратор"
 kind = "machine"
 
 [[model]]
 file = "assets/models/battery.glb"
+name = "Накопитель"
 kind = "machine"
 
 [[model]]
 file = "assets/models/gen_fuel.glb"
+name = "Топливный генератор"
 kind = "machine"
