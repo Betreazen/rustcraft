@@ -16,4 +16,5 @@ fn rustcraft_menu_quick_move(
         stack,
         handled,
     );
+    crate::game::rustcraft_base::on_sheet_quick_move(entity, container_slots, slot, stack, handled);
 }

@@ -831,6 +831,14 @@ pub(super) fn teach_slot_rules(game: &Game<'_>, recipes: &MachineRecipes) {
         (content::TERMINAL, 0, &none),
         (content::STATION, 0, &none),
     ];
+    // Slice 9: the sheet windows' hidden slot takes nothing; the placer's slots only blocks.
+    lists.extend(
+        Machine::ALL
+            .into_iter()
+            .filter(|m| m.owned() && m.has_menu() && m.slots() == 0)
+            .map(|m| (m.menu(), 0, &none)),
+    );
+    lists.extend((0..content::BLOCK_SLOTS).map(|i| (Machine::Placer.menu(), i, &next.placeable)));
     lists.extend(content::ALLOY_INPUTS.map(|i| (Machine::Alloy.menu(), i, &next.alloying)));
     lists.extend(content::CRAFTER_MODULES.map(|i| (Machine::Crafter.menu(), i, &modules)));
     for (menu, slot, items) in lists {

@@ -1,8 +1,12 @@
 {
   "variants": {
-    "facing=north": {"model": "rustcraft:block/gen_lava"},
-    "facing=east": {"model": "rustcraft:block/gen_lava", "y": 90},
-    "facing=south": {"model": "rustcraft:block/gen_lava", "y": 180},
-    "facing=west": {"model": "rustcraft:block/gen_lava", "y": 270}
+    "facing=north,lit=false": {"model": "rustcraft:block/gen_lava"},
+    "facing=north,lit=true": {"model": "rustcraft:block/gen_lava"},
+    "facing=east,lit=false": {"model": "rustcraft:block/gen_lava", "y": 90},
+    "facing=east,lit=true": {"model": "rustcraft:block/gen_lava", "y": 90},
+    "facing=south,lit=false": {"model": "rustcraft:block/gen_lava", "y": 180},
+    "facing=south,lit=true": {"model": "rustcraft:block/gen_lava", "y": 180},
+    "facing=west,lit=false": {"model": "rustcraft:block/gen_lava", "y": 270},
+    "facing=west,lit=true": {"model": "rustcraft:block/gen_lava", "y": 270}
   }
 }

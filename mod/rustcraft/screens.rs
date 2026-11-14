@@ -19,36 +19,29 @@
 use crate::game::{
     Game,
     rustcraft_content::{self as content, Kind, Machine},
-    rustcraft_fluid_panels as fluid_panels, rustcraft_panels as panels,
+    rustcraft_fluid_panels as fluid_panels, rustcraft_panels as panels, rustcraft_sheets as sheets,
     rustcraft_station as station, rustcraft_terminal as terminal,
 };
 use horizon_client::{hud::HudBatch, mod_api::NativeScreen};
 use rustcraft_rules::machines::{
     panel::{self, Panel, Rect},
     processor::{Shown, WorkMode},
+    style::{self, Fill, Severity, colour as C},
 };
 
-// The guide's window colours (docs/showcase/ui.css), as 0xAARRGGBB.
-pub(super) const PANEL: u32 = 0xFFC9CCD4;
-pub(super) const PANEL_EDGE: u32 = 0xFF0D0F14;
-pub(super) const PANEL_LIGHT: u32 = 0xFFF1F3F7;
-pub(super) const PANEL_SHADE: u32 = 0xFF8A919D;
-pub(super) const SLOT: u32 = 0xFF8A919D;
-pub(super) const SLOT_EDGE: u32 = 0xFF5D6470;
-pub(super) const BAR: u32 = 0xFF5D6470;
-pub(super) const BAR_EDGE: u32 = 0xFF3A3F49;
-pub(super) const PROGRESS: u32 = 0xFFF1F3F7;
-pub(super) const ENERGY: u32 = 0xFFFFE14A;
-pub(super) const FLAME: u32 = 0xFFFF9A3C;
-pub(super) const BUTTON_ON: u32 = 0xFF1A1D25;
-pub(super) const STATUS_OK: u32 = 0xFF59D38C;
-pub(super) const STATUS_WARN: u32 = 0xFFF0B33C;
-pub(super) const STATUS_BAD: u32 = 0xFFE0564A;
+// The «Кузня душ» window colours the windows name (docs/design/04-window-style.md, section 2);
+// rustcraft_rules::machines::style::colour holds every token, and the fills take theirs there.
+pub(super) const HOT: u32 = C::HOT;
+pub(super) const PROGRESS: u32 = C::PROGRESS;
+pub(super) const ENERGY: u32 = C::ENERGY;
+pub(super) const FLAME: u32 = C::FLAME;
+pub(super) const STATUS_OK: u32 = C::OK;
 // Text colours, 0xRRGGBB.
-pub(super) const LABEL: u32 = 0x3A3F49;
-pub(super) const TEXT: u32 = 0x1A1D25;
-pub(super) const TEXT_ON: u32 = 0xF1F3F7;
-pub(super) const STATUS_TEXT: u32 = 0x14161B;
+pub(super) const LABEL: u32 = C::LABEL;
+pub(super) const TEXT: u32 = C::TEXT;
+pub(super) const VALUE: u32 = C::VALUE;
+pub(super) const TEXT_ON: u32 = C::ON_TEXT;
+pub(super) const STATUS_TEXT: u32 = C::VALUE;
 /// The font's line height, for centring text in a box.
 pub(super) const FONT_HEIGHT: f32 = 8.0;
 
@@ -83,6 +76,10 @@ pub(super) fn plural(n: u64, key: &str, fallbacks: (&str, &str, &str)) -> String
 /// reaches it) is hidden, so it is not in the menu.
 pub(super) fn layout(block: &str, screen: &mut Option<NativeScreen>) {
     if screen.is_some() {
+        return;
+    }
+    if sheets::is_sheet(block) {
+        *screen = sheets::layout(block);
         return;
     }
     if block == content::TERMINAL {
@@ -135,6 +132,10 @@ pub(super) fn draw(
     batch: &mut HudBatch,
     origin: [f32; 2],
 ) {
+    if sheets::is_sheet(block) {
+        sheets::draw(game, block, batch, origin);
+        return;
+    }
     if block == content::TERMINAL {
         terminal::draw(game, batch, origin);
         return;
@@ -193,15 +194,61 @@ pub(super) fn title(game: &Game<'_>, batch: &mut HudBatch, o: [f32; 2], machine:
         Machine::Crafter => 2,
         _ => 1,
     };
-    let title = format!(
-        "{} · {}",
-        tr(
-            &format!("block.{}", machine.block().replace(':', ".")),
-            fallback_name(machine)
-        ),
-        tr_with("rustcraft.window.tier", "tier %s", &[tier.to_string()])
+    let name = tr(
+        &format!("block.{}", machine.block().replace(':', ".")),
+        fallback_name(machine),
     );
-    text(game, batch, &title, o, panel::TITLE, TEXT);
+    let tier = tr_with("rustcraft.window.tier", "tier %s", &[tier.to_string()]);
+    title_line(game, batch, o, &name, Some(&tier), panel::WIDTH);
+}
+
+/// The title line (style section 3, «Заголовок»): the name in the value colour, after it in the
+/// label colour what the guide writes after « · », and the rule under it across the window.
+pub(super) fn title_line(
+    game: &Game<'_>,
+    batch: &mut HudBatch,
+    o: [f32; 2],
+    name: &str,
+    rest: Option<&str>,
+    width: f32,
+) {
+    text(game, batch, name, o, panel::TITLE, VALUE);
+    if let Some(rest) = rest {
+        let x = panel::TITLE[0] + game.native_text_width(name);
+        text(
+            game,
+            batch,
+            &format!(" · {rest}"),
+            o,
+            [x, panel::TITLE[1]],
+            LABEL,
+        );
+    }
+    fills(game, batch, o, &style::title_rule(width, TITLE_RULE_Y));
+}
+
+/// The title's rule: under the font's line, above the first part (every window's parts start at
+/// 16 or lower).
+pub(super) const TITLE_RULE_Y: f32 = 14.0;
+
+/// Fills from rustcraft_rules' style, in window pixels, at the window's origin `o`.
+pub(super) fn fills(game: &Game<'_>, batch: &mut HudBatch, o: [f32; 2], fills: &[Fill]) {
+    for f in fills {
+        game.native_fill(batch, at(o, f.rect), f.argb);
+    }
+}
+
+/// Whether the mouse is over `r` (window pixels) of the window at `o`.
+pub(super) fn hovered(game: &Game<'_>, o: [f32; 2], r: Rect) -> bool {
+    let [x, y] = game.native_cursor();
+    panel::inside(r, [x - o[0], y - o[1]])
+}
+
+/// The hover outline (style section 4): one pixel of `HOT` round `r` while the mouse is on it.
+pub(super) fn hover(game: &Game<'_>, batch: &mut HudBatch, o: [f32; 2], r: Rect) {
+    if hovered(game, o, r) {
+        fills(game, batch, o, &style::outline(r, HOT));
+    }
 }
 
 /// The player's inventory: its label and its 36 slots' frames.
@@ -248,21 +295,10 @@ fn fallback_name(machine: Machine) -> &'static str {
     }
 }
 
-/// The panel with the guide's bevel: a dark edge, light top and left, shade bottom and right.
+/// The window's frame (style step 2): outline, brass line, light top and left, shade bottom and
+/// right, the iron face.
 pub(super) fn background(game: &Game<'_>, batch: &mut HudBatch, o: [f32; 2], size: [f32; 2]) {
-    let [w, h] = size;
-    game.native_fill(batch, [o[0], o[1], w, h], PANEL_EDGE);
-    game.native_fill(
-        batch,
-        [o[0] + 2.0, o[1] + 2.0, w - 4.0, h - 4.0],
-        PANEL_SHADE,
-    );
-    game.native_fill(
-        batch,
-        [o[0] + 2.0, o[1] + 2.0, w - 6.0, h - 6.0],
-        PANEL_LIGHT,
-    );
-    game.native_fill(batch, [o[0] + 4.0, o[1] + 4.0, w - 8.0, h - 8.0], PANEL);
+    fills(game, batch, o, &style::frame(size));
 }
 
 pub(super) fn text(
@@ -307,25 +343,38 @@ pub(super) fn label_right(
     text_right(game, batch, &s.to_uppercase(), o, right, y, LABEL);
 }
 
-/// A slot's frame around an item at `item` (`.w-s`).
+/// A slot's well around an item at `item` (style step 3): dark top and left, light bottom and
+/// right.
 pub(super) fn slot(game: &Game<'_>, batch: &mut HudBatch, o: [f32; 2], item: [f32; 2]) {
-    let f = at(o, panel::slot_frame(item));
-    game.native_fill(batch, f, SLOT_EDGE);
-    game.native_fill(batch, [f[0] + 1.0, f[1] + 1.0, 16.0, 16.0], SLOT);
+    fills(game, batch, o, &style::slot(item));
 }
 
-/// A bar's track and its fill to `share` (`.w-prog`).
+/// A module socket (style step 7): a slot with the brass corner, a plus while `empty`, the hover
+/// outline.
+pub(super) fn socket(
+    game: &Game<'_>,
+    batch: &mut HudBatch,
+    o: [f32; 2],
+    item: [f32; 2],
+    empty: bool,
+) {
+    fills(game, batch, o, &style::socket(item, empty));
+    hover(game, batch, o, style::slot_rect(item));
+}
+
+/// A bar's well and its fill to `share` (style step 4), `r` already at the window's origin; the
+/// energy bar has its quarter ticks.
 pub(super) fn bar(game: &Game<'_>, batch: &mut HudBatch, r: Rect, share: f64, fill: u32) {
-    game.native_fill(batch, r, BAR_EDGE);
-    game.native_fill(batch, [r[0] + 1.0, r[1] + 1.0, r[2] - 2.0, r[3] - 2.0], BAR);
-    let w = ((r[2] - 2.0) * share.clamp(0.0, 1.0) as f32).round();
-    if w > 0.0 {
-        game.native_fill(batch, [r[0] + 1.0, r[1] + 1.0, w, r[3] - 2.0], fill);
-    }
+    fills(
+        game,
+        batch,
+        [0.0, 0.0],
+        &style::bar(r, share, fill, fill == ENERGY),
+    );
 }
 
-/// The progress arrow: its shaft (`shaft`, in window pixels) fills with the progress, its head
-/// lights when there is any.
+/// The progress arrow: its shaft (`shaft`, in window pixels) fills with the progress, its head of
+/// six columns lights when there is any.
 pub(super) fn arrow(
     game: &Game<'_>,
     batch: &mut HudBatch,
@@ -333,24 +382,7 @@ pub(super) fn arrow(
     shaft: Rect,
     progress: f64,
 ) {
-    let shaft = at(o, shaft);
-    bar(game, batch, shaft, progress, PROGRESS);
-    let (x, y, h) = (
-        shaft[0] + shaft[2],
-        shaft[1] + shaft[3] / 2.0,
-        shaft[3] + 6.0,
-    );
-    let head = |grow: f32| {
-        [
-            [x - 1.0, y - h / 2.0 - grow],
-            [x + h / 2.0 + grow, y],
-            [x - 1.0, y + h / 2.0 + grow],
-            [x - 1.0, y + h / 2.0 + grow],
-        ]
-    };
-    game.native_quad(batch, head(1.0), BAR_EDGE);
-    let lit = if progress > 0.0 { PROGRESS } else { BAR };
-    game.native_quad(batch, head(0.0), lit);
+    fills(game, batch, o, &style::arrow(shaft, progress));
 }
 
 fn slots_part(game: &Game<'_>, batch: &mut HudBatch, o: [f32; 2], machine: Machine, p: &Panel) {
@@ -384,7 +416,7 @@ fn slots_part(game: &Game<'_>, batch: &mut HudBatch, o: [f32; 2], machine: Machi
     slot(game, batch, o, panel::INPUT);
     slot(game, batch, o, panel::OUTPUT);
     for m in panel::MODULE_SLOTS {
-        slot(game, batch, o, m);
+        socket(game, batch, o, m, true);
     }
     arrow(game, batch, o, panel::ARROW, p.progress);
 }
@@ -406,22 +438,70 @@ pub(super) fn energy_part(
         o,
         [bar_rect[0], label_y],
     );
-    let line = tr_with(
-        "rustcraft.window.energy_line",
-        "gets %s of %s E/s",
-        &[panel::energy_text(got), panel::energy_text(asked)],
-    );
-    text_right(
+    let line = tr("rustcraft.window.energy_line", "gets %s of %s E/s");
+    values_right(
         game,
         batch,
-        &line,
         o,
         bar_rect[0] + bar_rect[2],
         label_y,
-        TEXT,
+        &line,
+        &[panel::energy_text(got), panel::energy_text(asked)],
     );
     let share = if asked > 0.0 { got / asked } else { 0.0 };
     bar(game, batch, at(o, bar_rect), share, ENERGY);
+}
+
+/// A line whose `%s` are values: the words in the label colour, the values in the value colour
+/// (style: «получает **8** из **8** Е/с»), its right end at `right`.
+pub(super) fn values_right(
+    game: &Game<'_>,
+    batch: &mut HudBatch,
+    o: [f32; 2],
+    right: f32,
+    y: f32,
+    template: &str,
+    values: &[String],
+) {
+    let mut parts: Vec<(String, u32)> = Vec::new();
+    let mut rest = template;
+    for v in values {
+        let Some(i) = rest.find("%s") else {
+            break;
+        };
+        parts.push((rest[..i].to_owned(), LABEL));
+        parts.push((v.clone(), VALUE));
+        rest = &rest[i + 2..];
+    }
+    parts.push((rest.to_owned(), LABEL));
+    let width: f32 = parts.iter().map(|(t, _)| game.native_text_width(t)).sum();
+    let mut x = right - width;
+    for (t, rgb) in parts {
+        if !t.is_empty() {
+            text(game, batch, &t, o, [x, y], rgb);
+            x += game.native_text_width(&t);
+        }
+    }
+}
+
+/// The modes' names for segments `width` pixels wide: their short names where a full one does
+/// not fit (the miner's switch shares its row with the module sockets).
+pub(super) fn mode_names(game: &Game<'_>, width: f32) -> Vec<String> {
+    let full: Vec<String> = WorkMode::ALL.into_iter().map(mode_name).collect();
+    if full
+        .iter()
+        .all(|n| game.native_text_width(n) <= width - 4.0)
+    {
+        return full;
+    }
+    WorkMode::ALL
+        .into_iter()
+        .map(|m| match m {
+            WorkMode::Economy => tr("rustcraft.work.economy.short", "Eco"),
+            WorkMode::Normal => tr("rustcraft.work.normal.short", "Normal"),
+            WorkMode::Boost => tr("rustcraft.work.boost.short", "Boost"),
+        })
+        .collect()
 }
 
 pub(super) fn mode_name(mode: WorkMode) -> String {
@@ -432,7 +512,24 @@ pub(super) fn mode_name(mode: WorkMode) -> String {
     }
 }
 
-/// A button (`.w-btn`, lit when `on`) with its text in the middle.
+/// Text centred in `r` (window pixels).
+pub(super) fn centred(
+    game: &Game<'_>,
+    batch: &mut HudBatch,
+    o: [f32; 2],
+    r: Rect,
+    s: &str,
+    rgb: u32,
+) {
+    let w = game.native_text_width(s);
+    let at_text = [
+        o[0] + r[0] + ((r[2] - w) / 2.0).round(),
+        o[1] + r[1] + ((r[3] - FONT_HEIGHT) / 2.0).round() + 1.0,
+    ];
+    game.native_text(batch, s, at_text, rgb, false);
+}
+
+/// A button (`.w-btn`, brass when `on`) with its text in the middle and the hover outline.
 pub(super) fn button(
     game: &Game<'_>,
     batch: &mut HudBatch,
@@ -441,19 +538,52 @@ pub(super) fn button(
     name: &str,
     on: bool,
 ) {
-    let r = at(o, r);
-    game.native_fill(batch, r, if on { PANEL_EDGE } else { SLOT_EDGE });
-    let face = [r[0] + 1.0, r[1] + 1.0, r[2] - 2.0, r[3] - 2.0];
-    game.native_fill(batch, face, if on { BUTTON_ON } else { SLOT });
-    let w = game.native_text_width(name);
-    let at_text = [
-        r[0] + (r[2] - w) / 2.0,
-        r[1] + (r[3] - FONT_HEIGHT) / 2.0 + 1.0,
-    ];
-    game.native_text(batch, name, at_text, if on { TEXT_ON } else { TEXT }, false);
+    let face = if on {
+        style::raised(r)
+    } else {
+        style::button(r)
+    };
+    fills(game, batch, o, &face);
+    let hot = hovered(game, o, r);
+    let colour = match (on, hot) {
+        (true, _) => TEXT_ON,
+        (false, true) => VALUE,
+        (false, false) => TEXT,
+    };
+    centred(game, batch, o, r, name, colour);
+    if hot && !on {
+        fills(game, batch, o, &style::outline(r, HOT));
+    }
 }
 
-/// The three work modes (`.w-btn`, the active one `.on`), with their label above when given.
+/// A switch (style step 5, `.w-seg`): its segments in one well, the chosen one raised in brass
+/// with dark text, the others the label colour on the well; the one under the mouse lights.
+pub(super) fn switch(
+    game: &Game<'_>,
+    batch: &mut HudBatch,
+    o: [f32; 2],
+    segments: &[Rect],
+    names: &[String],
+    chosen: Option<usize>,
+) {
+    fills(game, batch, o, &style::segments(segments, chosen));
+    for (i, (r, name)) in segments.iter().zip(names).enumerate() {
+        let hot = hovered(game, o, *r);
+        let colour = if Some(i) == chosen {
+            TEXT_ON
+        } else if hot {
+            VALUE
+        } else {
+            LABEL
+        };
+        centred(game, batch, o, *r, name, colour);
+        if hot && Some(i) != chosen {
+            fills(game, batch, o, &style::outline(*r, HOT));
+        }
+    }
+}
+
+/// The three work modes as one switch, with their label above when given.
 pub(super) fn modes_part(
     game: &Game<'_>,
     batch: &mut HudBatch,
@@ -468,12 +598,12 @@ pub(super) fn modes_part(
             batch,
             &tr("rustcraft.window.mode", "Work mode"),
             o,
-            [buttons[0][0], y],
+            [buttons[0][0] - 1.0, y],
         );
     }
-    for (mode, r) in WorkMode::ALL.into_iter().zip(buttons) {
-        button(game, batch, o, *r, &mode_name(mode), mode == active);
-    }
+    let names = mode_names(game, buttons[2][2]);
+    let chosen = WorkMode::ALL.iter().position(|m| *m == active);
+    switch(game, batch, o, buttons, &names, chosen);
 }
 
 /// The machine's diagnosis (A4) as its status line says it.
@@ -508,7 +638,16 @@ pub(super) fn status_text(machine: Machine, shown: Shown) -> String {
     }
 }
 
-/// The status line in its colour: green at work, amber when waiting, red without power.
+/// How bad a machine's diagnosis is: works, works worse (or waits), stands.
+pub(super) fn severity(shown: Shown) -> Severity {
+    match shown {
+        Shown::Working | Shown::OnFuel => Severity::Ok,
+        Shown::Slowed { .. } | Shown::OutputFull | Shown::Idle | Shown::NoDemand => Severity::Warn,
+        Shown::NoEnergy | Shown::NoFuel => Severity::Bad,
+    }
+}
+
+/// The status line of a machine's diagnosis.
 pub(super) fn status_part(
     game: &Game<'_>,
     batch: &mut HudBatch,
@@ -517,16 +656,38 @@ pub(super) fn status_part(
     machine: Machine,
     shown: Shown,
 ) {
-    let colour = match shown {
-        Shown::Working | Shown::OnFuel => STATUS_OK,
-        Shown::Slowed { .. } | Shown::OutputFull | Shown::Idle | Shown::NoDemand => STATUS_WARN,
-        Shown::NoEnergy | Shown::NoFuel => STATUS_BAD,
-    };
-    let r = at(o, rect);
-    game.native_fill(batch, r, colour);
     let s = status_text(machine, shown);
-    let at_text = [r[0] + 5.0, r[1] + (r[3] - FONT_HEIGHT) / 2.0 + 1.0];
-    game.native_text(batch, &s, at_text, STATUS_TEXT, false);
+    status_line(game, batch, o, rect, severity(shown), &s);
+}
+
+/// A status line (style step 6): background and a stripe on the left by severity, its 7 × 7 glyph,
+/// the text in the value colour, cut with «…» when it is wider than the line.
+pub(super) fn status_line(
+    game: &Game<'_>,
+    batch: &mut HudBatch,
+    o: [f32; 2],
+    rect: Rect,
+    severity: Severity,
+    s: &str,
+) {
+    fills(game, batch, o, &style::status(rect, severity));
+    let x = style::status_text_x(rect);
+    let room = rect[0] + rect[2] - x - 2.0;
+    let shown = fit(game, s, room);
+    let y = rect[1] + ((rect[3] - FONT_HEIGHT) / 2.0).round() + 1.0;
+    text(game, batch, &shown, o, [x, y], STATUS_TEXT);
+}
+
+/// `s`, cut with «…» to fit `room` pixels.
+pub(super) fn fit(game: &Game<'_>, s: &str, room: f32) -> String {
+    if game.native_text_width(s) <= room {
+        return s.to_owned();
+    }
+    let mut out: String = s.to_owned();
+    while !out.is_empty() && game.native_text_width(&format!("{out}…")) > room {
+        out.pop();
+    }
+    format!("{}…", out.trim_end())
 }
 
 /// `native_screen_click`: a press on one of the window's buttons is its menu button.
@@ -539,6 +700,10 @@ pub(super) fn on_click(
     button: &mut Option<i32>,
 ) {
     if button.is_some() {
+        return;
+    }
+    if sheets::is_sheet(block) {
+        *button = sheets::on_click(block, at);
         return;
     }
     if block == content::TERMINAL {
@@ -611,6 +776,10 @@ pub(super) fn tooltip(
     at: [f32; 2],
     lines: &mut Vec<String>,
 ) {
+    if sheets::is_sheet(block) {
+        sheets::tooltip(game, block, at, lines);
+        return;
+    }
     if block == content::TERMINAL {
         terminal::tooltip(game, at, lines);
         return;

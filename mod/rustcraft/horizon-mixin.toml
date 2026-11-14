@@ -45,7 +45,7 @@
 # prototype hooked it.
 [mod]
 id = "rustcraft"
-version = "0.8.1"
+version = "0.9.0"
 
 # The commit the traversal prototype and path_of_craft_tree build on; every function used here
 # was checked in its source.
@@ -193,6 +193,14 @@ id = "mining"
 file = "crates/horizon-client/src/game.rs"
 name = "rustcraft_mining"
 source = "mining.rs"
+
+# Slice 9: the slice-7 and slice-8 blocks' drawn windows (sheets): the server sends each open
+# window what it shows, the client draws it in the «Кузня душ» style.
+[[module]]
+id = "sheets"
+file = "crates/horizon-client/src/game.rs"
+name = "rustcraft_sheets"
+source = "sheets.rs"
 
 [[module]]
 id = "selftest"

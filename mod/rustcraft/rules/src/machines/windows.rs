@@ -154,7 +154,9 @@ pub mod alloy {
     pub const FUEL: [f32; 2] = [10.0, 56.0];
     pub const FLAME: Rect = [32.0, 61.0, 60.0, 6.0];
     pub const MODULE_SLOTS: [[f32; 2]; 3] = [[150.0, 56.0], [168.0, 56.0], [186.0, 56.0]];
-    pub const TAKE_OWN: [Rect; 2] = [[8.0, 87.0, 64.0, 13.0], [75.0, 87.0, 64.0, 13.0]];
+    /// The «take own alloy» switch: one well, two segments (style::segment_rects).
+    pub const TAKE_OWN_WELL: Rect = [8.0, 87.0, 131.0, 13.0];
+    pub const TAKE_OWN: [Rect; 2] = [[9.0, 88.0, 64.0, 11.0], [74.0, 88.0, 64.0, 11.0]];
     pub const ENERGY_BAR: Rect = [8.0, 113.0, 198.0, 5.0];
     pub const STATUS: Rect = [8.0, 121.0, 198.0, 12.0];
     pub const LABEL_SLOTS_Y: f32 = 16.0;
@@ -272,10 +274,12 @@ pub mod crafter {
     pub const MODULE_SLOTS: [[f32; 2]; 3] = [[152.0, 16.0], [171.0, 16.0], [190.0, 16.0]];
     pub const LABEL_ENERGY_Y: f32 = 102.0;
     pub const ENERGY_BAR: Rect = [8.0, 111.0, 198.0, 5.0];
+    /// The work mode switch: one well, three segments (style::segment_rects).
+    pub const MODE_WELL: Rect = [8.0, 119.0, 198.0, 13.0];
     pub const MODE_BUTTONS: [Rect; 3] = [
-        [8.0, 119.0, 64.0, 13.0],
-        [75.0, 119.0, 64.0, 13.0],
-        [142.0, 119.0, 64.0, 13.0],
+        [9.0, 120.0, 65.0, 11.0],
+        [75.0, 120.0, 65.0, 11.0],
+        [141.0, 120.0, 64.0, 11.0],
     ];
     pub const STATUS: Rect = [8.0, 135.0, 198.0, 12.0];
     pub const INVENTORY: [f32; 2] = [26.0, 159.0];
@@ -426,6 +430,19 @@ mod tests {
             BUFFER_SLOTS + OUTPUT_SLOTS + MODULE_SLOT_COUNT
         );
         assert_eq!(module_slot_at([153.0, 18.0]), Some(0));
+    }
+
+    #[test]
+    fn the_switches_are_segments_of_one_well() {
+        use crate::machines::style::segment_rects;
+        assert_eq!(
+            segment_rects(crafter::MODE_WELL, 3),
+            crafter::MODE_BUTTONS.to_vec()
+        );
+        assert_eq!(
+            segment_rects(alloy::TAKE_OWN_WELL, 2),
+            alloy::TAKE_OWN.to_vec()
+        );
     }
 
     #[test]

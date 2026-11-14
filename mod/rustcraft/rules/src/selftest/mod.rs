@@ -23,6 +23,7 @@ pub mod sources;
 pub mod storage;
 pub mod transport;
 pub mod turret;
+pub mod windows;
 pub mod workers;
 
 use std::collections::BTreeMap;
@@ -210,6 +211,19 @@ pub trait Bench {
     fn role(&self, pos: Pos) -> Option<String>;
     /// The console's `rustcraft_testkit` with these words after it; its answer.
     fn testkit(&mut self, args: &str) -> String;
+
+    // ---- Slice 9 ----
+
+    /// What the window of the slice-7 or slice-8 block at `pos` shows: the sheet the server
+    /// sends a player who has it open.
+    fn sheet(&self, pos: Pos) -> Option<crate::machines::sheet::Sheet>;
+    /// `press` that also says what is on the cursor after it.
+    fn press_cursor(
+        &mut self,
+        pos: Pos,
+        button: i32,
+        carried: Option<(&str, u32)>,
+    ) -> Result<Option<(String, u32)>, String>;
 }
 
 /// A mob as the self-test reads it.
@@ -373,6 +387,7 @@ pub fn catalog() -> Vec<Build> {
     all.extend(anchor::ALL);
     all.extend(sources::ALL);
     all.extend(miners::ALL);
+    all.extend(windows::ALL);
     all
 }
 

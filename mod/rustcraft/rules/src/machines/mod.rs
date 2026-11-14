@@ -8,5 +8,7 @@ pub mod generator;
 pub mod panel;
 pub mod processor;
 pub mod pump;
+pub mod sheet;
 pub mod slots;
+pub mod style;
 pub mod windows;

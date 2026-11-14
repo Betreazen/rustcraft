@@ -23,10 +23,10 @@ use crate::game::{
     rustcraft_content::{self as content, Kind, Machine},
     rustcraft_machines as machines, rustcraft_mining as mining, rustcraft_power as power,
     rustcraft_server::{LevelNet, line},
-    rustcraft_window::named,
     rustcraft_workers as workers,
 };
 use horizon_client::{
+    containers::ModBlockEntity,
     items::ItemStack,
     mod_api::{AttachmentCodec, AttachmentError, AttachmentType, Holder, Host},
     text::Text,
@@ -35,11 +35,19 @@ use horizon_world::nbt::{Compound, JavaString, Tag};
 use rustcraft_rules::{
     anchor::{self, Anchor, State as AnchorState},
     geom::Pos,
+    machines::{
+        sheet::{
+            Bar as SheetBar, Cursor, Kind as SheetKind, Press, Sheet, Status as SheetStatus,
+            press_socket, put_free, severity_code,
+        },
+        style::Severity,
+    },
     modules::{Holder as ModuleHolder, Module},
     reports::{self, Report},
     tuning::Tuning,
     turret::{self, Effect, Loadout, Resist, Role, Shown, SoulsData},
 };
+use serde_json::Value;
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap, VecDeque},
     sync::{LazyLock, Mutex, MutexGuard, PoisonError},
@@ -301,14 +309,19 @@ pub(super) fn sent_reports() -> Vec<String> {
 
 // ---- Hooks ----
 
-/// The blocks with a server window and an owner: slice 7's and slice 8's.
-fn has_window(block: &str) -> bool {
-    Machine::of(block).is_some_and(|m| !m.has_menu())
+/// The blocks with an owner: slice 7's and slice 8's.
+fn has_owner(block: &str) -> bool {
+    Machine::of(block).is_some_and(Machine::owned)
+}
+
+/// The blocks whose window is a server menu: the solar panel alone since slice 9.
+fn has_server_window(block: &str) -> bool {
+    Machine::of(block).is_some_and(|m| m.owned() && !m.has_menu())
 }
 
 /// `native_place_block`: a slice-7 or slice-8 block placed by a player is theirs (X2).
 pub(super) fn on_place_block(game: &mut Game<'_>, stack: &ItemStack, pos: Pos) {
-    if !has_window(&stack.item) {
+    if !has_owner(&stack.item) {
         return;
     }
     let Some(player) = game.native_acting_player() else {
@@ -356,7 +369,7 @@ pub(super) fn on_incoming_damage(entity: i32, kind: &str, amount: &mut f32) {
 /// `native_right_click_block`: a turret, an anchor or a dock opens its window.
 pub(super) fn on_right_click_block(game: &mut Game<'_>, pos: Pos, canceled: &mut bool) {
     let block = game.native_block(pos);
-    if !has_window(&block) || *canceled {
+    if !has_server_window(&block) || *canceled {
         return;
     }
     let Some(player) = game.native_acting_player() else {
@@ -447,6 +460,7 @@ pub(super) fn tick(game: &mut Game<'_>, dimension: &str, level: &LevelNet, t: &T
         anchors(game, dimension, level, t);
     }
     windows(game, dimension, level, t);
+    crate::game::rustcraft_sheets::tick(game, dimension, level, t);
     flush_reports(game);
 }
 
@@ -499,6 +513,27 @@ fn souls(game: &Game<'_>, t: &Tuning) -> Option<SoulsData> {
     }
     state().souls = Some(data.clone());
     data
+}
+
+/// An attack effect's name for the window, in the player's language.
+fn effect_name(e: Effect) -> Text {
+    match e {
+        Effect::Bleed => line("rustcraft.turret.effect.bleed", "bleeding", &[]),
+        Effect::Poison => line("rustcraft.turret.effect.poison", "poison", &[]),
+        Effect::Slow => line("rustcraft.turret.effect.slow", "slowness", &[]),
+    }
+}
+
+/// Parts of one window row, joined with " · ".
+fn joined(parts: Vec<Text>) -> Text {
+    let mut row = Text::literal("");
+    for (i, p) in parts.into_iter().enumerate() {
+        if i > 0 {
+            row.push(Text::literal(" · "));
+        }
+        row.push(p);
+    }
+    row
 }
 
 /// Whether poison takes on mob `id`: the `#minecraft:undead` tag and the engine's own refusals
@@ -1145,14 +1180,12 @@ pub(super) fn diagnosis(
 
 // ---- Windows ----
 
-/// The rows of a block's window.
-fn rows_of(block: &str) -> u8 {
-    match Machine::of(block) {
-        Some(m) if m.kind() == Kind::Mining => mining::rows(m),
-        _ => 1,
-    }
-}
+/// The rows of the one server menu left.
+const SERVER_ROWS: u8 = 1;
 
+/// The one block left with a server menu: the solar panel, whose template (glass, for the sky's
+/// light under it) opens no menu of the block's own. The others' windows are sheets
+/// (rustcraft_sheets) since slice 9.
 fn windows(game: &mut Game<'_>, dimension: &str, level: &LevelNet, t: &Tuning) {
     let (opening, clicks) = {
         let mut s = state();
@@ -1174,9 +1207,9 @@ fn windows(game: &mut Game<'_>, dimension: &str, level: &LevelNet, t: &Tuning) {
     };
     for (uuid, _, pos) in opening {
         let block = game.native_block(pos);
-        let items = cells(game, dimension, level, pos, &block, t);
+        let items = cells(game, level, pos, &block, t);
         let title = Text::translate(&format!("block.{}", block.replace(':', ".")), &[]);
-        if let Some(window) = game.native_open_menu(uuid, rows_of(&block), title, items) {
+        if let Some(window) = game.native_open_menu(uuid, SERVER_ROWS, title, items) {
             state().sessions.insert(
                 uuid,
                 Session {
@@ -1187,7 +1220,8 @@ fn windows(game: &mut Game<'_>, dimension: &str, level: &LevelNet, t: &Tuning) {
             );
         }
     }
-    for (uuid, window, slot) in clicks {
+    // The panel's window has nothing to press: a click only shows it again.
+    for (uuid, window, _) in clicks {
         let pos = match state().sessions.get(&uuid) {
             Some(x) if x.window == window => x.pos,
             _ => continue,
@@ -1197,8 +1231,7 @@ fn windows(game: &mut Game<'_>, dimension: &str, level: &LevelNet, t: &Tuning) {
             game.native_close_menu(uuid);
             continue;
         }
-        click(game, uuid, pos, &block, slot);
-        let items = cells(game, dimension, level, pos, &block, t);
+        let items = cells(game, level, pos, &block, t);
         game.native_set_menu_items(uuid, items);
     }
     if state().ticks.is_multiple_of(20) {
@@ -1210,7 +1243,7 @@ fn windows(game: &mut Game<'_>, dimension: &str, level: &LevelNet, t: &Tuning) {
             .collect();
         for (uuid, pos) in open {
             let block = game.native_block(pos);
-            let items = cells(game, dimension, level, pos, &block, t);
+            let items = cells(game, level, pos, &block, t);
             game.native_set_menu_items(uuid, items);
         }
     }
@@ -1218,405 +1251,377 @@ fn windows(game: &mut Game<'_>, dimension: &str, level: &LevelNet, t: &Tuning) {
 
 const CELLS: usize = 9;
 
+/// The modules' holder of a block with module sockets.
 fn holder_of(block: &str) -> Option<ModuleHolder> {
-    match block {
-        content::TURRET => Some(ModuleHolder::Turret),
-        content::ANCHOR => Some(ModuleHolder::Anchor),
-        _ => Machine::of(block).and_then(mining::holder),
-    }
-}
-
-/// A click on module slot `slot` gives that module back.
-pub(super) fn take_module(game: &mut Game<'_>, uuid: u128, pos: Pos, slot: usize) {
-    let mut slots = modules_at(game, pos);
-    if let Some(m) = slots.get(slot).copied().flatten()
-        && game
-            .native_give_stack(uuid, ItemStack::new(m.item(), 1))
-            .is_none()
-    {
-        slots[slot] = None;
-        set_modules(game, pos, &slots);
-    }
-}
-
-/// A click on a module in the player's inventory slot `inventory` puts it into a free module
-/// slot, if `holder` takes it; whether it went in.
-pub(super) fn put_module(
-    game: &mut Game<'_>,
-    uuid: u128,
-    pos: Pos,
-    inventory: usize,
-    holder: ModuleHolder,
-) -> bool {
-    let Some(stack) = game
-        .native_player_stacks(uuid)
-        .and_then(|s| s.get(inventory).cloned().flatten())
-    else {
-        return false;
-    };
-    let Some(m) = Module::of(&stack.item).filter(|m| holder.takes(*m)) else {
-        return false;
-    };
-    let mut slots = modules_at(game, pos);
-    let Some(free) = slots.iter().position(Option::is_none) else {
-        return false;
-    };
-    let rest = (stack.count > 1).then(|| {
-        let mut s = stack.clone();
-        s.count -= 1;
-        s
-    });
-    if game
-        .native_set_inventory_slot(
-            uuid,
-            crate::game::native_inventories::NativeInventoryKind::Player,
-            inventory,
-            Some(&stack),
-            rest,
-        )
-        .is_err()
-    {
-        return false;
-    }
-    slots[free] = Some(m);
-    set_modules(game, pos, &slots)
-}
-
-/// A click on a module takes it back; on a module in the inventory below puts it in a free slot;
-/// on an unload dock's slot takes that stack.
-fn click(game: &mut Game<'_>, uuid: u128, pos: Pos, block: &str, slot: usize) {
-    if let Some(m) = Machine::of(block).filter(|m| m.kind() == Kind::Mining) {
-        mining::click(game, uuid, pos, m, slot);
-        return;
-    }
-    if block == content::BATTERY {
-        if slot < MODULE_SLOTS {
-            take_module(game, uuid, pos, slot);
-        } else if let Some(n) = slot.checked_sub(CELLS) {
-            let inventory = match n {
-                0..27 => n + 9,
-                27..36 => n - 27,
-                _ => return,
-            };
-            put_module(game, uuid, pos, inventory, ModuleHolder::Battery);
-        }
-        return;
-    }
-    if block == content::DOCK_UNLOAD {
-        if slot < content::DOCK_SLOTS {
-            let stack = game
-                .native_mod_block_entity(pos)
-                .and_then(|e| e.items.get(slot).cloned().flatten());
-            if let Some(stack) = stack.filter(|s| s.count > 0) {
-                let left = game.native_give_stack(uuid, stack.clone());
-                game.native_with_mod_block_entity(pos, |e| {
-                    if let Some(s) = e.items.get_mut(slot) {
-                        *s = left;
-                    }
-                });
-            }
-        }
-        return;
-    }
-    let Some(holder) = holder_of(block) else {
-        return;
-    };
-    let mut slots = modules_at(game, pos);
-    if slot < MODULE_SLOTS {
-        if let Some(m) = slots[slot]
-            && game
-                .native_give_stack(uuid, ItemStack::new(m.item(), 1))
-                .is_none()
-        {
-            slots[slot] = None;
-            set_modules(game, pos, &slots);
-        }
-        return;
-    }
-    let Some(n) = slot.checked_sub(CELLS) else {
-        return;
-    };
-    let inventory = match n {
-        0..27 => n + 9,
-        27..36 => n - 27,
-        _ => return,
-    };
-    let Some(stack) = game
-        .native_player_stacks(uuid)
-        .and_then(|s| s.get(inventory).cloned().flatten())
-    else {
-        return;
-    };
-    let Some(m) = Module::of(&stack.item).filter(|m| holder.takes(*m)) else {
-        return;
-    };
-    let Some(free) = slots.iter().position(Option::is_none) else {
-        return;
-    };
-    let rest = (stack.count > 1).then(|| {
-        let mut s = stack.clone();
-        s.count -= 1;
-        s
-    });
-    if game
-        .native_set_inventory_slot(
-            uuid,
-            crate::game::native_inventories::NativeInventoryKind::Player,
-            inventory,
-            Some(&stack),
-            rest,
-        )
-        .is_ok()
-    {
-        slots[free] = Some(m);
-        set_modules(game, pos, &slots);
-    }
-}
-
-pub(super) fn module_cells(slots: &[Option<Module>], out: &mut [Option<ItemStack>]) {
-    for i in 0..MODULE_SLOTS {
-        out[i] = Some(match slots.get(i).copied().flatten() {
-            Some(m) => named(
-                m.item(),
-                1,
-                Text::translate(&format!("item.{}", m.item().replace(':', ".")), &[]),
-                &[line(
-                    "rustcraft.window.module_take",
-                    "Click: take it back",
-                    &[],
-                )],
-                false,
-            ),
-            None => named(
-                "minecraft:gray_stained_glass_pane",
-                1,
-                line("rustcraft.window.module_slot", "Module slot", &[]),
-                &[line(
-                    "rustcraft.window.module_put",
-                    "Click a module in your inventory",
-                    &[],
-                )],
-                false,
-            ),
-        });
-    }
-}
-
-fn status_cell(text: Text, good: bool) -> Option<ItemStack> {
-    Some(named(
-        if good {
-            "minecraft:lime_dye"
-        } else {
-            "minecraft:red_dye"
-        },
-        1,
-        text,
-        &[],
-        false,
-    ))
+    SheetKind::of(block).and_then(SheetKind::holder)
 }
 
 fn cells(
     game: &Game<'_>,
-    dimension: &str,
     level: &LevelNet,
     pos: Pos,
     block: &str,
     t: &Tuning,
 ) -> Vec<Option<ItemStack>> {
     let mut out: Vec<Option<ItemStack>> = vec![None; CELLS];
-    match Machine::of(block) {
-        Some(m) if m.kind() == Kind::Mining => return mining::cells(game, dimension, pos, m, t),
-        Some(m) if matches!(m.kind(), Kind::Power | Kind::Battery) => {
-            power::cells(game, level, pos, m, t, &mut out);
-        }
-        Some(Machine::Turret) => {
-            let slots = modules_at(game, pos);
-            let l = Loadout::of(&slots);
-            module_cells(&slots, &mut out);
-            let support = l.role() == Role::Support;
-            out[4] = Some(named(
-                if support {
-                    "minecraft:golden_apple"
-                } else {
-                    "minecraft:iron_sword"
-                },
-                1,
-                if support {
-                    line("rustcraft.turret.mode_support", "Mode: support", &[])
-                } else {
-                    line("rustcraft.turret.mode_attack", "Mode: attack", &[])
-                },
-                &[line(
-                    "rustcraft.turret.targets",
-                    "Hostile mobs only: never players, pets or peaceful mobs",
-                    &[],
-                )],
-                false,
-            ));
-            let range = Text::literal(format!("{:.0}", l.range(t)));
-            let mut lore = vec![line("rustcraft.turret.range", "Range: %s blocks", &[range])];
-            if support {
-                let b = turret::buffs(&l, t);
-                lore.push(Text::literal(format!(
-                    "+{:.0} HP / {:.0} s · −{:.0}% · +{:.0}% · +{:.0}%",
-                    b.heal,
-                    b.heal_ticks / t.ticks_per_second,
-                    b.guard * 100.0,
-                    b.power * 100.0,
-                    b.haste * 100.0
-                )));
-                lore.push(Text::literal(format!("{:.0} E/s", l.support_draw(t))));
-            } else {
-                lore.push(line(
-                    "rustcraft.turret.shot",
-                    "Shot: %s E",
-                    &[Text::literal(format!("{:.0}", l.shot_energy(t)))],
-                ));
-                let e = turret::effects(&l, t, &Resist::default(), false);
-                if !e.is_empty() {
-                    let names: Vec<&str> = e.iter().map(|g| g.effect.key()).collect();
-                    lore.push(Text::literal(names.join(" · ")));
-                }
-            }
-            let aimed = state()
-                .turrets
-                .get(&(dimension.to_owned(), pos))
-                .and_then(|s| Some((s.target.clone()?, s.target_id)));
-            if let Some((target, target_id)) = aimed {
-                let mut l2 = line(
-                    "rustcraft.turret.target",
-                    "Target: %s",
-                    &[entity_name(&target)],
-                );
-                let refused = target_id.map_or_else(
-                    || undead(game, &target),
-                    |id| poison_refused(game, id, &target),
-                );
-                if refused && l.poison > 0 {
-                    l2.push(Text::literal(" · "));
-                    l2.push(line(
-                        "rustcraft.turret.undead",
-                        "undead: poison does not work",
-                        &[],
-                    ));
-                }
-                lore.push(l2);
-            }
-            out[5] = Some(named(
-                "minecraft:bow",
-                1,
-                line("rustcraft.turret.numbers", "Turret", &[]),
-                &lore,
-                false,
-            ));
-            let e = machines::buffer_energy(game, pos);
-            out[7] = Some(named(
-                "minecraft:redstone",
-                1,
-                Text::literal(format!("{e:.0} / {:.0} E", t.turret_buffer)),
-                &[],
-                false,
-            ));
-            let shown = turret_shown(dimension, pos);
-            let good = !matches!(shown, Some(Shown::NoEnergy | Shown::IdleEffects) | None);
-            out[8] = status_cell(
-                shown.map_or_else(
-                    || line("rustcraft.turret.idle", "Turret", &[]),
-                    |s| shown_text(&s),
-                ),
-                good,
-            );
-        }
-        Some(Machine::Anchor) => {
-            let slots = modules_at(game, pos);
-            module_cells(&slots, &mut out);
-            let owner = owner_at(game, pos);
-            let name = owner
-                .and_then(|o| {
-                    game.native_server_players()
-                        .into_iter()
-                        .find(|p| p.uuid == o)
-                        .map(|p| p.name)
-                })
-                .map_or_else(
-                    || {
-                        line(
-                            "rustcraft.anchor.owner_off",
-                            "the owner is off the server",
-                            &[],
-                        )
-                    },
-                    Text::literal,
-                );
-            out[4] = Some(named(
-                "minecraft:player_head",
-                1,
-                line("rustcraft.anchor.owner", "Owner: %s", &[name]),
-                &[],
-                false,
-            ));
-            let chunks = anchor::chunks(pos, &slots, t);
-            let side = (chunks.len() as f64).sqrt().round() as usize;
-            out[5] = Some(named(
-                "minecraft:filled_map",
-                1,
-                line(
-                    "rustcraft.anchor.area",
-                    "Holds %s chunks",
-                    &[Text::literal(format!("{side}×{side}"))],
-                ),
-                &[line(
-                    "rustcraft.anchor.area_hint",
-                    "A radius module: 3×3, two: 5×5",
-                    &[],
-                )],
-                false,
-            ));
-            out[6] = Some(named(
-                "minecraft:redstone",
-                1,
-                Text::literal(format!("{:.0} E/s", anchor::draw(chunks.len(), &slots, t))),
-                &[],
-                false,
-            ));
-            let st = anchor_state(dimension, pos);
-            out[8] = status_cell(
-                st.map_or_else(
-                    || line("rustcraft.anchor.idle", "Base anchor", &[]),
-                    |s| anchor_text(s, chunks.len()),
-                ),
-                st == Some(AnchorState::Holding),
-            );
-        }
-        Some(Machine::DockUnload) => {
-            if let Some(e) = game.native_mod_block_entity(pos) {
-                for (i, s) in e.items.iter().take(CELLS).enumerate() {
-                    out[i] = s.clone().filter(|s| s.count > 0);
-                }
-            }
-        }
-        Some(Machine::DockCharge) => {
-            let e = machines::buffer_energy(game, pos);
-            out[0] = Some(named(
-                "minecraft:redstone",
-                1,
-                Text::literal(format!("{e:.0} / {:.0} E", t.dock_buffer)),
-                &[line(
-                    "rustcraft.dock.draw",
-                    "Draws up to %s E/s",
-                    &[Text::literal(format!("{:.0}", t.dock_draw))],
-                )],
-                false,
-            ));
-            out[8] = status_cell(
-                workers::dock_text(game, dimension, pos, Machine::DockCharge),
-                e > 0.0,
-            );
-        }
-        _ => {}
+    if let Some(m) = Machine::of(block).filter(|m| m.kind() == Kind::Power) {
+        power::cells(game, level, pos, m, t, &mut out);
     }
     out
+}
+
+// ---- Sheets: the slice-7 and slice-8 blocks' drawn windows (rustcraft_sheets) ----
+
+/// A text as the sheet carries it: the game's text component, which each client reads in its own
+/// language.
+pub(super) fn v(t: &Text) -> Value {
+    t.component()
+}
+
+/// The sockets' modules of the block at `pos`, as item ids, one a socket.
+pub(super) fn module_items(game: &Game<'_>, pos: Pos) -> Vec<Option<String>> {
+    let mut items = game
+        .native_mod_block_entity(pos)
+        .map(|e| read_modules(&e.nbt))
+        .unwrap_or_default();
+    items.resize(MODULE_SLOTS, None);
+    items
+}
+
+/// What the window of a slice-7 or slice-8 block at `pos` shows: what its server menu showed,
+/// part by part.
+pub(super) fn sheet(
+    game: &Game<'_>,
+    dimension: &str,
+    level: &LevelNet,
+    pos: Pos,
+    block: &str,
+    t: &Tuning,
+) -> Option<Sheet> {
+    let kind = SheetKind::of(block)?;
+    let mut s = Sheet {
+        pos,
+        ..Sheet::default()
+    };
+    if kind.holder().is_some() {
+        s.modules = module_items(game, pos);
+    }
+    match kind {
+        SheetKind::Turret => turret_sheet(game, dimension, pos, t, &mut s),
+        SheetKind::Anchor => anchor_sheet(game, dimension, pos, t, &mut s),
+        SheetKind::DockUnload | SheetKind::DockCharge => {
+            dock_sheet(game, dimension, pos, kind, t, &mut s)
+        }
+        SheetKind::Battery | SheetKind::Windmill | SheetKind::LavaGenerator => {
+            power::sheet(game, level, pos, kind, t, &mut s);
+        }
+        SheetKind::Miner | SheetKind::Placer | SheetKind::Breaker => {
+            mining::sheet(game, dimension, pos, kind, t, &mut s);
+        }
+    }
+    Some(s)
+}
+
+fn status(severity: Severity, text: &Text) -> Option<SheetStatus> {
+    Some(SheetStatus {
+        severity: severity_code(severity),
+        text: v(text),
+    })
+}
+
+fn turret_sheet(game: &Game<'_>, dimension: &str, pos: Pos, t: &Tuning, s: &mut Sheet) {
+    let slots = modules_at(game, pos);
+    let l = Loadout::of(&slots);
+    let support = l.role() == Role::Support;
+    s.support = Some(support);
+    s.role = vec![
+        v(&if support {
+            line("rustcraft.turret.mode_support", "Mode: support", &[])
+        } else {
+            line("rustcraft.turret.mode_attack", "Mode: attack", &[])
+        }),
+        v(&line(
+            "rustcraft.turret.targets",
+            "Hostile mobs only: never players, pets or peaceful mobs",
+            &[],
+        )),
+    ];
+    let range = Text::literal(format!("{:.0}", l.range(t)));
+    s.rows.push(v(&line(
+        "rustcraft.turret.range",
+        "Range: %s blocks",
+        &[range],
+    )));
+    if support {
+        let b = turret::buffs(&l, t);
+        let pct = |f: f64| Text::literal(format!("{:.0}%", f * 100.0));
+        let mut parts = Vec::new();
+        if b.heal > 0.0 {
+            parts.push(line(
+                "rustcraft.turret.buff.heal",
+                "heal +%s HP every %s s",
+                &[
+                    Text::literal(format!("{:.0}", b.heal)),
+                    Text::literal(format!("{:.0}", b.heal_ticks / t.ticks_per_second)),
+                ],
+            ));
+        }
+        if b.guard > 0.0 {
+            parts.push(line(
+                "rustcraft.turret.buff.guard",
+                "protection −%s",
+                &[pct(b.guard)],
+            ));
+        }
+        if b.power > 0.0 {
+            parts.push(line(
+                "rustcraft.turret.buff.power",
+                "strength +%s",
+                &[pct(b.power)],
+            ));
+        }
+        if b.haste > 0.0 {
+            parts.push(line(
+                "rustcraft.turret.buff.haste",
+                "speed +%s",
+                &[pct(b.haste)],
+            ));
+        }
+        if !parts.is_empty() {
+            s.rows.push(v(&joined(parts)));
+        }
+        s.rows
+            .push(v(&Text::literal(format!("{:.0} E/s", l.support_draw(t)))));
+    } else {
+        s.rows.push(v(&line(
+            "rustcraft.turret.shot",
+            "Shot: %s E",
+            &[Text::literal(format!("{:.0}", l.shot_energy(t)))],
+        )));
+        let e = turret::effects(&l, t, &Resist::default(), false);
+        if !e.is_empty() {
+            s.rows.push(v(&joined(
+                e.iter().map(|g| effect_name(g.effect)).collect(),
+            )));
+        }
+    }
+    let aimed = state()
+        .turrets
+        .get(&(dimension.to_owned(), pos))
+        .and_then(|x| Some((x.target.clone()?, x.target_id)));
+    if let Some((target, target_id)) = aimed {
+        let mut l2 = line(
+            "rustcraft.turret.target",
+            "Target: %s",
+            &[entity_name(&target)],
+        );
+        let refused = target_id.map_or_else(
+            || undead(game, &target),
+            |id| poison_refused(game, id, &target),
+        );
+        if refused && l.poison > 0 {
+            l2.push(Text::literal(" · "));
+            l2.push(line(
+                "rustcraft.turret.undead",
+                "undead: poison does not work",
+                &[],
+            ));
+        }
+        s.rows.push(v(&l2));
+    }
+    let e = machines::buffer_energy(game, pos);
+    s.bars.push(SheetBar {
+        label: v(&line("rustcraft.window.energy", "Energy", &[])),
+        value: v(&Text::literal(format!("{e:.0} / {:.0} E", t.turret_buffer))),
+        share: e / t.turret_buffer.max(1.0),
+        energy: true,
+    });
+    let shown = turret_shown(dimension, pos);
+    let severity = match shown {
+        Some(Shown::NoEnergy) => Severity::Bad,
+        Some(Shown::Shooting(_) | Shown::Healing(_) | Shown::Supporting) => Severity::Ok,
+        _ => Severity::Warn,
+    };
+    let text = shown.map_or_else(
+        || line("rustcraft.turret.idle", "Turret", &[]),
+        |x| shown_text(&x),
+    );
+    s.status = status(severity, &text);
+}
+
+fn anchor_sheet(game: &Game<'_>, dimension: &str, pos: Pos, t: &Tuning, s: &mut Sheet) {
+    let slots = modules_at(game, pos);
+    let name = owner_at(game, pos)
+        .and_then(|o| {
+            game.native_server_players()
+                .into_iter()
+                .find(|p| p.uuid == o)
+                .map(|p| p.name)
+        })
+        .map_or_else(
+            || {
+                line(
+                    "rustcraft.anchor.owner_off",
+                    "the owner is off the server",
+                    &[],
+                )
+            },
+            Text::literal,
+        );
+    s.rows
+        .push(v(&line("rustcraft.anchor.owner", "Owner: %s", &[name])));
+    let chunks = anchor::chunks(pos, &slots, t);
+    let side = (chunks.len() as f64).sqrt().round() as usize;
+    s.rows.push(v(&line(
+        "rustcraft.anchor.area",
+        "Holds %s chunks",
+        &[Text::literal(format!("{side}×{side}"))],
+    )));
+    s.hints = vec![
+        Vec::new(),
+        vec![v(&line(
+            "rustcraft.anchor.area_hint",
+            "A radius module: 3×3, two: 5×5",
+            &[],
+        ))],
+    ];
+    s.rows.push(v(&Text::literal(format!(
+        "{:.0} E/s",
+        anchor::draw(chunks.len(), &slots, t)
+    ))));
+    let st = anchor_state(dimension, pos);
+    let severity = match st {
+        Some(AnchorState::Holding) => Severity::Ok,
+        Some(AnchorState::NoEnergy | AnchorState::NoOwner) => Severity::Bad,
+        _ => Severity::Warn,
+    };
+    let text = st.map_or_else(
+        || line("rustcraft.anchor.idle", "Base anchor", &[]),
+        |x| anchor_text(x, chunks.len()),
+    );
+    s.status = status(severity, &text);
+}
+
+fn dock_sheet(
+    game: &Game<'_>,
+    dimension: &str,
+    pos: Pos,
+    kind: SheetKind,
+    t: &Tuning,
+    s: &mut Sheet,
+) {
+    let machine = if kind == SheetKind::DockCharge {
+        Machine::DockCharge
+    } else {
+        Machine::DockUnload
+    };
+    let text = workers::dock_text(game, dimension, pos, machine);
+    if machine == Machine::DockCharge {
+        let e = machines::buffer_energy(game, pos);
+        s.bars.push(SheetBar {
+            label: v(&line("rustcraft.window.energy", "Energy", &[])),
+            value: v(&Text::literal(format!("{e:.0} / {:.0} E", t.dock_buffer))),
+            share: e / t.dock_buffer.max(1.0),
+            energy: true,
+        });
+        s.rows.push(v(&line(
+            "rustcraft.dock.draw",
+            "Draws up to %s E/s",
+            &[Text::literal(format!("{:.0}", t.dock_draw))],
+        )));
+        let severity = if e > 0.0 { Severity::Ok } else { Severity::Bad };
+        s.status = status(severity, &text);
+    } else {
+        let full = game.native_mod_block_entity(pos).is_some_and(|e| {
+            e.items.len() >= content::DOCK_SLOTS
+                && e.items
+                    .iter()
+                    .all(|x| x.as_ref().is_some_and(|x| x.count > 0))
+        });
+        let severity = if full { Severity::Warn } else { Severity::Ok };
+        s.status = status(severity, &text);
+    }
+}
+
+/// A press on a sheet window (`native_menu_button_v2`; rustcraft_rules::machines::sheet::Press):
+/// a socket takes or gives a module as a slot does, a work mode is set, an ore toggled. The block
+/// entity is out of the world during the call, so everything is written to `entity`.
+pub(super) fn on_sheet_button(
+    entity: &mut ModBlockEntity,
+    id: i32,
+    carried: &mut Option<ItemStack>,
+) {
+    let Some(kind) = SheetKind::of(&entity.id) else {
+        return;
+    };
+    let Some(press) = Press::of(id) else {
+        return;
+    };
+    match press {
+        Press::Socket(k) => {
+            let Some(holder) = kind.holder() else {
+                return;
+            };
+            let mut slots = rustcraft_rules::modules::read(&read_modules(&entity.nbt));
+            let cursor = carried.as_ref().map(|c| Cursor {
+                item: c.item.to_string(),
+                count: c.count,
+            });
+            let Some(after) = press_socket(&mut slots, k, holder, cursor.as_ref()) else {
+                return;
+            };
+            *carried = after.map(|c| {
+                let mut stack = carried
+                    .clone()
+                    .filter(|x| *x.item == *c.item)
+                    .unwrap_or_else(|| ItemStack::new(c.item.as_str(), c.count));
+                stack.count = c.count;
+                stack
+            });
+            write_sockets(entity, kind, &slots);
+        }
+        Press::Mode(mode) if kind.shape().mode => machines::write_work(&mut entity.nbt, mode),
+        Press::Toggle(i) if kind == SheetKind::Miner => mining::toggle_ore(&mut entity.nbt, i),
+        _ => {}
+    }
+}
+
+fn write_sockets(entity: &mut ModBlockEntity, kind: SheetKind, slots: &[Option<Module>]) {
+    let items: Vec<Option<String>> = slots
+        .iter()
+        .map(|m| m.map(|m| m.item().to_owned()))
+        .collect();
+    write_modules(&mut entity.nbt, &items);
+    if kind == SheetKind::Turret {
+        write_role(&mut entity.nbt, Loadout::of(slots).role());
+    }
+}
+
+/// `native_menu_quick_move` on a sheet window: a module shift-clicked in the inventory goes into
+/// the first free socket the block's modules take, one of the stack; anything else goes the
+/// game's way (the placer's slots, the docks' and the miner's slots to the inventory).
+pub(super) fn on_sheet_quick_move(
+    entity: &mut ModBlockEntity,
+    container_slots: usize,
+    slot: usize,
+    stack: &mut ItemStack,
+    handled: &mut bool,
+) {
+    if *handled || slot < container_slots {
+        return;
+    }
+    let Some(kind) = SheetKind::of(&entity.id) else {
+        return;
+    };
+    let Some(holder) = kind.holder() else {
+        return;
+    };
+    let mut slots = rustcraft_rules::modules::read(&read_modules(&entity.nbt));
+    if put_free(&mut slots, holder, &stack.item) {
+        stack.count -= 1;
+        write_sockets(entity, kind, &slots);
+        *handled = true;
+    }
 }
 
 /// The server folder's SoulsCraft data, for the self-test: whether it was found.

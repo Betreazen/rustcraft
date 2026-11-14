@@ -27,8 +27,7 @@ use crate::game::{
     rustcraft_content as content,
     rustcraft_monorail::{CAPSULE, LISTING, RENAME},
     rustcraft_screens::{
-        self as kit, BUTTON_ON, ENERGY, FONT_HEIGHT, LABEL, PANEL_LIGHT, SLOT, SLOT_EDGE,
-        STATUS_BAD, STATUS_OK, STATUS_TEXT, STATUS_WARN, TEXT, TEXT_ON, button, text, tr, tr_with,
+        self as kit, ENERGY, HOT, LABEL, TEXT, TEXT_ON, VALUE, button, text, tr, tr_with,
     },
     rustcraft_workers::NOTES as WORKERS,
 };
@@ -38,6 +37,7 @@ use horizon_client::{
 };
 use rustcraft_rules::{
     geom::{Face, Pos},
+    machines::style::{self, Severity, colour},
     monorail::{
         capsule,
         route::Point,
@@ -53,16 +53,15 @@ use std::{
 const ESCAPE: &str = "key.keyboard.escape";
 const ENTER: [&str; 2] = ["key.keyboard.enter", "key.keyboard.keypad.enter"];
 const BACKSPACE: &str = "key.keyboard.backspace";
-/// The scheme's colours (docs/showcase/ui.css `.w-map`).
-const MAP_BACK: u32 = 0xFFF1F3F7;
-const MAP_EDGE: u32 = 0xFF5D6470;
-const MAP_LINE: u32 = 0xFFC57F52;
-const DOT_EDGE: u32 = 0xFF1A1D25;
-const DOT: u32 = 0xFFF1F3F7;
-const DOT_HERE: u32 = 0xFF1A1D25;
-const DOT_CHOSEN: u32 = 0xFF56DBE2;
-const MAP_TEXT: u32 = 0x1A1D25;
-const BROKEN_TEXT: u32 = 0xB0382E;
+/// The scheme's colours (docs/showcase/ui.css `.w-map`, style «Схемы»): parchment, ink, the brass
+/// line of the way; this station an inked dot, the chosen one blue.
+const MAP_LINE: u32 = colour::PAPER_LINE;
+const DOT_EDGE: u32 = colour::PAPER_INK;
+const DOT: u32 = colour::PAPER;
+const DOT_HERE: u32 = colour::PAPER_INK;
+const DOT_CHOSEN: u32 = colour::PAPER_CHOSEN;
+const MAP_TEXT: u32 = colour::PAPER_TEXT;
+const BROKEN_TEXT: u32 = colour::BAD_TEXT;
 /// The capsule's parts as standalone models.
 const BODY: &str = "rustcraft:block/capsule_body";
 const BELOW: &str = "rustcraft:block/capsule_below";
@@ -212,11 +211,11 @@ fn row_text(d: &Destination) -> String {
 }
 
 /// The status line for the chosen destination, and its colour.
-fn status(listing: &Listing, chosen: Option<&Destination>) -> (String, u32) {
+fn status(listing: &Listing, chosen: Option<&Destination>) -> (String, Severity) {
     if !listing.on_rail {
         return (
             tr("rustcraft.station.no_rail", "The station stands by no rail"),
-            STATUS_BAD,
+            Severity::Bad,
         );
     }
     let Some(d) = chosen else {
@@ -226,7 +225,7 @@ fn status(listing: &Listing, chosen: Option<&Destination>) -> (String, u32) {
                     "rustcraft.station.alone",
                     "No other stations on the network",
                 ),
-                STATUS_WARN,
+                Severity::Warn,
             )
         } else {
             (
@@ -234,7 +233,7 @@ fn status(listing: &Listing, chosen: Option<&Destination>) -> (String, u32) {
                     "rustcraft.station.choose",
                     "Choose a station on the scheme or in the list",
                 ),
-                STATUS_WARN,
+                Severity::Warn,
             )
         };
     };
@@ -245,7 +244,7 @@ fn status(listing: &Listing, chosen: Option<&Destination>) -> (String, u32) {
                 "%s · the trip costs %s E",
                 &[station_name(&d.name, d.station), number(d.cost)],
             ),
-            STATUS_OK,
+            Severity::Ok,
         ),
         Reach::Short(short) => (
             tr_with(
@@ -253,7 +252,7 @@ fn status(listing: &Listing, chosen: Option<&Destination>) -> (String, u32) {
                 "Not enough energy: %s E more",
                 &[format!("{}", short.ceil())],
             ),
-            STATUS_BAD,
+            Severity::Bad,
         ),
         Reach::Broken(at) => (
             tr_with(
@@ -261,7 +260,7 @@ fn status(listing: &Listing, chosen: Option<&Destination>) -> (String, u32) {
                 "The way is broken at %s",
                 &[pos_text(at)],
             ),
-            STATUS_BAD,
+            Severity::Bad,
         ),
         Reach::NoRoom(at) => (
             tr_with(
@@ -269,7 +268,7 @@ fn status(listing: &Listing, chosen: Option<&Destination>) -> (String, u32) {
                 "No room for the capsule at %s",
                 &[pos_text(at)],
             ),
-            STATUS_BAD,
+            Severity::Bad,
         ),
     }
 }
@@ -300,7 +299,7 @@ pub(super) fn draw(game: &Game<'_>, batch: &mut HudBatch, o: [f32; 2]) {
             &tr("rustcraft.station.loading", "Waiting for the station…"),
             o,
             [win::NAME[0], win::NAME[1] + 2.0],
-            TEXT,
+            LABEL,
         );
         kit::inventory(game, batch, o, win::INVENTORY, win::INVENTORY_LABEL_Y);
         return;
@@ -324,10 +323,13 @@ pub(super) fn draw(game: &Game<'_>, batch: &mut HudBatch, o: [f32; 2]) {
         .take(win::ROWS)
         .enumerate()
     {
-        let r = kit::at(o, win::row_rect(i));
+        let rect = win::row_rect(i);
+        let r = kit::at(o, rect);
         let on = Some(d.station) == v.chosen;
         if on {
-            game.native_fill(batch, r, BUTTON_ON);
+            kit::fills(game, batch, o, &style::raised(rect));
+        } else {
+            kit::hover(game, batch, o, rect);
         }
         let broken = matches!(d.reach, Reach::Broken(_) | Reach::NoRoom(_));
         let colour = if on {
@@ -369,35 +371,37 @@ pub(super) fn draw(game: &Game<'_>, batch: &mut HudBatch, o: [f32; 2]) {
         &tr("rustcraft.station.go", "Go"),
         ready,
     );
-    let (line, colour) = status(&listing, chosen);
-    let r = kit::at(o, win::STATUS);
-    game.native_fill(batch, r, colour);
-    let line = fit(game, &line, r[2] - 8.0);
-    let y = r[1] + (r[3] - FONT_HEIGHT) / 2.0 + 1.0;
-    game.native_text(batch, &line, [r[0] + 4.0, y], STATUS_TEXT, false);
+    let (line, severity) = status(&listing, chosen);
+    kit::status_line(game, batch, o, win::STATUS, severity, &line);
     kit::inventory(game, batch, o, win::INVENTORY, win::INVENTORY_LABEL_Y);
 }
 
+/// The name field (style «Поля»): a well, «Название:» in the label colour, the name in the value
+/// colour, the caret while typing, the focus outlined.
 fn name_field(game: &Game<'_>, batch: &mut HudBatch, o: [f32; 2], listing: &Listing, v: &View) {
-    let r = kit::at(o, win::NAME);
-    game.native_fill(batch, r, SLOT_EDGE);
-    let face = if v.editing.is_some() {
-        PANEL_LIGHT
-    } else {
-        SLOT
-    };
-    game.native_fill(
-        batch,
-        [r[0] + 1.0, r[1] + 1.0, r[2] - 2.0, r[3] - 2.0],
-        face,
-    );
-    let shown = match &v.editing {
-        Some(typed) => format!("{typed}▏"),
+    let r = win::NAME;
+    let x = style::field_text_x(r, false);
+    let key = tr("rustcraft.station.name", "Name: %s");
+    let key = key.split("%s").next().unwrap_or_default().to_owned();
+    let key_w = game.native_text_width(&key);
+    let value = match &v.editing {
+        Some(typed) => typed.clone(),
         None => station_name(&listing.name, listing.station),
     };
-    let line = tr_with("rustcraft.station.name", "Name: %s", &[shown]);
-    let line = fit(game, &line, r[2] - 6.0);
-    game.native_text(batch, &line, [r[0] + 3.0, r[1] + 2.0], TEXT, false);
+    let value = fit(game, &value, r[0] + r[2] - x - key_w - 4.0);
+    let caret = v
+        .editing
+        .is_some()
+        .then(|| x + key_w + game.native_text_width(&value));
+    kit::fills(game, batch, o, &style::field(r, false, caret));
+    if v.editing.is_some() {
+        kit::fills(game, batch, o, &style::outline(r, HOT));
+    } else {
+        kit::hover(game, batch, o, r);
+    }
+    let y = r[1] + ((r[3] - kit::FONT_HEIGHT) / 2.0).round() + 1.0;
+    text(game, batch, &key, o, [x, y], LABEL);
+    text(game, batch, &value, o, [x + key_w, y], VALUE);
 }
 
 /// The scheme (T7): the rails as lines from above, the stations as dots with their names.
@@ -408,13 +412,8 @@ fn scheme(
     listing: &Listing,
     chosen: Option<Pos>,
 ) {
+    kit::fills(game, batch, o, &style::paper(win::SCHEME));
     let r = kit::at(o, win::SCHEME);
-    game.native_fill(batch, r, MAP_EDGE);
-    game.native_fill(
-        batch,
-        [r[0] + 1.0, r[1] + 1.0, r[2] - 2.0, r[3] - 2.0],
-        MAP_BACK,
-    );
     let reachable: Vec<&Destination> = listing
         .destinations
         .iter()
@@ -719,12 +718,6 @@ pub(super) fn draw_capsule(
     let Some((rise, points)) = capsules().get(&mob.id).cloned() else {
         return;
     };
-    // Its own rider looking out in first person sees the world, not the cabin's inside (block
-    // models have no inner faces to cull): neither the capsule nor the seat is drawn for them.
-    if game.riding == Some(mob.id) && game.camera_type.first_person() {
-        *drawn = true;
-        return;
-    }
     let Some(m) = game.mobs.iter().find(|m| m.id == mob.id) else {
         return;
     };
@@ -735,6 +728,25 @@ pub(super) fn draw_capsule(
         lerp(m.previous.y, m.position.y) + rise,
         lerp(m.previous.z, m.position.z),
     ];
+    // A camera looking out from inside the cabin sees the world, not the cabin's inside (block
+    // models have no inner faces to cull): neither the capsule nor the seat is drawn for it. The
+    // camera is the player's own eye unless the studio's free camera has the view
+    // (`studio_freecam`, game.rs:3100; the engine's own body-in-view rule, game/perspective.rs:
+    // 710-712), which LetsCam's director drives in a replay while the replay rides the recorded
+    // player in first person (game/studio.rs:762, game/remote_vehicles.rs:212-220).
+    let camera = if game.studio_freecam.active {
+        let c = game.studio_freecam.position;
+        capsule::Camera::Free([c.x, c.y, c.z])
+    } else {
+        capsule::Camera::Own {
+            rides: game.riding == Some(mob.id) && game.controls_camera(),
+            first_person: game.camera_type.first_person(),
+        }
+    };
+    if capsule::hidden_from(camera, feet) {
+        *drawn = true;
+        return;
+    }
     let Some(i) = segment_at(&points, feet) else {
         return;
     };

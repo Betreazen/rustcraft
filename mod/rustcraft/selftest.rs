@@ -327,6 +327,15 @@ impl Bench for GameBench<'_, '_> {
     }
 
     fn press(&mut self, pos: Pos, button: i32, carried: Option<(&str, u32)>) -> Result<(), String> {
+        self.press_cursor(pos, button, carried).map(|_| ())
+    }
+
+    fn press_cursor(
+        &mut self,
+        pos: Pos,
+        button: i32,
+        carried: Option<(&str, u32)>,
+    ) -> Result<Option<(String, u32)>, String> {
         let mut entity = self
             .game
             .native_mod_block_entity(pos)
@@ -335,7 +344,15 @@ impl Bench for GameBench<'_, '_> {
         // The order `mod_menu_button` calls them in.
         server::on_menu_button(&mut entity, button);
         server::on_menu_button_v2(self.game, pos, &mut entity, button, &mut cursor);
-        self.change_entity(pos, move |e| *e = entity)
+        self.change_entity(pos, move |e| *e = entity)?;
+        Ok(cursor.map(|c| (c.item.to_string(), c.count)))
+    }
+
+    fn sheet(&self, pos: Pos) -> Option<rustcraft_rules::machines::sheet::Sheet> {
+        let block = self.game.native_block(pos);
+        let t = server::tuning();
+        self.with_level(|l| base::sheet(self.game, DIMENSION, l, pos, &block, t))
+            .flatten()
     }
 
     fn set_tank(&mut self, pos: Pos, fluid: &str, amount: u64) -> Result<(), String> {

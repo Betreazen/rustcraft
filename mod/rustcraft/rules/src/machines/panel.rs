@@ -129,11 +129,13 @@ pub const OUTPUT: [f32; 2] = [110.0, 28.0];
 /// The progress arrow's shaft; its head follows it.
 pub const ARROW: Rect = [34.0, 33.0, 62.0, 8.0];
 pub const ENERGY_BAR: Rect = [8.0, 60.0, 198.0, 6.0];
-/// The three work modes' buttons, in `WorkMode::ALL` order.
+/// The work mode switch: one well (`MODE_WELL`) with the three modes' segments, in
+/// `WorkMode::ALL` order (style::segment_rects of the well).
+pub const MODE_WELL: Rect = [8.0, 82.0, 198.0, 14.0];
 pub const MODE_BUTTONS: [Rect; 3] = [
-    [8.0, 82.0, 64.0, 14.0],
-    [75.0, 82.0, 64.0, 14.0],
-    [142.0, 82.0, 64.0, 14.0],
+    [9.0, 83.0, 65.0, 12.0],
+    [75.0, 83.0, 65.0, 12.0],
+    [141.0, 83.0, 64.0, 12.0],
 ];
 /// The module slots (A5: three for a machine of tiers 1–2), where their items would go.
 pub const MODULE_SLOTS: [[f32; 2]; 3] = [[152.0, 28.0], [171.0, 28.0], [190.0, 28.0]];
@@ -230,8 +232,12 @@ mod tests {
     fn each_mode_button_is_its_own_rectangle_inside_the_window() {
         assert_eq!(mode_button_at([10.0, 85.0]), Some(WorkMode::Economy));
         assert_eq!(mode_button_at([100.0, 90.0]), Some(WorkMode::Normal));
-        assert_eq!(mode_button_at([205.0, 95.0]), Some(WorkMode::Boost));
-        assert_eq!(mode_button_at([73.0, 85.0]), None);
+        assert_eq!(mode_button_at([204.0, 94.0]), Some(WorkMode::Boost));
+        assert_eq!(mode_button_at([74.0, 85.0]), None);
+        assert_eq!(
+            crate::machines::style::segment_rects(MODE_WELL, 3),
+            MODE_BUTTONS.to_vec()
+        );
         assert_eq!(mode_button_at([100.0, 60.0]), None);
         for r in MODE_BUTTONS.iter().chain([&ENERGY_BAR, &STATUS, &ARROW]) {
             assert!(r[0] >= 2.0 && r[0] + r[2] <= WIDTH - 2.0);

@@ -213,6 +213,17 @@ impl Bench for Fake {
     fn testkit(&mut self, _: &str) -> String {
         String::new()
     }
+    fn sheet(&self, _: Pos) -> Option<crate::machines::sheet::Sheet> {
+        None
+    }
+    fn press_cursor(
+        &mut self,
+        _: Pos,
+        _: i32,
+        _: Option<(&str, u32)>,
+    ) -> Result<Option<(String, u32)>, String> {
+        Ok(None)
+    }
 }
 
 const PLOT: Area = Area {

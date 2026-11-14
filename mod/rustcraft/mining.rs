@@ -5,29 +5,30 @@
 //
 // - Breaking: `native_machine_destroy_block` (game/native_machines.rs:36) with the drops rolled for
 //   Tuning's tool and collected; the miner then sets the rock (`native_set_block`).
-// - Placing: `native_use_as_player` (game/native_machines.rs:102), a fake player clicking the
-//   placer's front face with one block of its stack, so a block goes in as a player's would (its
+// - Placing: `native_use_as_player` (game/native_machines.rs:102), a sneaking fake player
+//   clicking the placer's front face with one block of its stack, so a block goes in as a player's would (its
 //   facing, a sapling's soil, a crop's farmland).
 // - Reports to Path-of-craft-tree (contract «break», «place»): the miner's `break … pickaxe` and
 //   `place` of its rock, the placer's `place`; the breaker reports nothing (X7).
 // - Owners: the block's `owner` (rustcraft_base::on_place_block, X2).
 use crate::game::{
-    Game,
-    native_inventories::NativeInventoryKind,
-    rustcraft_base as base,
+    Game, rustcraft_base as base,
     rustcraft_content::{self as content, Machine},
     rustcraft_machines::{self as machines, read_f64, read_int, write_f64, write_int},
     rustcraft_server::{self as server, line},
     rustcraft_transport as transport,
-    rustcraft_window::named,
 };
 use horizon_client::{items::ItemStack, mod_api::NativeUseTarget, text::Text};
 use horizon_world::nbt::{Compound, JavaString, Tag};
 use rustcraft_rules::{
     geom::{Face, Pos, step},
-    machines::processor::WorkMode,
+    machines::{
+        sheet::{
+            Kind as SheetKind, Sheet, Status as SheetStatus, Toggle as SheetToggle, severity_code,
+        },
+        style::Severity,
+    },
     mining::{self as rules, Cycle, Miner, Ore, Shown, Step},
-    modules::Holder,
     reports::Report,
     tuning::Tuning,
 };
@@ -45,12 +46,6 @@ const PROGRESS_KEY: &str = "progress";
 /// MN1: what a miner or a breaker holds goes to a container beside it this often, this many.
 const PUSH_EVERY: u64 = 8;
 const PUSH: u32 = 16;
-const MINER_ROWS: u8 = 5;
-const BLOCK_ROWS: u8 = 2;
-/// The cells of a window's first row.
-const MODE_CELL: usize = 3;
-const INFO_CELL: usize = 4;
-const STATUS_CELL: usize = 8;
 
 #[derive(Default)]
 struct State {
@@ -98,13 +93,6 @@ fn write_miner(nbt: &mut Compound, m: &Miner) {
     nbt.insert(JavaString::from(TARGET_KEY), Tag::IntArray(target));
     write_f64(nbt, DIG_KEY, m.dig);
     write_f64(nbt, CARRY_KEY, m.carry);
-}
-
-/// D5: the ores switched off in the miner's window.
-pub(super) fn ores_off(game: &Game<'_>, pos: Pos) -> u16 {
-    game.native_mod_block_entity(pos)
-        .and_then(|e| read_int(&e.nbt, OFF_KEY))
-        .map_or(0, |v| v as u16)
 }
 
 pub(super) fn set_ores_off(game: &mut Game<'_>, pos: Pos, off: u16) -> bool {
@@ -511,7 +499,9 @@ fn place(game: &mut Game<'_>, dimension: &str, pos: Pos, slot: usize, face: Face
         face: transport::direction(face),
         point,
     };
-    let Some(used) = game.native_use_as_player(one, center, yaw, 0.0, target, false) else {
+    // Sneaking: since slice 9 the placer copies the furnace, whose use opens its window; a
+    // sneaking player's click with a block in hand skips the clicked block's use and places.
+    let Some(used) = game.native_use_as_player(one, center, yaw, 0.0, target, true) else {
         return;
     };
     let placed = game.native_block(cell);
@@ -585,92 +575,72 @@ pub(super) fn diagnosis(dimension: &str, pos: Pos, block: &str) -> Option<Text> 
     ))
 }
 
-// ---- Windows (rustcraft_base keeps the sessions) ----
+// ---- Windows: sheets (rustcraft_sheets, rustcraft_base::sheet) ----
 
-pub(super) fn rows(machine: Machine) -> u8 {
-    if machine == Machine::Miner {
-        MINER_ROWS
-    } else {
-        BLOCK_ROWS
-    }
+/// A press on ore toggle `i` of the miner's window (D5): that ore taken or left.
+pub(super) fn toggle_ore(nbt: &mut Compound, i: usize) {
+    let Some(ore) = Ore::LISTED.get(i) else {
+        return;
+    };
+    let off = read_int(nbt, OFF_KEY).map_or(0, |v| v as u16) ^ ore.bit();
+    write_int(nbt, OFF_KEY, i32::from(off));
 }
 
-fn mode_name(mode: WorkMode) -> Text {
-    match mode {
-        WorkMode::Economy => line("rustcraft.work.economy", "Economy", &[]),
-        WorkMode::Normal => line("rustcraft.work.normal", "Normal", &[]),
-        WorkMode::Boost => line("rustcraft.work.boost", "Boost", &[]),
-    }
-}
-
-pub(super) fn cells(
+/// What the window of a miner, a placer or a breaker shows: its server menu's cells, part by
+/// part. The modules and the mode are the sheet's own parts; the slots are the menu's.
+pub(super) fn sheet(
     game: &Game<'_>,
     dimension: &str,
     pos: Pos,
-    machine: Machine,
+    kind: SheetKind,
     t: &Tuning,
-) -> Vec<Option<ItemStack>> {
-    let mut out: Vec<Option<ItemStack>> = vec![None; usize::from(rows(machine)) * 9];
+    s: &mut Sheet,
+) {
     let Some(entity) = game.native_mod_block_entity(pos) else {
-        return out;
+        return;
     };
     let slots = base::modules_at(game, pos);
-    base::module_cells(&slots, &mut out);
-    let mode = machines::read_work(&entity.nbt);
-    out[MODE_CELL] = Some(named(
-        "minecraft:clock",
-        1,
-        line("rustcraft.machine.mode_now", "Mode: %s", &[mode_name(mode)]),
-        &[line(
-            "rustcraft.machine.mode_next",
-            "Click: the next mode",
+    s.mode = Some(machines::read_work(&entity.nbt).code());
+    if kind == SheetKind::Miner {
+        let min_y = game.native_world_height().0;
+        let side = rules::side(&slots, t);
+        let total = rules::cells(pos, side, min_y);
+        let m = read_miner(&entity.nbt);
+        let layer = m.cursor / (side as u64).pow(2);
+        let size = Text::literal(format!("{side}×{side}"));
+        s.rows.push(base::v(&line(
+            "rustcraft.miner.area",
+            "Area %s down to y %s",
+            &[size, Text::literal(min_y.to_string())],
+        )));
+        s.rows.push(base::v(&line(
+            "rustcraft.miner.scanned",
+            "Scanned %s of %s cells, layer y %s",
+            &[
+                Text::literal(m.cursor.min(total).to_string()),
+                Text::literal(total.to_string()),
+                Text::literal((pos[1] - 1 - layer as i32).max(min_y).to_string()),
+            ],
+        )));
+        s.hints = vec![vec![base::v(&line(
+            "rustcraft.miner.area_hint",
+            "An area module: 22×22, two: 33×33",
             &[],
-        )],
-        false,
-    ));
-    let first = 9;
-    match machine {
-        Machine::Miner => {
-            let min_y = game.native_world_height().0;
-            let side = rules::side(&slots, t);
-            let total = rules::cells(pos, side, min_y);
-            let m = read_miner(&entity.nbt);
-            let layer = m.cursor / (side as u64).pow(2);
-            let size = Text::literal(format!("{side}×{side}"));
-            out[INFO_CELL] = Some(named(
-                "minecraft:filled_map",
-                1,
-                line(
-                    "rustcraft.miner.area",
-                    "Area %s down to y %s",
-                    &[size, Text::literal(min_y.to_string())],
-                ),
-                &[
-                    line(
-                        "rustcraft.miner.scanned",
-                        "Scanned %s of %s cells, layer y %s",
-                        &[
-                            Text::literal(m.cursor.min(total).to_string()),
-                            Text::literal(total.to_string()),
-                            Text::literal((pos[1] - 1 - layer as i32).max(min_y).to_string()),
-                        ],
-                    ),
-                    line(
-                        "rustcraft.miner.area_hint",
-                        "An area module: 22×22, two: 33×33",
-                        &[],
-                    ),
-                ],
-                false,
-            ));
-            let off = read_int(&entity.nbt, OFF_KEY).map_or(0, |v| v as u16);
-            for (i, ore) in Ore::LISTED.iter().enumerate() {
+        ))]];
+        let off = read_int(&entity.nbt, OFF_KEY).map_or(0, |v| v as u16);
+        s.toggles = Ore::LISTED
+            .iter()
+            .map(|ore| {
                 let on = ore.bit() & off == 0;
-                out[first + i] = Some(named(
-                    ore.icon(),
-                    1,
-                    line(&format!("rustcraft.ore.{}", ore.key()), ore.key(), &[]),
-                    &[if on {
+                SheetToggle {
+                    icon: ore.icon().to_owned(),
+                    name: base::v(&line(
+                        &format!("rustcraft.ore.{}", ore.key()),
+                        ore.key(),
+                        &[],
+                    )),
+                    on,
+                    hint: base::v(&if on {
                         line("rustcraft.miner.ore_on", "Taken · click: leave it", &[])
                     } else {
                         line(
@@ -678,202 +648,55 @@ pub(super) fn cells(
                             "Left in the ground · click: take it",
                             &[],
                         )
-                    }],
-                    on,
-                ));
-            }
-            let usable = rules::slots_of(&slots, t);
-            for i in 0..content::MINER_SLOTS {
-                out[first + 9 + i] = if i < usable {
-                    entity
-                        .items
-                        .get(i)
-                        .cloned()
-                        .flatten()
-                        .filter(|s| s.count > 0)
-                } else {
-                    Some(named(
-                        "minecraft:gray_stained_glass_pane",
-                        1,
-                        line(
-                            "rustcraft.miner.more_slots",
-                            "More slots with a storage module",
-                            &[],
-                        ),
-                        &[],
-                        false,
-                    ))
-                };
-            }
-        }
-        _ => {
-            let (item, title, energy, ticks) = if machine == Machine::Placer {
-                (
-                    "minecraft:dropper",
-                    line(
-                        "rustcraft.placer.info",
-                        "Places the block in front of it",
-                        &[],
-                    ),
-                    t.placer_energy,
-                    t.placer_ticks,
-                )
-            } else {
-                (
-                    "minecraft:iron_pickaxe",
-                    line(
-                        "rustcraft.breaker.info",
-                        "Breaks the block in front of it",
-                        &[],
-                    ),
-                    t.breaker_energy,
-                    t.breaker_ticks,
-                )
-            };
-            let secs = ticks / t.ticks_per_second;
-            out[INFO_CELL] = Some(named(
-                item,
-                1,
-                title,
-                &[line(
-                    "rustcraft.placer.pace",
-                    "A block in %s s, %s E/s",
-                    &[
-                        Text::literal(format!("{secs:.0}")),
-                        Text::literal(format!("{energy:.0}")),
-                    ],
-                )],
-                false,
-            ));
-            for i in 0..content::BLOCK_SLOTS {
-                out[first + i] = entity
-                    .items
-                    .get(i)
-                    .cloned()
-                    .flatten()
-                    .filter(|s| s.count > 0);
-            }
-        }
+                    }),
+                }
+            })
+            .collect();
+        s.usable = u8::try_from(rules::slots_of(&slots, t)).ok();
+    } else {
+        let (title, energy, ticks) = if kind == SheetKind::Placer {
+            (
+                line(
+                    "rustcraft.placer.info",
+                    "Places the block in front of it",
+                    &[],
+                ),
+                t.placer_energy,
+                t.placer_ticks,
+            )
+        } else {
+            (
+                line(
+                    "rustcraft.breaker.info",
+                    "Breaks the block in front of it",
+                    &[],
+                ),
+                t.breaker_energy,
+                t.breaker_ticks,
+            )
+        };
+        let secs = ticks / t.ticks_per_second;
+        s.rows.push(base::v(&title));
+        s.rows.push(base::v(&line(
+            "rustcraft.placer.pace",
+            "A block in %s s, %s E/s",
+            &[
+                Text::literal(format!("{secs:.0}")),
+                Text::literal(format!("{energy:.0}")),
+            ],
+        )));
     }
     let shown = shown_at(dimension, pos);
-    let good = matches!(shown, Some(Shown::Working | Shown::Slowed(_)));
-    out[STATUS_CELL] = Some(named(
-        if good {
-            "minecraft:lime_dye"
-        } else {
-            "minecraft:red_dye"
-        },
-        1,
-        shown.map_or_else(|| Text::literal("…"), shown_text),
-        &[],
-        false,
-    ));
-    out
-}
-
-/// A click on a cell of the window (`slot` in the menu, the player's inventory after its cells).
-pub(super) fn click(game: &mut Game<'_>, uuid: u128, pos: Pos, machine: Machine, slot: usize) {
-    let size = usize::from(rows(machine)) * 9;
-    if slot == MODE_CELL {
-        game.native_with_mod_block_entity(pos, |e| {
-            let next = match machines::read_work(&e.nbt) {
-                WorkMode::Economy => WorkMode::Normal,
-                WorkMode::Normal => WorkMode::Boost,
-                WorkMode::Boost => WorkMode::Economy,
-            };
-            machines::write_work(&mut e.nbt, next);
-        });
-        return;
-    }
-    if slot < 3 {
-        base::take_module(game, uuid, pos, slot);
-        return;
-    }
-    if slot >= size {
-        let n = slot - size;
-        let inventory = match n {
-            0..27 => n + 9,
-            27..36 => n - 27,
-            _ => return,
-        };
-        let holder = if machine == Machine::Miner {
-            Holder::Miner
-        } else {
-            Holder::Placer
-        };
-        if base::put_module(game, uuid, pos, inventory, holder) || machine != Machine::Placer {
-            return;
-        }
-        put_blocks(game, uuid, pos, inventory);
-        return;
-    }
-    let first = 9;
-    let store_from = if machine == Machine::Miner {
-        if (first..first + 9).contains(&slot) {
-            let ore = Ore::LISTED[slot - first];
-            let off = ores_off(game, pos) ^ ore.bit();
-            set_ores_off(game, pos, off);
-            return;
-        }
-        first + 9
-    } else {
-        first
+    let severity = match shown {
+        Some(Shown::Working) => Severity::Ok,
+        Some(Shown::NoEnergy) => Severity::Bad,
+        _ => Severity::Warn,
     };
-    let Some(i) = slot.checked_sub(store_from) else {
-        return;
-    };
-    let stack = game
-        .native_mod_block_entity(pos)
-        .and_then(|e| e.items.get(i).cloned().flatten());
-    if let Some(stack) = stack.filter(|s| s.count > 0) {
-        let left = game.native_give_stack(uuid, stack);
-        game.native_with_mod_block_entity(pos, |e| {
-            if let Some(s) = e.items.get_mut(i) {
-                *s = left;
-            }
-        });
-    }
-}
-
-/// A block stack of the player's inventory goes into the placer.
-fn put_blocks(game: &mut Game<'_>, uuid: u128, pos: Pos, inventory: usize) {
-    let Some(stack) = game
-        .native_player_stacks(uuid)
-        .and_then(|s| s.get(inventory).cloned().flatten())
-    else {
-        return;
-    };
-    let placeable = game
-        .items()
-        .get(&stack.item)
-        .is_some_and(|i| i.block.is_some());
-    if !placeable {
-        return;
-    }
-    let max = machines::max_stack(game, &stack.item);
-    let Some(left) = game.native_with_mod_block_entity(pos, |e| {
-        if e.items.len() < content::BLOCK_SLOTS {
-            e.items.resize(content::BLOCK_SLOTS, None);
-        }
-        store(&mut e.items[..content::BLOCK_SLOTS], stack.clone(), max)
-    }) else {
-        return;
-    };
-    if left.as_ref().map(|l| l.count) == Some(stack.count) {
-        return;
-    }
-    if game
-        .native_set_inventory_slot(
-            uuid,
-            NativeInventoryKind::Player,
-            inventory,
-            Some(&stack),
-            left,
-        )
-        .is_err()
-    {
-        log::warn!("rustcraft: a placer's blocks from {uuid:032x} not taken");
-    }
+    let text = shown.map_or_else(|| Text::literal("…"), shown_text);
+    s.status = Some(SheetStatus {
+        severity: severity_code(severity),
+        text: base::v(&text),
+    });
 }
 
 /// The self-test's plot cleared: what it showed goes.
@@ -882,14 +705,4 @@ pub(super) fn forget_area(dimension: &str, min: Pos, max: Pos) {
     state()
         .shown
         .retain(|(d, p), _| d != dimension || !inside(*p));
-}
-
-/// The module helper for the bench: a placer's or a breaker's modules count as the placer's.
-pub(super) fn holder(machine: Machine) -> Option<Holder> {
-    match machine {
-        Machine::Miner => Some(Holder::Miner),
-        Machine::Placer | Machine::Breaker => Some(Holder::Placer),
-        Machine::Battery => Some(Holder::Battery),
-        _ => None,
-    }
 }

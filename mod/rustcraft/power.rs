@@ -24,6 +24,10 @@ use crate::game::{
 use horizon_client::{items::ItemStack, mod_api::NativeHeightmap, text::Text};
 use rustcraft_rules::{
     geom::Pos,
+    machines::{
+        sheet::{Bar as SheetBar, Kind as SheetKind, Sheet, Status as SheetStatus, severity_code},
+        style::Severity,
+    },
     modules::Module,
     net::energy::{Producer, Shared, Store, join_groups},
     power::{self as rules, Battery, Form, PowerView, Shown},
@@ -401,7 +405,8 @@ pub(super) fn write_sinks(game: &mut Game<'_>, before: &[Sink], after: &BTreeMap
 // ---- What they show ----
 
 fn e(n: f64) -> Text {
-    let r = (n * 10.0).round() / 10.0;
+    // + 0.0 turns a rounded −0 into 0: a battery giving nothing showed «Отдаёт −0 Е/с».
+    let r = (n * 10.0).round() / 10.0 + 0.0;
     Text::literal(if (r - r.round()).abs() < 1e-9 {
         format!("{r:.0}")
     } else {
@@ -480,105 +485,42 @@ pub(super) fn diagnosis(
     Some(text)
 }
 
-/// The cells of a power block's window (one row): the battery's modules, the numbers, the state.
+/// The cells of the solar panel's server menu (one row): its numbers and its state.
 pub(super) fn cells(
-    game: &Game<'_>,
+    _game: &Game<'_>,
     level: &LevelNet,
     pos: Pos,
     machine: Machine,
     t: &Tuning,
     out: &mut [Option<ItemStack>],
 ) {
-    let v = level.sources.views.get(&pos).copied();
-    let numbers =
-        |item: &str, title: Text, lore: Vec<Text>| Some(named(item, 1, title, &lore, false));
-    match machine {
-        Machine::Battery => {
-            base::module_cells(&base::modules_at(game, pos), out);
-            if let Some(v) = v {
-                out[4] = numbers(
-                    "minecraft:redstone_block",
-                    line(
-                        "rustcraft.battery.stored",
-                        "%s of %s E",
-                        &[e(v.stored.floor()), e(v.capacity)],
-                    ),
-                    vec![
-                        line(
-                            "rustcraft.battery.blocks",
-                            "Blocks in the structure: %s",
-                            &[Text::literal(v.blocks.to_string())],
-                        ),
-                        line("rustcraft.battery.takes", "Takes %s E/s", &[e(v.fluid)]),
-                        line("rustcraft.battery.gives", "Gives %s E/s", &[e(v.output)]),
-                    ],
-                );
-            }
-        }
-        Machine::LavaGenerator => {
-            if let Some(v) = v {
-                out[4] = numbers(
-                    "minecraft:lava_bucket",
-                    line(
-                        "rustcraft.power.lava",
-                        "lava %s of %s mB",
-                        &[e(v.fluid.floor()), e(rules::lava_capacity(t))],
-                    ),
-                    vec![line(
-                        "rustcraft.power.lava_hint",
-                        "A bucket gives %s E at %s E/s",
-                        &[e(t.lava_energy_per_bucket), e(t.lava_output)],
-                    )],
-                );
-            }
-        }
-        _ => {
-            if let Some(v) = v {
-                let (item, hint) = if machine == Machine::Solar {
-                    (
-                        "minecraft:daylight_detector",
-                        line(
-                            "rustcraft.power.solar_hint",
-                            "By day %s E/s, in rain half, at night a quarter",
-                            &[e(t.solar_day)],
-                        ),
-                    )
-                } else {
-                    (
-                        "minecraft:white_wool",
-                        line(
-                            "rustcraft.power.wind_hint",
-                            "%s E/s at sea level, %s E/s high up",
-                            &[e(t.windmill_low), e(t.windmill_high)],
-                        ),
-                    )
-                };
-                let mut lore = vec![hint];
-                if machine == Machine::Solar && v.blocks > 1 {
-                    lore.push(line(
-                        "rustcraft.power.structure_gives",
-                        "Structure of %s · gives %s E/s",
-                        &[Text::literal(v.blocks.to_string()), e(v.stored)],
-                    ));
-                }
-                out[4] = numbers(
-                    item,
-                    line("rustcraft.power.gives", "Gives %s E/s", &[e(v.output)]),
-                    lore,
-                );
-            }
-        }
+    // Only the solar panel keeps a server menu (rustcraft_base::windows); the others are sheets.
+    if machine != Machine::Solar {
+        return;
     }
-    let good = v.is_some_and(|v| {
-        !matches!(
-            v.shown,
-            Shown::NoSky
-                | Shown::Blocked
-                | Shown::NoLava
-                | Shown::NoSolution(_)
-                | Shown::BrokenShape(_)
-        )
-    });
+    let v = level.sources.views.get(&pos).copied();
+    if let Some(v) = v {
+        let mut lore = vec![line(
+            "rustcraft.power.solar_hint",
+            "By day %s E/s, in rain half, at night a quarter",
+            &[e(t.solar_day)],
+        )];
+        if v.blocks > 1 {
+            lore.push(line(
+                "rustcraft.power.structure_gives",
+                "Structure of %s · gives %s E/s",
+                &[Text::literal(v.blocks.to_string()), e(v.stored)],
+            ));
+        }
+        out[4] = Some(named(
+            "minecraft:daylight_detector",
+            1,
+            line("rustcraft.power.gives", "Gives %s E/s", &[e(v.output)]),
+            &lore,
+            false,
+        ));
+    }
+    let good = v.is_some_and(|v| severity(&v) == Severity::Ok);
     out[8] = Some(named(
         if good {
             "minecraft:lime_dye"
@@ -590,6 +532,101 @@ pub(super) fn cells(
         &[],
         false,
     ));
+}
+
+fn severity(v: &PowerView) -> Severity {
+    match v.shown {
+        Shown::NoSky | Shown::Blocked | Shown::NoLava => Severity::Bad,
+        Shown::NoSolution(_) | Shown::BrokenShape(_) | Shown::Holding => Severity::Warn,
+        Shown::Gives(x) if x <= 0.0 => Severity::Warn,
+        _ => Severity::Ok,
+    }
+}
+
+/// What the window of a battery, a windmill or a lava generator shows: its server menu's cells,
+/// part by part (the modules are the sheet's own, rustcraft_base::sheet).
+pub(super) fn sheet(
+    _game: &Game<'_>,
+    level: &LevelNet,
+    pos: Pos,
+    kind: SheetKind,
+    t: &Tuning,
+    s: &mut Sheet,
+) {
+    let Some(v) = level.sources.views.get(&pos).copied() else {
+        return;
+    };
+    match kind {
+        SheetKind::Battery => {
+            s.bars.push(SheetBar {
+                label: base::v(&line("rustcraft.window.energy", "Energy", &[])),
+                value: base::v(&line(
+                    "rustcraft.battery.stored",
+                    "%s of %s E",
+                    &[e(v.stored.floor()), e(v.capacity)],
+                )),
+                share: if v.capacity > 0.0 {
+                    v.stored / v.capacity
+                } else {
+                    0.0
+                },
+                energy: true,
+            });
+            s.rows.push(base::v(&line(
+                "rustcraft.battery.blocks",
+                "Blocks in the structure: %s",
+                &[Text::literal(v.blocks.to_string())],
+            )));
+            s.rows.push(base::v(&line(
+                "rustcraft.battery.takes",
+                "Takes %s E/s",
+                &[e(v.fluid)],
+            )));
+            s.rows.push(base::v(&line(
+                "rustcraft.battery.gives",
+                "Gives %s E/s",
+                &[e(v.output)],
+            )));
+        }
+        SheetKind::LavaGenerator => {
+            let capacity = rules::lava_capacity(t);
+            s.bars.push(SheetBar {
+                label: base::v(&Text::translate("block.minecraft.lava", &[])),
+                value: base::v(&line(
+                    "rustcraft.power.lava",
+                    "lava %s of %s mB",
+                    &[e(v.fluid.floor()), e(capacity)],
+                )),
+                share: if capacity > 0.0 {
+                    v.fluid / capacity
+                } else {
+                    0.0
+                },
+                energy: false,
+            });
+            s.rows.push(base::v(&line(
+                "rustcraft.power.lava_hint",
+                "A bucket gives %s E at %s E/s",
+                &[e(t.lava_energy_per_bucket), e(t.lava_output)],
+            )));
+        }
+        _ => {
+            s.rows.push(base::v(&line(
+                "rustcraft.power.gives",
+                "Gives %s E/s",
+                &[e(v.output)],
+            )));
+            s.rows.push(base::v(&line(
+                "rustcraft.power.wind_hint",
+                "%s E/s at sea level, %s E/s high up",
+                &[e(t.windmill_low), e(t.windmill_high)],
+            )));
+        }
+    }
+    s.status = Some(SheetStatus {
+        severity: severity_code(severity(&v)),
+        text: base::v(&shown_text(&v)),
+    });
 }
 
 /// What the self-test reads of a power block or crystal.

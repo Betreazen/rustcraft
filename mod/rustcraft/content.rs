@@ -300,10 +300,17 @@ impl Machine {
         matches!(self.kind(), Kind::Generator | Kind::Power)
     }
 
-    /// Whether its block copies the furnace and opens its own menu type; the slice-7 blocks copy
-    /// the iron block and open server menus.
+    /// Whether its block copies the furnace and opens its own menu type, drawn by the client.
+    /// Since slice 9 that is every machine but the solar panel, which copies glass for the sky's
+    /// light under it (E19) and so opens no menu on use: its window stays a server menu.
     pub fn has_menu(self) -> bool {
-        !matches!(
+        self != Machine::Solar
+    }
+
+    /// The slice-7 and slice-8 blocks: an owner each (X2), modules and settings in their block
+    /// entity, their window a sheet (rustcraft_rules::machines::sheet).
+    pub fn owned(self) -> bool {
+        matches!(
             self.kind(),
             Kind::Dock
                 | Kind::Charger
@@ -517,11 +524,13 @@ fn declare_storage_and_tanks(blocks: &mut Vec<Block>) {
 /// the cluster's outline and no occlusion; the furnace and the crusher copy `minecraft:furnace`
 /// for a menu on use and `facing` on placement (times `lit`: 8 states each, `lit` never set, so
 /// they never glow).
-/// The slice-7 blocks: the iron block's one state times their own `facing` (4), set as a
-/// furnace sets it, to face the player placing them (rustcraft_base::state_for_placement). The
-/// turret's head reaches past its cell, so it hides nothing behind it.
+/// The slice-7 and slice-8 blocks. Since slice 9 they copy `minecraft:furnace`, as the machines
+/// do, for a menu on use (their sheet windows) and `facing` on placement (times `lit`, never
+/// set). The solar panel copies glass instead (E19) with a `facing` of its own, set as a furnace
+/// sets it (rustcraft_base::state_for_placement). The turret's head reaches past its cell, so it
+/// hides nothing behind it.
 fn declare_slice7(blocks: &mut Vec<Block>) {
-    for machine in Machine::ALL.into_iter().filter(|m| !m.has_menu()) {
+    for machine in Machine::ALL.into_iter().filter(|m| m.owned()) {
         // E19: the solar panel is a thin plate that lets the light through, so there is no
         // shadow under it; the turret's head and the windmill's mast reach past their cells.
         let open = matches!(
@@ -541,7 +550,7 @@ fn declare_slice7(blocks: &mut Vec<Block>) {
             template: if machine == Machine::Solar {
                 "minecraft:glass"
             } else {
-                "minecraft:iron_block"
+                "minecraft:furnace"
             }
             .into(),
             properties: BlockProperties {
@@ -553,13 +562,21 @@ fn declare_slice7(blocks: &mut Vec<Block>) {
             },
             shapes: plate.clone(),
             collision_shapes: plate,
-            state_properties: BTreeMap::from([(
-                FACING.to_owned(),
-                StateProperty::Enum {
-                    values: FACINGS.map(str::to_owned).to_vec(),
-                },
-            )]),
-            default_state: BTreeMap::from([(FACING.to_owned(), FACINGS[0].to_owned())]),
+            state_properties: if machine.has_menu() {
+                BTreeMap::new()
+            } else {
+                BTreeMap::from([(
+                    FACING.to_owned(),
+                    StateProperty::Enum {
+                        values: FACINGS.map(str::to_owned).to_vec(),
+                    },
+                )])
+            },
+            default_state: if machine.has_menu() {
+                BTreeMap::new()
+            } else {
+                BTreeMap::from([(FACING.to_owned(), FACINGS[0].to_owned())])
+            },
             item: true,
             ..Block::default()
         });
@@ -589,7 +606,10 @@ fn declare_machines(blocks: &mut Vec<Block>) {
         item: true,
         ..Block::default()
     });
-    for machine in Machine::ALL.into_iter().filter(|m| m.has_menu()) {
+    for machine in Machine::ALL
+        .into_iter()
+        .filter(|m| m.has_menu() && !m.owned())
+    {
         blocks.push(Block {
             id: machine.block().into(),
             template: "minecraft:furnace".into(),
@@ -701,6 +721,11 @@ pub fn block_entity_container(block: &str, container: &mut Option<ModContainer>)
         return;
     };
     if machine.slots() == 0 {
+        // A sheet window with no slot of its own (the turret, the anchor, the charge dock, the
+        // battery, the windmill, the lava generator) still needs its menu's one hidden slot.
+        if container.is_none() && machine.has_menu() {
+            *container = Some(hidden_container(block));
+        }
         return;
     }
     if container.is_none() {

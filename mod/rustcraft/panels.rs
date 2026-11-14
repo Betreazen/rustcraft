@@ -10,8 +10,8 @@ use crate::game::{
     Game,
     rustcraft_content::{Machine, item_of_number},
     rustcraft_screens::{
-        self as kit, FLAME, LABEL, PANEL_EDGE, SLOT, SLOT_EDGE, STATUS_OK, TEXT, TEXT_ON, at,
-        label, label_right, slot, text, text_right, tr, tr_with,
+        self as kit, FLAME, LABEL, STATUS_OK, VALUE, at, label, label_right, slot, socket, text,
+        text_right, tr, tr_with,
     },
 };
 use horizon_client::{hud::HudBatch, mod_api::NativeScreen};
@@ -19,6 +19,7 @@ use rustcraft_rules::{
     machines::{
         panel::{Rect, energy_text, inside, slot_frame},
         processor::WorkMode,
+        style::{self, colour},
         windows::{
             WIDTH,
             alloy::{self as aw},
@@ -32,7 +33,7 @@ use rustcraft_rules::{
 /// The right edge of a window's parts.
 const RIGHT: f32 = WIDTH - 8.0;
 /// A ghost item's veil: the pattern's items are a sample, not items.
-const GHOST: u32 = 0x66C9CCD4;
+const GHOST: u32 = colour::GHOST;
 
 /// `native_screen` for the three windows.
 pub(super) fn layout(machine: Machine) -> NativeScreen {
@@ -105,12 +106,16 @@ fn draw_generator(game: &Game<'_>, data: &[i32], batch: &mut HudBatch, o: [f32; 
         o,
         [gw::GIVES_BAR[0], gw::LABEL_GIVES_Y],
     );
-    let line = tr_with(
-        "rustcraft.window.gives_line",
-        "gives %s E/s",
+    let line = tr("rustcraft.window.gives_line", "gives %s E/s");
+    kit::values_right(
+        game,
+        batch,
+        o,
+        RIGHT,
+        gw::LABEL_GIVES_Y,
+        &line,
         &[energy_text(p.gives)],
     );
-    text_right(game, batch, &line, o, RIGHT, gw::LABEL_GIVES_Y, TEXT);
     let share = if p.output > 0.0 {
         p.gives / p.output
     } else {
@@ -147,9 +152,13 @@ fn draw_generator(game: &Game<'_>, data: &[i32], batch: &mut HudBatch, o: [f32; 
         ),
         (tr("rustcraft.window.enough", "Enough"), enough),
     ];
-    for ((key, value), y) in rows.iter().zip(gw::BALANCE_ROWS) {
+    for (i, ((key, value), y)) in rows.iter().zip(gw::BALANCE_ROWS).enumerate() {
         text(game, batch, key, o, [gw::BALANCE[0], y], LABEL);
-        text_right(game, batch, value, o, RIGHT, y, TEXT);
+        text_right(game, batch, value, o, RIGHT, y, VALUE);
+        if i + 1 < rows.len() {
+            let rule = style::kv_rule(gw::BALANCE[0], RIGHT, y + 9.0);
+            kit::fills(game, batch, o, &[rule]);
+        }
     }
     if let Some(shown) = p.shown {
         kit::status_part(game, batch, o, gw::STATUS, Machine::Generator, shown);
@@ -173,12 +182,11 @@ fn draw_alloy(game: &Game<'_>, data: &[i32], batch: &mut HudBatch, o: [f32; 2]) 
     );
     let output = tr("rustcraft.window.output", "Output");
     label_right(game, batch, &output, o, RIGHT, aw::LABEL_SLOTS_Y);
-    for s in aw::INPUTS
-        .iter()
-        .chain(&aw::OUTPUTS)
-        .chain(&aw::MODULE_SLOTS)
-    {
+    for s in aw::INPUTS.iter().chain(&aw::OUTPUTS) {
         slot(game, batch, o, *s);
+    }
+    for s in aw::MODULE_SLOTS {
+        socket(game, batch, o, s, true);
     }
     kit::arrow(game, batch, o, aw::ARROW, p.progress);
     let fuel = tr("rustcraft.window.fuel", "Fuel");
@@ -201,10 +209,12 @@ fn draw_alloy(game: &Game<'_>, data: &[i32], batch: &mut HudBatch, o: [f32; 2]) 
         o,
         [aw::TAKE_OWN[0][0], aw::LABEL_TAKE_Y],
     );
-    let on = tr("rustcraft.window.on", "on");
-    let off = tr("rustcraft.window.off", "off");
-    kit::button(game, batch, o, aw::TAKE_OWN[0], &on, p.take_own);
-    kit::button(game, batch, o, aw::TAKE_OWN[1], &off, !p.take_own);
+    let names = [
+        tr("rustcraft.window.on", "on"),
+        tr("rustcraft.window.off", "off"),
+    ];
+    let chosen = Some(if p.take_own { 0 } else { 1 });
+    kit::switch(game, batch, o, &aw::TAKE_OWN, &names, chosen);
     kit::energy_part(
         game,
         batch,
@@ -237,11 +247,20 @@ fn draw_crafter(game: &Game<'_>, data: &[i32], batch: &mut HudBatch, o: [f32; 2]
     let p = cw::decode(data);
     kit::background(game, batch, o, [WIDTH, cw::HEIGHT]);
     kit::title(game, batch, o, Machine::Crafter);
+    let tabs: Vec<Rect> = (0..p.pages).map(cw::tab).collect();
+    let line_y = cw::TABS_Y + cw::TAB_H;
+    let tab_right = cw::MODULE_SLOTS[0][0] - 4.0;
+    kit::fills(
+        game,
+        batch,
+        o,
+        &style::tabs(&tabs, Some(p.page), line_y, tab_right),
+    );
     for i in 0..p.pages {
         tab(game, batch, o, i, &p);
     }
     for m in cw::MODULE_SLOTS {
-        slot(game, batch, o, m);
+        socket(game, batch, o, m, true);
     }
     let pattern = tr("rustcraft.window.pattern", "Pattern");
     label(game, batch, &pattern, o, [8.0, cw::LABEL_GRID_Y]);
@@ -290,15 +309,16 @@ fn draw_crafter(game: &Game<'_>, data: &[i32], batch: &mut HudBatch, o: [f32; 2]
     kit::inventory(game, batch, o, cw::INVENTORY, cw::INVENTORY_LABEL_Y);
 }
 
-/// A page's tab: its number and what it makes, lit when open, marked while it is crafted.
+/// A page's tab (its face drawn by `style::tabs`): its number and what it makes, marked while it
+/// is crafted; the one under the mouse has the hover outline.
 fn tab(game: &Game<'_>, batch: &mut HudBatch, o: [f32; 2], i: usize, p: &cw::CrafterPanel) {
-    let r = at(o, cw::tab(i));
     let open = i == p.page;
-    game.native_fill(batch, r, if open { PANEL_EDGE } else { SLOT_EDGE });
-    let face = [r[0] + 1.0, r[1] + 1.0, r[2] - 2.0, r[3] - 2.0];
-    game.native_fill(batch, face, if open { kit::BUTTON_ON } else { SLOT });
+    if !open {
+        kit::hover(game, batch, o, cw::tab(i));
+    }
+    let r = at(o, cw::tab(i));
     let number = (i + 1).to_string();
-    let colour = if open { TEXT_ON } else { TEXT };
+    let colour = if open { VALUE } else { LABEL };
     game.native_text(batch, &number, [r[0] + 3.0, r[1] + 5.0], colour, false);
     if let Some(id) = p.tabs[i].and_then(|n| item_of_number(game, n)) {
         game.native_item(batch, id, [r[0] + 12.0, r[1] + 2.0], 14.0);

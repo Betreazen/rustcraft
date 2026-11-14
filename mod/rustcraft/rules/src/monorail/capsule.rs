@@ -41,6 +41,40 @@ pub fn block_per_pixel() -> f64 {
     PIXEL * MODEL_SCALE
 }
 
+/// The cabin's half length and its height over the model's floor, in blocks: 10 model pixels long
+/// (its widest), the roof at 2 blocks.
+const CABIN_HALF: f64 = 5.0 * PIXEL * MODEL_SCALE;
+const CABIN_HEIGHT: f64 = 2.0;
+
+/// The camera a capsule is drawn for.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Camera {
+    /// The player's own view: whether they ride this capsule and look in first person.
+    Own { rides: bool, first_person: bool },
+    /// A camera loose from the player (the studio's free camera, which LetsCam's director drives
+    /// in a replay), at this place.
+    Free([f64; 3]),
+}
+
+/// Whether the cabin is left out for `camera`: only when it looks out from inside the cabin, whose
+/// passenger's feet are at `feet` (a block model has no inner faces, so from inside it would only
+/// hide the world). A replay rides the recorded player in first person while its own camera films,
+/// so riding alone does not hide it.
+pub fn hidden_from(camera: Camera, feet: [f64; 3]) -> bool {
+    match camera {
+        Camera::Own {
+            rides,
+            first_person,
+        } => rides && first_person,
+        Camera::Free(at) => {
+            let floor = floor_under(feet[1]);
+            (at[0] - feet[0]).abs() <= CABIN_HALF
+                && (at[2] - feet[2]).abs() <= CABIN_HALF
+                && (floor..=floor + CABIN_HEIGHT).contains(&at[1])
+        }
+    }
+}
+
 /// The model's floor under a passenger's feet.
 pub fn floor_under(feet_y: f64) -> f64 {
     feet_y - FEET_OVER_FLOOR
@@ -89,6 +123,25 @@ pub fn room_cells(cell: Pos, mount: Face) -> Vec<Pos> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_a_camera_inside_the_cabin_hides_it() {
+        let feet = [10.5, 65.05, 3.5];
+        // Its own rider in first person: hidden; in third person or another player: drawn.
+        let own = |rides, first_person| Camera::Own {
+            rides,
+            first_person,
+        };
+        assert!(hidden_from(own(true, true), feet));
+        assert!(!hidden_from(own(true, false), feet));
+        assert!(!hidden_from(own(false, true), feet));
+        // A replay's director camera a few blocks off: drawn, though the replay rides in first
+        // person; the director's first-person framing at the rider's eye: hidden.
+        assert!(!hidden_from(Camera::Free([14.0, 66.5, 5.0]), feet));
+        assert!(!hidden_from(Camera::Free([10.5, 68.0, 3.5]), feet));
+        assert!(hidden_from(Camera::Free([10.5, 66.67, 3.5]), feet));
+        assert!(hidden_from(Camera::Free([11.2, 65.2, 2.8]), feet));
+    }
 
     fn close(a: f64, b: f64) -> bool {
         (a - b).abs() < 1e-9

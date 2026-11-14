@@ -22,8 +22,7 @@ use crate::game::{
     Game,
     rustcraft_content::{self as content, item_of_number},
     rustcraft_screens::{
-        self as kit, LABEL, PANEL_EDGE, PANEL_LIGHT, SLOT_EDGE, STATUS_BAD, STATUS_OK, STATUS_TEXT,
-        STATUS_WARN, TEXT, at, button, plural, slot, text, tr, tr_with,
+        self as kit, HOT, LABEL, TEXT, VALUE, at, button, plural, slot, text, tr, tr_with,
     },
     rustcraft_storage::CHANNEL,
 };
@@ -34,6 +33,7 @@ use horizon_client::{
 };
 use rustcraft_rules::{
     geom::Pos,
+    machines::style::{self, Severity, colour},
     storage::{
         Limit,
         terminal::{
@@ -47,9 +47,10 @@ use std::sync::{LazyLock, Mutex, MutexGuard, PoisonError};
 
 /// The search keeps at most this many characters.
 const SEARCH_MAX: usize = 32;
-/// A sample item's veil: an item with a limit and none stored.
-const GHOST: u32 = 0x99C9CCD4;
-const SELECTED: u32 = 0xFFF0B33C;
+/// A sample item's veil: an item with a limit and none stored (style: the icon at 35%).
+const GHOST: u32 = colour::GHOST;
+/// The veil over the limit buttons while no item is chosen.
+const DIMMED: u32 = 0x9911_0D0B;
 const ESCAPE: &str = "key.keyboard.escape";
 const ENTER: [&str; 2] = ["key.keyboard.enter", "key.keyboard.keypad.enter"];
 const BACKSPACE: &str = "key.keyboard.backspace";
@@ -206,8 +207,22 @@ pub(super) fn draw(game: &Game<'_>, batch: &mut HudBatch, o: [f32; 2]) {
     let listing = listing_of(v.terminal);
     kit::background(game, batch, o, [term::WIDTH, term::HEIGHT]);
     title(game, batch, o, listing.as_ref());
-    for (tab, r) in Tab::ALL.into_iter().zip(term::TABS) {
-        button(game, batch, o, r, &tab_name(tab), tab == v.tab);
+    let open = Tab::ALL.iter().position(|t| *t == v.tab);
+    let line_y = term::TABS[0][1] + term::TABS[0][3];
+    let right = term::WIDTH - 8.0;
+    kit::fills(
+        game,
+        batch,
+        o,
+        &style::tabs(&term::TABS, open, line_y, right),
+    );
+    for (i, (tab, r)) in Tab::ALL.into_iter().zip(term::TABS).enumerate() {
+        let is_open = Some(i) == open;
+        if !is_open {
+            kit::hover(game, batch, o, r);
+        }
+        let colour = if is_open { VALUE } else { LABEL };
+        kit::centred(game, batch, o, r, &tab_name(tab), colour);
     }
     search_field(game, batch, o, &v);
     let list = listing
@@ -227,7 +242,7 @@ pub(super) fn draw(game: &Game<'_>, batch: &mut HudBatch, o: [f32; 2]) {
         &page,
         o,
         [r[0] + (r[2] - w) / 2.0, r[1] + 3.0],
-        TEXT,
+        VALUE,
     );
     button(
         game,
@@ -259,7 +274,11 @@ fn title(game: &Game<'_>, batch: &mut HudBatch, o: [f32; 2], listing: Option<&Li
         );
         title = format!("{title} · {cells} · {slots}");
     }
-    text(game, batch, &title, o, term::TITLE, TEXT);
+    let (name, rest) = match title.split_once(" · ") {
+        Some((n, r)) => (n.to_owned(), Some(r.to_owned())),
+        None => (title, None),
+    };
+    kit::title_line(game, batch, o, &name, rest.as_deref(), term::WIDTH);
 }
 
 fn tab_name(tab: Tab) -> String {
@@ -271,27 +290,30 @@ fn tab_name(tab: Tab) -> String {
     }
 }
 
-/// The search field (`.w-find`): its text and a caret while focused, a hint while empty.
+/// The search field (`.w-find`, style «Поля»): a well with the magnifier, the text and a caret
+/// while focused, a hint while empty; the focus has the hover outline's colour round it.
 fn search_field(game: &Game<'_>, batch: &mut HudBatch, o: [f32; 2], v: &View) {
-    let r = at(o, term::SEARCH);
-    game.native_fill(batch, r, if v.focused { PANEL_EDGE } else { SLOT_EDGE });
-    game.native_fill(
-        batch,
-        [r[0] + 1.0, r[1] + 1.0, r[2] - 2.0, r[3] - 2.0],
-        PANEL_LIGHT,
-    );
-    let shown = if v.search.is_empty() && !v.focused {
+    let r = term::SEARCH;
+    let x = style::field_text_x(r, true);
+    let room = r[0] + r[2] - x - 3.0;
+    let (shown, colour) = if v.search.is_empty() && !v.focused {
         (tr("rustcraft.terminal.search", "Search"), LABEL)
     } else {
-        let caret = if v.focused { "_" } else { "" };
         // The end of a long search, as a text box scrolls.
         let mut s: String = v.search.clone();
-        while game.native_text_width(&format!("{s}{caret}")) > r[2] - 6.0 && !s.is_empty() {
+        while game.native_text_width(&s) > room && !s.is_empty() {
             s.remove(0);
         }
-        (format!("{s}{caret}"), TEXT)
+        (s, VALUE)
     };
-    game.native_text(batch, &shown.0, [r[0] + 3.0, r[1] + 3.0], shown.1, false);
+    let caret = v.focused.then(|| x + game.native_text_width(&shown));
+    kit::fills(game, batch, o, &style::field(r, true, caret));
+    if v.focused {
+        kit::fills(game, batch, o, &style::outline(r, HOT));
+    } else {
+        kit::hover(game, batch, o, r);
+    }
+    text(game, batch, &shown, o, [x, r[1] + 3.0], colour);
 }
 
 /// The page's items: icon, count and wear; a limit without items veiled; the chosen one framed.
@@ -309,12 +331,7 @@ fn grid(
         let p = cell(i);
         let at_item = [o[0] + p[0], o[1] + p[1]];
         if selected == Some(e.key) {
-            game.native_fill(
-                batch,
-                [at_item[0] - 1.0, at_item[1] - 1.0, 18.0, 18.0],
-                SELECTED,
-            );
-            game.native_fill(batch, [at_item[0], at_item[1], 16.0, 16.0], kit::SLOT);
+            kit::fills(game, batch, o, &style::outline(style::slot_rect(p), HOT));
         }
         let Some(stack) = stack_of(game, e.key, e.count) else {
             continue;
@@ -348,7 +365,7 @@ fn limit_row(
                 game.native_item(batch, id, [o[0] + p[0], o[1] + p[1]], 12.0);
             }
             let s = limit_text(line.and_then(|l| l.limit));
-            text(game, batch, &s, o, term::LIMIT_TEXT, TEXT);
+            text(game, batch, &s, o, term::LIMIT_TEXT, VALUE);
         }
         None => {
             let s = tr("rustcraft.terminal.limit.choose", "Limit: —");
@@ -376,22 +393,22 @@ fn limit_row(
             term::LIMIT_CLEAR,
             term::LIMIT_DESTROY,
         ] {
-            game.native_fill(batch, at(o, r), 0x66C9CCD4);
+            game.native_fill(batch, at(o, r), DIMMED);
         }
     }
 }
 
 /// The status line and the line under it: the storage's state, its slots or its missing cells.
 fn status(game: &Game<'_>, batch: &mut HudBatch, o: [f32; 2], listing: Option<&Listing>) {
-    let (colour, s, detail) = match listing {
+    let (severity, s, detail) = match listing {
         None => (
-            STATUS_WARN,
+            Severity::Warn,
             tr("rustcraft.terminal.loading", "Waiting for the storage…"),
             String::new(),
         ),
         Some(l) => match l.state {
             State::Works => (
-                STATUS_OK,
+                Severity::Ok,
                 tr("rustcraft.machine.working", "Working"),
                 tr_with(
                     "rustcraft.terminal.used",
@@ -400,12 +417,12 @@ fn status(game: &Game<'_>, batch: &mut HudBatch, o: [f32; 2], listing: Option<&L
                 ),
             ),
             State::Holes => (
-                STATUS_BAD,
+                Severity::Bad,
                 tr("rustcraft.terminal.holes", "The storage is no solid box"),
                 holes_line(l),
             ),
             State::NoCells => (
-                STATUS_BAD,
+                Severity::Bad,
                 tr(
                     "rustcraft.storage.no_cells",
                     "The terminal touches no storage cell",
@@ -414,10 +431,7 @@ fn status(game: &Game<'_>, batch: &mut HudBatch, o: [f32; 2], listing: Option<&L
             ),
         },
     };
-    let r = at(o, term::STATUS);
-    game.native_fill(batch, r, colour);
-    let at_text = [r[0] + 5.0, r[1] + (r[3] - kit::FONT_HEIGHT) / 2.0 + 1.0];
-    game.native_text(batch, &s, at_text, STATUS_TEXT, false);
+    kit::status_line(game, batch, o, term::STATUS, severity, &s);
     text(game, batch, &detail, o, term::DETAIL, TEXT);
 }
 

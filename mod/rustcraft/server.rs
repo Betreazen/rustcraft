@@ -355,6 +355,7 @@ pub(super) fn on_menu_button_v2(
     carried: &mut Option<ItemStack>,
 ) {
     machines::on_menu_button_v2(entity, id, carried, &TUNING);
+    base::on_sheet_button(entity, id, carried);
     storage::on_button(game, pos, entity, id, carried);
     monorail::on_button(game, pos, entity, id);
 }

@@ -228,9 +228,10 @@ def num(v):
 class Skin:
     """The palette of one model: a colour per material, in cells of 16 x 16 pages."""
 
-    def __init__(self, texture, tints=None):
+    def __init__(self, texture, tints=None, alpha=255):
         self.texture = texture
         self.tints = tints or {}
+        self.alpha = alpha
         self.colors = []
 
     def color(self, mat):
@@ -262,18 +263,18 @@ class Skin:
         out = {}
         for p, name in enumerate(self.page_names()):
             colors = self.colors[p * PER_PAGE:(p + 1) * PER_PAGE] or ['#ff00ff']
-            rows = [[rgba(colors[0])] * PAGE for _ in range(PAGE)]
+            rows = [[rgba(colors[0], self.alpha)] * PAGE for _ in range(PAGE)]
             for i, color in enumerate(colors):
                 x0, y0 = i % (PAGE // CELL) * CELL, i // (PAGE // CELL) * CELL
                 for y in range(y0, y0 + CELL):
                     for x in range(x0, x0 + CELL):
-                        rows[y][x] = rgba(color)
+                        rows[y][x] = rgba(color, self.alpha)
             out[name] = rows
         return out
 
 
-def rgba(color):
-    return tuple(int(color[i:i + 2], 16) for i in (1, 3, 5)) + (255,)
+def rgba(color, alpha=255):
+    return tuple(int(color[i:i + 2], 16) for i in (1, 3, 5)) + (alpha,)
 
 
 def elements(boxes, skin, stats):
@@ -382,11 +383,13 @@ def png(pixels):
     return b'\x89PNG\r\n\x1a\n' + chunk(b'IHDR', header) + chunk(b'IDAT', zlib.compress(raw, 9)) + chunk(b'IEND', b'')
 
 
-def model_json(textures, els, parent=None):
+def model_json(textures, els, parent=None, render_type=None):
     """A model with one element per line, so a diff shows which boxes changed."""
     head = {}
     if parent:
         head['parent'] = parent
+    if render_type:
+        head['render_type'] = render_type
     head['textures'] = textures
     lines = ['{']
     lines += ['  %s: %s,' % (json.dumps(k), json.dumps(v)) for k, v in head.items()]
@@ -483,8 +486,10 @@ def machine_states(out):
     for single in ('crystal', 'cell'):
         out.text('blockstates/%s.json' % single,
                  '{\n  "variants": {\n    "": {"model": "rustcraft:block/%s"}\n  }\n}\n' % single)
-    # The pump, the terminal, the tank and the station copy the furnace too, for a menu on use.
-    for machine in ('furnace', 'crusher', 'gen_fuel', 'alloy', 'crafter', 'pump', 'terminal', 'tank', 'station'):
+    # The pump, the terminal, the tank and the station copy the furnace too, for a menu on use;
+    # since slice 9 so do the slice-7 and slice-8 blocks but the solar panel (SLICE7_BLOCKS).
+    furnaces = ('furnace', 'crusher', 'gen_fuel', 'alloy', 'crafter', 'pump', 'terminal', 'tank', 'station')
+    for machine in furnaces + tuple(b for b in SLICE7_PANELS if b not in SLICE7_BLOCKS):
         variants = []
         for facing, y in FACING_Y.items():
             for lit in ('false', 'true'):
@@ -495,6 +500,14 @@ def machine_states(out):
         out.text('blockstates/%s.json' % machine, '{\n  "variants": {\n%s\n  }\n}\n' % ',\n'.join(variants))
 
 
+# Models drawn see-through, with their palette's alpha: the solar panel lets the light through
+# (E19, no shadow under it), so the guide draws it at 40% (docs/showcase/js/poses.js `P.solar`). A
+# texture with alpha 1..254 goes to the engine's translucent pass, which blends it; the model also
+# names that pass, as NeoForge's `render_type` does.
+SEE_THROUGH = {'solar': 102}
+TRANSLUCENT = 'minecraft:translucent'
+
+
 def staged(out, report, skipped):
     """Every other block model, at rest, for blocks that come later."""
     for section in BLOCK_SECTIONS:
@@ -503,13 +516,15 @@ def staged(out, report, skipped):
                 continue
             every = read(draw, name)
             boxes = [b for b in every if at_rest(name, b[0])]
-            skin = Skin(name, DEFAULT_TINTS.get(name))
+            alpha = SEE_THROUGH.get(name, 255)
+            skin = Skin(name, DEFAULT_TINTS.get(name), alpha)
             stats = {}
             els = elements(boxes, skin, stats)
             if stats.get('outside_limit'):
                 skipped.append(name)
                 continue
-            out.text('models/block/%s.json' % name, model_json(skin.textures(), els, BLOCK))
+            render = TRANSLUCENT if alpha < 255 else None
+            out.text('models/block/%s.json' % name, model_json(skin.textures(), els, BLOCK, render))
             out.skin(skin)
             dropped = sorted({b[0] for b in every} - {b[0] for b in boxes})
             stats['dropped'] = dropped
@@ -646,11 +661,12 @@ def worker_parts(out, report):
     report.append(('worker', 'worker_body, worker_below, worker_saw, worker_reaper', stats))
 
 
-# The slice-7 blocks copy the iron block with a `facing` of their own (rustcraft_content): the
-# blockstate turns the staged model as the machines' does.
-SLICE7_BLOCKS = ('dock_unload', 'dock_charge', 'turret', 'anchor',
-                 # Slice 8: the energy sources, the battery, the miner, the placer and the breaker.
+# The slice-7 and slice-8 blocks: since slice 9 they copy the furnace for their own windows
+# (machine_states); the solar panel alone still copies glass with a `facing` of its own
+# (rustcraft_content), and its blockstate turns the staged model as the machines' does.
+SLICE7_PANELS = ('dock_unload', 'dock_charge', 'turret', 'anchor',
                  'solar', 'windmill', 'gen_lava', 'battery', 'miner', 'placer', 'breaker')
+SLICE7_BLOCKS = ('solar',)
 
 
 def slice7_states(out):
