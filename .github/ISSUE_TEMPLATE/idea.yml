@@ -1,0 +1,21 @@
+name: Идея или баланс · Idea or balance
+description: Новый блок, правка баланса, удобство · A new block, a balance change, a convenience
+labels: [idea]
+body:
+  - type: input
+    id: area
+    attributes:
+      label: Часть мода · Area
+      placeholder: "Магистраль, машины, склад, монорельс, работники, турели · Magistral, machines, storage, monorail, workers, turrets"
+  - type: textarea
+    id: idea
+    attributes:
+      label: Что предлагаете · The idea
+      description: Что изменить и почему, какую игру это улучшит · What to change and why
+    validations:
+      required: true
+  - type: textarea
+    id: numbers
+    attributes:
+      label: Числа · Numbers
+      description: Если это баланс, что сейчас и сколько, по-вашему, должно быть · For balance, what it is now and what you expect

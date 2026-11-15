@@ -1,0 +1,59 @@
+name: Ошибка · Bug report
+description: Что-то работает не так, как описано · Something does not work as described
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Спасибо, что сообщаете об ошибке. Чем точнее шаги, тем быстрее её найдём.
+        Thanks for the report. Write in Russian or English.
+  - type: input
+    id: version
+    attributes:
+      label: Версия мода · Mod version
+      description: "`version` в `mod/rustcraft/horizon-mixin.toml` или тег, с которого ставили · the tag you installed"
+      placeholder: "0.11.0"
+    validations:
+      required: true
+  - type: input
+    id: horizon
+    attributes:
+      label: Коммит Horizon · Horizon revision
+      placeholder: "7e4e421"
+  - type: dropdown
+    id: where
+    attributes:
+      label: Где · Where
+      options:
+        - Выделенный сервер · Dedicated server
+        - Одиночная игра · Single player
+        - Сервер с хостом (LAN) · LAN host
+    validations:
+      required: true
+  - type: input
+    id: block
+    attributes:
+      label: Блок или предмет · Block or item
+      placeholder: "Электропечь · Electric furnace"
+  - type: textarea
+    id: steps
+    attributes:
+      label: Шаги · Steps
+      description: Что строили, что ожидали увидеть, что произошло · What you built, what you expected, what happened
+      placeholder: |
+        1. Поставил печь вплотную к корпусу с энергетическим каналом
+        2. Положил железную руду в сундук на той же линии
+        3. Ожидал: печь плавит. Произошло: диагноз «Нет энергии»
+    validations:
+      required: true
+  - type: textarea
+    id: diagnosis
+    attributes:
+      label: Диагноз блока · Block diagnosis
+      description: Строка над хотбаром, когда смотрите на блок · The line above the hotbar while you look at the block
+  - type: textarea
+    id: log
+    attributes:
+      label: Журнал · Log
+      description: Строки с `rustcraft` из журнала игры или сервера · Lines with `rustcraft` from the game or server log
+      render: text

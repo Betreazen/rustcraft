@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Справочник инженера · Engineer's reference
+    url: https://betreazen.github.io/rustcraft/showcase/
+    about: Каждый блок, предмет и модуль со сценой, окном и рецептом · Every block, item and module with a scene, window and recipe
+  - name: Horizon
+    url: https://github.com/horizon-rust/horizon
+    about: Вопросы о самом движке и лаунчере · Questions about the engine and launcher
