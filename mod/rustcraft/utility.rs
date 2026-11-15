@@ -106,6 +106,7 @@ pub(super) fn title(u: Util) -> &'static str {
         Util::Projector => "Holo-Projector",
         Util::Builder => "Building Machine",
         Util::PortalDock => "Portal Dock",
+        Util::Vein => "Living Vein",
     }
 }
 
@@ -296,6 +297,7 @@ pub(super) fn tick(game: &mut Game<'_>, dimension: &str, level: &LevelNet, t: &T
             Util::Projector | Util::Builder | Util::PortalDock => {
                 builder::step(game, dimension, pos, u, cost, now)
             }
+            Util::Vein => grow(game, dimension, pos, cost),
         };
         show(game, dimension, pos, shown);
     }
@@ -381,11 +383,8 @@ fn crafting_recipes(game: &Game<'_>) -> Vec<disassembly::Recipe> {
     out
 }
 
-fn charged(s: &ItemStack) -> bool {
-    match s.custom_data().and_then(|d| d.get(&JavaString::from(charge::CHARGE))) {
-        Some(Tag::Double(bits)) => f64::from_bits(*bits) > 0.0,
-        _ => false,
-    }
+fn charged(game: &Game<'_>, s: &ItemStack) -> bool {
+    battery_of(game, s).is_some_and(|b| b.charge > 0.0)
 }
 
 fn disintegrate(game: &mut Game<'_>, pos: Pos, cost: f64) -> Shown {
@@ -396,10 +395,11 @@ fn disintegrate(game: &mut Game<'_>, pos: Pos, cost: f64) -> Shown {
         let r = crafting_recipes(game);
         state().recipes = Some(r);
     }
+    let is_charged = charged(game, &input);
     let recipe = {
         let s = state();
         let all = s.recipes.as_deref().unwrap_or_default();
-        disassembly::recipe_for(&input.item, all, charged(&input)).cloned()
+        disassembly::recipe_for(&input.item, all, is_charged).cloned()
     };
     let Ok(recipe) = recipe else {
         return Shown::Blocked("dis_refused");
@@ -433,28 +433,15 @@ fn disintegrate(game: &mut Game<'_>, pos: Pos, cost: f64) -> Shown {
 
 // ---- The charger and the plate ----
 
-fn battery_of(s: &ItemStack) -> Option<charge::Battery> {
-    let d = s.custom_data()?;
-    let f = |k: &str| match d.get(&JavaString::from(k)) {
-        Some(Tag::Double(bits)) => Some(f64::from_bits(*bits)),
-        _ => None,
-    };
-    Some(charge::Battery {
-        charge: f(charge::CHARGE).unwrap_or(0.0),
-        capacity: f(charge::CAPACITY)?,
-    })
-}
-
-fn set_charge(s: &mut ItemStack, charge_now: f64) {
-    let mut data = s.custom_data().cloned().unwrap_or_default();
-    data.insert(JavaString::from(charge::CHARGE), Tag::Double(charge_now.to_bits()));
-    s.data_mut().set_other(CUSTOM_DATA, Some(Tag::Compound(data)));
+// Slice 13: the batteries are the gear's (rustcraft_gear keeps them under each piece's number).
+fn battery_of(game: &Game<'_>, s: &ItemStack) -> Option<charge::Battery> {
+    crate::game::rustcraft_gear::battery(game, s)
 }
 
 fn charge_slots(game: &mut Game<'_>, pos: Pos, every: u64) -> Shown {
     let slots = items(game, pos);
     let held: Vec<(usize, charge::Battery)> = (0..4)
-        .filter_map(|i| slots.get(i).cloned().flatten().and_then(|s| battery_of(&s).map(|b| (i, b))))
+        .filter_map(|i| slots.get(i).cloned().flatten().and_then(|s| battery_of(game, &s).map(|b| (i, b))))
         .collect();
     if held.is_empty() {
         return Shown::Idle("charge_empty");
@@ -466,13 +453,11 @@ fn charge_slots(game: &mut Game<'_>, pos: Pos, every: u64) -> Shown {
         return Shown::NoEnergy;
     }
     spend(game, pos, used);
-    with_items(game, pos, |items| {
-        for ((slot, _), b) in held.iter().zip(&after) {
-            if let Some(Some(s)) = items.get_mut(*slot) {
-                set_charge(s, b.charge);
-            }
+    for ((slot, _), b) in held.iter().zip(&after) {
+        if let Some(s) = slots.get(*slot).cloned().flatten() {
+            crate::game::rustcraft_gear::charge(&s, b.charge);
         }
-    });
+    }
     // Full ones go to the output slots, for the net.
     for ((slot, _), b) in held.iter().zip(&after) {
         if b.full()
@@ -490,13 +475,38 @@ fn plate(game: &mut Game<'_>, dimension: &str, pos: Pos) -> Shown {
     if game.native_block(below) != crate::game::rustcraft_content::HOUSING {
         return Shown::Blocked("plate_no_housing");
     }
-    let on = game.native_server_players().into_iter().any(|p| {
-        p.dimension == dimension
-            && p.position[0].floor() as i32 == pos[0]
-            && p.position[2].floor() as i32 == pos[2]
-            && (p.position[1] - f64::from(pos[1])).abs() < 1.2
-    });
-    if on { Shown::Working } else { Shown::Idle("plate_empty") }
+    let standing: Vec<u128> = game
+        .native_server_players()
+        .into_iter()
+        .filter(|p| {
+            p.dimension == dimension
+                && p.position[0].floor() as i32 == pos[0]
+                && p.position[2].floor() as i32 == pos[2]
+                && (p.position[1] - f64::from(pos[1])).abs() < 1.2
+        })
+        .map(|p| p.uuid)
+        .collect();
+    if standing.is_empty() {
+        return Shown::Idle("plate_empty");
+    }
+    // W3: worn armour and both hands, each in turn.
+    use horizon_world::player_inventory::EquipmentSlot as E;
+    let mut offer = energy(game, pos).min(Util::ChargePlate.spec().draw);
+    let mut used = 0.0;
+    for uuid in standing {
+        for slot in [E::Head, E::Chest, E::Legs, E::Feet, E::MainHand, E::OffHand] {
+            let Some(st) = game.native_player_equipment(uuid, slot) else { continue };
+            let Some(b) = battery_of(game, &st) else { continue };
+            let (after, took) = b.fill(offer);
+            if took > 0.0 {
+                crate::game::rustcraft_gear::charge(&st, after.charge);
+                offer -= took;
+                used += took;
+            }
+        }
+    }
+    spend(game, pos, used);
+    if used > 0.0 { Shown::Working } else { Shown::Idle("plate_full") }
 }
 
 // ---- The repair stand ----
@@ -814,6 +824,35 @@ fn brush(game: &mut Game<'_>, pos: Pos, cost: f64) -> Shown {
     if let Some(o) = owner(game, pos) {
         base::report(Report::Counted { kind: "brush", owner: o, count: 1 });
     }
+    Shown::Working
+}
+
+// ---- The living vein (slice 13) ----
+
+fn grow(game: &mut Game<'_>, dimension: &str, pos: Pos, cost: f64) -> Shown {
+    use rustcraft_rules::utility::vein;
+    let slots = items(game, pos);
+    let Some(slot) = slots.iter().position(|s| s.as_ref().is_some_and(|s| s.count > 0 && vein::is_rock(&s.item))) else {
+        return Shown::Idle("vein_no_rock");
+    };
+    let Some(cell) = vein::cells()
+        .into_iter()
+        .map(|c| [pos[0] + c[0], pos[1] + c[1], pos[2] + c[2]])
+        .find(|p| matches!(game.native_block(*p).as_str(), "minecraft:air" | "minecraft:cave_air"))
+    else {
+        return Shown::Blocked("vein_no_room");
+    };
+    let rare = modules::count(&base::modules_at(game, pos), Module::Rare);
+    let ore = vein::ore(random(), rare);
+    let Some(state_id) = game.native_default_state(ore) else {
+        return Shown::Blocked("vein_no_room");
+    };
+    if !spend(game, pos, cost) {
+        return Shown::NoEnergy;
+    }
+    game.native_set_block(dimension, cell, state_id, 3);
+    with_items(game, pos, |items| take_one(items, slot));
+    base::report(Report::Place { dimension: dimension.to_owned(), pos: cell, block: ore.to_owned() });
     Shown::Working
 }
 

@@ -46,6 +46,7 @@ import anim_mc  # noqa: E402
 import branches  # noqa: E402
 import energy  # noqa: E402
 import gear  # noqa: E402
+import gear_mc  # noqa: E402
 import icons_mc  # noqa: E402
 import kit  # noqa: E402
 import machines  # noqa: E402
@@ -515,7 +516,7 @@ def machine_states(out):
 # Slice 12: the last blocks copy the furnace as the machines do; the portal dock's model is `pdock`.
 SLICE12_BLOCKS = ('butcher', 'trash', 'disintegrator', 'charger', 'charge_plate', 'repair', 'kitchen', 'fishery',
                   'feeder', 'shearer', 'apiary', 'brewer', 'xp_tank', 'enchanter', 'archeo', 'projector',
-                  'builder', 'portal_dock')
+                  'builder', 'portal_dock', 'vein')
 BLOCK_MODEL = {'portal_dock': 'pdock'}
 
 
@@ -830,6 +831,7 @@ def main():
     staged(out, report, skipped)
     rust_table(out)
     items(out)
+    gear_mc.write(out)
     count = out.flush()
     print('wrote %d files under %s' % (count, ASSETS))
     for name, what, stats in report:

@@ -1,0 +1,16 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "equipment",
+  "pattern": [
+    "ccc",
+    "csc"
+  ],
+  "key": {
+    "c": "rustcraft:crystallite",
+    "s": "minecraft:amethyst_shard"
+  },
+  "result": {
+    "id": "rustcraft:tech_helmet_3",
+    "count": 1
+  }
+}

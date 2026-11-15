@@ -1,0 +1,17 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "equipment",
+  "pattern": [
+    "c c",
+    "csc",
+    "ccc"
+  ],
+  "key": {
+    "c": "rustcraft:sparksteel",
+    "s": "minecraft:amethyst_shard"
+  },
+  "result": {
+    "id": "rustcraft:tech_chestplate_2",
+    "count": 1
+  }
+}

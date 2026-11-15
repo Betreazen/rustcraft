@@ -1,0 +1,17 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "equipment",
+  "pattern": [
+    " a ",
+    "aba",
+    " a "
+  ],
+  "key": {
+    "a": "rustcraft:starsteel",
+    "b": "rustcraft:eshield_3"
+  },
+  "result": {
+    "id": "rustcraft:eshield_4",
+    "count": 1
+  }
+}

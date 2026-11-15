@@ -1,0 +1,14 @@
+{
+  "layers": {
+    "humanoid": [
+      {
+        "texture": "rustcraft:tech_t3"
+      }
+    ],
+    "humanoid_leggings": [
+      {
+        "texture": "rustcraft:tech_t3"
+      }
+    ]
+  }
+}

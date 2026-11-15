@@ -713,6 +713,7 @@ fn declare_machines(blocks: &mut Vec<Block>) {
 /// The channels, the wrench and the dusts. The channels' and the wrench's templates have no use of their own: what a click with them
 /// does is all `native_use_item_on`'s (rustcraft_server::on_use_item_on).
 pub fn declare_items(items: &mut Vec<Item>) {
+    declare_gear(items);
     // Slice 12: the facade (spec 15); a click with it is rustcraft_builder's.
     items.push(Item {
         id: "rustcraft:facade".into(),
@@ -892,4 +893,55 @@ pub(super) fn item_of_number(game: &Game<'_>, number: u32) -> Option<&'static st
         .names
         .get(usize::try_from(number).ok()?)
         .map(|n| &**n)
+}
+
+/// Slice 13: the gear (rustcraft_gear). Each piece copies the game's item of its kind for its
+/// protection, damage or blocking, never breaks (W1: a battery instead of durability), and
+/// technical armour looks like its tier's equipment asset (assets/models/gear_mc.py).
+fn declare_gear(items: &mut Vec<Item>) {
+    use rustcraft_rules::gear::{self as gear, Gear};
+    for g in Gear::all() {
+        // No durability at all (W1): the template's max_damage and damage are taken off. A patch
+        // may name only a component some vanilla item has (mod_content.rs `patch_components`), and
+        // `minecraft:unbreakable` is on none, so it is refused.
+        let mut components = BTreeMap::from([
+            ("!minecraft:max_damage".to_owned(), serde_json::json!({})),
+            ("!minecraft:damage".to_owned(), serde_json::json!({})),
+        ]);
+        if let Some(slot) = g.slot_name() {
+            components.insert(
+                "minecraft:equippable".to_owned(),
+                serde_json::json!({ "slot": slot, "asset_id": format!("rustcraft:tech_t{}", g.tier) }),
+            );
+        }
+        items.push(Item {
+            id: g.item(),
+            template: g.template(),
+            max_stack_size: Some(1),
+            components,
+            ..Item::default()
+        });
+    }
+    for m in gear::Module::ALL {
+        items.push(Item {
+            id: m.item().into(),
+            template: "minecraft:iron_ingot".into(),
+            max_stack_size: Some(1),
+            ..Item::default()
+        });
+    }
+    items.push(Item {
+        id: "rustcraft:scout_compass".into(),
+        template: "minecraft:iron_ingot".into(),
+        max_stack_size: Some(1),
+        ..Item::default()
+    });
+    for book in [gear::BOOK_CAPACITY, gear::BOOK_THRIFT] {
+        items.push(Item {
+            id: book.into(),
+            template: "minecraft:book".into(),
+            max_stack_size: Some(16),
+            ..Item::default()
+        });
+    }
 }

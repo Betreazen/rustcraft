@@ -242,6 +242,12 @@ impl Bench for Fake {
     fn anim(&self, _: Pos) -> Option<crate::anim::Shown> {
         None
     }
+    fn put_gear(&mut self, _: Pos, _: usize, _: &str, _: f64) -> Result<(), String> {
+        Ok(())
+    }
+    fn gear_charge(&self, _: Pos, _: usize) -> Option<f64> {
+        None
+    }
 }
 
 const PLOT: Area = Area {

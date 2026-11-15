@@ -1,0 +1,17 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "equipment",
+  "pattern": [
+    "asa",
+    "aaa",
+    " a "
+  ],
+  "key": {
+    "a": "rustcraft:sparksteel",
+    "s": "minecraft:amethyst_shard"
+  },
+  "result": {
+    "id": "rustcraft:eshield_2",
+    "count": 1
+  }
+}

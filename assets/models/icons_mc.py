@@ -130,6 +130,7 @@ SIGN = {
     'output': ['....ee..', '...ee...', '..ee....', '.eeeeee.', '....ee..', '...ee...', '..ee....', '........'],
     'scout': ['.eeee...', 'eg...e..', 'e....e..', 'e....e..', '.eeee...', '....ff..', '.....ff.', '......ff'],
     'area': ['ee....ee', 'e......e', '..gggg..', '..g..g..', '..g..g..', '..gggg..', 'e......e', 'ee....ee'],
+    'rare': ['..eeee..', '.gwgeef.', 'eggeeeef', '.eeeeef.', '..eeef..', '...ef...', '........', '........'],
     'haste': ['....gee.', '...eee..', '..eee...', '.eeeeee.', '...eee..', '..eee...', '.ee.....', 'e.......'],
 }
 EFFECT_BOARD, SUPPORT_BOARD, UPGRADE_BOARD, MACHINE_BOARD = '#4a2a30', '#24453a', '#6a4a2a', '#3b4a5a'
@@ -146,6 +147,8 @@ for _name, _sign, _accent, _board in [
     # Slice 8 (icons.js module('mod_store_cap', 'store', …) and the miner's).
     ('module_store_cap', 'store', '#ffe14a', MACHINE_BOARD), ('module_output', 'output', '#ffb23c', MACHINE_BOARD),
     ('module_scout', 'scout', '#e6e8ee', MACHINE_BOARD), ('module_area', 'area', '#7af0ff', MACHINE_BOARD),
+    # Slice 13 (icons.js module('mod_rare', 'rare', …)).
+    ('module_rare', 'rare', '#5fe6dd', MACHINE_BOARD),
 ]:
     ICONS[_name] = (MODULE, _board, _accent, [(4, 3, SIGN[_sign])])
 REAPER = [
@@ -340,3 +343,170 @@ def icon(name):
     for x, y, art in over:
         paint(x, y, art)
     return pixels
+
+
+# ---------------------------------------------------------------- slice 13: the gear
+# icons.js S.helmet, S.chestplate, S.leggings, S.boots (technical armour with a charge strip),
+# S.jetpack, S.eshield, S.book with EMBLEM.star, and the drawings `sword` and `rifle` (outlined).
+HELMET = ['', '', '', '...kkkkkkkkkk...', '..kcccccccccak..', '.kcaaaaaaaaaabk.', '.kaaaaaaaaaaabk.',
+          '.kaakkkkkkkkabk.', '.kaak......kabk.', '.kbbk......kbbk.', '.kkk........kkk.']
+CHESTPLATE = ['', '.kkkk......kkkk.', 'kcaak......kaabk', 'kaaakkkkkkkkaabk', 'kaaacaaaaaaaaabk',
+              'kkkaaaaaaaaaakkk', '..kaaaaaaaaaak..', '..kaaaaaaaaaak..', '..kaaaaaaaaabk..', '..kaaaaaaaaabk..',
+              '..kaaaaaaaaabk..', '..kbbbbbbbbbbk..', '..kkkkkkkkkkkk..']
+LEGGINGS = ['', '', '..kkkkkkkkkkkk..', '..kcaaaaaaaaak..', '..kaaaaaaaaaak..', '..kaaaaaaaaaak..',
+            '..kaaaakkaaaak..', '..kaaak..kaaak..', '..kaabk..kaabk..', '..kaabk..kaabk..', '..kaabk..kaabk..',
+            '..kaabk..kaabk..', '..kaabk..kaabk..', '..kkkkk..kkkkk..']
+BOOTS = ['', '', '', '', '', '', '..kkkk....kkkk..', '..kcak....kcak..', '..kaak....kaak..', '..kaak....kaak..',
+         '.kaaak...kaaak..', 'kaaaak..kaaaak..', 'kbbbbk..kbbbbk..', 'kkkkkk..kkkkkk..']
+JETPACK = ['', '....kk....kk....', '...kmmk..kmmk...', '..kaaaakkaaaak..', '..kcaaakkcaaak..', '..kcaaakkcaaak..',
+           '..kaaaakkaaaak..', '...koyyyyyyok...', '..kkkkkkkkkkkk..', '..khhhhhhhhhhk..', '..kkkkkkkkkkkk..']
+ESHIELD = ['', '.kkkkkkkkkkkkkk.', '.kcccccccccccbk.', '.kcggggggggggbk.', '.kcgeeeeeeeefbk.', '.kcgeeeweeeefbk.',
+           '.kcgeewwweeefbk.', '.kcgeeeweeeefbk.', '.kcgeeeeeeeefbk.', '.kageeeeeeeefbk.', '..kageeeeeefbk..',
+           '...kageeeefbk...', '....kabeefbk....', '.....kabbbk.....']
+BOOK = ['', '..kkkkkkkkkkkk..'] + ['..kbaaaaaaaawk..'] * 11 + ['..kbbbbbbbbbwk..', '..kkkkkkkkkkkk..']
+STAR = ['...g...', '...g...', '.ggegg.', '...g...', '...g...', '.......', '.......']
+LEAF = ['..ee...', '.eeee..', 'eeeeee.', '.eeee..', '..ee...', '.......', '.......']
+
+
+def outlined(paint):
+    """icons.js `outlined`: the drawing, with k wherever a filled pixel meets an empty one."""
+    px = {}
+    paint(lambda x, y, ch: px.__setitem__((x, y), ch))
+    rows = []
+    for y in range(16):
+        row = ''
+        for x in range(16):
+            ch = px.get((x, y))
+            if ch:
+                row += ch
+            elif any((x + dx, y + dy) in px for dx, dy in ((-1, 0), (1, 0), (0, -1), (0, 1))):
+                row += 'k'
+            else:
+                row += '.'
+        rows.append(row)
+    return rows
+
+
+def _box(dot, x0, y0, w, h, ch):
+    for y in range(y0, y0 + h):
+        for x in range(x0, x0 + w):
+            dot(x, y, ch)
+
+
+def _sword(dot):
+    for x in range(6, 15):
+        dot(x, 15 - x, 'w')
+    for x in range(6, 14):
+        dot(x, 14 - x, 'g')
+    for x in range(7, 15):
+        dot(x, 16 - x, 'f')
+    for x in range(2, 8):
+        dot(x, x + 5, 'a')
+    for x in range(3, 8):
+        dot(x, x + 4, 'c')
+    dot(5, 10, 't')
+    for x in range(2, 5):
+        dot(x, 15 - x, 'x')
+    dot(3, 13, 'n')
+    dot(1, 14, 'c')
+    dot(2, 14, 'b')
+    dot(1, 15, 'b')
+
+
+def _rifle(dot):
+    _box(dot, 1, 7, 3, 3, 'a')
+    _box(dot, 1, 7, 3, 1, 'c')
+    _box(dot, 1, 9, 3, 1, 'b')
+    _box(dot, 4, 6, 7, 3, 'n')
+    _box(dot, 4, 6, 7, 1, 'm')
+    _box(dot, 5, 7, 5, 1, 'e')
+    dot(9, 7, 'g')
+    _box(dot, 11, 7, 4, 1, 'o')
+    _box(dot, 11, 8, 4, 1, 'm')
+    dot(12, 7, 'c')
+    dot(12, 8, 'a')
+    dot(15, 7, 'g')
+    dot(15, 8, 'e')
+    _box(dot, 6, 4, 4, 1, 'x')
+    dot(10, 4, 'u')
+    dot(7, 5, 'x')
+    _box(dot, 6, 9, 2, 3, 'b')
+    dot(8, 9, 'x')
+
+
+ARMOR_STRIP = {'helmet': [(6, 5, ['tttt'])], 'chestplate': [(6, 6, ['tttt']), (7, 7, ['tt'])],
+               'leggings': [(5, 4, ['tttttt'])], 'boots': [(4, 8, ['t']), (12, 8, ['t'])]}
+for _t in (2, 3, 4):
+    for _piece, _rows in (('helmet', HELMET), ('chestplate', CHESTPLATE), ('leggings', LEGGINGS), ('boots', BOOTS)):
+        ICONS['tech_%s_%d' % (_piece, _t)] = (_rows, TIER[_t], '#ffe14a', ARMOR_STRIP[_piece])
+    ICONS['blade_%d' % _t] = (outlined(_sword), TIER[_t], '#62e6f2', [])
+    ICONS['eshield_%d' % _t] = (ESHIELD, TIER[_t], '#4fd2e6', [])
+ICONS['rifle'] = (outlined(_rifle), TIER[4], '#7af0ff', [])
+ICONS['jetpack'] = (JETPACK, TIER[4], '#ffe14a', [])
+ICONS['book_capacity'] = (BOOK, '#7a5ad0', '#ffffff', [(4, 4, STAR)] + dots([(3, 2), (11, 12), (10, 3), (5, 12)], 'l'))
+ICONS['book_thrift'] = (BOOK, '#3558d6', '#b8f6fa', [(4, 4, LEAF)] + dots([(3, 2), (11, 12), (10, 3), (5, 12)], 'l'))
+# Player modules: the module plate of the third tier with a sign of its own (drawn at 4, 3).
+PM_SIGNS = {
+    'pm_dash': ['..e....', '..ee...', 'eeeee..', '..ee...', '..e....', '.......'],
+    'pm_run': ['.e..e..', 'ee.ee..', 'eeeee..', 'ee.ee..', '.e..e..', '.......'],
+    'pm_jump': ['...e...', '..eee..', '.e.e.e.', '...e...', '...e...', '.eeeee.'],
+    'pm_absorber': ['eeeeeee', '.e.e.e.', '.e.e.e.', '.e.e.e.', 'eeeeeee', '.......'],
+    'pm_capacity': ['.eeeee.', 'ee...ee', 'e.eee.e', 'e.eee.e', 'eeeeeee', '.......'],
+    'pm_night': ['..eee..', '.e...e.', 'e.eee.e', '.e...e.', '..eee..', '.......'],
+    'pm_magnet': ['ee...ee', 'ee...ee', 'ee...ee', '.e...e.', '..eee..', '.......'],
+    'pm_damper': ['..eee..', '.eeeee.', '.eeeee.', '..eee..', '...e...', '.......'],
+}
+for _name, _sign in PM_SIGNS.items():
+    ICONS[_name] = (MODULE, TIER[3], '#ffe14a', [(4, 3, _sign)])
+
+
+# Slice 13: icons.js `mapDrum` (outlined) and `compass`.
+def _map_drum(dot):
+    dot(8, 1, 'e')
+    for y in range(2, 5):
+        dot(8, y, 'n')
+    for x in range(6, 11):
+        if x != 8:
+            dot(x, 3, 'm')
+    for x in range(4, 12):
+        dot(x, 5, 'c')
+    for x in range(3, 13):
+        dot(x, 6, 'a' if x in (3, 12) else 'c')
+    for y in range(7, 12):
+        for x in range(3, 13):
+            dot(x, y, 'a' if x == 3 else 'b' if x == 12 else 'o')
+    for x, y in [(5, 8), (6, 8), (5, 9), (6, 9), (7, 9), (9, 7), (10, 7), (10, 8), (11, 8)]:
+        dot(x, y, 'q')
+    for x, y in [(4, 11), (5, 11), (9, 10), (10, 10), (10, 11), (11, 11)]:
+        dot(x, y, 'u')
+    for x, y in [(7, 7), (8, 8), (8, 10)]:
+        dot(x, y, 'r')
+    for x in range(4, 12):
+        dot(x, 12, 'b')
+    for x in range(6, 10):
+        dot(x, 13, 'n')
+    for x in range(5, 11):
+        dot(x, 14, 'm')
+
+
+def _compass_rows():
+    px = {}
+    put = lambda x, y, ch: px.__setitem__((x, y), ch)
+    for x in range(6, 10):
+        put(x, 1, 'k')
+    put(6, 2, 'k'); put(7, 2, 'm'); put(8, 2, 'm'); put(9, 2, 'k')
+    for y in range(16):
+        for x in range(16):
+            d = math.hypot(x - 7.5, y - 8.5)
+            if d >= 6.5:
+                continue
+            put(x, y, 'k' if d >= 5.7 else ('c' if x + y < 15 else 'b') if d >= 4.6 else 'f' if d >= 3.9 else 'x')
+    for x, y in [(7, 5), (8, 5), (7, 12), (8, 12), (4, 8), (4, 9), (11, 8), (11, 9)]:
+        put(x, y, 'e')
+    put(5, 6, 'n'); put(6, 6, 'n'); put(5, 7, 'n'); put(10, 6, 'r'); put(9, 7, 'r')
+    put(8, 8, 'm'); put(7, 9, 'm'); put(6, 10, 'w'); put(5, 11, 'w')
+    return [''.join(px.get((x, y), '.') for x in range(16)) for y in range(16)]
+
+
+ICONS['tool_map'] = (outlined(_map_drum), '#5ab0e6', '#7af0ff', [])
+ICONS['scout_compass'] = (_compass_rows(), '#8a919d', '#7af0ff', [])

@@ -45,7 +45,7 @@
 # prototype hooked it.
 [mod]
 id = "rustcraft"
-version = "0.12.0"
+version = "0.13.0"
 
 # The commit the traversal prototype and path_of_craft_tree build on; every function used here
 # was checked in its source.
@@ -245,6 +245,21 @@ id = "builder"
 file = "crates/horizon-client/src/game.rs"
 name = "rustcraft_builder"
 source = "builder.rs"
+
+# Slice 13: the cartographer's atlas and the scout compass (rustcraft_rules::explore).
+[[module]]
+id = "explore"
+file = "crates/horizon-client/src/game.rs"
+name = "rustcraft_explore"
+source = "explore.rs"
+
+# Slice 13: the player's gear (rustcraft_rules::gear): technical armour with player modules, the
+# energy blade, shield and rifle, the technical enchantment books.
+[[module]]
+id = "gear"
+file = "crates/horizon-client/src/game.rs"
+name = "rustcraft_gear"
+source = "gear.rs"
 
 # Slice 12: the blocks' moving parts (rustcraft_rules::anim): their standalone models, the state the
 # server sends clients, and the parts drawn each frame from the block entity.
@@ -797,7 +812,10 @@ helper = "hook_incoming_damage.rs"
 bindings = [
   { name = "entity", ty = "i32", value = "entity" },
   { name = "kind", ty = "&str", value = "kind" },
+  { name = "damage_type", ty = "&str", value = "damage_type" },
+  { name = "causing", ty = "i32", value = "causing" },
   { name = "amount", ty = "&mut f32", value = "&mut *amount" },
+  { name = "canceled", ty = "&mut bool", value = "&mut *canceled" },
 ]
 
 # Slice 10: the backpack. A right click with it (API 13), each carried stack's tick (API 39), where

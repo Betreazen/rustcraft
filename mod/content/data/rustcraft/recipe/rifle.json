@@ -1,0 +1,19 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "equipment",
+  "pattern": [
+    "aaa",
+    "rsb",
+    "  a"
+  ],
+  "key": {
+    "a": "rustcraft:starsteel",
+    "r": "minecraft:redstone",
+    "s": "minecraft:amethyst_shard",
+    "b": "minecraft:bow"
+  },
+  "result": {
+    "id": "rustcraft:rifle",
+    "count": 1
+  }
+}

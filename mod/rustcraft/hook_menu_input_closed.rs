@@ -4,4 +4,5 @@ fn rustcraft_menu_input_closed(
     slots: &mut Vec<Option<horizon_client::items::ItemStack>>,
 ) {
     crate::game::rustcraft_backpack::on_menu_input_closed(uuid, window, slots);
+    crate::game::rustcraft_gear::on_menu_input_closed(uuid, window, slots);
 }

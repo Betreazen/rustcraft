@@ -498,6 +498,7 @@ fn work(
         Some(Tool::Grab) => grab(game, dimension, w, cell, t),
         Some(Tool::Scoop) => scoop(game, dimension, net, w, cell, t),
         Some(Tool::Shooter) => guard(game, dimension, w, cell, t),
+        Some(Tool::Map) => crate::game::rustcraft_explore::map(game, dimension, w, cell, t),
         Some(Tool::Hold) | None => {}
     }
 }
@@ -975,6 +976,7 @@ fn tool_name(tool: Option<Tool>) -> Text {
         Some(Tool::Grab) => line("rustcraft.worker.grab", "Collector", &[]),
         Some(Tool::Scoop) => line("rustcraft.worker.scoop", "Digger", &[]),
         Some(Tool::Shooter) => line("rustcraft.worker.guard", "Guard", &[]),
+        Some(Tool::Map) => line("rustcraft.worker.map", "Cartographer", &[]),
         None => line("rustcraft.worker.bare", "Chassis", &[]),
     }
 }
@@ -1026,7 +1028,7 @@ fn notes(game: &mut Game<'_>, level: &LevelFleet) {
             Some(Tool::Saw) => 1,
             Some(Tool::Reaper) => 2,
             // The worker model has no part for the slice-10 tools: the chassis alone.
-            Some(Tool::Hold | Tool::Grab | Tool::Scoop | Tool::Shooter) => 0,
+            Some(Tool::Hold | Tool::Grab | Tool::Scoop | Tool::Shooter | Tool::Map) => 0,
         });
     }
     if bytes.is_empty() {

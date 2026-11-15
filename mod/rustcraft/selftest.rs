@@ -667,6 +667,26 @@ impl Bench for GameBench<'_, '_> {
         butcher::shown(DIMENSION, pos)
     }
 
+    fn put_gear(&mut self, pos: Pos, slot: usize, item: &str, charge: f64) -> Result<(), String> {
+        let mut stack = ItemStack::new(item, 1);
+        crate::game::rustcraft_gear::number(&mut stack);
+        crate::game::rustcraft_gear::set_held(
+            &stack,
+            rustcraft_rules::gear::Held { charge, ..Default::default() },
+        );
+        self.change_entity(pos, move |e| {
+            if e.items.len() <= slot {
+                e.items.resize(slot + 1, None);
+            }
+            e.items[slot] = Some(stack);
+        })
+    }
+
+    fn gear_charge(&self, pos: Pos, slot: usize) -> Option<f64> {
+        let stack = self.game.native_mod_block_entity(pos)?.items.get(slot).cloned().flatten()?;
+        crate::game::rustcraft_gear::held(&stack).map(|h| h.charge)
+    }
+
     fn anim(&self, pos: Pos) -> Option<rustcraft_rules::anim::Shown> {
         self.game
             .native_mod_block_entity(pos)

@@ -127,6 +127,7 @@ ANIM = {
         'head': {'on': [wave_move(Y, 4, SIN, 2.1)], 'off': 'rest', 'carry': 'bridge'},
     },
     'butcher': {'arm': {'on': [wave_rot('y', 1, CHOP, 1)], 'off': 'rest'}},
+    'vein': {'core': {'on': [spin('z', 0.8)], 'off': 'rest'}},
 }
 
 

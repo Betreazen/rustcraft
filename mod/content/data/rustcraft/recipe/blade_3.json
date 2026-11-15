@@ -1,0 +1,17 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "equipment",
+  "pattern": [
+    " a ",
+    "aba",
+    " a "
+  ],
+  "key": {
+    "a": "rustcraft:crystallite",
+    "b": "rustcraft:blade_2"
+  },
+  "result": {
+    "id": "rustcraft:blade_3",
+    "count": 1
+  }
+}

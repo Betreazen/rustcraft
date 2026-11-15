@@ -1,0 +1,69 @@
+//! The living vein (spec 4.9, guide `vein`): a block of ore a minute grows in a free cell within 2
+//! of it, for 2000 E and a stone from its slots. Which ore is chance: common ores often, rare ones
+//! seldom; each rarity module (`module_rare`) doubles the chances of the rare ones. Its ore gives no
+//! miner's experience (X6): the placed block is told to Path-of-craft-tree as `place`.
+
+pub const STEP_TICKS: u64 = 1200;
+pub const BLOCK_ENERGY: f64 = 2000.0;
+pub const REACH: i32 = 2;
+
+/// The ores and their chances in percent (guide `vein`); the last seven are the rare ones.
+pub const ORES: [(&str, f64, bool); 10] = [
+    ("minecraft:coal_ore", 30.0, false),
+    ("minecraft:copper_ore", 25.0, false),
+    ("minecraft:iron_ore", 20.0, false),
+    ("minecraft:redstone_ore", 8.0, true),
+    ("minecraft:lapis_ore", 6.0, true),
+    ("minecraft:gold_ore", 6.0, true),
+    ("minecraft:nether_quartz_ore", 3.0, true),
+    ("minecraft:emerald_ore", 1.0, true),
+    ("minecraft:diamond_ore", 0.8, true),
+    ("minecraft:ancient_debris", 0.2, true),
+];
+
+/// Whether `item` feeds it.
+pub fn is_rock(item: &str) -> bool {
+    matches!(item, "minecraft:cobblestone" | "minecraft:stone" | "minecraft:cobbled_deepslate" | "minecraft:deepslate")
+}
+
+/// The ore a draw `r` (0..1) gives with `rare` rarity modules.
+pub fn ore(r: f64, rare: u32) -> &'static str {
+    let k = 2f64.powi(rare.min(4) as i32);
+    let weight = |w: f64, is_rare: bool| if is_rare { w * k } else { w };
+    let total: f64 = ORES.iter().map(|(_, w, rr)| weight(*w, *rr)).sum();
+    let mut at = r.clamp(0.0, 0.999_999) * total;
+    for (id, w, rr) in ORES {
+        let w = weight(w, rr);
+        if at < w {
+            return id;
+        }
+        at -= w;
+    }
+    ORES[0].0
+}
+
+/// The cells within reach round it, nearest first.
+pub fn cells() -> Vec<[i32; 3]> {
+    let mut out: Vec<[i32; 3]> = (-REACH..=REACH)
+        .flat_map(|x| (-REACH..=REACH).flat_map(move |y| (-REACH..=REACH).map(move |z| [x, y, z])))
+        .filter(|c| *c != [0, 0, 0])
+        .collect();
+    out.sort_by_key(|c| c[0].abs() + c[1].abs() + c[2].abs());
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn common_ores_come_first_and_rarity_shifts_the_chances() {
+        assert_eq!(ore(0.0, 0), "minecraft:coal_ore");
+        assert_eq!(ore(0.999, 0), "minecraft:ancient_debris");
+        // Without the module a draw at 0.8 is iron; with two it lands on the rare ones.
+        assert_eq!(ore(0.70, 0), "minecraft:iron_ore");
+        assert!(ORES.iter().any(|(id, _, rare)| *rare && *id == ore(0.70, 2)));
+        assert_eq!(cells().len(), 124);
+        assert!(is_rock("minecraft:cobblestone") && !is_rock("minecraft:dirt"));
+    }
+}

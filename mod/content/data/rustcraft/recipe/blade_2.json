@@ -1,0 +1,18 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "equipment",
+  "pattern": [
+    " a ",
+    " s ",
+    " k "
+  ],
+  "key": {
+    "a": "rustcraft:sparksteel",
+    "s": "minecraft:amethyst_shard",
+    "k": "minecraft:stick"
+  },
+  "result": {
+    "id": "rustcraft:blade_2",
+    "count": 1
+  }
+}

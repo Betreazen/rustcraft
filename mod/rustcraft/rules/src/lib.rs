@@ -5,6 +5,8 @@ pub mod anchor;
 pub mod anim;
 pub mod backpack;
 pub mod butcher;
+pub mod explore;
+pub mod gear;
 pub mod geom;
 pub mod housing;
 pub mod machines;

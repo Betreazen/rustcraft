@@ -282,6 +282,18 @@ pub const PARTS: &[Part] = &[
         tinted: false,
     },
     Part {
+        block: "rustcraft:vein",
+        model: "rustcraft:block/vein__core",
+        pivot: [0.5, 0.53125, 0.5],
+        bottom: 0.390625,
+        on: &[Motion { target: Target::Rot(1), base: -0.0, amp: -0.8, shape: Shape::Lin, freq: 1.0, phase: 0.0 }],
+        off: Off::Rest,
+        show: Show::Always,
+        carry: 0,
+        level: false,
+        tinted: false,
+    },
+    Part {
         block: "rustcraft:trash",
         model: "rustcraft:block/trash__fire",
         pivot: [0.5, 0.5, 0.5],

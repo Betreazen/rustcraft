@@ -22,6 +22,7 @@ pub mod run;
 pub mod slice10;
 pub mod slice11;
 pub mod slice12;
+pub mod slice13;
 pub mod sources;
 pub mod storage;
 pub mod transport;
@@ -247,6 +248,12 @@ pub trait Bench {
     // Slice 12.
     /// What clients were told of the block's moving parts.
     fn anim(&self, pos: Pos) -> Option<crate::anim::Shown>;
+
+    // Slice 13.
+    /// Puts a gear piece with a number of its own and `charge` E into slot `slot` at `pos`.
+    fn put_gear(&mut self, pos: Pos, slot: usize, item: &str, charge: f64) -> Result<(), String>;
+    /// The charge of the gear piece in slot `slot` at `pos`.
+    fn gear_charge(&self, pos: Pos, slot: usize) -> Option<f64>;
 }
 
 /// A mob as the self-test reads it.
@@ -414,6 +421,7 @@ pub fn catalog() -> Vec<Build> {
     all.extend(slice10::ALL);
     all.extend(slice11::ALL);
     all.extend(slice12::ALL);
+    all.extend(slice13::ALL);
     all
 }
 

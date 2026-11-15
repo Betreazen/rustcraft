@@ -1,0 +1,17 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "equipment",
+  "pattern": [
+    "ccc",
+    "csc",
+    "c c"
+  ],
+  "key": {
+    "c": "rustcraft:sparksteel",
+    "s": "minecraft:amethyst_shard"
+  },
+  "result": {
+    "id": "rustcraft:tech_leggings_2",
+    "count": 1
+  }
+}

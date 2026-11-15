@@ -1,0 +1,18 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    "dsd",
+    "sns",
+    "dsd"
+  ],
+  "key": {
+    "d": "rustcraft:starsteel",
+    "s": "minecraft:amethyst_shard",
+    "n": "minecraft:netherite_ingot"
+  },
+  "result": {
+    "id": "rustcraft:vein",
+    "count": 1
+  }
+}

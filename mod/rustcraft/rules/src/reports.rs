@@ -89,6 +89,15 @@ pub enum Report {
     },
     /// Slice 12: the shearer milked a cow.
     Milk { owner: u128, entity: u32 },
+    /// Slice 13: a cartographer marked a chunk new to its owner (EX1).
+    Chunk {
+        owner: u128,
+        dimension: String,
+        x: i32,
+        z: i32,
+    },
+    /// Slice 13: a cartographer found a biome new to its owner (EX1).
+    Biome { owner: u128, biome: String },
     /// Slice 12: the building machine placed a cell of its projector's plan (instead of `place`).
     Build {
         owner: u128,
@@ -143,6 +152,8 @@ impl Report {
             Report::Counted { kind, owner, count } => format!("{COMMAND} {kind} {owner:032x} {count}"),
             Report::Fish { owner, item, count } => format!("{COMMAND} fish {owner:032x} {item} {count}"),
             Report::Milk { owner, entity } => format!("{COMMAND} milk {owner:032x} {entity}"),
+            Report::Chunk { owner, dimension, x, z } => format!("{COMMAND} chunk {owner:032x} {dimension} {x} {z}"),
+            Report::Biome { owner, biome } => format!("{COMMAND} biome {owner:032x} {biome}"),
             Report::Build {
                 owner,
                 dimension,
@@ -166,6 +177,8 @@ impl Report {
             Report::Counted { kind, .. } => kind,
             Report::Fish { .. } => "fish",
             Report::Milk { .. } => "milk",
+            Report::Chunk { .. } => "chunk",
+            Report::Biome { .. } => "biome",
             Report::Build { .. } => "build",
         }
     }

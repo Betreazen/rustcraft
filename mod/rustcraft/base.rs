@@ -510,6 +510,7 @@ pub(super) fn tick(game: &mut Game<'_>, dimension: &str, level: &LevelNet, t: &T
     // Slice 11: before the deaths, so a slaughter is told the tick the animal died.
     butcher::tick(game, dimension, level, t);
     crate::game::rustcraft_utility::tick(game, dimension, level, t);
+    crate::game::rustcraft_gear::tick(game, dimension);
     bleed(game, dimension, now, t);
     deaths(game, t);
     if now.is_multiple_of(ANCHOR_EVERY) {

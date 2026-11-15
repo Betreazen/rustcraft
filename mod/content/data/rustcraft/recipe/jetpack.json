@@ -1,0 +1,18 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "equipment",
+  "pattern": [
+    "dxd",
+    "xsx",
+    "dxd"
+  ],
+  "key": {
+    "d": "rustcraft:starsteel",
+    "s": "minecraft:amethyst_shard",
+    "x": "minecraft:blaze_rod"
+  },
+  "result": {
+    "id": "rustcraft:jetpack",
+    "count": 1
+  }
+}

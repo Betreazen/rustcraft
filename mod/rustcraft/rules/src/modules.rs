@@ -33,10 +33,12 @@ pub enum Module {
     /// The miner (A7): scans ×2 a module; its square 11 → 22 → 33.
     Scout,
     Area,
+    /// Slice 13: the living vein's rare ores ×2 a module.
+    Rare,
 }
 
 /// Every module with its item id.
-pub const ITEMS: [(Module, &str); 17] = [
+pub const ITEMS: [(Module, &str); 18] = [
     (Module::Speed, "rustcraft:module_speed"),
     (Module::Economy, "rustcraft:module_economy"),
     (Module::Radius, "rustcraft:module_radius"),
@@ -54,6 +56,7 @@ pub const ITEMS: [(Module, &str); 17] = [
     (Module::Output, "rustcraft:module_output"),
     (Module::Scout, "rustcraft:module_scout"),
     (Module::Area, "rustcraft:module_area"),
+    (Module::Rare, "rustcraft:module_rare"),
 ];
 
 impl Module {
@@ -136,6 +139,7 @@ impl Holder {
                 matches!(kind, Module::Speed | Module::Economy)
                     || (u.has_radius() && kind == Module::Radius)
                     || (u == crate::utility::Util::Disintegrator && kind == Module::Output)
+                    || (u == crate::utility::Util::Vein && kind == Module::Rare)
             }
         }
     }

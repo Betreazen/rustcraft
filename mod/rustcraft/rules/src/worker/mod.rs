@@ -52,16 +52,19 @@ pub enum Tool {
     /// Slice 11: the shooter (tier 3), which makes a worker a guard (P2): it rides its ring and
     /// shoots hostile mobs in range, never players, pets or peaceful mobs (P3).
     Shooter,
+    /// Slice 13: the cartographer (tier 3): it marks the chunks and biomes along its rails.
+    Map,
 }
 
 impl Tool {
-    pub const ALL: [Tool; 6] = [
+    pub const ALL: [Tool; 7] = [
         Tool::Saw,
         Tool::Reaper,
         Tool::Hold,
         Tool::Grab,
         Tool::Scoop,
         Tool::Shooter,
+        Tool::Map,
     ];
 
     pub fn item(self) -> &'static str {
@@ -72,6 +75,7 @@ impl Tool {
             Tool::Grab => "rustcraft:tool_grab",
             Tool::Scoop => "rustcraft:tool_scoop",
             Tool::Shooter => "rustcraft:tool_shooter",
+            Tool::Map => "rustcraft:tool_map",
         }
     }
 
@@ -87,7 +91,7 @@ impl Tool {
             Tool::Reaper => "hoe",
             Tool::Grab => "pickaxe",
             Tool::Scoop => "shovel",
-            Tool::Hold | Tool::Shooter => "",
+            Tool::Hold | Tool::Shooter | Tool::Map => "",
         }
     }
 
@@ -96,7 +100,7 @@ impl Tool {
         match self {
             Tool::Saw => trees::is_sapling(item),
             Tool::Reaper => plants::is_seed(item),
-            Tool::Hold | Tool::Grab | Tool::Scoop | Tool::Shooter => false,
+            Tool::Hold | Tool::Grab | Tool::Scoop | Tool::Shooter | Tool::Map => false,
         }
     }
 }
@@ -262,7 +266,7 @@ impl Worker {
         }
     }
 
-    fn count(&self, kind: Module) -> u32 {
+    pub fn count(&self, kind: Module) -> u32 {
         modules::count(&self.upgrades, kind)
     }
 
