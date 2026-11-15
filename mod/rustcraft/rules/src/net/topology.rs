@@ -249,6 +249,46 @@ fn find_nets(layout: &Layout, tuning: &Tuning, reach: &HashMap<Pos, Reach>) -> V
     nets
 }
 
+/// The blocks of pipe from the nearest of `from` to the nearest of `to`, going only through
+/// `housings` (one channel net's): 0 for a housing in both, 1 for a touching housing further, 2
+/// more through a node. None when no way through the net joins them.
+pub fn pipe_length(
+    layout: &Layout,
+    tuning: &Tuning,
+    housings: &BTreeSet<Pos>,
+    from: &[Pos],
+    to: &[Pos],
+) -> Option<u32> {
+    let targets: BTreeSet<Pos> = to
+        .iter()
+        .copied()
+        .filter(|p| housings.contains(p))
+        .collect();
+    if targets.is_empty() {
+        return None;
+    }
+    let mut best: HashMap<Pos, u32> = HashMap::new();
+    let mut queue = BinaryHeap::new();
+    for &h in from.iter().filter(|p| housings.contains(*p)) {
+        queue.push((std::cmp::Reverse(0u32), h));
+    }
+    while let Some((std::cmp::Reverse(d), h)) = queue.pop() {
+        if best.get(&h).is_some_and(|&b| b <= d) {
+            continue;
+        }
+        best.insert(h, d);
+        if targets.contains(&h) {
+            return Some(d);
+        }
+        for (next, cost) in links(layout, tuning, h) {
+            if housings.contains(&next) && best.get(&next).is_none_or(|&b| b > d + cost) {
+                queue.push((std::cmp::Reverse(d + cost), next));
+            }
+        }
+    }
+    None
+}
+
 /// Works out the lines, reaches and channel networks of `layout`.
 pub fn analyse(layout: &Layout, tuning: &Tuning) -> Topology {
     let lines = find_lines(layout, tuning);
@@ -469,5 +509,36 @@ mod tests {
             t.net_of([100, 0, 0], 0).map(|n| n.housings.clone())
         );
         assert_eq!(t.net_of([1, 0, 0], 0).unwrap().housings.len(), 32);
+    }
+
+    #[test]
+    fn the_pipe_between_two_housings_of_a_net_is_counted_through_its_node() {
+        // Slice 17: an order's items ride this many blocks of pipe.
+        let mut layout = Layout::default();
+        layout.nodes.insert([0, 0, 0], Node { tier: 3 });
+        row(&mut layout, 1, 10);
+        layout.nodes.insert([11, 0, 0], Node { tier: 3 });
+        row(&mut layout, 12, 3);
+        let tuning = Tuning::default();
+        let t = analyse(&layout, &tuning);
+        let net = t.net_of([1, 0, 0], 0).unwrap();
+        let length =
+            |from: &[Pos], to: &[Pos]| pipe_length(&layout, &tuning, &net.housings, from, to);
+        assert_eq!(length(&[[3, 0, 0]], &[[3, 0, 0]]), Some(0));
+        assert_eq!(length(&[[3, 0, 0]], &[[9, 0, 0]]), Some(6));
+        // The node between 10 and 12 is a block of pipe too.
+        assert_eq!(length(&[[1, 0, 0]], &[[14, 0, 0]]), Some(9 + 2 + 2));
+        // The nearest of several ends.
+        assert_eq!(
+            length(&[[1, 0, 0], [8, 0, 0]], &[[2, 0, 0], [10, 0, 0]]),
+            Some(1)
+        );
+        // A housing off the net is no end.
+        assert_eq!(length(&[[1, 0, 0]], &[[40, 0, 0]]), None);
+        let half: BTreeSet<Pos> = net.housings.iter().copied().filter(|p| p[0] <= 5).collect();
+        assert_eq!(
+            pipe_length(&layout, &tuning, &half, &[[1, 0, 0]], &[[9, 0, 0]]),
+            None
+        );
     }
 }

@@ -119,6 +119,15 @@ Start-Sleep -Seconds 1
 $file = Join-Path $Out 'handbook-page.png'
 Bot $riderSock "screenshot $file" | Out-Null
 Write-Host "shot $file"
+# The page's last sheet: the guide's animated scene (H3), at two moments of its steps.
+Bot $riderSock 'key right tap' | Out-Null
+Start-Sleep -Seconds 2
+foreach ($n in 1, 2) {
+    $file = Join-Path $Out "handbook-scene-$n.png"
+    Bot $riderSock "screenshot $file" | Out-Null
+    Write-Host "shot $file"
+    Start-Sleep -Seconds 5
+}
 Bot $riderSock 'key esc tap' | Out-Null
 
 foreach ($s in $camSock, $riderSock) {

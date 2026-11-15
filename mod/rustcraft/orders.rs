@@ -8,13 +8,18 @@
 // one of its item nets (M11): «on the line» is every block behind a joint of an item net the
 // storage's anchor is a joint of (rustcraft_transport::Transport::around).
 //
-// A job's items go straight from the storage into the machine's input slots, the way a machine
-// writes its own slots (rustcraft_machines::write_slots), and its product comes straight back
-// into the storage from the machine's output slots once a second, so an order runs on the default
-// joints (the storage takes, M16) and never waits on a net's settings. They do not ride the item
-// channel: an item net moves what its joints' modes, filters and priorities decide
-// (rustcraft_rules::net::items::tick), and has no move «this item to that machine» an order could
-// ask for without a new kind of joint. An autocrafter's job is a temporary page
+// Slice 17: a job's items ride the item channel (rustcraft_rules::orders::ship). They leave the
+// storage as one shipment on the item net that joins the storage and the machine
+// (rustcraft_transport::Transport::route), loaded at the net's throughput and riding the pipe at
+// its tier's speed, and go into the machine's input slots when they arrive, the way a machine
+// writes its own slots (rustcraft_machines::write_slots); its products leave the machine's output
+// slots once a second and ride back. An order still runs on the default joints (the storage
+// takes, M16) and never waits on a net's settings: the shipment is the order's own move, not
+// one the joints' modes, filters and priorities decide (rustcraft_rules::net::items::tick), and
+// it takes its share of the net's throughput first. A shipment whose job is gone when it arrives
+// turns back to the storage. Where no item net joins the storage and the machine through joints
+// that are not switched off, the items go straight from the storage into the machine and back,
+// as slice 15 moved them. An autocrafter's job is a temporary page
 // (rustcraft_crafter::TempPage), crafted before its own pages; it disappears when its crafts are
 // done. A furnace's, crusher's, smelter's or mixer's job is done when its inputs hold none of the
 // job's items.
@@ -64,6 +69,7 @@ use rustcraft_rules::{
         KINDS, PlanRecipe, Step, fluid_key, fluid_number, fluid_of,
         queue::{FreeMachine, Job, Order, Queue, SMART_TIER, Wait, runs_that_fit},
         saved::{self, Record, SavedJob, SavedPage},
+        ship::{self, Leg, Route, Shipment},
     },
     storage::{
         keys,
@@ -119,6 +125,8 @@ struct LevelOrders {
 struct Orders {
     levels: HashMap<String, LevelOrders>,
     jobs: HashMap<String, Vec<Running>>,
+    /// Slice 17: the items riding the item channel for the level's jobs, in the order they set off.
+    ships: HashMap<String, Vec<Shipment>>,
     book: Option<Arc<Book>>,
 }
 
@@ -197,6 +205,7 @@ fn page_of(t: &TempPage) -> SavedPage {
 fn records(
     state: &LevelOrders,
     jobs: &[Running],
+    ships: &[Shipment],
     pages: &BTreeMap<Pos, TempPage>,
 ) -> BTreeMap<u32, Vec<String>> {
     let ids: BTreeSet<u32> = state
@@ -204,6 +213,7 @@ fn records(
         .keys()
         .copied()
         .chain(jobs.iter().map(|r| r.storage))
+        .chain(ships.iter().map(|s| s.storage))
         .collect();
     ids.into_iter()
         .map(|id| {
@@ -221,6 +231,7 @@ fn records(
                         },
                     })
                     .collect(),
+                ships: ships.iter().filter(|s| s.storage == id).cloned().collect(),
             };
             (id, saved::encode(&record))
         })
@@ -233,6 +244,7 @@ fn records(
 pub(super) fn restore(dimension: &str, saved: &BTreeMap<u32, Vec<String>>) {
     let mut queues = BTreeMap::new();
     let mut jobs = Vec::new();
+    let mut ships = Vec::new();
     for (&id, strings) in saved {
         let Some(record) = saved::decode(strings) else {
             log::warn!("rustcraft: the orders of storage {id} were not read");
@@ -241,6 +253,13 @@ pub(super) fn restore(dimension: &str, saved: &BTreeMap<u32, Vec<String>>) {
         if !record.queue.orders.is_empty() {
             queues.insert(id, record.queue);
         }
+        // A shipment rides on from where it was: it arrives, or turns back when its job is gone.
+        ships.extend(
+            record
+                .ships
+                .into_iter()
+                .map(|s| Shipment { storage: id, ..s }),
+        );
         jobs.extend(record.jobs.into_iter().map(|j| Running {
             storage: id,
             job: j.job,
@@ -251,15 +270,17 @@ pub(super) fn restore(dimension: &str, saved: &BTreeMap<u32, Vec<String>>) {
         }));
     }
     log::info!(
-        "rustcraft: {} orders and {} jobs read back on {dimension}",
+        "rustcraft: {} orders, {} jobs and {} shipments read back on {dimension}",
         queues.values().map(|q| q.orders.len()).sum::<usize>(),
-        jobs.len()
+        jobs.len(),
+        ships.len()
     );
     let mut o = orders();
     let level = o.levels.entry(dimension.to_owned()).or_default();
     level.queues = queues;
     level.revision += 1;
     o.jobs.insert(dimension.to_owned(), jobs);
+    o.ships.insert(dimension.to_owned(), ships);
 }
 
 /// A job read back finds its machine: an autocrafter gets its page again, owing no more than its
@@ -664,6 +685,44 @@ fn line_state(level: &LevelNet, anchor: Pos) -> (Smart, Vec<(Pos, Machine)>) {
 
 // ---- Moving an order's items ----
 
+/// How a job's items move between its storage and its machine: along `route` on the item
+/// channel (slice 17), or straight when no item net joins them.
+struct Way<'s> {
+    storage: u32,
+    order: u16,
+    route: Option<Route>,
+    ships: &'s mut Vec<Shipment>,
+}
+
+impl Way<'_> {
+    /// `items` set off along the route to `leg`'s end.
+    fn send(&mut self, leg: Leg, items: Vec<(ItemKey, u32)>) {
+        let Some(route) = &self.route else {
+            return;
+        };
+        let tps = server::tuning().ticks_per_second;
+        self.ships.push(Shipment::new(
+            self.storage,
+            self.order,
+            leg,
+            items,
+            route,
+            tps,
+        ));
+    }
+}
+
+/// The way an order's items ride between the storage at `anchor` and the machine at `machine`.
+fn route_of(level: &LevelNet, anchor: Option<Pos>, machine: Pos) -> Option<Route> {
+    let route = level
+        .transport
+        .route(&level.layout, server::tuning(), anchor?, machine);
+    if route.is_none() {
+        log::debug!("rustcraft: no item path to {machine:?}: an order's items move directly");
+    }
+    route
+}
+
 /// The stack sizes of a step's inputs.
 fn stacks(game: &Game<'_>, inputs: &[(ItemKey, u32)]) -> BTreeMap<ItemKey, u32> {
     inputs
@@ -672,21 +731,55 @@ fn stacks(game: &Game<'_>, inputs: &[(ItemKey, u32)]) -> BTreeMap<ItemKey, u32> 
         .collect()
 }
 
-/// A job's items out of the storage into the machine's inputs; false, and nothing moved, when the
-/// storage no longer holds them or the inputs do not take them. A fluid input is not the storage's
-/// to give: the fluid nets bring it (O12).
+/// `wants` into the inputs of the machine at `pos`; false, and nothing written, when they do not
+/// all fit or the machine is gone.
+fn place_inputs(game: &mut Game<'_>, machine: Machine, pos: Pos, wants: &[(ItemKey, u64)]) -> bool {
+    let items: Vec<(ItemKey, u32)> = wants.iter().map(|(i, _)| (i.clone(), 1)).collect();
+    let sizes = stacks(game, &items);
+    let (inputs, _) = slots_of(machine);
+    let placed = game.native_with_mod_block_entity(pos, |entity| {
+        let before: Vec<Slot> = inputs.clone().map(|i| slot_of(entity, i)).collect();
+        let mut after = before.clone();
+        for (item, want) in wants {
+            let n = u32::try_from(*want).unwrap_or(u32::MAX);
+            let size = sizes.get(item).copied().unwrap_or(machines::FALLBACK_STACK);
+            if !slots::place(&mut after, item, n, size) {
+                return false;
+            }
+        }
+        write_slots(entity, inputs.clone(), &before, &after, &[]);
+        true
+    });
+    placed == Some(true)
+}
+
+/// What came of handing a job its items.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Sent {
+    /// The storage no longer holds them, or the machine does not take them: nothing moved.
+    No,
+    /// Straight into the machine (no item path).
+    Placed,
+    /// Riding the item channel to the machine.
+    Riding,
+}
+
+/// A job's items out of the storage, into the machine's inputs or onto the item channel to it.
+/// A fluid input is not the storage's to give: the fluid nets bring it (O12).
 fn deliver(
     game: &mut Game<'_>,
     dimension: &str,
-    storage_id: u32,
+    way: &mut Way<'_>,
     machine: Machine,
     job: &Job,
-) -> bool {
-    let items = job.step.items();
-    let wants: Vec<(ItemKey, u64)> = items
+) -> Sent {
+    let wants: Vec<(ItemKey, u64)> = job
+        .step
+        .items()
         .iter()
         .map(|(i, n)| (i.clone(), u64::from(*n) * u64::from(job.runs)))
         .collect();
+    let storage_id = way.storage;
     let mut taken: Vec<(ItemKey, u64)> = Vec::new();
     let give_back = |taken: &[(ItemKey, u64)]| {
         for (item, n) in taken {
@@ -698,38 +791,41 @@ fn deliver(
         taken.push((item.clone(), got));
         if got < *want {
             give_back(&taken);
-            return false;
+            return Sent::No;
         }
     }
-    let sizes = stacks(game, &items);
-    let (inputs, _) = slots_of(machine);
-    let placed = game.native_with_mod_block_entity(job.machine, |entity| {
-        let before: Vec<Slot> = inputs.clone().map(|i| slot_of(entity, i)).collect();
-        let mut after = before.clone();
-        for (item, want) in &wants {
-            let n = u32::try_from(*want).unwrap_or(u32::MAX);
-            let size = sizes.get(item).copied().unwrap_or(machines::FALLBACK_STACK);
-            if !slots::place(&mut after, item, n, size) {
-                return false;
-            }
+    if way.route.is_some() {
+        if game.native_mod_block_entity(job.machine).is_none() {
+            give_back(&taken);
+            return Sent::No;
         }
-        write_slots(entity, inputs.clone(), &before, &after, &[]);
-        true
-    });
-    if placed != Some(true) {
+        let items = wants
+            .iter()
+            .map(|(i, n)| (i.clone(), u32::try_from(*n).unwrap_or(u32::MAX)))
+            .collect();
+        way.send(
+            Leg::Machine {
+                machine: job.machine,
+            },
+            items,
+        );
+        return Sent::Riding;
+    }
+    if !place_inputs(game, machine, job.machine, &wants) {
         give_back(&taken);
-        return false;
+        return Sent::No;
     }
-    true
+    Sent::Placed
 }
 
-/// The plain stacks of `item` in the machine's output slots go into the storage, as far as it
+/// The plain stacks of `item` in the machine's output slots go to the storage, as far as it
 /// takes them; with `own` (O11: a product the order's next step takes) all of them, past the
-/// storage's room and limits. How many went.
+/// storage's room and limits. Along a route they ride and land when they arrive; how many went
+/// into the storage now.
 fn pull(
     game: &mut Game<'_>,
     dimension: &str,
-    storage_id: u32,
+    way: &mut Way<'_>,
     pos: Pos,
     machine: Machine,
     item: &str,
@@ -752,9 +848,27 @@ fn pull(
     if plain == 0 {
         return 0;
     }
+    let storage_id = way.storage;
+    let riding = way.route.is_some();
     let took = if own {
-        storage::restore_into(dimension, storage_id, item, u64::from(plain));
+        if !riding {
+            storage::restore_into(dimension, storage_id, item, u64::from(plain));
+        }
         plain
+    } else if riding {
+        // As far as the storage will take them when they arrive, less what rides to it already.
+        let on_the_way: u64 = way
+            .ships
+            .iter()
+            .filter(|s| {
+                s.storage == storage_id && matches!(s.leg, Leg::Products { own: false, .. })
+            })
+            .flat_map(|s| s.items.iter())
+            .filter(|(i, _)| i == item)
+            .map(|(_, n)| u64::from(*n))
+            .sum();
+        let room = storage::room_in(game, dimension, storage_id, item).saturating_sub(on_the_way);
+        u32::try_from(room).unwrap_or(u32::MAX).min(plain)
     } else {
         let took = storage::put_into(game, dimension, storage_id, item, u64::from(plain));
         u32::try_from(took).unwrap_or(plain).min(plain)
@@ -770,18 +884,27 @@ fn pull(
     });
     if written.is_none() {
         // The machine went meanwhile: what the storage took is not there.
-        storage::take_from(dimension, storage_id, item, u64::from(took));
+        if !riding {
+            storage::take_from(dimension, storage_id, item, u64::from(took));
+        }
+        return 0;
+    }
+    if riding {
+        way.send(
+            Leg::Products { from: pos, own },
+            vec![(item.to_owned(), took)],
+        );
         return 0;
     }
     took
 }
 
 /// O7: what a cancelled job did not use yet goes back from the machine's inputs to the storage:
-/// at most `runs` runs of its items.
+/// at most `runs` runs of its items, riding the item channel where it joins them.
 fn take_back(
     game: &mut Game<'_>,
     dimension: &str,
-    storage_id: u32,
+    way: &mut Way<'_>,
     machine: Machine,
     job: &Job,
     runs: u32,
@@ -799,8 +922,20 @@ fn take_back(
         write_slots(e, inputs.clone(), &before, &after, &[]);
         back
     });
-    for (item, n) in back.unwrap_or_default() {
-        storage::restore_into(dimension, storage_id, &item, u64::from(n));
+    let back: Vec<(ItemKey, u32)> = back
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|(_, n)| *n > 0)
+        .collect();
+    if back.is_empty() {
+        return;
+    }
+    if way.route.is_some() {
+        way.send(Leg::Back { from: job.machine }, back);
+        return;
+    }
+    for (item, n) in back {
+        storage::restore_into(dimension, way.storage, &item, u64::from(n));
     }
 }
 
@@ -815,33 +950,166 @@ fn inputs_spent(game: &Game<'_>, machine: Machine, job: &Job) -> bool {
     })
 }
 
+// ---- Shipments arriving ----
+
+/// The most items one item entity holds when a shipment's storage is gone.
+const DROP_STACK: u32 = 64;
+
+/// Items riding to the storage arrive: into it (`own`: O11, the order's own, past its room and
+/// limits; `None`: coming back, past them too; `Some(false)`: as far as it takes them, the rest
+/// past them, so nothing is lost). A storage that is gone meanwhile leaves them on the ground at
+/// the block they came from.
+fn land(
+    game: &mut Game<'_>,
+    dimension: &str,
+    state: &mut LevelOrders,
+    live: &BTreeSet<u32>,
+    s: &Shipment,
+    from: Pos,
+    own: Option<bool>,
+) {
+    if !live.contains(&s.storage) {
+        for (item, n) in &s.items {
+            let mut left = *n;
+            while left > 0 {
+                let part = left.min(DROP_STACK);
+                storage::drop_stack(game, dimension, from, item, part);
+                left -= part;
+            }
+        }
+        return;
+    }
+    for (item, n) in &s.items {
+        let n = u64::from(*n);
+        let took = match own {
+            Some(false) => storage::put_into(game, dimension, s.storage, item, n),
+            _ => 0,
+        };
+        if took < n {
+            storage::restore_into(dimension, s.storage, item, n - took);
+        }
+        if own == Some(true)
+            && let Some(q) = state.queues.get_mut(&s.storage)
+        {
+            q.keep_for(s.order, item, n);
+        }
+    }
+}
+
+/// Slice 17: the shipments that arrived. A job's items go into its machine's inputs (an
+/// autocrafter gets its temporary page then); a shipment whose job is gone turns back, one whose
+/// machine is not on the level yet while the job read back waits for it waits too, and a job whose
+/// items no longer fit its machine ends (they ride back). Products and items coming back land in
+/// the storage.
+fn arrive(
+    game: &mut Game<'_>,
+    dimension: &str,
+    level: &mut LevelNet,
+    state: &mut LevelOrders,
+    jobs: &mut Vec<Running>,
+    ships: &mut Vec<Shipment>,
+) {
+    if !ships.iter().any(Shipment::arrived) {
+        return;
+    }
+    let live: BTreeSet<u32> = storage::level_storages(dimension)
+        .into_iter()
+        .map(|(id, _, _)| id)
+        .collect();
+    let mut kept = Vec::with_capacity(ships.len());
+    let mut failed: Vec<(u32, u16, Pos)> = Vec::new();
+    for s in std::mem::take(ships) {
+        if !s.arrived() {
+            kept.push(s);
+            continue;
+        }
+        match s.leg.clone() {
+            Leg::Machine { machine } => {
+                let Some(r) = jobs
+                    .iter()
+                    .find(|r| s.bound_for(r.storage, r.job.order, r.job.machine))
+                else {
+                    kept.push(s.turn_back());
+                    continue;
+                };
+                let on_level = level
+                    .machines
+                    .get(&machine)
+                    .copied()
+                    .filter(|m| kind_of(*m) == Some(r.job.step.machine.as_str()));
+                let Some(kind) = on_level else {
+                    kept.push(if r.restored.is_some() {
+                        s
+                    } else {
+                        s.turn_back()
+                    });
+                    continue;
+                };
+                let wants: Vec<(ItemKey, u64)> = s
+                    .items
+                    .iter()
+                    .map(|(i, n)| (i.clone(), u64::from(*n)))
+                    .collect();
+                if !place_inputs(game, kind, machine, &wants) {
+                    failed.push((r.storage, r.job.order, machine));
+                    kept.push(s.turn_back());
+                    continue;
+                }
+                if kind == Machine::Crafter {
+                    let book = book_of(game, &level.recipes);
+                    let page = TempPage {
+                        pattern: r.job.step.pattern(&book.recipes),
+                        owed: r.job.runs,
+                    };
+                    level.temp_pages.insert(machine, page);
+                }
+            }
+            Leg::Products { from, own } => {
+                land(game, dimension, state, &live, &s, from, Some(own));
+            }
+            Leg::Back { from } => land(game, dimension, state, &live, &s, from, None),
+        }
+    }
+    jobs.retain(|r| !failed.contains(&(r.storage, r.job.order, r.job.machine)));
+    *ships = kept;
+}
+
 // ---- The tick ----
 
-/// Once a second from the level's tick: the jobs looked at, the cancelled ones taken back, and a
-/// round of every storage's queue; then the storages' records of their orders brought up to date.
+/// Once a second from the level's tick: the shipments ride on and those that arrived land, the
+/// jobs looked at, the cancelled ones taken back, and a round of every storage's queue; then the
+/// storages' records of their orders brought up to date.
 pub(super) fn tick(game: &mut Game<'_>, dimension: &str, level: &mut LevelNet) {
-    let (mut state, mut jobs) = {
+    let (mut state, mut jobs, mut ships) = {
         let mut o = orders();
         (
             o.levels.remove(dimension).unwrap_or_default(),
             o.jobs.remove(dimension).unwrap_or_default(),
+            o.ships.remove(dimension).unwrap_or_default(),
         )
     };
     let before = state.clone();
     let job_count = jobs.len();
     let had_book = orders().book.is_some();
-    follow_jobs(game, dimension, level, &mut state, &mut jobs);
-    for (id, anchor, terminals) in storage::level_storages(dimension) {
+    // Slice 17: a second of riding; the nets' own moves get what the shipments left.
+    let tps = server::tuning().ticks_per_second;
+    let second = tps.round().max(1.0) as u32;
+    let loaded = ship::advance(&mut ships, second);
+    level.transport.reserve(loaded, second);
+    arrive(game, dimension, level, &mut state, &mut jobs, &mut ships);
+    let storages = storage::level_storages(dimension);
+    let anchors: BTreeMap<u32, Pos> = storages.iter().map(|(id, a, _)| (*id, *a)).collect();
+    follow_jobs(
+        game, dimension, level, &mut state, &mut jobs, &mut ships, &anchors,
+    );
+    for (id, anchor, terminals) in &storages {
         let started = storage_round(
-            game, dimension, level, &mut state, &jobs, id, anchor, &terminals,
+            game, dimension, level, &mut state, &jobs, &mut ships, *id, *anchor, terminals,
         );
         jobs.extend(started);
     }
     // Storages that are gone take their orders with them.
-    let live: BTreeSet<u32> = storage::level_storages(dimension)
-        .into_iter()
-        .map(|(id, _, _)| id)
-        .collect();
+    let live: BTreeSet<u32> = anchors.keys().copied().collect();
     state
         .queues
         .retain(|id, q| live.contains(id) && !q.orders.is_empty());
@@ -860,9 +1128,10 @@ pub(super) fn tick(game: &mut Game<'_>, dimension: &str, level: &mut LevelNet) {
                 merge_presses(state.queues.entry(id).or_default(), q);
             }
         }
-        let kept = records(&state, &jobs, &level.temp_pages);
+        let kept = records(&state, &jobs, &ships, &level.temp_pages);
         o.levels.insert(dimension.to_owned(), state);
         o.jobs.insert(dimension.to_owned(), jobs);
+        o.ships.insert(dimension.to_owned(), ships);
         kept
     };
     storage::set_order_records(dimension, kept);
@@ -877,15 +1146,18 @@ fn merge_presses(queue: &mut Queue, meanwhile: Queue) {
     }
 }
 
-/// Each job: its machine's products pulled into the storage; a done job counted to its order; a
-/// job whose order was cancelled taken back; a job whose machine went dropped. A job read back
-/// from the record takes its machine again, or waits for it a while.
+/// Each job: its machine's products sent to the storage; a done job counted to its order; a job
+/// whose order was cancelled taken back; a job whose machine went dropped. A job read back from
+/// the record takes its machine again, or waits for it a while. A job whose items still ride to
+/// its machine waits for them.
 fn follow_jobs(
     game: &mut Game<'_>,
     dimension: &str,
     level: &mut LevelNet,
     state: &mut LevelOrders,
     jobs: &mut Vec<Running>,
+    ships: &mut Vec<Shipment>,
+    anchors: &BTreeMap<u32, Pos>,
 ) {
     let mut kept = Vec::with_capacity(jobs.len());
     for mut r in std::mem::take(jobs) {
@@ -912,13 +1184,30 @@ fn follow_jobs(
             continue;
         };
         adopt(game, level, machine, &mut r);
+        // Its items still ride: nothing is in the machine for it yet. A job whose order went
+        // ends; its items turn back when they arrive.
+        if ships
+            .iter()
+            .any(|s| s.bound_for(r.storage, r.job.order, pos))
+        {
+            if order_item.is_some() {
+                kept.push(r);
+            }
+            continue;
+        }
         let done = match machine {
             Machine::Crafter => level.temp_pages.get(&pos).map(|t| t.owed == 0),
             _ => Some(inputs_spent(game, machine, &r.job)),
         };
+        let mut way = Way {
+            storage: r.storage,
+            order: r.job.order,
+            route: route_of(level, anchors.get(&r.storage).copied(), pos),
+            ships: &mut *ships,
+        };
         let output = &r.job.step.output.0;
         let own = order_item.as_ref().is_some_and(|item| item != output);
-        let pulled = pull(game, dimension, r.storage, pos, machine, output, own);
+        let pulled = pull(game, dimension, &mut way, pos, machine, output, own);
         if own && let Some(q) = state.queues.get_mut(&r.storage) {
             q.keep_for(r.job.order, output, u64::from(pulled));
         }
@@ -927,7 +1216,7 @@ fn follow_jobs(
                 Machine::Crafter => level.temp_pages.get(&pos).map_or(0, |t| t.owed),
                 _ => r.job.runs,
             };
-            take_back(game, dimension, r.storage, machine, &r.job, left);
+            take_back(game, dimension, &mut way, machine, &r.job, left);
             level.temp_pages.remove(&pos);
             continue;
         }
@@ -968,7 +1257,7 @@ fn stock_with_fluids(
 }
 
 /// One storage's round: its line, its «держать» orders and the jobs to start, started. The jobs
-/// that went to machines.
+/// that went to machines. An order whose items ride the item channel counts as running.
 #[allow(clippy::too_many_arguments)]
 fn storage_round(
     game: &mut Game<'_>,
@@ -976,6 +1265,7 @@ fn storage_round(
     level: &mut LevelNet,
     state: &mut LevelOrders,
     jobs: &[Running],
+    ships: &mut Vec<Shipment>,
     id: u32,
     anchor: Pos,
     terminals: &[Pos],
@@ -998,7 +1288,14 @@ fn storage_round(
     if smart != Smart::Works || !(has_queue || !keeps.is_empty()) {
         return Vec::new();
     }
-    let running = |order: u16| jobs.iter().any(|r| r.storage == id && r.job.order == order);
+    let riding: BTreeSet<u16> = ships
+        .iter()
+        .filter(|s| s.storage == id)
+        .map(|s| s.order)
+        .collect();
+    let running = |order: u16| {
+        riding.contains(&order) || jobs.iter().any(|r| r.storage == id && r.job.order == order)
+    };
     let queue = state.queues.entry(id).or_default();
     if book_in {
         queue.keep(&keeps, &stock, &running);
@@ -1035,47 +1332,57 @@ fn storage_round(
         .map(|(p, _)| *p)
         .collect();
     let plan_stock = stock_with_fluids(game, level, stock, &book, &mixers);
-    let recipes = &mut level.recipes;
     let machine_at: BTreeMap<Pos, Machine> = machines_on_line.iter().copied().collect();
-    let mut fits = |pos: Pos, step: &Step, want: u32| -> u32 {
-        let Some(&machine) = machine_at.get(&pos) else {
-            return 0;
-        };
-        if machine == Machine::Crafter {
-            let pattern: Pattern = step.pattern(&book.recipes);
-            let makes = crafter::makes(game, recipes, &pattern);
-            if makes.as_ref().map(|(i, n)| (i.as_str(), *n))
-                != Some((step.output.0.as_str(), step.output.1))
-            {
+    let new_jobs = {
+        let recipes = &mut level.recipes;
+        let mut fits = |pos: Pos, step: &Step, want: u32| -> u32 {
+            let Some(&machine) = machine_at.get(&pos) else {
                 return 0;
+            };
+            if machine == Machine::Crafter {
+                let pattern: Pattern = step.pattern(&book.recipes);
+                let makes = crafter::makes(game, recipes, &pattern);
+                if makes.as_ref().map(|(i, n)| (i.as_str(), *n))
+                    != Some((step.output.0.as_str(), step.output.1))
+                {
+                    return 0;
+                }
             }
-        }
-        let Some(slots) = read_slots(game, pos, slots_of(machine).0) else {
-            return 0;
+            let Some(slots) = read_slots(game, pos, slots_of(machine).0) else {
+                return 0;
+            };
+            let items = step.items();
+            let sizes = stacks(game, &items);
+            let size = |item: &str| sizes.get(item).copied().unwrap_or(machines::FALLBACK_STACK);
+            runs_that_fit(&slots, &items, want, &size)
         };
-        let items = step.items();
-        let sizes = stacks(game, &items);
-        let size = |item: &str| sizes.get(item).copied().unwrap_or(machines::FALLBACK_STACK);
-        runs_that_fit(&slots, &items, want, &size)
+        queue.round(
+            &plan_stock,
+            &book.recipes,
+            &kinds,
+            &free,
+            &running,
+            &mut fits,
+        )
     };
-    let new_jobs = queue.round(
-        &plan_stock,
-        &book.recipes,
-        &kinds,
-        &free,
-        &running,
-        &mut fits,
-    );
     let mut started = Vec::new();
     for job in new_jobs {
         let Some(&machine) = machine_at.get(&job.machine) else {
             continue;
         };
-        if !deliver(game, dimension, id, machine, &job) {
+        let mut way = Way {
+            storage: id,
+            order: job.order,
+            route: route_of(level, Some(anchor), job.machine),
+            ships: &mut *ships,
+        };
+        let sent = deliver(game, dimension, &mut way, machine, &job);
+        if sent == Sent::No {
             continue;
         }
         queue.started(&job);
-        if machine == Machine::Crafter {
+        // Along the channel the page comes when the items arrive.
+        if machine == Machine::Crafter && sent == Sent::Placed {
             level.temp_pages.insert(
                 job.machine,
                 TempPage {

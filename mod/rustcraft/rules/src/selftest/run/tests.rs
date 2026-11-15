@@ -288,6 +288,17 @@ impl Bench for Fake {
     fn recipe_grid(&self, _: &str) -> Option<[Option<String>; 9]> {
         None
     }
+    fn set_brush_loot(&mut self, _: Pos, _: &str) -> Result<(), String> {
+        Ok(())
+    }
+    fn wrench_lift(
+        &mut self,
+        _: Pos,
+        _: Pos,
+        _: usize,
+    ) -> Result<crate::utility::found::Lift, String> {
+        Ok(crate::utility::found::Lift::Grown)
+    }
 }
 
 const PLOT: Area = Area {

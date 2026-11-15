@@ -254,7 +254,8 @@ fn cancel_gives_parts_back(o: Pos, _: &Tuning) -> Scenario {
             FILL,
             move |b, _| Ok(b.order(terminal_at(o), PISTON, 2).is_ok()),
         )
-        .until("the parts are in the crafter", 100, move |b, _| {
+        // Slice 17: the parts ride the channel there and back.
+        .until("the parts are in the crafter", 200, move |b, _| {
             Ok(count_of(&b.items(crafter_at(o)), COBBLE) == 8)
         })
         .then("cancel the order", move |b, _| {
@@ -265,7 +266,7 @@ fn cancel_gives_parts_back(o: Pos, _: &Tuning) -> Scenario {
                 .ok_or("no order to cancel")?;
             b.cancel_order(terminal_at(o), id)
         })
-        .until("the parts are back in the storage", 100, move |b, _| {
+        .until("the parts are back in the storage", 200, move |b, _| {
             holds(b, o, &p3)
         })
         .check("the crafter keeps none of them", move |b, _| {

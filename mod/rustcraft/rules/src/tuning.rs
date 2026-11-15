@@ -12,6 +12,9 @@ pub struct Tuning {
     pub hub_tier: u8,
     /// M10: what a channel of each tier carries a second (tier table of the guide).
     pub item_per_second: [f64; 4],
+    /// Slice 17 (proposal): how fast an order's items ride an item channel of each tier, blocks a
+    /// second (spec 19, O4: «ингредиенты приходят по магистрали»).
+    pub item_ride_speed: [f64; 4],
     pub fluid_buckets_per_second: [f64; 4],
     /// M13: how many fluids a fluid channel of each tier carries at once.
     pub fluid_kinds: [usize; 4],
@@ -241,6 +244,7 @@ impl Default for Tuning {
             node_range: [32, 64, 128, 256],
             hub_tier: 4,
             item_per_second: [4.0, 16.0, 64.0, 256.0],
+            item_ride_speed: [4.0, 8.0, 16.0, 32.0],
             fluid_buckets_per_second: [1.0, 4.0, 16.0, 64.0],
             fluid_kinds: [1, 2, 4, 8],
             energy_per_second: [32.0, 128.0, 512.0, 2048.0],
@@ -396,6 +400,11 @@ impl Tuning {
     /// Items a second an item net with weakest channel `tier` carries.
     pub fn items_of(&self, tier: u8) -> f64 {
         self.item_per_second[tier_index(tier)]
+    }
+
+    /// Blocks a second an order's items ride an item net with weakest channel `tier` (slice 17).
+    pub fn ride_speed_of(&self, tier: u8) -> f64 {
+        self.item_ride_speed[tier_index(tier)]
     }
 
     /// Buckets a second a fluid net with weakest channel `tier` carries, each fluid in its lane.

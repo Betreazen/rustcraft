@@ -306,6 +306,16 @@ pub(super) fn on_use_item_on(
 ) {
     workers::on_use_item_on(game, stack, pos, claimed);
     let item: &str = &stack.item;
+    // Spec 26: the wrench with sneaking lifts suspicious sand or gravel (rustcraft_utility).
+    if !*claimed
+        && item == content::WRENCH
+        && let Some(player) = game.native_acting_player()
+        && rustcraft_rules::utility::found::wrench_lifts(&game.native_block(pos), player.sneaking)
+    {
+        *claimed = true;
+        crate::game::rustcraft_utility::lift_with_wrench(game, player.uuid, &player.dimension, pos);
+        return;
+    }
     // Slice 12: the facade on a housing or a node; the wrench pairs portal docks.
     if !*claimed
         && let Some(player) = game.native_acting_player()
@@ -414,8 +424,10 @@ pub(super) fn on_place_block(game: &mut Game<'_>, stack: &ItemStack, pos: [i32; 
         mark_all_stale();
         return;
     };
-    // ST5: a block placed where the vein grew one is no grown block.
+    // ST5: a block placed where the vein grew one is no grown block, unless it is a grown one
+    // placed again; a lifted suspicious block gets its loot back (spec 26).
     crate::game::rustcraft_utility::forget_grown(game, &player.dimension, pos);
+    crate::game::rustcraft_utility::on_place_suspicious(game, &player.dimension, stack, pos);
     if is_ours(&stack.item) || touches_magistral(&player.dimension, pos) {
         mark_stale(&player.dimension);
     }

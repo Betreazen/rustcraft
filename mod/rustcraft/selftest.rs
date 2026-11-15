@@ -781,6 +781,32 @@ impl Bench for GameBench<'_, '_> {
         crate::game::rustcraft_handbook::recipe_of(self.game, item).map(|(grid, _)| grid)
     }
 
+    fn set_brush_loot(&mut self, pos: Pos, table: &str) -> Result<(), String> {
+        crate::game::rustcraft_utility::set_brush_loot(self.game, pos, table)
+            .then_some(())
+            .ok_or_else(|| format!("no brushable block entity at {pos:?}"))
+    }
+
+    fn wrench_lift(
+        &mut self,
+        pos: Pos,
+        into: Pos,
+        slot: usize,
+    ) -> Result<rustcraft_rules::utility::found::Lift, String> {
+        let (stack, _) = crate::game::rustcraft_utility::lift(self.game, DIMENSION, pos)
+            .ok_or_else(|| format!("nothing lifted at {pos:?}"))?;
+        // What the item says, read back from its custom data.
+        let said = crate::game::rustcraft_utility::marks_of(&stack)
+            .ok_or_else(|| format!("the lifted {} has no mark", stack.item))?;
+        self.change_entity(into, |e| {
+            if e.items.len() <= slot {
+                e.items.resize(slot + 1, None);
+            }
+            e.items[slot] = Some(stack);
+        })?;
+        Ok(said)
+    }
+
     fn anim(&self, pos: Pos) -> Option<rustcraft_rules::anim::Shown> {
         self.game
             .native_mod_block_entity(pos)

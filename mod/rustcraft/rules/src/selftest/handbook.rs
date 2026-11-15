@@ -4,13 +4,18 @@
 //!   and with sparksteel after it nothing more: the handbook comes once.
 //! - Every page names an item the game knows, and the handbook's own recipe, book and
 //!   coppersteel, is in the game's recipes as the page's grid reads it and makes the handbook.
+//! - Every item a page's scene (H3) draws is in the game's item registry.
 
 use super::{Build, Scenario, plot_area, same};
 use crate::geom::Pos;
-use crate::handbook::{self, PAGES};
+use crate::handbook::{self, PAGES, scene};
 use crate::tuning::Tuning;
 
-pub const ALL: [Build; 2] = [first_alloy_gives_the_handbook_once, pages_name_known_items];
+pub const ALL: [Build; 3] = [
+    first_alloy_gives_the_handbook_once,
+    pages_name_known_items,
+    scenes_show_known_items,
+];
 
 const PLAYER: u128 = 0x5e1f_7e57_0000_0000_0000_0000_0000_0b00;
 const COPPERSTEEL: &str = "rustcraft:coppersteel";
@@ -79,6 +84,29 @@ fn pages_name_known_items(o: Pos, _: &Tuning) -> Scenario {
                 made,
                 Some((handbook::ITEM.to_owned(), 1)),
             )
+        },
+    )
+}
+
+fn scenes_show_known_items(o: Pos, _: &Tuning) -> Scenario {
+    Scenario::new("handbook_scenes_show_known_items", plot_area(o)).check(
+        "every block a scene draws is an item of the game",
+        |b, _| {
+            let unknown: Vec<&str> = scene::LOOKS
+                .iter()
+                .filter_map(|l| match *l {
+                    scene::Look::Item(id) => Some(id),
+                    scene::Look::Tint(_) => None,
+                })
+                .filter(|i| !b.item_known(i))
+                .collect();
+            if unknown.is_empty() {
+                Ok(())
+            } else {
+                Err(format!(
+                    "scenes draw items the game does not know: {unknown:?}"
+                ))
+            }
         },
     )
 }

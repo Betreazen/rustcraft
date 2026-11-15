@@ -524,6 +524,20 @@ fn room_at(game: &Game<'_>, dimension: &str, anchor: Pos, key: &str) -> u64 {
     .unwrap_or(0)
 }
 
+/// Slice 17: what the storage `id` takes of `key` now (none while it does not work), so an
+/// order's products set off only as far as they will go in when they arrive.
+pub(super) fn room_in(game: &Game<'_>, dimension: &str, id: u32, key: &str) -> u64 {
+    let stack = |k: &str| max_stack(game, keys::item_of(k));
+    with_level(dimension, |level| {
+        level
+            .works(id)
+            .then(|| level.stores.get(&id).map(|s| s.room_for(key, &stack)))
+            .flatten()
+    })
+    .flatten()
+    .unwrap_or(0)
+}
+
 /// Puts `count` of `key` into the storage `id`; how many it took (destroyed surplus counts).
 pub(super) fn put_into(game: &Game<'_>, dimension: &str, id: u32, key: &str, count: u64) -> u64 {
     let stack = |k: &str| max_stack(game, keys::item_of(k));
@@ -1181,7 +1195,7 @@ pub(super) fn on_cell_broken(game: &mut Game<'_>, dimension: &str, pos: Pos) {
 
 /// An item entity of `count` of `key` at the middle of `pos` (`/summon`'s compound, the damage as
 /// the stack's `minecraft:damage` component).
-fn drop_stack(game: &mut Game<'_>, dimension: &str, pos: Pos, key: &str, count: u32) {
+pub(super) fn drop_stack(game: &mut Game<'_>, dimension: &str, pos: Pos, key: &str, count: u32) {
     let (item, damage) = keys::parse(key);
     let mut stack = vec![("id", string(item)), ("count", Tag::Int(count as i32))];
     if damage > 0 {

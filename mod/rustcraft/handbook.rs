@@ -24,6 +24,15 @@
 // - A left click (`native_screen_mouse_button_pressed_pre`, API 80, native_hooks.rs:3804-3838),
 //   the wheel (`native_screen_mouse_scrolled_pre`, API 93, native_hooks.rs:3893-3933) and the
 //   arrow keys (`native_screen_key_pressed_pre`, API 104) turn its sheets; Escape closes it.
+// - A page whose guide entry has an animated scene (H3; rustcraft_rules::handbook::scene) has
+//   one sheet more, its last: the scene's step as block item icons in the game's slot view of a
+//   block (`native_item`, API 20, native_hooks.rs:10951-10965, which scales the icon with
+//   `HudBatch::scale_since`, horizon-client-render hud.rs:1889-1894), water, lava and the ghost as
+//   tinted cubes (`native_quad`, API 111, native_hooks.rs:11020-11023), flows and beams as dots
+//   (`native_fill`, native_hooks.rs:10842-10846), everything cut to the panel
+//   (`HudBatch::clip_since`, hud.rs:1895). The scene moves by the window's own clock and goes on
+//   to its next step by itself; the step buttons in the bottom row step it by hand. A block
+//   under the mouse names its item (`native_gui_tooltip`, native_client_services.rs:472-474).
 use crate::game::{
     Game,
     rustcraft_screens::{
@@ -39,7 +48,10 @@ use horizon_client::{
     text::Text,
 };
 use rustcraft_rules::{
-    handbook::{self as rules, Given, PAGES, Part, Piece, Role, Row, View},
+    handbook::{
+        self as rules, Given, PAGES, Part, Piece, Role, Row, View,
+        scene::{self, Look, Playback, Scene},
+    },
     machines::style::{self, colour},
 };
 use std::{
@@ -50,6 +62,7 @@ use std::{
         LazyLock, Mutex, MutexGuard, PoisonError,
         atomic::{AtomicBool, Ordering},
     },
+    time::Instant,
 };
 
 /// The mod's own screen's owner (`native_mod_screen`).
@@ -249,6 +262,19 @@ static VIEW: LazyLock<Mutex<View>> = LazyLock::new(Mutex::default);
 static RECIPES: LazyLock<Mutex<HashMap<&'static str, Option<(Grid, u32)>>>> =
     LazyLock::new(Mutex::default);
 
+/// The scene on screen: its page, step and since when (`clock`); None off a scene's sheet.
+static PLAYING: LazyLock<Mutex<Option<Playback>>> = LazyLock::new(Mutex::default);
+/// The window's clock, which moves the scenes.
+static STARTED: LazyLock<Instant> = LazyLock::new(Instant::now);
+
+fn clock() -> f64 {
+    STARTED.elapsed().as_secs_f64()
+}
+
+fn playing() -> MutexGuard<'static, Option<Playback>> {
+    PLAYING.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
 fn view() -> MutexGuard<'static, View> {
     VIEW.lock().unwrap_or_else(PoisonError::into_inner)
 }
@@ -324,9 +350,26 @@ fn laid(game: &Game<'_>, page: usize) -> Laid {
 
 fn sheets_of(game: &Game<'_>, v: View) -> usize {
     match v {
-        View::Page { page, .. } if page < PAGES.len() => laid(game, page).sheets.len(),
+        View::Page { page, .. } if page < PAGES.len() => {
+            rules::sheet_count(&PAGES[page], laid(game, page).sheets.len())
+        }
         _ => 1,
     }
+}
+
+/// The scene the view shows, when it is on a page's scene sheet.
+fn scene_shown(game: &Game<'_>, v: View) -> Option<&'static Scene> {
+    let View::Page { page, .. } = v else {
+        return None;
+    };
+    let p = PAGES.get(page)?;
+    let text = laid(game, page).sheets.len();
+    let View::Page { sheet, .. } = v.clamped(rules::sheet_count(p, text)) else {
+        return None;
+    };
+    (rules::scene_sheet(p, text)? == sheet)
+        .then(|| rules::scene_of(p))
+        .flatten()
 }
 
 /// `native_screen_render_post`: the window, while it is the open screen.
@@ -352,24 +395,143 @@ pub(super) fn draw(game: &Game<'_>, batch: &mut HudBatch, screen: &NativeScreenV
                 Some(contents.as_str()),
                 rules::WIDTH,
             );
+            *playing() = None;
             contents_part(game, batch, o, section, sheet);
-            bottom(game, batch, o, true, sheet, rules::contents_sheets(section));
+            bottom(
+                game,
+                batch,
+                o,
+                true,
+                false,
+                sheet,
+                rules::contents_sheets(section),
+            );
         }
         View::Page { page, .. } => {
-            let laid = laid(game, page.min(PAGES.len() - 1));
-            let View::Page { page, sheet } = v.clamped(laid.sheets.len()) else {
+            let page = page.min(PAGES.len() - 1);
+            let laid = laid(game, page);
+            let p = &PAGES[page];
+            let sheets = rules::sheet_count(p, laid.sheets.len());
+            let View::Page { page, sheet } = v.clamped(sheets) else {
                 return;
             };
-            let p = &PAGES[page];
-            let section = tr(&rules::section_key(p.section), p.id);
-            kit::title_line(game, batch, o, &title, Some(section.as_str()), rules::WIDTH);
-            if sheet == 0 {
-                head(game, batch, o, page);
+            let on_scene = rules::scene_sheet(p, laid.sheets.len()) == Some(sheet);
+            match rules::scene_of(p).filter(|_| on_scene) {
+                Some(s) => {
+                    let name = tr(&p.key("name"), p.id);
+                    let word = tr(&rules::key("scene"), "Scene");
+                    // The title's « · » and its rest fit what the title leaves of the line.
+                    let measure = |x: &str| game.native_text_width(x);
+                    let room = rules::WIDTH - 2.0 * rules::TITLE[0] - measure(&title);
+                    let rest = format!("{name} · {word}");
+                    let rest = rules::clip(&rest, room - measure(" · "), &measure);
+                    kit::title_line(game, batch, o, &title, Some(rest.as_str()), rules::WIDTH);
+                    scene_part(game, batch, o, page, s);
+                    bottom(game, batch, o, false, true, sheet, sheets);
+                }
+                None => {
+                    *playing() = None;
+                    let section = tr(&rules::section_key(p.section), p.id);
+                    kit::title_line(game, batch, o, &title, Some(section.as_str()), rules::WIDTH);
+                    if sheet == 0 {
+                        head(game, batch, o, page);
+                    }
+                    body(game, batch, o, &laid, sheet);
+                    bottom(game, batch, o, false, false, sheet, sheets);
+                }
             }
-            body(game, batch, o, &laid, sheet);
-            bottom(game, batch, o, false, sheet, laid.sheets.len());
         }
     }
+}
+
+/// A page's scene sheet (H3): the step in the panel, its caption, the step buttons.
+fn scene_part(game: &Game<'_>, batch: &mut HudBatch, o: [f32; 2], page: usize, s: &Scene) {
+    let now = clock();
+    let (step, t) = {
+        let mut play = playing();
+        let p = play.get_or_insert_with(|| Playback::start(page, now));
+        if p.page != page {
+            *p = Playback::start(page, now);
+        }
+        p.update(s, now);
+        (p.step.min(s.steps.len() - 1), p.time(now))
+    };
+    let st = &s.steps[step];
+    let panel = scene::PANEL;
+    kit::fills(game, batch, o, &style::well(panel));
+    let at = [o[0] + panel[0], o[1] + panel[1]];
+    let fit = scene::fit(s, [panel[2], panel[3]]);
+    let start = batch.vertices.len();
+    let drawn = scene::drawn(st, t, &fit);
+    for d in &drawn {
+        look(game, batch, at, d, &fit);
+    }
+    if st.tint != 0 {
+        game.native_fill(batch, [at[0], at[1], panel[2], panel[3]], st.tint);
+    }
+    for dot in scene::dots(st, t, &fit) {
+        let side = scene::dot_side(&dot, fit.scale);
+        let c = [at[0] + dot.centre[0], at[1] + dot.centre[1]];
+        if !dot.dash {
+            let rim = side + 2.0;
+            let r = [c[0] - rim / 2.0, c[1] - rim / 2.0, rim, rim];
+            game.native_fill(batch, r, colour::OUTLINE);
+        }
+        let r = [c[0] - side / 2.0, c[1] - side / 2.0, side, side];
+        game.native_fill(batch, r, 0xFF00_0000 | dot.rgb);
+    }
+    batch.clip_since(start, at[0], at[1], at[0] + panel[2], at[1] + panel[3]);
+    let measure = |x: &str| game.native_text_width(x);
+    if let Some(caption) = lookup(&s.caption_key(step)) {
+        let lines = scene::caption_lines(&caption, rules::BODY_WIDTH, &measure);
+        for (i, line) in lines.iter().enumerate() {
+            let y = scene::CAPTION_TOP + rules::LINE * i as f32;
+            text(game, batch, line, o, [rules::BODY_X, y + 1.0], TEXT);
+        }
+    }
+    button(game, batch, o, scene::STEP_BACK, "◀", false);
+    button(game, batch, o, scene::STEP_ON, "▶", false);
+    let n = tr_with(
+        &rules::key("step"),
+        "Step %s of %s",
+        &[(step + 1).to_string(), s.steps.len().to_string()],
+    );
+    kit::centred(game, batch, o, scene::STEP_COUNT, &n, LABEL);
+    if kit::hovered(game, o, panel) {
+        let cursor = game.native_cursor();
+        let over = [cursor[0] - at[0], cursor[1] - at[1]];
+        if let Some(Look::Item(id)) = scene::pick(&drawn, &fit, over).map(|i| drawn[i].look) {
+            game.native_gui_tooltip(batch, &[item_name(game, id)], cursor);
+        }
+    }
+}
+
+/// One block of a scene: its item's icon at the scene's scale, or a tinted cube.
+fn look(game: &Game<'_>, batch: &mut HudBatch, at: [f32; 2], d: &scene::Drawn, fit: &scene::Fit) {
+    let c = [at[0] + d.centre[0], at[1] + d.centre[1]];
+    match d.look {
+        Look::Item(id) => {
+            let side = fit.icon();
+            let corner = d.corner(side);
+            game.native_item(batch, id, [at[0] + corner[0], at[1] + corner[1]], side);
+        }
+        Look::Tint(argb) => {
+            for (corners, light) in scene::cube_faces(c, fit.scale) {
+                game.native_quad(batch, corners, scene::shaded(argb, light));
+            }
+        }
+    }
+}
+
+/// An item's name, as a tooltip names it.
+fn item_name(game: &Game<'_>, it: &str) -> Text {
+    let fallback = it.rsplit(':').next().unwrap_or(it);
+    let kind = if game.items().get(it).is_some_and(|i| i.block.is_some()) {
+        "block"
+    } else {
+        "item"
+    };
+    Text::translate_with_fallback(&format!("{kind}.{}", it.replace(':', ".")), fallback, &[])
 }
 
 /// The contents: the sections on the left, the chosen one raised; its pages on the right.
@@ -516,18 +678,7 @@ fn recipe(game: &Game<'_>, batch: &mut HudBatch, o: [f32; 2], y: f32, laid: &Lai
     slot(game, batch, o, res);
     item(game, batch, o, res, made, *count);
     if let Some(it) = named {
-        let fallback = it.rsplit(':').next().unwrap_or(it);
-        let kind = if game.items().get(it).is_some_and(|i| i.block.is_some()) {
-            "block"
-        } else {
-            "item"
-        };
-        let name = Text::translate_with_fallback(
-            &format!("{kind}.{}", it.replace(':', ".")),
-            fallback,
-            &[],
-        );
-        game.native_gui_tooltip(batch, &[name], game.native_cursor());
+        game.native_gui_tooltip(batch, &[item_name(game, it)], game.native_cursor());
     }
 }
 
@@ -537,12 +688,14 @@ fn item(game: &Game<'_>, batch: &mut HudBatch, o: [f32; 2], p: [f32; 2], id: &st
     game.native_gui_draw_item_with(batch, &stack, [o[0] + p[0], o[1] + p[1]], shown.as_deref());
 }
 
-/// The bottom row: back, the contents, the sheet's number, on.
+/// The bottom row: back, the contents, the sheet's number (left of the step buttons on a
+/// scene's sheet), on.
 fn bottom(
     game: &Game<'_>,
     batch: &mut HudBatch,
     o: [f32; 2],
     contents: bool,
+    on_scene: bool,
     sheet: usize,
     sheets: usize,
 ) {
@@ -555,7 +708,8 @@ fn bottom(
         "%s / %s",
         &[(sheet + 1).to_string(), sheets.max(1).to_string()],
     );
-    kit::centred(game, batch, o, rules::SHEET, &n, LABEL);
+    let place = if on_scene { scene::SHEET } else { rules::SHEET };
+    kit::centred(game, batch, o, place, &n, LABEL);
 }
 
 /// `native_screen_mouse_button_pressed_pre`: a left click on the window's parts.
@@ -575,6 +729,14 @@ pub(super) fn on_mouse(
     let o = corner(screen);
     let at = [screen.mouse[0] - o[0], screen.mouse[1] - o[1]];
     let v = *view();
+    if let Some(s) = scene_shown(game, v)
+        && let Some(part) = scene::part_at(at)
+    {
+        if let Some(p) = playing().as_mut() {
+            p.go(s, part == Part::StepOn, clock());
+        }
+        return;
+    }
     let Some(part) = rules::part_at(v, at) else {
         return;
     };

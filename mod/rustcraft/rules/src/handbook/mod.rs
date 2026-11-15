@@ -11,8 +11,13 @@
 //!   text width into `Row`s (`lay_out`) and cut into sheets that fit the window (`sheets`);
 //!   `part_at` and `press` turn a click into the next `View`.
 //! - `recipe_grid`: a crafting recipe's cells as the 3 × 3 grid a page draws.
+//! - `scene` (H3, H4): a page whose guide entry has an animated scene has one sheet more, its
+//!   last, which plays the scene (`scenes`, written by assets/models/scenes_mc.py from the
+//!   guide's scenes.js): `scene_sheet` says which sheet that is.
 
 pub mod pages;
+pub mod scene;
+pub mod scenes;
 
 use crate::machines::panel::{Rect, inside};
 use std::collections::BTreeSet;
@@ -243,6 +248,21 @@ impl View {
     }
 }
 
+/// The page's scene, if its guide entry has one.
+pub fn scene_of(page: &Page) -> Option<&'static scene::Scene> {
+    scene::find(page.id)
+}
+
+/// The sheets of a page whose texts take `text_sheets`: those, and its scene's after them.
+pub fn sheet_count(page: &Page, text_sheets: usize) -> usize {
+    text_sheets.max(1) + usize::from(scene_of(page).is_some())
+}
+
+/// Which of a page's sheets is its scene's: the one after its texts' `text_sheets`.
+pub fn scene_sheet(page: &Page, text_sheets: usize) -> Option<usize> {
+    scene_of(page).map(|_| text_sheets.max(1))
+}
+
 /// Sheets of the contents with `section` chosen.
 pub fn contents_sheets(section: usize) -> usize {
     pages_of(section).len().div_ceil(ENTRIES).max(1)
@@ -266,6 +286,9 @@ pub enum Part {
     Section(usize),
     /// A row of the contents' pages.
     Entry(usize),
+    /// A scene's step buttons, on its sheet (`scene::part_at`).
+    StepBack,
+    StepOn,
 }
 
 /// The part at `at` (window pixels) of the window showing `view`.

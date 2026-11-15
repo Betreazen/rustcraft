@@ -8,6 +8,7 @@
 pub mod charge;
 pub mod disassembly;
 pub mod farm;
+pub mod found;
 pub mod grown;
 pub mod plan;
 pub mod repair;

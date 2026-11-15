@@ -18,7 +18,9 @@ recipe (the window reads it from the game's recipes by the page's item, so only 
 here), the paragraphs, the stats as key and value, the diagnoses with what to do about each
 (`RC.DIAG_FIX`), and for a block with a window its numbered parts with a line each (H6, ui.js
 `RC.UI`). The glossary's page holds the glossary as its stats, the tiers' page the tier table.
-The guide's links and markup become plain text. The animated scenes (H3) stay in the guide.
+The guide's links and markup become plain text. The animated scenes (H3) come from the guide's
+scenes.js through scenes_mc.py: their table `rules/src/handbook/scenes.rs` and their captions
+`rustcraft.handbook.scene.<id>.<n>`, written by the same run.
 
 From the repository's root, with Node on the PATH:
 
@@ -34,6 +36,7 @@ from pathlib import Path
 
 sys.dont_write_bytecode = True
 import handbook_en  # noqa: E402
+import scenes_mc  # noqa: E402
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent.parent
@@ -89,6 +92,8 @@ UI = {
     'diagnoses': ('Диагнозы', 'Diagnoses'),
     'window': ('Окно блока', "The block's window"),
     'sheet': ('%s / %s', '%s / %s'),
+    'scene': ('Сцена', 'Scene'),
+    'step': ('Шаг %s из %s', 'Step %s of %s'),
     'given': ('Справочник инженера у тебя: правый клик открывает его',
               "You have the Engineer's Handbook: a right click opens it"),
 }
@@ -228,9 +233,19 @@ def main():
     text = table(rows, sections).encode('utf-8')
     if not TABLE.exists() or TABLE.read_bytes() != text:
         TABLE.write_bytes(text)
+    have = lambda name: (CONTENT / 'items' / (name + '.json')).exists()  # noqa: E731
+    scene_table, scene_ru, scene_en, done = scenes_mc.build({e['id'] for e in g['entries']}, have)
+    ru.update(scene_ru)
+    en.update(scene_en)
+    scenes_mc.write(scene_table)
     changed = [n for n, d in (('ru_ru.json', ru), ('en_us.json', en)) if write_lang(n, d)]
     print('%d pages in %d sections; %d Russian and %d English lines%s' % (
         len(rows), len(sections), len(ru), len(en), ('; rewrote ' + ', '.join(changed)) if changed else ''))
+    dropped = ', '.join('%s x%d' % kv for kv in sorted(done['dropped'].items())) or 'nothing'
+    print('%d scenes, %d steps, %d looks, %d block lists (at most %d blocks a step); dropped: %s; '
+          '%d badges not carried; %d captions have digits (H4)' % (
+              done['scenes'], done['steps'], done['looks'], done['lists'], done['most'], dropped,
+              done['badges'], done['numbers']))
 
 
 if __name__ == '__main__':

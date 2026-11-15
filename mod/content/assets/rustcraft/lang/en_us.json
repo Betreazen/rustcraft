@@ -760,6 +760,8 @@
   "rustcraft.handbook.diagnoses": "Diagnoses",
   "rustcraft.handbook.window": "The block's window",
   "rustcraft.handbook.sheet": "%s / %s",
+  "rustcraft.handbook.scene": "Scene",
+  "rustcraft.handbook.step": "Step %s of %s",
   "rustcraft.handbook.given": "You have the Engineer's Handbook: a right click opens it",
   "rustcraft.handbook.tier.1": "Tier 1 · Coppersteel",
   "rustcraft.handbook.tier.2": "Tier 2 · Sparksteel",

@@ -23,6 +23,12 @@
 // through rustcraft_storage, which takes a container's stacks out with `native_extract_item` only
 // as far as the storage has room, and gives with `native_insert_item` (native_hooks.rs:
 // 11166-11177), keeping what the target refuses. By default it takes («в блок», M16).
+//
+// Slice 17: an order's items ride the net (rustcraft_rules::orders::ship). `route` finds the
+// item net that joins the storage and a machine through joints that are not switched off, and
+// the blocks of pipe between them (rustcraft_rules::net::topology::pipe_length); the shipments
+// loaded on a net over the last second are `reserve`d, and its own moves get the rest of its
+// throughput.
 use crate::game::{
     Game,
     rustcraft_content::{self as content, Machine},
@@ -42,8 +48,9 @@ use rustcraft_rules::{
         items::{self, Joint, JointNote, Mode, NetState, Transfer},
         joints,
         stock::{self, Stock, StockSlot, Stocks},
-        topology::ChannelKind,
+        topology::{ChannelKind, Layout, pipe_length},
     },
+    orders::ship::{self, NetKey, Route},
     storage::{keys, terminal},
     tuning::Tuning,
 };
@@ -79,9 +86,12 @@ const MODES_KEY: &str = "modes";
 
 struct ItemNet {
     /// The net's slot and its first housing: what keeps its throughput and turns over rescans.
-    key: (usize, Pos),
+    key: NetKey,
     joints: Vec<Joint>,
     per_second: f64,
+    /// Slice 17: its housings and its weakest channel, for an order's route.
+    housings: BTreeSet<Pos>,
+    tier: u8,
 }
 
 /// One level's item nets and their joints.
@@ -93,6 +103,10 @@ pub struct Transport {
     pub joint_blocks: BTreeMap<Pos, Vec<Mode>>,
     /// Receivers a move found full, until which level tick.
     full_until: HashMap<Pos, u64>,
+    /// Slice 17: thousandths of an item the orders' shipments loaded on each net over the last
+    /// `reserved_ticks` ticks.
+    reserved: HashMap<NetKey, u64>,
+    reserved_ticks: u32,
 }
 
 impl Transport {
@@ -117,6 +131,47 @@ impl Transport {
             }
         }
         (!blocks.is_empty()).then_some((blocks, housings))
+    }
+
+    /// Slice 17: the shortest way an order's items ride from the block `from` to the block `to`
+    /// (a storage's anchor and a machine, either way round) on an item net that has a joint on
+    /// both that is not switched off; none when no net joins them so.
+    pub fn route(&self, layout: &Layout, tuning: &Tuning, from: Pos, to: Pos) -> Option<Route> {
+        let ends = |net: &ItemNet, block: Pos| -> Vec<Pos> {
+            net.joints
+                .iter()
+                .filter(|j| j.block == block && j.mode != Mode::Off)
+                .map(|j| j.housing)
+                .collect()
+        };
+        self.nets
+            .iter()
+            .filter_map(|net| {
+                let (a, b) = (ends(net, from), ends(net, to));
+                if a.is_empty() || b.is_empty() {
+                    return None;
+                }
+                let pipe = pipe_length(layout, tuning, &net.housings, &a, &b)?;
+                Some(Route::of_tier(net.key, pipe, net.tier, tuning))
+            })
+            .min_by(|x, y| {
+                let t = |r: &Route| r.ride_ticks(tuning.ticks_per_second);
+                t(x).cmp(&t(y))
+            })
+    }
+
+    /// Slice 17: what the orders' shipments loaded on each net over the last `ticks` ticks
+    /// (rustcraft_rules::orders::ship::advance); the nets they did not load on keep their
+    /// throughput whole.
+    pub fn reserve(&mut self, loaded: BTreeMap<NetKey, u64>, ticks: u32) {
+        self.reserved = loaded.into_iter().collect();
+        self.reserved_ticks = ticks;
+    }
+
+    /// The throughput of the net `key` of `per_second` that its own moves have.
+    fn own_rate(&self, key: NetKey, per_second: f64, ticks_per_second: f64) -> f64 {
+        let loaded = self.reserved.get(&key).copied().unwrap_or(0);
+        ship::left_for_net(per_second, loaded, self.reserved_ticks, ticks_per_second)
     }
 }
 
@@ -186,6 +241,8 @@ pub(super) fn rebuild(game: &mut Game<'_>, dimension: &str, level: &mut LevelNet
                 key: (net.slot, first),
                 joints,
                 per_second: tuning.items_of(net.min_tier),
+                housings: net.housings.clone(),
+                tier: net.min_tier,
             })
         })
         .collect();
@@ -246,6 +303,11 @@ pub(super) fn tick(game: &mut Game<'_>, dimension: &str, level: &mut LevelNet, t
         machines,
         ..
     } = level;
+    let rates: Vec<f64> = transport
+        .nets
+        .iter()
+        .map(|n| transport.own_rate(n.key, n.per_second, tuning.ticks_per_second))
+        .collect();
     let Transport {
         nets,
         states,
@@ -253,7 +315,7 @@ pub(super) fn tick(game: &mut Game<'_>, dimension: &str, level: &mut LevelNet, t
         ..
     } = transport;
     full_until.retain(|_, until| *until > now);
-    for net in nets.iter() {
+    for (net, &per_second) in nets.iter().zip(&rates) {
         if net.joints.len() < 2 {
             continue;
         }
@@ -262,7 +324,7 @@ pub(super) fn tick(game: &mut Game<'_>, dimension: &str, level: &mut LevelNet, t
         let state = states.entry(net.key).or_default();
         let result = items::tick(
             &net.joints,
-            net.per_second,
+            per_second,
             moves_per_second,
             state,
             &mut stocks,

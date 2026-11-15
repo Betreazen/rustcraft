@@ -20,6 +20,7 @@ pub mod magistral;
 pub mod miners;
 pub mod monorail;
 pub mod orders2;
+pub mod rest;
 pub mod run;
 pub mod slice10;
 pub mod slice11;
@@ -305,6 +306,19 @@ pub trait Bench {
     fn item_known(&self, item: &str) -> bool;
     /// The 3 × 3 grid of the first crafting recipe of `item`, as the handbook's page reads it.
     fn recipe_grid(&self, item: &str) -> Option<[Option<String>; 9]>;
+    // Spec 26: the wrench lifts suspicious blocks.
+    /// The loot table of the suspicious block at `pos`, as a structure leaves it in its block
+    /// entity.
+    fn set_brush_loot(&mut self, pos: Pos, table: &str) -> Result<(), String>;
+    /// A sneaking player's wrench on the suspicious block at `pos`, the item it gives put into
+    /// slot `slot` of the block entity at `into` instead of the player's inventory: what the
+    /// item's marks say.
+    fn wrench_lift(
+        &mut self,
+        pos: Pos,
+        into: Pos,
+        slot: usize,
+    ) -> Result<crate::utility::found::Lift, String>;
 }
 
 /// A mob as the self-test reads it.
@@ -481,6 +495,7 @@ pub fn catalog() -> Vec<Build> {
     all.extend(orders2::ALL);
     all.extend(traversal::ALL);
     all.extend(handbook::ALL);
+    all.extend(rest::ALL);
     all
 }
 

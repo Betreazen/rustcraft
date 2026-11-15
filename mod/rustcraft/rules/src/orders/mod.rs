@@ -8,7 +8,8 @@
 //! as `PlanRecipe`s; `PlanRecipe::crafting` builds the autocrafter's ones from a crafting grid. An
 //! input of a recipe may take any of several items (planks of any wood): the planner takes the one
 //! the storage has most of. `queue` runs the orders of one storage; `saved` writes a queue and
-//! its running jobs into the storage's record and reads them back.
+//! its running jobs into the storage's record and reads them back; `ship` lets a job's items ride the
+//! item channel (slice 17).
 //!
 //! O12: fluids are keys of their own (`fluid_key`), counted in buckets. The mixer's recipes take
 //! items and water and make a fluid; the fluid the line's tanks and mixers hold is the stock of
@@ -23,6 +24,7 @@ use crate::net::items::ItemKey;
 
 pub mod queue;
 pub mod saved;
+pub mod ship;
 
 /// The machine kinds a step can name, in the order the terminal's list codes them.
 pub const KINDS: [&str; 5] = ["crafter", "furnace", "crusher", "alloy", "mixer"];

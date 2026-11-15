@@ -29,7 +29,7 @@ The mod is written entirely in Rust as a native Horizon mod and runs on the same
 <p align="center"><img src="docs/images/in-game.jpg" alt="In-game shot: the magistral with its nodes, machines in front, two rows of farm and workshop blocks behind" width="860"><br><sub>The mod in the game: the magistral, machines and farm blocks with the guide's models</sub></p>
 
 > [!NOTE]
-> The mod is in active development: version 0.16, with every block of the guide and the player gear in the game. Everything listed below works in the game and is covered by the in-world self-test. Balance numbers are a first proposal and will change after playtests. The in-game texts and the design docs are Russian first. The game's blocks, windows and diagnoses also have English names.
+> The mod is in active development: version 0.17, with every block of the guide and the player gear in the game. Everything listed below works in the game and is covered by the in-world self-test. Balance numbers are a first proposal and will change after playtests. The in-game texts and the design docs are Russian first. The game's blocks, windows and diagnoses also have English names.
 
 ## Features
 
@@ -49,7 +49,7 @@ The mod is written entirely in Rust as a native Horizon mod and runs on the same
 - **Living blocks.** Rolls, drills, rotors, flames and lamps move as in the guide; tanks show their fluid, batteries their charge.
 - **Gear.** Technical armour in three tiers with player modules (night vision, jump, run, dash, magnet, damper, shock absorber) and a jetpack, the energy blade, shield and rifle, the zipline with ropes that stay in the world and can be ridden again, the harpoon that also hooks mobs, technical enchantment books. All run on batteries charged at the charger and the charge plate.
 - The **living vein** grows ore, a chosen ore or suspicious sand for archaeology, the **cartographer** finds new biomes and the world's structures along its way, the **scout compass** leads to them.
-- **The engineer's handbook in the game.** The first alloy brings the book: a page for every block and item of the mod with its description, recipe and window parts.
+- **The engineer's handbook in the game.** The first alloy brings the book: a page for every block and item of the mod with its description, recipe, window parts and the guide's animated scene.
 - **Backpacks** with 27 and 54 slots.
 - **Experience for machine work.** Machines tell Path-of-craft-tree what they did, and their owner earns profession experience in the skill tree. Turret and guard kills count in SoulsCraft's hunter's book.
 - **Two languages.** Names, windows and diagnoses in Russian and English.
@@ -73,11 +73,11 @@ The mod is written entirely in Rust as a native Horizon mod and runs on the same
 </tr>
 <tr>
 <td width="50%"><img src="docs/images/in-game-zipline.jpg" alt="In-game shot: a player rides the zipline's rope to a pillar, the anchor at the rope's start"></td>
-<td width="50%"><img src="docs/images/in-game-handbook.jpg" alt="In-game shot: the engineer's handbook window, the alloy smelter's page with its recipe"></td>
+<td width="50%"><img src="docs/images/in-game-handbook.jpg" alt="In-game shot: the engineer's handbook window, the alloy smelter's animated scene with its step caption"></td>
 </tr>
 <tr>
 <td align="center"><b>Zipline</b>: the rope stays in the world and is ridden again</td>
-<td align="center"><b>Handbook in the game</b>: a page for every block with its recipe</td>
+<td align="center"><b>Handbook in the game</b>: a page for every block, its recipe and scene</td>
 </tr>
 </table>
 
@@ -106,7 +106,7 @@ Both parts are needed in the game and on the server, at the same version. Withou
 ### Client
 
 ```powershell
-git clone --branch v0.16.0 https://github.com/Betreazen/rustcraft
+git clone --branch v0.17.0 https://github.com/Betreazen/rustcraft
 horizon-launcher native-build rustcraft/mod/rustcraft --instance <instance> --trust-native-code
 ```
 
@@ -116,7 +116,7 @@ Then copy the contents of `mod/content` into the instance's `horizon-mods/rustcr
 
 ```powershell
 horizon-launcher native-build rustcraft/mod/rustcraft `
-    --server-output C:\horizon-engines\rustcraft-0.16.0 --trust-native-code
+    --server-output C:\horizon-engines\rustcraft-0.17.0 --trust-native-code
 horizon-server --dir <server folder> config set engine.path=C:\horizon-engines\rustcraft-0.12.0\horizon-engine.exe
 ```
 

@@ -24,6 +24,13 @@
 //   (rustcraft_rules::utility::grown, the world's `data/rustcraft_grown.json`) until a player
 //   breaks or places there; the grab (rustcraft_workers) takes it whole and its item carries custom
 //   data `rustcraft:grown`, so the table sends no `brush` for it (ST4, ST5).
+// - Spec 26: the wrench with sneaking lifts suspicious sand or gravel out of the world
+//   (rustcraft_rules::utility::found). Its item carries custom data `rustcraft:found`: the
+//   dimension, the cell, and the loot table and seed its brushable block entity held (or the find
+//   a brush stroke already rolled), read from the level's block entities (`BlockEntity::Brushable`,
+//   SRC/crates/horizon-client-render/src/chunk/block_entity.rs:324-332). Placed again it gets that
+//   loot back; the archaeology table brushes it with that loot table and tells `brush`, as for any
+//   block found in the world. A grown block lifted stays grown, and placed again its cell is grown.
 // The farm machines, the projector and builder and the portal dock are rustcraft_farm and
 // rustcraft_builder; this module runs their ticks too.
 use crate::game::{
@@ -32,7 +39,12 @@ use crate::game::{
     rustcraft_mining as mining,
     rustcraft_server::{LevelNet, line, tell},
 };
-use horizon_client::{containers::ModBlockEntity, items::ItemStack, text::Text};
+use horizon_client::{
+    containers::{BlockEntity, ModBlockEntity},
+    items::ItemStack,
+    save,
+    text::Text,
+};
 use horizon_world::nbt::{Compound, JavaString, Tag};
 use rustcraft_rules::{
     geom::{Face, Pos},
@@ -45,6 +57,7 @@ use rustcraft_rules::{
     tuning::Tuning,
     utility::{
         self as rules, ARCHEO_TABLES, KITCHEN_RECIPES, Shown, Util, charge, disassembly,
+        found::{self, Found, Lift},
         grown::{self, Grown},
         repair, xp,
     },
@@ -906,7 +919,14 @@ fn brush(game: &mut Game<'_>, pos: Pos, cost: f64) -> Shown {
         return Shown::NoEnergy;
     }
     let was_grown = is_grown(&block);
-    let finds = game.sequence_loot(table, table, Some(&brush));
+    // Spec 26: a lifted block brushes with the loot it was found with.
+    let remembered = found_of(&block);
+    let rolled = remembered.as_ref().and_then(|(_, item)| item.clone());
+    let table = found::brush_table(remembered.as_ref().map(|(f, _)| f), table).to_owned();
+    let finds = match rolled {
+        Some(item) => vec![item],
+        None => game.sequence_loot(&table, &table, Some(&brush)),
+    };
     let max_damage = game.items().get(&brush.item).map_or(0, |i| i.max_damage);
     with_items(game, pos, |items| {
         take_one(items, 0);
@@ -926,6 +946,188 @@ fn brush(game: &mut Game<'_>, pos: Pos, cost: f64) -> Shown {
         base::report(r);
     }
     Shown::Working
+}
+
+// ---- Lifting suspicious blocks with the wrench (spec 26) ----
+
+/// What the brushable block entity at a cell holds: its loot table, its seed and the find a brush
+/// stroke already rolled.
+type Brushed = (Option<String>, Option<i64>, Option<ItemStack>);
+
+fn brushable_at(game: &Game<'_>, pos: Pos) -> Option<Brushed> {
+    match game.world.block_entities.get(&(pos[0], pos[1], pos[2]))? {
+        BlockEntity::Brushable(b) => Some((
+            match &b.loot_table {
+                Some(Tag::String(t)) => Some(t.to_string_lossy()),
+                _ => None,
+            },
+            match &b.loot_seed {
+                Some(Tag::Long(seed)) => Some(*seed),
+                _ => None,
+            },
+            b.item.clone(),
+        )),
+        _ => None,
+    }
+}
+
+/// The self-test's structure: the brushable block at `pos` holds the loot table `table`.
+pub(super) fn set_brush_loot(game: &mut Game<'_>, pos: Pos, table: &str) -> bool {
+    match game.world.block_entities.get_mut(&(pos[0], pos[1], pos[2])) {
+        Some(BlockEntity::Brushable(b)) => {
+            b.loot_table = Some(Tag::String(JavaString::from(table)));
+            b.loot_seed = None;
+            b.item = None;
+            true
+        }
+        _ => false,
+    }
+}
+
+/// The item a lift gives of the suspicious `block`: marked grown, or with where it was found.
+fn lifted_stack(block: &str, lift: &Lift, rolled: Option<&ItemStack>) -> ItemStack {
+    let mut stack = ItemStack::new(block, 1);
+    let mut data = Compound::default();
+    match lift {
+        Lift::Grown => {
+            data.insert(JavaString::from(grown::MARK), Tag::Byte(1));
+        }
+        Lift::Found(f) => {
+            let text = |s: &str| Tag::String(JavaString::from(s));
+            let mut mark = Compound::default();
+            let dimension = text(f.dimension.as_str());
+            mark.insert(JavaString::from(found::DIMENSION), dimension);
+            mark.insert(JavaString::from(found::POS), Tag::IntArray(f.pos.to_vec()));
+            if let Some(table) = &f.loot_table {
+                mark.insert(JavaString::from(found::LOOT_TABLE), text(table.as_str()));
+            }
+            if let Some(seed) = f.seed {
+                mark.insert(JavaString::from(found::SEED), Tag::Long(seed));
+            }
+            if let Some(item) = rolled {
+                mark.insert(JavaString::from(found::ITEM), save::item_to_nbt(item));
+            }
+            data.insert(JavaString::from(found::MARK), Tag::Compound(mark));
+        }
+    }
+    stack
+        .data_mut()
+        .set_other(CUSTOM_DATA, Some(Tag::Compound(data)));
+    stack
+}
+
+/// Where a lifted block was found, from its item's custom data `rustcraft:found`, and the find a
+/// brush stroke rolled before it was lifted.
+fn found_of(stack: &ItemStack) -> Option<(Found, Option<ItemStack>)> {
+    let data = stack.custom_data()?;
+    let Some(Tag::Compound(mark)) = data.get(&JavaString::from(found::MARK)) else {
+        return None;
+    };
+    let field = |key: &str| mark.get(&JavaString::from(key));
+    let text = |key: &str| match field(key) {
+        Some(Tag::String(s)) => Some(s.to_string_lossy()),
+        _ => None,
+    };
+    let pos = match field(found::POS) {
+        Some(Tag::IntArray(v)) if v.len() == 3 => [v[0], v[1], v[2]],
+        _ => [0; 3],
+    };
+    let seed = match field(found::SEED) {
+        Some(Tag::Long(seed)) => Some(*seed),
+        _ => None,
+    };
+    let rolled = field(found::ITEM).and_then(save::item_from_nbt);
+    let found = Found {
+        dimension: text(found::DIMENSION).unwrap_or_default(),
+        pos,
+        loot_table: text(found::LOOT_TABLE),
+        seed,
+        rolled: rolled.is_some(),
+    };
+    Some((found, rolled))
+}
+
+/// What a lifted block's item says of it: grown, or found where; none for an item with neither
+/// mark.
+pub(super) fn marks_of(stack: &ItemStack) -> Option<Lift> {
+    if is_grown(stack) {
+        return Some(Lift::Grown);
+    }
+    found_of(stack).map(|(f, _)| Lift::Found(f))
+}
+
+/// Spec 26: the suspicious block at `pos` of `dimension` lifted out of the world: its item,
+/// marked grown (ST5) or with where it was found and its loot, and what that says. None when it is
+/// no suspicious block or the world does not let it go.
+pub(super) fn lift(game: &mut Game<'_>, dimension: &str, pos: Pos) -> Option<(ItemStack, Lift)> {
+    let block = game.native_block(pos);
+    if !grown::is_suspicious(&block) {
+        return None;
+    }
+    let (table, seed, rolled) = brushable_at(game, pos).unwrap_or_default();
+    let was_grown = grown_at(game, dimension, pos);
+    let lift = found::lift(dimension, pos, was_grown, table, seed, rolled.is_some());
+    let air = game.native_default_state("minecraft:air")?;
+    if !game.native_set_block(dimension, pos, air, 3) {
+        return None;
+    }
+    forget_grown(game, dimension, pos);
+    Some((lifted_stack(&block, &lift, rolled.as_ref()), lift))
+}
+
+/// `native_use_item_on` of the wrench with sneaking on suspicious sand or gravel: the block is
+/// lifted into the player's inventory; what does not fit drops where it stood.
+pub(super) fn lift_with_wrench(game: &mut Game<'_>, uuid: u128, dimension: &str, pos: Pos) {
+    let Some((stack, _)) = lift(game, dimension, pos) else {
+        return;
+    };
+    let Some(rest) = game.native_give_stack(uuid, stack) else {
+        return;
+    };
+    // `/summon`'s compound with the stack's components, marks and all.
+    let nbt = Compound::from([(JavaString::from("Item"), save::item_to_nbt(&rest))]);
+    let at = pos.map(|c| f64::from(c) + 0.5);
+    if game
+        .native_summon(dimension, "minecraft:item", at, nbt)
+        .is_none()
+    {
+        log::warn!("rustcraft: the lifted {} at {pos:?} was lost", rest.item);
+    }
+}
+
+/// `native_place_block` of suspicious sand or gravel, after the cell's grown mark was forgotten:
+/// a grown one's cell is grown again, so a lift and a place do not wash its mark off (ST5); a
+/// lifted one's block entity gets its loot back.
+pub(super) fn on_place_suspicious(
+    game: &mut Game<'_>,
+    dimension: &str,
+    stack: &ItemStack,
+    pos: Pos,
+) {
+    if !grown::is_suspicious(&stack.item) {
+        return;
+    }
+    if is_grown(stack) {
+        let mut g = grown_cells(game);
+        g.cells.grew(dimension, pos);
+        g.dirty = true;
+        return;
+    }
+    let Some((f, rolled)) = found_of(stack) else {
+        return;
+    };
+    let set = match game.world.block_entities.get_mut(&(pos[0], pos[1], pos[2])) {
+        Some(BlockEntity::Brushable(b)) => {
+            b.loot_table = f.loot_table.as_deref().map(|t| Tag::String(JavaString::from(t)));
+            b.loot_seed = f.loot_table.as_ref().and(f.seed).map(Tag::Long);
+            b.item = if b.loot_table.is_none() { rolled } else { None };
+            true
+        }
+        _ => false,
+    };
+    if set {
+        game.world.modified.insert((pos[0] >> 4, pos[2] >> 4));
+    }
 }
 
 // ---- The living vein (slice 13) ----
