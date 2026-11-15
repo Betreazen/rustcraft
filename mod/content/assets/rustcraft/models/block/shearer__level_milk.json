@@ -1,0 +1,7 @@
+{
+  "textures": {"particle": "rustcraft:block/shearer", "p0": "rustcraft:block/shearer"},
+  "elements": [
+    {"from": [2, 16.75, 10], "to": [6, 20.5, 14], "faces": {"down": {"uv": [2.5, 2.5, 3.5, 3.5], "texture": "#p0"}, "north": {"uv": [2.5, 2.5, 3.5, 3.5], "texture": "#p0"}, "south": {"uv": [2.5, 2.5, 3.5, 3.5], "texture": "#p0"}, "west": {"uv": [2.5, 2.5, 3.5, 3.5], "texture": "#p0"}, "east": {"uv": [2.5, 2.5, 3.5, 3.5], "texture": "#p0"}}},
+    {"from": [2, 20, 10], "to": [6, 20.5, 14], "faces": {"up": {"uv": [4.5, 2.5, 5.5, 3.5], "texture": "#p0"}}}
+  ]
+}

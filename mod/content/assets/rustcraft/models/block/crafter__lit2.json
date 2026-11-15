@@ -1,0 +1,6 @@
+{
+  "textures": {"particle": "rustcraft:block/crafter", "p0": "rustcraft:block/crafter"},
+  "elements": [
+    {"from": [10.75, 16.6, 3.75], "to": [12.25, 16.9, 5.25], "light_emission": 15, "faces": {"down": {"uv": [10.5, 0.5, 11.5, 1.5], "texture": "#p0"}, "up": {"uv": [10.5, 0.5, 11.5, 1.5], "texture": "#p0"}, "north": {"uv": [10.5, 0.5, 11.5, 1.5], "texture": "#p0"}, "south": {"uv": [10.5, 0.5, 11.5, 1.5], "texture": "#p0"}, "west": {"uv": [10.5, 0.5, 11.5, 1.5], "texture": "#p0"}, "east": {"uv": [10.5, 0.5, 11.5, 1.5], "texture": "#p0"}}}
+  ]
+}

@@ -21,6 +21,7 @@ pub mod monorail;
 pub mod run;
 pub mod slice10;
 pub mod slice11;
+pub mod slice12;
 pub mod sources;
 pub mod storage;
 pub mod transport;
@@ -242,6 +243,10 @@ pub trait Bench {
     fn catalyst(&self, pos: Pos) -> Option<crate::machines::catalyst::Tank>;
     /// What the butcher at `pos` showed on its last strike.
     fn butcher(&self, pos: Pos) -> Option<crate::butcher::Shown>;
+
+    // Slice 12.
+    /// What clients were told of the block's moving parts.
+    fn anim(&self, pos: Pos) -> Option<crate::anim::Shown>;
 }
 
 /// A mob as the self-test reads it.
@@ -408,6 +413,7 @@ pub fn catalog() -> Vec<Build> {
     all.extend(windows::ALL);
     all.extend(slice10::ALL);
     all.extend(slice11::ALL);
+    all.extend(slice12::ALL);
     all
 }
 

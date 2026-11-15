@@ -1,0 +1,19 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    "cgc",
+    "gsg",
+    "clc"
+  ],
+  "key": {
+    "c": "rustcraft:crystallite",
+    "g": "minecraft:glass",
+    "s": "minecraft:amethyst_shard",
+    "l": "minecraft:lapis_lazuli"
+  },
+  "result": {
+    "id": "rustcraft:xp_tank",
+    "count": 1
+  }
+}

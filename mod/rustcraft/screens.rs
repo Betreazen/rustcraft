@@ -296,6 +296,7 @@ fn fallback_name(machine: Machine) -> &'static str {
         Machine::DockLoad => "Load Dock",
         Machine::Turbine => "Hydro Turbine",
         Machine::Butcher => "Butcher",
+        Machine::Util(u) => crate::game::rustcraft_utility::title(u),
     }
 }
 

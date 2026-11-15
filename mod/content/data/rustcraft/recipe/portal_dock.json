@@ -1,0 +1,19 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    "bob",
+    "oso",
+    "bhb"
+  ],
+  "key": {
+    "b": "rustcraft:sparksteel",
+    "o": "minecraft:obsidian",
+    "s": "minecraft:amethyst_shard",
+    "h": "minecraft:hopper"
+  },
+  "result": {
+    "id": "rustcraft:portal_dock",
+    "count": 2
+  }
+}

@@ -509,6 +509,7 @@ pub(super) fn tick(game: &mut Game<'_>, dimension: &str, level: &LevelNet, t: &T
     }
     // Slice 11: before the deaths, so a slaughter is told the tick the animal died.
     butcher::tick(game, dimension, level, t);
+    crate::game::rustcraft_utility::tick(game, dimension, level, t);
     bleed(game, dimension, now, t);
     deaths(game, t);
     if now.is_multiple_of(ANCHOR_EVERY) {
@@ -1309,6 +1310,7 @@ pub(super) fn diagnosis(
             Some(workers::dock_text(game, dimension, pos, m))
         }
         Machine::Butcher => Some(butcher::diagnosis(dimension, pos)),
+        Machine::Util(u) => Some(crate::game::rustcraft_utility::diagnosis(dimension, pos, u)),
         _ => None,
     }
 }
@@ -1455,6 +1457,7 @@ pub(super) fn sheet(
         }
         SheetKind::Mixer => mixer::sheet(game, dimension, pos, t, &mut s),
         SheetKind::Butcher => butcher::sheet(game, dimension, pos, t, &mut s),
+        SheetKind::Util(u) => crate::game::rustcraft_utility::sheet(game, dimension, pos, u, &mut s),
         SheetKind::Miner | SheetKind::Placer | SheetKind::Breaker => {
             mining::sheet(game, dimension, pos, kind, t, &mut s);
         }
@@ -1984,6 +1987,7 @@ pub(super) fn forget_area(game: &mut Game<'_>, dimension: &str, min: Pos, max: P
     mining::forget_area(dimension, min, max);
     mixer::forget_area(dimension, min, max);
     butcher::forget_area(dimension, min, max);
+    crate::game::rustcraft_utility::forget_area(dimension, min, max);
     let mut s = state();
     s.turrets.retain(|(d, p), _| d != dimension || !inside(*p));
     s.anchor_states

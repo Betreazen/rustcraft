@@ -1,0 +1,19 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    "cdc",
+    "dsd",
+    "crc"
+  ],
+  "key": {
+    "c": "rustcraft:crystallite",
+    "d": "minecraft:dropper",
+    "s": "minecraft:amethyst_shard",
+    "r": "minecraft:redstone"
+  },
+  "result": {
+    "id": "rustcraft:builder",
+    "count": 1
+  }
+}

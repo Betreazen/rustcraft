@@ -45,7 +45,7 @@
 # prototype hooked it.
 [mod]
 id = "rustcraft"
-version = "0.11.0"
+version = "0.12.0"
 
 # The commit the traversal prototype and path_of_craft_tree build on; every function used here
 # was checked in its source.
@@ -223,6 +223,36 @@ id = "sheets"
 file = "crates/horizon-client/src/game.rs"
 name = "rustcraft_sheets"
 source = "sheets.rs"
+
+# Slice 12: the last blocks of the guide (rustcraft_rules::utility): the trash, the disintegrator,
+# the charger and the plate, the repair stand, the kitchen, the brewer, the experience condenser,
+# the enchanting machine and the archaeology table; the farm machines; the projector, the building
+# machine, the portal dock and the facade.
+[[module]]
+id = "utility"
+file = "crates/horizon-client/src/game.rs"
+name = "rustcraft_utility"
+source = "utility.rs"
+
+[[module]]
+id = "farm"
+file = "crates/horizon-client/src/game.rs"
+name = "rustcraft_farm"
+source = "farm.rs"
+
+[[module]]
+id = "builder"
+file = "crates/horizon-client/src/game.rs"
+name = "rustcraft_builder"
+source = "builder.rs"
+
+# Slice 12: the blocks' moving parts (rustcraft_rules::anim): their standalone models, the state the
+# server sends clients, and the parts drawn each frame from the block entity.
+[[module]]
+id = "anim"
+file = "crates/horizon-client/src/game.rs"
+name = "rustcraft_anim"
+source = "anim.rs"
 
 [[module]]
 id = "selftest"
@@ -805,4 +835,43 @@ bindings = [
   { name = "uuid", ty = "u128", value = "uuid" },
   { name = "window", ty = "i32", value = "window" },
   { name = "slots", ty = "&mut Vec<Option<horizon_client::items::ItemStack>>", value = "&mut *slots" },
+]
+
+# Slice 12: what clients get of a block entity, its moving parts drawn each frame, and the
+# windmill's taller bounds (API 45, 71; as SoulsCraft's altar and trophies hook them).
+[[injection]]
+id = "block_entity_update_tag"
+hook = "block_entity_update_tag"
+hook_version = 1
+kind = "HEAD"
+helper = "hook_update_tag.rs"
+bindings = [
+  { name = "entity", ty = "&horizon_client::containers::ModBlockEntity", value = "entity" },
+  { name = "tag", ty = "&mut Option<horizon_world::nbt::Compound>", value = "&mut *tag" },
+]
+
+[[injection]]
+id = "block_entity_submit"
+hook = "block_entity_submit"
+hook_version = 1
+kind = "HEAD"
+helper = "hook_block_entity_submit.rs"
+bindings = [
+  { name = "game", ty = "&crate::game::Game<'_>", value = "&*self" },
+  { name = "pos", ty = "[i32; 3]", value = "pos" },
+  { name = "block", ty = "&str", value = "block" },
+  { name = "state", ty = "horizon_world::registry::BlockStateId", value = "state" },
+  { name = "entity", ty = "&horizon_client::containers::ModBlockEntity", value = "entity" },
+  { name = "draw", ty = "&mut crate::game::native_block_entity_draw::BlockEntityDraw", value = "&mut *draw" },
+]
+
+[[injection]]
+id = "block_entity_bounds"
+hook = "block_entity_render_bounding_box"
+hook_version = 1
+kind = "HEAD"
+helper = "hook_block_entity_bounds.rs"
+bindings = [
+  { name = "block", ty = "&str", value = "block" },
+  { name = "bounds", ty = "&mut [f32; 6]", value = "&mut *bounds" },
 ]

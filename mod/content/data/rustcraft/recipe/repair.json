@@ -1,0 +1,18 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    "bbb",
+    "bnb",
+    "brb"
+  ],
+  "key": {
+    "b": "rustcraft:sparksteel",
+    "n": "minecraft:anvil",
+    "r": "minecraft:redstone"
+  },
+  "result": {
+    "id": "rustcraft:repair",
+    "count": 1
+  }
+}

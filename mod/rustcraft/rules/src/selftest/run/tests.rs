@@ -239,6 +239,9 @@ impl Bench for Fake {
     fn butcher(&self, _: Pos) -> Option<crate::butcher::Shown> {
         None
     }
+    fn anim(&self, _: Pos) -> Option<crate::anim::Shown> {
+        None
+    }
 }
 
 const PLOT: Area = Area {

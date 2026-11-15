@@ -602,6 +602,10 @@ fn write_back(game: &mut Game<'_>, before: &[TankGroup], after: &[TankGroup], pe
         for (pos, share) in a.shares(per_block) {
             if old.get(&pos) != Some(&share) {
                 game.native_with_mod_block_entity(pos, |e| write_tank(&mut e.nbt, &share));
+                // Slice 12: the fluid's height and colour on the tank's model.
+                let level = share.amount as f64 / per_block.max(1) as f64;
+                let colour = share.fluid.as_deref().map_or(0, rustcraft_rules::anim::fluid_tint);
+                crate::game::rustcraft_anim::show_level_cached(game, pos, level, colour);
             }
         }
     }

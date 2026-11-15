@@ -77,6 +77,24 @@
     "rustcraft:module_scout",
     "rustcraft:module_area",
     "rustcraft:backpack",
-    "rustcraft:backpack_2"
+    "rustcraft:backpack_2",
+    "rustcraft:trash",
+    "rustcraft:disintegrator",
+    "rustcraft:charger",
+    "rustcraft:charge_plate",
+    "rustcraft:repair",
+    "rustcraft:kitchen",
+    "rustcraft:fishery",
+    "rustcraft:feeder",
+    "rustcraft:shearer",
+    "rustcraft:apiary",
+    "rustcraft:brewer",
+    "rustcraft:xp_tank",
+    "rustcraft:enchanter",
+    "rustcraft:archeo",
+    "rustcraft:projector",
+    "rustcraft:builder",
+    "rustcraft:portal_dock",
+    "rustcraft:facade"
   ]
 }

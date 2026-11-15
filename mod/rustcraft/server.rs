@@ -81,6 +81,8 @@ pub struct LevelNet {
     /// Something may have changed since the layout was read: read it again before the next look.
     pub stale: bool,
     pub ticks: u64,
+    /// Slice 12: whether each machine's moving parts move, as clients were last told.
+    pub anim: BTreeMap<Pos, bool>,
 }
 
 impl LevelNet {
@@ -98,6 +100,7 @@ impl LevelNet {
             sources: power::Sources::default(),
             stale: true,
             ticks: 0,
+            anim: BTreeMap::new(),
         }
     }
 }
@@ -289,6 +292,20 @@ pub(super) fn on_use_item_on(
 ) {
     workers::on_use_item_on(game, stack, pos, claimed);
     let item: &str = &stack.item;
+    // Slice 12: the facade on a housing or a node; the wrench pairs portal docks.
+    if !*claimed
+        && let Some(player) = game.native_acting_player()
+    {
+        if item == content::WRENCH && game.native_block(pos) == "rustcraft:portal_dock" {
+            *claimed = true;
+            crate::game::rustcraft_builder::wrench_dock(game, player.uuid, pos);
+            return;
+        }
+        if crate::game::rustcraft_builder::on_use_item_on(game, player.uuid, player.sneaking, stack, pos) {
+            *claimed = true;
+            return;
+        }
+    }
     let channel = content::channel_of(item);
     if *claimed || (channel.is_none() && item != content::WRENCH) {
         return;
@@ -357,6 +374,7 @@ pub(super) fn on_menu_button_v2(
 ) {
     machines::on_menu_button_v2(entity, id, carried, &TUNING);
     base::on_sheet_button(entity, id, carried);
+    crate::game::rustcraft_utility::on_button(game, pos, entity, id);
     storage::on_button(game, pos, entity, id, carried);
     monorail::on_button(game, pos, entity, id);
 }

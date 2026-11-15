@@ -142,6 +142,8 @@ pub(super) fn tick(game: &mut Game<'_>, dimension: &str, level: &LevelNet, t: &T
         }
         if now.is_multiple_of(t.butcher_ticks.max(1)) {
             let shown = strike(game, dimension, pos, t);
+            // Slice 12: its arm chops while it works.
+            crate::game::rustcraft_anim::show_on(game, pos, matches!(shown, Shown::Working(_)));
             state().shown.insert((dimension.to_owned(), pos), shown);
         }
     }

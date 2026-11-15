@@ -2,6 +2,7 @@
 //! applies what they decide. Rule ids in comments (M3, N4…) refer to `docs/design/02-spec.md`.
 
 pub mod anchor;
+pub mod anim;
 pub mod backpack;
 pub mod butcher;
 pub mod geom;
@@ -18,5 +19,6 @@ pub mod reports;
 pub mod selftest;
 pub mod storage;
 pub mod tuning;
+pub mod utility;
 pub mod turret;
 pub mod worker;

@@ -66,7 +66,40 @@ pub enum Report {
         entity: u32,
         kind: String,
     },
+    /// Slice 12: the kitchen made a recipe (the contract's `craft`).
+    Craft {
+        owner: u128,
+        recipe: String,
+        item: String,
+        count: u32,
+        crafts: u32,
+    },
+    /// Slice 12: the contract's counted reports of spec 22: `repair`, `breed`, `shear`, `honey`,
+    /// `brew`, `enchant` (levels) and `brush`.
+    Counted {
+        kind: &'static str,
+        owner: u128,
+        count: u32,
+    },
+    /// Slice 12: the fishing station's catch.
+    Fish {
+        owner: u128,
+        item: String,
+        count: u32,
+    },
+    /// Slice 12: the shearer milked a cow.
+    Milk { owner: u128, entity: u32 },
+    /// Slice 12: the building machine placed a cell of its projector's plan (instead of `place`).
+    Build {
+        owner: u128,
+        dimension: String,
+        pos: Pos,
+        block: String,
+    },
 }
+
+/// The counted kinds of spec 22 Path-of-craft-tree takes.
+pub const COUNTED: [&str; 7] = ["repair", "breed", "shear", "honey", "brew", "enchant", "brush"];
 
 impl Report {
     /// The command line, without a slash.
@@ -100,6 +133,25 @@ impl Report {
                 entity,
                 kind,
             } => format!("{COMMAND} slaughter {owner:032x} {entity} {kind}"),
+            Report::Craft {
+                owner,
+                recipe,
+                item,
+                count,
+                crafts,
+            } => format!("{COMMAND} craft {owner:032x} {recipe} {item} {count} {crafts}"),
+            Report::Counted { kind, owner, count } => format!("{COMMAND} {kind} {owner:032x} {count}"),
+            Report::Fish { owner, item, count } => format!("{COMMAND} fish {owner:032x} {item} {count}"),
+            Report::Milk { owner, entity } => format!("{COMMAND} milk {owner:032x} {entity}"),
+            Report::Build {
+                owner,
+                dimension,
+                pos,
+                block,
+            } => format!(
+                "{COMMAND} build {owner:032x} {dimension} {} {} {} {block}",
+                pos[0], pos[1], pos[2]
+            ),
         }
     }
 
@@ -110,6 +162,11 @@ impl Report {
             Report::Place { .. } => "place",
             Report::Kill { .. } => "kill",
             Report::Slaughter { .. } => "slaughter",
+            Report::Craft { .. } => "craft",
+            Report::Counted { kind, .. } => kind,
+            Report::Fish { .. } => "fish",
+            Report::Milk { .. } => "milk",
+            Report::Build { .. } => "build",
         }
     }
 }
@@ -117,6 +174,25 @@ impl Report {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn spec_22_reports_read_as_the_contract_writes_them() {
+        let owner = 0x26a5132a990442e59cfd2cccd5083fa8u128;
+        let o = "26a5132a990442e59cfd2cccd5083fa8";
+        let c = Report::Counted { kind: "breed", owner, count: 1 };
+        assert_eq!(c.command(), format!("pct-machine breed {o} 1"));
+        let f = Report::Fish { owner, item: "minecraft:cod".into(), count: 1 };
+        assert_eq!(f.command(), format!("pct-machine fish {o} minecraft:cod 1"));
+        assert_eq!(Report::Milk { owner, entity: 9 }.command(), format!("pct-machine milk {o} 9"));
+        let b = Report::Build {
+            owner,
+            dimension: "minecraft:overworld".into(),
+            pos: [1, 2, -3],
+            block: "minecraft:stone".into(),
+        };
+        assert_eq!(b.command(), format!("pct-machine build {o} minecraft:overworld 1 2 -3 minecraft:stone"));
+        assert_eq!(b.kind(), "build");
+    }
 
     #[test]
     fn a_kill_reads_as_soulscraft_takes_it() {

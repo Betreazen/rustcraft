@@ -19,7 +19,7 @@
 // `Providers::burn_time` on the item's `cooking_fuel` component (SRC/crates/horizon-client-render/
 // src/providers.rs:108-113, the call the furnace makes in block_entity_ticks.rs:239-243).
 use crate::game::{
-    Game, rustcraft_alloy as alloy, rustcraft_base as base,
+    Game, rustcraft_alloy as alloy, rustcraft_anim as anim, rustcraft_base as base,
     rustcraft_content::{self as content, Kind, Machine},
     rustcraft_crafter as crafter, rustcraft_fluids as fluids, rustcraft_generator as generator,
     rustcraft_mining as mining, rustcraft_mixer as mixer, rustcraft_monorail as monorail,
@@ -312,6 +312,7 @@ pub struct BufferHeld {
 pub(super) fn buffer_spec(machine: Machine, tuning: &Tuning) -> (f64, f64) {
     match machine {
         Machine::Turret => (tuning.turret_buffer, tuning.turret_charge),
+        Machine::Util(u) => (u.spec().buffer, u.spec().draw),
         _ => (tuning.dock_buffer, tuning.dock_draw),
     }
 }
@@ -364,7 +365,7 @@ pub(super) fn tick(game: &mut Game<'_>, level: &mut LevelNet, tuning: &Tuning) {
                 }
                 Kind::Pump => Unit::Pump(fluids::read_pump(game, pos, tuning)?),
                 Kind::Station => Unit::Station(monorail::read_station(game, pos, tuning)?),
-                Kind::Charger | Kind::Turret => {
+                Kind::Charger | Kind::Turret | Kind::Util => {
                     Unit::Buffer(read_buffer(game, pos, machine, tuning)?)
                 }
                 Kind::Anchor => Unit::Anchor(base::anchor_request(game, pos, tuning)),
@@ -446,6 +447,17 @@ pub(super) fn tick(game: &mut Game<'_>, level: &mut LevelNet, tuning: &Tuning) {
         } else {
             0.0
         };
+        // Slice 12: whether its moving parts move (rustcraft_anim), told to clients on a change.
+        let on = match &unit {
+            Unit::Generator(_) => report.used.get(&pos).copied().unwrap_or(0.0) > 0.0,
+            Unit::Power(h) => h.output > 0.0,
+            _ => share > 0.0 && request > 0.0,
+        };
+        // The slice-12 machines say it from their own work (rustcraft_utility).
+        if !matches!(machine, Machine::Util(_)) && level.anim.get(&pos) != Some(&on) {
+            anim::show_on(game, pos, on);
+            level.anim.insert(pos, on);
+        }
         let shown = match unit {
             Unit::Processor(h) => run(game, pos, h, share, request, tuning),
             Unit::Generator(h) => {
@@ -829,6 +841,16 @@ pub(super) fn slot_takes(
         Machine::DockLoad => true,
         // Slice 11: the butcher's sword slot takes a sword (K5).
         Machine::Butcher => rustcraft_rules::butcher::is_sword(item),
+        // Slice 12: each slot as its machine says; the trash by its filter slots (UT2).
+        Machine::Util(u) => {
+            drop(a);
+            let filter: Vec<String> = (0..9)
+                .filter_map(|i| entity.items.get(i).cloned().flatten())
+                .filter(|s| s.count > 0)
+                .map(|s| s.item.to_string())
+                .collect();
+            u.takes(slot, item, &filter)
+        }
         Machine::Mixer => {
             let inputs: Vec<Slot> = (0..content::MIXER_SLOTS)
                 .map(|i| slot_of(entity, i))
@@ -956,9 +978,12 @@ pub(super) fn teach_slot_rules(game: &Game<'_>, recipes: &MachineRecipes) {
     ];
     // Slice 9: the sheet windows' hidden slot takes nothing; the placer's slots only blocks.
     lists.extend(
-        Machine::ALL
-            .into_iter()
-            .filter(|m| m.owned() && m.has_menu() && m.slots() == 0)
+        Machine::all()
+            .filter(|m| {
+                m.owned()
+                    && m.has_menu()
+                    && (m.slots() == 0 || matches!(m, Machine::Util(u) if u.slots().count == 1))
+            })
             .map(|m| (m.menu(), 0, &none)),
     );
     lists.extend((0..content::BLOCK_SLOTS).map(|i| (Machine::Placer.menu(), i, &next.placeable)));

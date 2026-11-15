@@ -1,0 +1,19 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    "cgc",
+    "gdg",
+    "crc"
+  ],
+  "key": {
+    "c": "rustcraft:crystallite",
+    "g": "minecraft:glass",
+    "d": "minecraft:diamond",
+    "r": "minecraft:redstone"
+  },
+  "result": {
+    "id": "rustcraft:projector",
+    "count": 1
+  }
+}

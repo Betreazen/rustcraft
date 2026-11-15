@@ -27,7 +27,7 @@ RustCraft is a mod about tidy automation. Inside a base everything is joined by 
 The mod is written entirely in Rust as a native Horizon mod and runs on the same server as [Path-of-craft-tree](https://github.com/Betreazen/path-of-craft-tree) and [SoulsCraft](https://github.com/Betreazen/soulscraft).
 
 > [!NOTE]
-> The mod is in active development: version 0.11, with 11 of the planned code slices done. Everything listed below works in the game and is covered by the in-world self-test. Balance numbers are a first proposal and will change after playtests. The in-game texts and the design docs are Russian first. The game's blocks, windows and diagnoses also have English names.
+> The mod is in active development: version 0.12, with every block of the guide in the game. Everything listed below works in the game and is covered by the in-world self-test. Balance numbers are a first proposal and will change after playtests. The in-game texts and the design docs are Russian first. The game's blocks, windows and diagnoses also have English names.
 
 ## Features
 
@@ -40,6 +40,11 @@ The mod is written entirely in Rust as a native Horizon mod and runs on the same
 - **Monorail.** Rail on floors, walls and ceilings, named stations with a network map, a capsule at 32 blocks per second, a lift.
 - **Workers.** A chassis on the rails with tools: saw, reaper, cargo hold, grab, scoop, and the shooter that turns a worker into a guard. Unload, load and charge docks.
 - **Defence.** Turrets with bleeding, poison and slowness modules, and support turrets: healing, protection, strength, speed. The base anchor keeps chunks loaded.
+- **Farming and crafts.** Kitchen, fishing station, feeder, shearer-milker, apiary collector, brewing vat, experience condenser, enchanting machine, archaeology table, repair stand.
+- **Trash and disintegrator.** Surplus burns by filter; unwanted items come apart into half their ingredients.
+- **Holo-projector and building machine.** The projector remembers a building and shows its ghost; the machine builds it from its slots.
+- **Portal dock** sends cargo to another world; the **facade** hides the magistral under any block.
+- **Living blocks.** Rolls, drills, rotors, flames and lamps move as in the guide; tanks show their fluid, batteries their charge.
 - **Backpacks** with 27 and 54 slots.
 - **Experience for machine work.** Machines tell Path-of-craft-tree what they did, and their owner earns profession experience in the skill tree. Turret and guard kills count in SoulsCraft's hunter's book.
 - **Two languages.** Names, windows and diagnoses in Russian and English.
@@ -88,7 +93,7 @@ Both parts are needed in the game and on the server, at the same version. Withou
 ### Client
 
 ```powershell
-git clone --branch v0.11.0 https://github.com/Betreazen/rustcraft
+git clone --branch v0.12.0 https://github.com/Betreazen/rustcraft
 horizon-launcher native-build rustcraft/mod/rustcraft --instance <instance> --trust-native-code
 ```
 
@@ -98,8 +103,8 @@ Then copy the contents of `mod/content` into the instance's `horizon-mods/rustcr
 
 ```powershell
 horizon-launcher native-build rustcraft/mod/rustcraft `
-    --server-output C:\horizon-engines\rustcraft-0.11.0 --trust-native-code
-horizon-server --dir <server folder> config set engine.path=C:\horizon-engines\rustcraft-0.11.0\horizon-engine.exe
+    --server-output C:\horizon-engines\rustcraft-0.12.0 --trust-native-code
+horizon-server --dir <server folder> config set engine.path=C:\horizon-engines\rustcraft-0.12.0\horizon-engine.exe
 ```
 
 The content mod goes into the server folder's `horizon-mods/rustcraft` and is turned on the same way. The `--server-output` folder must not exist yet. To build a server with several mods, put their bundles side by side and pass `native-build` the common folder. See [Horizon's native mod docs](https://github.com/horizon-rust/horizon/blob/main/docs/native-mods.md).

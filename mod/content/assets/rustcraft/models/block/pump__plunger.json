@@ -1,0 +1,7 @@
+{
+  "textures": {"particle": "rustcraft:block/pump", "p0": "rustcraft:block/pump"},
+  "elements": [
+    {"from": [7.25, 14, 7.25], "to": [8.75, 21, 8.75], "faces": {"down": {"uv": [14.5, 0.5, 15.5, 1.5], "texture": "#p0"}, "up": {"uv": [14.5, 0.5, 15.5, 1.5], "texture": "#p0"}, "north": {"uv": [14.5, 0.5, 15.5, 1.5], "texture": "#p0"}, "south": {"uv": [14.5, 0.5, 15.5, 1.5], "texture": "#p0"}, "west": {"uv": [14.5, 0.5, 15.5, 1.5], "texture": "#p0"}, "east": {"uv": [14.5, 0.5, 15.5, 1.5], "texture": "#p0"}}},
+    {"from": [6.25, 18, 6.25], "to": [9.75, 19.5, 9.75], "faces": {"down": {"uv": [0.5, 2.5, 1.5, 3.5], "texture": "#p0"}, "up": {"uv": [0.5, 2.5, 1.5, 3.5], "texture": "#p0"}, "north": {"uv": [0.5, 2.5, 1.5, 3.5], "texture": "#p0"}, "south": {"uv": [0.5, 2.5, 1.5, 3.5], "texture": "#p0"}, "west": {"uv": [0.5, 2.5, 1.5, 3.5], "texture": "#p0"}, "east": {"uv": [0.5, 2.5, 1.5, 3.5], "texture": "#p0"}}}
+  ]
+}

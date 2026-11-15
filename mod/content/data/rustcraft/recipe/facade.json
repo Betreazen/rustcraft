@@ -1,0 +1,17 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    " s ",
+    "sas",
+    " s "
+  ],
+  "key": {
+    "s": "minecraft:stone",
+    "a": "rustcraft:coppersteel"
+  },
+  "result": {
+    "id": "rustcraft:facade",
+    "count": 8
+  }
+}

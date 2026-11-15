@@ -1,0 +1,18 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    "ccc",
+    "csc",
+    "cbc"
+  ],
+  "key": {
+    "c": "rustcraft:crystallite",
+    "s": "minecraft:brewing_stand",
+    "b": "minecraft:blaze_rod"
+  },
+  "result": {
+    "id": "rustcraft:brewer",
+    "count": 1
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "textures": {"particle": "rustcraft:block/mixer", "p0": "rustcraft:block/mixer"},
+  "elements": [
+    {"from": [7.5, 12, 7.5], "to": [8.5, 16.5, 8.5], "faces": {"down": {"uv": [2.5, 2.5, 3.5, 3.5], "texture": "#p0"}, "up": {"uv": [2.5, 2.5, 3.5, 3.5], "texture": "#p0"}, "north": {"uv": [2.5, 2.5, 3.5, 3.5], "texture": "#p0"}, "south": {"uv": [2.5, 2.5, 3.5, 3.5], "texture": "#p0"}, "west": {"uv": [2.5, 2.5, 3.5, 3.5], "texture": "#p0"}, "east": {"uv": [2.5, 2.5, 3.5, 3.5], "texture": "#p0"}}},
+    {"from": [3, 12.75, 7.25], "to": [13, 14, 8.75], "faces": {"down": {"uv": [2.5, 2.5, 3.5, 3.5], "texture": "#p0"}, "up": {"uv": [2.5, 2.5, 3.5, 3.5], "texture": "#p0"}, "north": {"uv": [2.5, 2.5, 3.5, 3.5], "texture": "#p0"}, "south": {"uv": [2.5, 2.5, 3.5, 3.5], "texture": "#p0"}, "west": {"uv": [2.5, 2.5, 3.5, 3.5], "texture": "#p0"}, "east": {"uv": [2.5, 2.5, 3.5, 3.5], "texture": "#p0"}}},
+    {"from": [7.25, 12.75, 3], "to": [8.75, 14, 13], "faces": {"down": {"uv": [2.5, 2.5, 3.5, 3.5], "texture": "#p0"}, "up": {"uv": [2.5, 2.5, 3.5, 3.5], "texture": "#p0"}, "north": {"uv": [2.5, 2.5, 3.5, 3.5], "texture": "#p0"}, "south": {"uv": [2.5, 2.5, 3.5, 3.5], "texture": "#p0"}, "west": {"uv": [2.5, 2.5, 3.5, 3.5], "texture": "#p0"}, "east": {"uv": [2.5, 2.5, 3.5, 3.5], "texture": "#p0"}}}
+  ]
+}

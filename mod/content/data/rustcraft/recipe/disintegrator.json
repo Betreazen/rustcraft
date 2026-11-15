@@ -1,0 +1,18 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    "cpc",
+    "ctc",
+    "ccc"
+  ],
+  "key": {
+    "c": "rustcraft:crystallite",
+    "p": "minecraft:iron_pickaxe",
+    "t": "minecraft:crafting_table"
+  },
+  "result": {
+    "id": "rustcraft:disintegrator",
+    "count": 1
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    "dbd",
+    "dtd",
+    "dld"
+  ],
+  "key": {
+    "d": "rustcraft:starsteel",
+    "b": "minecraft:book",
+    "t": "minecraft:enchanting_table",
+    "l": "minecraft:lapis_lazuli"
+  },
+  "result": {
+    "id": "rustcraft:enchanter",
+    "count": 1
+  }
+}

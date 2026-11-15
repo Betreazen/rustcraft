@@ -1,0 +1,7 @@
+{
+  "textures": {"particle": "rustcraft:block/xp_tank", "p0": "rustcraft:block/xp_tank"},
+  "elements": [
+    {"from": [2, 1.75, 2], "to": [14, 13, 14], "light_emission": 15, "faces": {"down": {"uv": [10.5, 0.5, 11.5, 1.5], "texture": "#p0"}, "north": {"uv": [10.5, 0.5, 11.5, 1.5], "texture": "#p0"}, "south": {"uv": [10.5, 0.5, 11.5, 1.5], "texture": "#p0"}, "west": {"uv": [10.5, 0.5, 11.5, 1.5], "texture": "#p0"}, "east": {"uv": [10.5, 0.5, 11.5, 1.5], "texture": "#p0"}}},
+    {"from": [2, 12.5, 2], "to": [14, 13, 14], "light_emission": 15, "faces": {"up": {"uv": [12.5, 0.5, 13.5, 1.5], "texture": "#p0"}}}
+  ]
+}

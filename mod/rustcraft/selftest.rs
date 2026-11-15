@@ -667,6 +667,12 @@ impl Bench for GameBench<'_, '_> {
         butcher::shown(DIMENSION, pos)
     }
 
+    fn anim(&self, pos: Pos) -> Option<rustcraft_rules::anim::Shown> {
+        self.game
+            .native_mod_block_entity(pos)
+            .map(|e| crate::game::rustcraft_anim::read(&e.nbt))
+    }
+
     fn drop_item(&mut self, at: [f64; 3], item: &str, count: u32) -> Result<(), String> {
         let stack = Tag::compound([
             (

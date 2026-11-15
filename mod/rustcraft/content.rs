@@ -9,6 +9,7 @@ use horizon_client::containers::ModContainer;
 use horizon_mods::content::{Block, BlockProperties, BlockShapes, Item, StateProperty};
 use horizon_world::nbt::Compound;
 use rustcraft_rules::net::topology::{Channel, ChannelKind};
+use rustcraft_rules::utility::Util;
 use std::{
     collections::{BTreeMap, HashMap},
     sync::{Arc, OnceLock},
@@ -159,6 +160,8 @@ pub enum Machine {
     DockLoad,
     Turbine,
     Butcher,
+    /// Slice 12: the last blocks of the guide (rustcraft_utility).
+    Util(Util),
 }
 
 /// How a machine works: the rules type that runs it.
@@ -193,6 +196,8 @@ pub enum Kind {
     LoadDock,
     /// Slice 11, rustcraft_butcher: culls a pen's farm animals with a sword.
     Butcher,
+    /// Slice 12, rustcraft_utility: a buffer on energy and its own work.
+    Util,
 }
 
 impl Machine {
@@ -222,7 +227,15 @@ impl Machine {
     ];
 
     pub fn of(block: &str) -> Option<Machine> {
-        Machine::ALL.into_iter().find(|m| m.block() == block)
+        Machine::ALL
+            .into_iter()
+            .find(|m| m.block() == block)
+            .or_else(|| Util::of(block).map(Machine::Util))
+    }
+
+    /// Every machine, the slice-12 ones after the rest.
+    pub fn all() -> impl Iterator<Item = Machine> {
+        Machine::ALL.into_iter().chain(Util::ALL.map(Machine::Util))
     }
 
     pub fn block(self) -> &'static str {
@@ -249,6 +262,7 @@ impl Machine {
             Machine::DockLoad => DOCK_LOAD,
             Machine::Turbine => TURBINE,
             Machine::Butcher => BUTCHER,
+            Machine::Util(u) => u.spec().block,
         }
     }
 
@@ -272,6 +286,7 @@ impl Machine {
             Machine::Mixer => Kind::Mixer,
             Machine::DockLoad => Kind::LoadDock,
             Machine::Butcher => Kind::Butcher,
+            Machine::Util(_) => Kind::Util,
         }
     }
 
@@ -299,6 +314,10 @@ impl Machine {
             Kind::Mixer => MIXER_SLOTS,
             Kind::LoadDock => DOCK_SLOTS,
             Kind::Butcher => rustcraft_rules::butcher::SLOTS,
+            Kind::Util => match self {
+                Machine::Util(u) => u.slots().count,
+                _ => 0,
+            },
             Kind::Charger | Kind::Turret | Kind::Anchor | Kind::Power | Kind::Battery => 0,
         }
     }
@@ -314,6 +333,10 @@ impl Machine {
             Kind::Mixer => (0..MIXER_SLOTS).collect(),
             Kind::LoadDock => (0..DOCK_SLOTS).collect(),
             Kind::Butcher => vec![rustcraft_rules::butcher::SWORD_SLOT],
+            Kind::Util => match self {
+                Machine::Util(u) => u.slots().inputs.collect(),
+                _ => Vec::new(),
+            },
             _ => Vec::new(),
         }
     }
@@ -327,6 +350,10 @@ impl Machine {
             Kind::Crafter => CRAFTER_OUTPUTS.collect(),
             Kind::Dock => (0..DOCK_SLOTS).collect(),
             Kind::Butcher => (0..rustcraft_rules::butcher::LOOT_SLOTS).collect(),
+            Kind::Util => match self {
+                Machine::Util(u) => u.slots().outputs.collect(),
+                _ => Vec::new(),
+            },
             Kind::Mining if self != Machine::Placer => (0..self.slots()).collect(),
             _ => Vec::new(),
         }
@@ -364,6 +391,7 @@ impl Machine {
                 | Kind::Mixer
                 | Kind::LoadDock
                 | Kind::Butcher
+                | Kind::Util
         )
     }
 }
@@ -589,7 +617,7 @@ fn declare_storage_and_tanks(blocks: &mut Vec<Block>) {
 /// sets it (rustcraft_base::state_for_placement). The turret's head reaches past its cell, so it
 /// hides nothing behind it.
 fn declare_slice7(blocks: &mut Vec<Block>) {
-    for machine in Machine::ALL.into_iter().filter(|m| m.owned()) {
+    for machine in Machine::all().filter(|m| m.owned()) {
         // E19: the solar panel is a thin plate that lets the light through, so there is no
         // shadow under it; the turret's head and the windmill's mast reach past their cells.
         let open = matches!(
@@ -665,9 +693,7 @@ fn declare_machines(blocks: &mut Vec<Block>) {
         item: true,
         ..Block::default()
     });
-    for machine in Machine::ALL
-        .into_iter()
-        .filter(|m| m.has_menu() && !m.owned())
+    for machine in Machine::all().filter(|m| m.has_menu() && !m.owned())
     {
         blocks.push(Block {
             id: machine.block().into(),
@@ -687,6 +713,12 @@ fn declare_machines(blocks: &mut Vec<Block>) {
 /// The channels, the wrench and the dusts. The channels' and the wrench's templates have no use of their own: what a click with them
 /// does is all `native_use_item_on`'s (rustcraft_server::on_use_item_on).
 pub fn declare_items(items: &mut Vec<Item>) {
+    // Slice 12: the facade (spec 15); a click with it is rustcraft_builder's.
+    items.push(Item {
+        id: "rustcraft:facade".into(),
+        template: "minecraft:iron_ingot".into(),
+        ..Item::default()
+    });
     for (_, _, id) in CHANNEL_ITEMS {
         items.push(Item {
             id: id.into(),

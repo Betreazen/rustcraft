@@ -1,0 +1,18 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    "cbc",
+    "ctc",
+    "ccc"
+  ],
+  "key": {
+    "c": "rustcraft:crystallite",
+    "b": "minecraft:brush",
+    "t": "minecraft:crafting_table"
+  },
+  "result": {
+    "id": "rustcraft:archeo",
+    "count": 1
+  }
+}

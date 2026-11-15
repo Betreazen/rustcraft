@@ -44,6 +44,8 @@ pub enum Kind {
     Turbine,
     /// Slice 11: the butcher.
     Butcher,
+    /// Slice 12: the last blocks of the guide.
+    Util(crate::utility::Util),
 }
 
 /// Which parts a window has, and how many of each it has room for.
@@ -96,11 +98,15 @@ impl Kind {
             Kind::DockLoad => "rustcraft:dock_load",
             Kind::Turbine => "rustcraft:turbine",
             Kind::Butcher => crate::butcher::BLOCK,
+            Kind::Util(u) => u.spec().block,
         }
     }
 
     pub fn of(block: &str) -> Option<Kind> {
-        Kind::ALL.into_iter().find(|k| k.block() == block)
+        Kind::ALL
+            .into_iter()
+            .find(|k| k.block() == block)
+            .or_else(|| crate::utility::Util::of(block).map(Kind::Util))
     }
 
     /// Whose modules its sockets take.
@@ -113,6 +119,7 @@ impl Kind {
             Kind::Placer | Kind::Breaker => Some(Holder::Placer),
             Kind::Mixer => Some(Holder::Mixer),
             Kind::Butcher => Some(Holder::Butcher),
+            Kind::Util(u) => Some(Holder::Util(u)),
             _ => None,
         }
     }
@@ -199,6 +206,21 @@ impl Kind {
                 slots: crate::butcher::SLOTS,
                 ..Shape::default()
             },
+            // Slice 12: its lines, its toggles, its slots; a block with only the menu's one hidden
+            // slot shows none.
+            Kind::Util(u) => {
+                let spec = u.spec();
+                let count = u.slots().count;
+                Shape {
+                    sockets,
+                    mode: false,
+                    rows: spec.rows,
+                    bars: 1,
+                    toggles: spec.toggles,
+                    slots: if count > 1 { count } else { 0 },
+                    ..Shape::default()
+                }
+            }
         }
     }
 }

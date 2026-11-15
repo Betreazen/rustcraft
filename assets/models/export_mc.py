@@ -42,6 +42,7 @@ ASSETS = HERE.parent.parent / 'mod' / 'content' / 'assets' / 'rustcraft'
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(HERE))
 
+import anim_mc  # noqa: E402
 import branches  # noqa: E402
 import energy  # noqa: E402
 import gear  # noqa: E402
@@ -122,11 +123,17 @@ def scaled(p, k):
     return (8 + (p[0] - 8) * k, 8 + (p[1] - 8) * k, p[2] * k)
 
 
-def read(draw, name=None):
-    """The boxes of a model; with its name, parts the guide holds turned at rest are turned so."""
+def read(draw, name=None, rest_turn=True):
+    """The boxes of a model; with its name, parts the guide holds turned at rest are turned so
+    (unless rest_turn is off: a moving part's own model is drawn unturned)."""
+    return read_full(draw, name, rest_turn)[0]
+
+
+def read_full(draw, name=None, rest_turn=True):
+    """(boxes, pivots) of a model, scaled as read() scales them."""
     rec = Recorder()
     draw(rec)
-    turns = REST_TURN.get(name, {})
+    turns = REST_TURN.get(name, {}) if rest_turn else {}
     k = SCALED.get(name)
     boxes = []
     for part, mat, lo, hi, rot in rec.boxes:
@@ -139,7 +146,8 @@ def read(draw, name=None):
             axis, degrees = turns[part]
             rot = ({'X': (1, 0, 0), 'Y': (0, 1, 0), 'Z': (0, 0, 1)}[axis], degrees, rec.pivots[part])
         boxes.append((part, mat, lo, hi, rot))
-    return boxes
+    pivots = {part: (scaled(p, k) if k else p) for part, p in rec.pivots.items()}
+    return boxes, pivots
 
 
 # ---------------------------------------------------------------- to Minecraft
@@ -277,8 +285,9 @@ def rgba(color, alpha=255):
     return tuple(int(color[i:i + 2], 16) for i in (1, 3, 5)) + (alpha,)
 
 
-def elements(boxes, skin, stats):
-    """The elements of the boxes. stats collects what the caller reports."""
+def elements(boxes, skin, stats, tint_index=False):
+    """The elements of the boxes. stats collects what the caller reports; tint_index gives every
+    face tint index 0, for a part the client colours (the tank's fluid)."""
     placed = [(box, *to_mc(box)) for box in boxes]
     solids = [(i, lo, hi) for i, (_, lo, hi, rot) in enumerate(placed) if not rot]
     out = []
@@ -300,6 +309,8 @@ def elements(boxes, skin, stats):
                 continue
             key, uv = skin.slot(mat)
             f = {'uv': [num(v) for v in uv], 'texture': '#' + key}
+            if tint_index:
+                f['tintindex'] = 0
             side = None if rot else cull(face, lo, hi)
             if side:
                 f['cullface'] = side
@@ -489,15 +500,23 @@ def machine_states(out):
     # The pump, the terminal, the tank and the station copy the furnace too, for a menu on use;
     # since slice 9 so do the slice-7 and slice-8 blocks but the solar panel (SLICE7_BLOCKS).
     furnaces = ('furnace', 'crusher', 'gen_fuel', 'alloy', 'crafter', 'pump', 'terminal', 'tank', 'station')
-    for machine in furnaces + tuple(b for b in SLICE7_PANELS if b not in SLICE7_BLOCKS):
+    for machine in furnaces + tuple(b for b in SLICE7_PANELS if b not in SLICE7_BLOCKS) + SLICE12_BLOCKS:
         variants = []
+        model_name = BLOCK_MODEL.get(machine, machine)
         for facing, y in FACING_Y.items():
             for lit in ('false', 'true'):
-                model = {'model': 'rustcraft:block/' + machine}
+                model = {'model': 'rustcraft:block/' + model_name}
                 if y:
                     model['y'] = y
                 variants.append('    %s: %s' % (json.dumps('facing=%s,lit=%s' % (facing, lit)), json.dumps(model)))
         out.text('blockstates/%s.json' % machine, '{\n  "variants": {\n%s\n  }\n}\n' % ',\n'.join(variants))
+
+
+# Slice 12: the last blocks copy the furnace as the machines do; the portal dock's model is `pdock`.
+SLICE12_BLOCKS = ('butcher', 'trash', 'disintegrator', 'charger', 'charge_plate', 'repair', 'kitchen', 'fishery',
+                  'feeder', 'shearer', 'apiary', 'brewer', 'xp_tank', 'enchanter', 'archeo', 'projector',
+                  'builder', 'portal_dock')
+BLOCK_MODEL = {'portal_dock': 'pdock'}
 
 
 # Models drawn see-through, with their palette's alpha: the solar panel lets the light through
@@ -515,11 +534,18 @@ def staged(out, report, skipped):
             if name in ('pipe', 'node'):
                 continue
             every = read(draw, name)
-            boxes = [b for b in every if at_rest(name, b[0])]
+            moving = anim_mc.parts_of(name)
+            boxes = [b for b in every if at_rest(name, b[0]) and b[0] not in moving]
             alpha = SEE_THROUGH.get(name, 255)
             skin = Skin(name, DEFAULT_TINTS.get(name), alpha)
+            # One palette for the block and its moving parts, so their models share a texture.
+            for b in every:
+                if b[0] not in ALWAYS_HIDDEN:
+                    skin.slot(b[1])
             stats = {}
             els = elements(boxes, skin, stats)
+            if moving:
+                anim_parts(out, name, draw, skin, stats)
             if stats.get('outside_limit'):
                 skipped.append(name)
                 continue
@@ -530,6 +556,112 @@ def staged(out, report, skipped):
             stats['dropped'] = dropped
             stats['pages'] = len(skin.page_names())
             report.append((name, '%d elements' % len(els), stats))
+
+
+# ---------------------------------------------------------------- moving parts (slice 12)
+
+# Blocks whose id is not their model's name.
+MODEL_BLOCK = {'pdock': 'portal_dock'}
+ANIM_TABLE = []
+AXES = {'x': 0, 'y': 2, 'z': 1}
+
+
+def anim_parts(out, name, draw, skin, stats):
+    """The moving parts of model `name` (anim_mc.ANIM), unturned, each a standalone model drawn by
+    the client's block-entity renderer, and their rows of the Rust table."""
+    boxes, pivots = read_full(draw, name, rest_turn=False)
+    spec = anim_mc.parts_of(name)
+    order = list(spec)
+    for part in order:
+        p = spec[part]
+        part_boxes = [b for b in boxes if b[0] == part]
+        assert part_boxes, 'no boxes in moving part %s of %s' % (part, name)
+        model = '%s__%s' % (name, part)
+        if p.get('tinted'):
+            white = Skin(model, dict((b[1], '#ffffff') for b in part_boxes))
+            els = elements(part_boxes, white, stats, tint_index=True)
+            out.text('models/block/%s.json' % model, model_json(white.textures(), els))
+            out.skin(white)
+        else:
+            out.text('models/block/%s.json' % model, model_json(skin.textures(), elements(part_boxes, skin, stats)))
+        pivot = [v / 16 for v in swap(pivots.get(part, (8, 8, 8)))]
+        bottom = min(swap(b[2])[1] for b in part_boxes) / 16
+        ANIM_TABLE.append({
+            'block': 'rustcraft:' + MODEL_BLOCK.get(name, name), 'model': 'rustcraft:block/' + model,
+            'pivot': pivot, 'bottom': bottom, 'on': [motion_mc(m) for m in p['on']],
+            'off': p['off'] if isinstance(p['off'], str) else [motion_mc(m) for m in p['off']],
+            'show': p.get('show'), 'carry': (order.index(p['carry']) - order.index(part)) if p.get('carry') else 0,
+            'level': bool(p.get('level')), 'tinted': bool(p.get('tinted')),
+        })
+
+
+def motion_mc(m):
+    """A motion in Minecraft numbers: the y/z swap is a mirror, so turns change sign; vectors are
+    swapped and go from pixels to blocks."""
+    kind, what, base, amp, shape, freq, phase = m
+    if kind == 'rot':
+        return ('Rot', AXES[what], -base, -amp, shape, freq, phase)
+    vec = [v / 16 for v in swap(what)]
+    return ('Move', vec, base, amp, shape, freq, phase)
+
+
+def rust_f(v):
+    s = repr(float(round(v, 6)))
+    return s if ('.' in s or 'e' in s) else s + '.0'
+
+
+def rust_motion(m):
+    kind, what, base, amp, shape, freq, phase = m
+    target = ('Target::Rot(%d)' % what) if kind == 'Rot' else ('Target::Move([%s])' % ', '.join(rust_f(v) for v in what))
+    return 'Motion { target: %s, base: %s, amp: %s, shape: Shape::%s, freq: %s, phase: %s }' % (
+        target, rust_f(base), rust_f(amp), shape.capitalize(), rust_f(freq), rust_f(phase))
+
+
+def rust_show(show):
+    if not show:
+        return 'Show::Always'
+    if show[0] == 'below':
+        return 'Show::Below { rate: %s, modulo: %d, index: %d }' % (rust_f(show[1]), show[2], show[3])
+    if show[0] == 'eq':
+        return 'Show::Eq { rate: %s, modulo: %d, index: %d }' % (rust_f(show[1]), show[2], show[3])
+    return 'Show::Sin { freq: %s, threshold: %s }' % (rust_f(show[1]), rust_f(show[2]))
+
+
+def rust_table(out):
+    rows = []
+    for r in ANIM_TABLE:
+        off = r['off']
+        if off == 'rest':
+            off_s = 'Off::Rest'
+        elif off == 'hide':
+            off_s = 'Off::Hide'
+        elif off == 'always':
+            off_s = 'Off::Always'
+        else:
+            off_s = 'Off::Moves(&[%s])' % ', '.join(rust_motion(m) for m in off)
+        rows.append('''    Part {
+        block: %s,
+        model: %s,
+        pivot: [%s],
+        bottom: %s,
+        on: &[%s],
+        off: %s,
+        show: %s,
+        carry: %d,
+        level: %s,
+        tinted: %s,
+    },''' % (json.dumps(r['block']), json.dumps(r['model']), ', '.join(rust_f(v) for v in r['pivot']), rust_f(r['bottom']),
+             ', '.join(rust_motion(m) for m in r['on']), off_s, rust_show(r['show']), r['carry'],
+             'true' if r['level'] else 'false', 'true' if r['tinted'] else 'false'))
+    text = ('//! The moving parts of the block models, written by assets/models/export_mc.py from\n'
+            '//! assets/models/anim_mc.py: do not edit by hand, run the exporter.\n\n'
+            'use super::{Motion, Off, Part, Shape, Show, Target};\n\n'
+            '#[rustfmt::skip]\npub const PARTS: &[Part] = &[\n%s\n];\n' % '\n'.join(rows))
+    path = HERE.parent.parent / 'mod' / 'rustcraft' / 'rules' / 'src' / 'anim' / 'parts.rs'
+    path.parent.mkdir(parents=True, exist_ok=True)
+    data = text.encode('utf-8')
+    if not path.exists() or path.read_bytes() != data:
+        path.write_bytes(data)
 
 
 # The monorail (spec 4.6, rustcraft_rules::monorail::shape): the guide's floor rail cut into its
@@ -696,6 +828,7 @@ def main():
     worker_parts(out, report)
     slice7_states(out)
     staged(out, report, skipped)
+    rust_table(out)
     items(out)
     count = out.flush()
     print('wrote %d files under %s' % (count, ASSETS))

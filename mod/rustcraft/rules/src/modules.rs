@@ -96,6 +96,8 @@ pub enum Holder {
     Mixer,
     /// Slice 11: the butcher.
     Butcher,
+    /// Slice 12: the last blocks.
+    Util(crate::utility::Util),
 }
 
 impl Holder {
@@ -128,6 +130,13 @@ impl Holder {
             Holder::Mixer => matches!(kind, Module::Speed | Module::Economy),
             // Round 26, K1: the radius module doubles its pen.
             Holder::Butcher => matches!(kind, Module::Radius),
+            // Guide: speed and economy for every machine; radius for the farm machines; the
+            // disintegrator's yield module is the output module (DS5).
+            Holder::Util(u) => {
+                matches!(kind, Module::Speed | Module::Economy)
+                    || (u.has_radius() && kind == Module::Radius)
+                    || (u == crate::utility::Util::Disintegrator && kind == Module::Output)
+            }
         }
     }
 }

@@ -351,6 +351,11 @@ pub(super) fn settle(game: &mut Game<'_>, s: &mut Sources, shared: &Shared, t: &
                 machines::set_buffer_energy(game, p, each);
             }
         }
+        // Slice 12: the charge bar on the battery's model.
+        let level = if b.capacity > 0.0 { after / b.capacity } else { 0.0 };
+        for &p in &g {
+            crate::game::rustcraft_anim::show_level_cached(game, p, level, 0);
+        }
         let view = PowerView {
             output: given,
             shown: Battery::shown(given, taken),

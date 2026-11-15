@@ -1,0 +1,12 @@
+{
+  "variants": {
+    "facing=north,lit=false": {"model": "rustcraft:block/projector"},
+    "facing=north,lit=true": {"model": "rustcraft:block/projector"},
+    "facing=east,lit=false": {"model": "rustcraft:block/projector", "y": 90},
+    "facing=east,lit=true": {"model": "rustcraft:block/projector", "y": 90},
+    "facing=south,lit=false": {"model": "rustcraft:block/projector", "y": 180},
+    "facing=south,lit=true": {"model": "rustcraft:block/projector", "y": 180},
+    "facing=west,lit=false": {"model": "rustcraft:block/projector", "y": 270},
+    "facing=west,lit=true": {"model": "rustcraft:block/projector", "y": 270}
+  }
+}
