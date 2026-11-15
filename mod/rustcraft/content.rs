@@ -8,7 +8,7 @@ use crate::game::Game;
 use horizon_client::containers::ModContainer;
 use horizon_mods::content::{Block, BlockProperties, BlockShapes, Item, StateProperty};
 use horizon_world::nbt::Compound;
-use rustcraft_rules::net::topology::ChannelKind;
+use rustcraft_rules::net::topology::{Channel, ChannelKind};
 use std::{
     collections::{BTreeMap, HashMap},
     sync::{Arc, OnceLock},
@@ -105,6 +105,16 @@ pub const MINER_SLOTS: usize = 27;
 pub const BLOCK_SLOTS: usize = 9;
 /// The worker's chassis and tools (rustcraft_workers), placed on a rail as a worker.
 pub const CHASSIS: &str = "rustcraft:chassis";
+/// Slice 10: the mixer (rustcraft_mixer), the load dock (rustcraft_workers) and the hydro
+/// turbine (rustcraft_power). They copy the furnace, as the slice-7 and slice-8 blocks do, and
+/// their windows are sheets.
+pub const MIXER: &str = "rustcraft:mixer";
+pub const DOCK_LOAD: &str = "rustcraft:dock_load";
+pub const TURBINE: &str = "rustcraft:turbine";
+/// The mixer's input slots: one ingredient a slot.
+pub const MIXER_SLOTS: usize = rustcraft_rules::machines::mixer::INPUTS;
+/// Slice 10: the backpacks, sparksteel's and crystallite's (G4), one to a stack (rustcraft_backpack).
+pub const BACKPACKS: [&str; 2] = rustcraft_rules::backpack::ITEMS;
 /// The `facing` of the slice-7 blocks: the side their front looks to.
 pub const FACING: &str = "facing";
 pub const FACINGS: [&str; 4] = ["north", "east", "south", "west"];
@@ -143,6 +153,9 @@ pub enum Machine {
     Miner,
     Placer,
     Breaker,
+    Mixer,
+    DockLoad,
+    Turbine,
 }
 
 /// How a machine works: the rules type that runs it.
@@ -171,10 +184,14 @@ pub enum Kind {
     Battery,
     /// rustcraft_mining: the miner, the placer and the breaker.
     Mining,
+    /// Slice 10, rustcraft_mixer: ingredients and water into a fluid.
+    Mixer,
+    /// Slice 10, rustcraft_workers: the load dock, slots the net puts into for cargo workers.
+    LoadDock,
 }
 
 impl Machine {
-    pub const ALL: [Machine; 18] = [
+    pub const ALL: [Machine; 21] = [
         Machine::Furnace,
         Machine::Crusher,
         Machine::Generator,
@@ -193,6 +210,9 @@ impl Machine {
         Machine::Miner,
         Machine::Placer,
         Machine::Breaker,
+        Machine::Mixer,
+        Machine::DockLoad,
+        Machine::Turbine,
     ];
 
     pub fn of(block: &str) -> Option<Machine> {
@@ -219,6 +239,9 @@ impl Machine {
             Machine::Miner => MINER,
             Machine::Placer => PLACER,
             Machine::Breaker => BREAKER,
+            Machine::Mixer => MIXER,
+            Machine::DockLoad => DOCK_LOAD,
+            Machine::Turbine => TURBINE,
         }
     }
 
@@ -234,9 +257,13 @@ impl Machine {
             Machine::DockCharge => Kind::Charger,
             Machine::Turret => Kind::Turret,
             Machine::Anchor => Kind::Anchor,
-            Machine::Solar | Machine::Windmill | Machine::LavaGenerator => Kind::Power,
+            Machine::Solar | Machine::Windmill | Machine::LavaGenerator | Machine::Turbine => {
+                Kind::Power
+            }
             Machine::Battery => Kind::Battery,
             Machine::Miner | Machine::Placer | Machine::Breaker => Kind::Mining,
+            Machine::Mixer => Kind::Mixer,
+            Machine::DockLoad => Kind::LoadDock,
         }
     }
 
@@ -261,6 +288,8 @@ impl Machine {
             Kind::Dock => DOCK_SLOTS,
             Kind::Mining if self == Machine::Miner => MINER_SLOTS,
             Kind::Mining => BLOCK_SLOTS,
+            Kind::Mixer => MIXER_SLOTS,
+            Kind::LoadDock => DOCK_SLOTS,
             Kind::Charger | Kind::Turret | Kind::Anchor | Kind::Power | Kind::Battery => 0,
         }
     }
@@ -273,6 +302,8 @@ impl Machine {
             Kind::Alloy => ALLOY_INPUTS.chain([ALLOY_FUEL]).collect(),
             Kind::Crafter => CRAFTER_BUFFER.collect(),
             Kind::Mining if self == Machine::Placer => (0..BLOCK_SLOTS).collect(),
+            Kind::Mixer => (0..MIXER_SLOTS).collect(),
+            Kind::LoadDock => (0..DOCK_SLOTS).collect(),
             _ => Vec::new(),
         }
     }
@@ -319,6 +350,8 @@ impl Machine {
                 | Kind::Power
                 | Kind::Battery
                 | Kind::Mining
+                | Kind::Mixer
+                | Kind::LoadDock
         )
     }
 }
@@ -330,6 +363,18 @@ const CRYSTAL_BOX: [f64; 6] = [0.125, 0.0, 0.125, 0.875, 0.9375, 0.875];
 pub const ITEM_CHANNEL: &str = "rustcraft:item_channel";
 pub const FLUID_CHANNEL: &str = "rustcraft:fluid_channel";
 pub const ENERGY_CHANNEL: &str = "rustcraft:energy_channel";
+/// Slice 10: the channels by kind and tier, one item each (tiers 2 and 3 of plan slice 2).
+const CHANNEL_ITEMS: [(ChannelKind, u8, &str); 9] = [
+    (ChannelKind::Item, 1, ITEM_CHANNEL),
+    (ChannelKind::Item, 2, "rustcraft:item_channel_2"),
+    (ChannelKind::Item, 3, "rustcraft:item_channel_3"),
+    (ChannelKind::Fluid, 1, FLUID_CHANNEL),
+    (ChannelKind::Fluid, 2, "rustcraft:fluid_channel_2"),
+    (ChannelKind::Fluid, 3, "rustcraft:fluid_channel_3"),
+    (ChannelKind::Energy, 1, ENERGY_CHANNEL),
+    (ChannelKind::Energy, 2, "rustcraft:energy_channel_2"),
+    (ChannelKind::Energy, 3, "rustcraft:energy_channel_3"),
+];
 pub const WRENCH: &str = "rustcraft:wrench";
 
 /// The node's state property: its tier, 1 to 4 (N3).
@@ -346,20 +391,22 @@ const JOINS: &str = "rustcraft:magistral";
 /// so the outline and collision wrap the collars.
 const HOUSING_THICKNESS: f32 = 6.5;
 
-/// The item that carries a channel of `kind`.
-pub fn channel_item(kind: ChannelKind) -> &'static str {
-    match kind {
-        ChannelKind::Item => ITEM_CHANNEL,
-        ChannelKind::Fluid => FLUID_CHANNEL,
-        ChannelKind::Energy => ENERGY_CHANNEL,
-    }
+/// The item that carries a channel of `kind` and `tier`; a tier no item has (4, from a save of
+/// another version) gives back the highest item of its kind.
+pub fn channel_item(kind: ChannelKind, tier: u8) -> &'static str {
+    CHANNEL_ITEMS
+        .iter()
+        .filter(|(k, t, _)| *k == kind && *t <= tier.max(1))
+        .last()
+        .map_or(ITEM_CHANNEL, |(_, _, i)| i)
 }
 
-/// The kind of channel item `item` carries, if it is one.
-pub fn channel_kind(item: &str) -> Option<ChannelKind> {
-    [ChannelKind::Item, ChannelKind::Fluid, ChannelKind::Energy]
-        .into_iter()
-        .find(|&kind| channel_item(kind) == item)
+/// The channel item `item` carries, if it is one.
+pub fn channel_of(item: &str) -> Option<Channel> {
+    CHANNEL_ITEMS
+        .iter()
+        .find(|(_, _, i)| *i == item)
+        .map(|&(kind, tier, _)| Channel { kind, tier })
 }
 
 /// The housing, the node, the crystal and the machines, each with its block item.
@@ -628,7 +675,7 @@ fn declare_machines(blocks: &mut Vec<Block>) {
 /// The channels, the wrench and the dusts. The channels' and the wrench's templates have no use of their own: what a click with them
 /// does is all `native_use_item_on`'s (rustcraft_server::on_use_item_on).
 pub fn declare_items(items: &mut Vec<Item>) {
-    for id in [ITEM_CHANNEL, FLUID_CHANNEL, ENERGY_CHANNEL] {
+    for (_, _, id) in CHANNEL_ITEMS {
         items.push(Item {
             id: id.into(),
             template: "minecraft:iron_ingot".into(),
@@ -661,6 +708,15 @@ pub fn declare_items(items: &mut Vec<Item>) {
     }
     // Slice 7: the chassis and the tools, one to a stack; the modules and upgrades, plain items.
     for id in std::iter::once(CHASSIS).chain(rustcraft_rules::worker::Tool::ALL.map(|t| t.item())) {
+        items.push(Item {
+            id: id.into(),
+            template: "minecraft:iron_ingot".into(),
+            max_stack_size: Some(1),
+            ..Item::default()
+        });
+    }
+    // Slice 10: the backpacks, one to a stack; their use opens them (rustcraft_backpack).
+    for id in BACKPACKS {
         items.push(Item {
             id: id.into(),
             template: "minecraft:iron_ingot".into(),

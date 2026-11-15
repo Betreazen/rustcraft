@@ -600,7 +600,7 @@ fn stack_of(game: &Game<'_>, ctx: &Context, cell: &Cell) -> Option<ItemStack> {
             slot,
             kind: Some(kind),
         } => named(
-            content::channel_item(*kind),
+            content::channel_item(*kind, 1),
             1,
             server::line(
                 "rustcraft.window.slot",

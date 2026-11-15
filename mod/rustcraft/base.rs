@@ -21,7 +21,8 @@
 use crate::game::{
     Game,
     rustcraft_content::{self as content, Kind, Machine},
-    rustcraft_machines as machines, rustcraft_mining as mining, rustcraft_power as power,
+    rustcraft_machines as machines, rustcraft_mining as mining, rustcraft_mixer as mixer,
+    rustcraft_power as power,
     rustcraft_server::{LevelNet, line},
     rustcraft_workers as workers,
 };
@@ -43,7 +44,7 @@ use rustcraft_rules::{
         style::Severity,
     },
     modules::{Holder as ModuleHolder, Module},
-    reports::{self, Report},
+    reports::{self, Report, SoulsKill},
     tuning::Tuning,
     turret::{self, Effect, Loadout, Resist, Role, Shown, SoulsData},
 };
@@ -117,7 +118,7 @@ struct Base {
     turrets: HashMap<(String, Pos), TurretState>,
     hits: HashMap<u32, Hit>,
     bleeds: HashMap<u32, Bleed>,
-    deaths: Vec<(u32, String)>,
+    deaths: Vec<(u32, String, Pos)>,
     /// Player → the buffs on them now, and what was applied as modifiers.
     buffs: HashMap<u128, Buff>,
     applied: HashMap<u128, (f64, f64)>,
@@ -135,6 +136,9 @@ struct Base {
     /// Path-of-craft-tree.
     reports: Vec<Report>,
     pct: Option<bool>,
+    /// Slice 10: kills told to SoulsCraft's hunter book, and whether its command is there.
+    souls_kills: Vec<SoulsKill>,
+    souls_command: Option<bool>,
     sent: VecDeque<String>,
     counts: BTreeMap<&'static str, u64>,
     souls: Option<Option<SoulsData>>,
@@ -267,6 +271,7 @@ pub(super) fn report(r: Report) {
 /// Sends the reports waiting, once a tick of the server: only where commands run (no player's
 /// state swapped in). Without Path-of-craft-tree they are counted and dropped.
 fn flush_reports(game: &mut Game<'_>) {
+    flush_souls_kills(game);
     let (due, known) = {
         let mut s = state();
         if s.reports.is_empty() {
@@ -293,6 +298,44 @@ fn flush_reports(game: &mut Game<'_>) {
         let mut s = state();
         *s.counts
             .entry(if ran { r.kind() } else { "unsent" })
+            .or_default() += 1;
+        if s.sent.len() >= KEPT_REPORTS {
+            s.sent.pop_front();
+        }
+        s.sent
+            .push_back(if ran { line } else { format!("unsent {line}") });
+    }
+}
+
+/// The kills for SoulsCraft, once a tick, only when its `soulscraft-kill` command is there
+/// (asked once); counted like Path-of-craft-tree's reports.
+fn flush_souls_kills(game: &mut Game<'_>) {
+    let (due, known) = {
+        let mut s = state();
+        if s.souls_kills.is_empty() {
+            return;
+        }
+        (std::mem::take(&mut s.souls_kills), s.souls_command)
+    };
+    let present = known.unwrap_or_else(|| {
+        let p = game.native_command_info(reports::SOULS_COMMAND).is_some();
+        log::info!(
+            "rustcraft: SoulsCraft kill reports {}",
+            if p {
+                "on"
+            } else {
+                "off: no soulscraft-kill command"
+            }
+        );
+        state().souls_command = Some(p);
+        p
+    });
+    for k in due {
+        let line = k.command();
+        let ran = present && game.native_run_mod_command(&line);
+        let mut s = state();
+        *s.counts
+            .entry(if ran { "souls_kill" } else { "souls_unsent" })
             .or_default() += 1;
         if s.sent.len() >= KEPT_REPORTS {
             s.sent.pop_front();
@@ -348,10 +391,11 @@ pub(super) fn on_destroy_block(game: &mut Game<'_>, pos: Pos, dimension: &str, c
 }
 
 /// `native_living_death`: a mob a turret hit lately died; its kill is reported at the next tick.
-pub(super) fn on_living_death(entity: u32, kind: &str) {
+pub(super) fn on_living_death(entity: u32, kind: &str, at: [f64; 3]) {
     let mut s = state();
     if s.hits.contains_key(&entity) {
-        s.deaths.push((entity, kind.to_owned()));
+        s.deaths
+            .push((entity, kind.to_owned(), reports::block_of(at)));
     }
     s.bleeds.remove(&entity);
 }
@@ -710,7 +754,7 @@ fn deaths(game: &mut Game<'_>, t: &Tuning) {
         let mut s = state();
         (std::mem::take(&mut s.deaths), s.ticks)
     };
-    for (entity, kind) in deaths {
+    for (entity, kind, at) in deaths {
         let Some(hit) = state().hits.remove(&entity) else {
             continue;
         };
@@ -718,6 +762,14 @@ fn deaths(game: &mut Game<'_>, t: &Tuning) {
             continue;
         }
         game.native_give_experience(hit.owner, t.turret_kill_experience);
+        // SoulsCraft's hunter book (spec 27.1), apart from Path-of-craft-tree's report.
+        state().souls_kills.push(SoulsKill {
+            source: "turret",
+            owner: hit.owner,
+            entity,
+            kind: kind.clone(),
+            pos: at,
+        });
         report(Report::Kill {
             owner: hit.owner,
             entity,
@@ -1171,7 +1223,7 @@ pub(super) fn diagnosis(
                 |s| anchor_text(s, n),
             ))
         }
-        m @ (Machine::DockUnload | Machine::DockCharge) => {
+        m @ (Machine::DockUnload | Machine::DockCharge | Machine::DockLoad) => {
             Some(workers::dock_text(game, dimension, pos, m))
         }
         _ => None,
@@ -1309,12 +1361,16 @@ pub(super) fn sheet(
     match kind {
         SheetKind::Turret => turret_sheet(game, dimension, pos, t, &mut s),
         SheetKind::Anchor => anchor_sheet(game, dimension, pos, t, &mut s),
-        SheetKind::DockUnload | SheetKind::DockCharge => {
+        SheetKind::DockUnload | SheetKind::DockCharge | SheetKind::DockLoad => {
             dock_sheet(game, dimension, pos, kind, t, &mut s)
         }
-        SheetKind::Battery | SheetKind::Windmill | SheetKind::LavaGenerator => {
+        SheetKind::Battery
+        | SheetKind::Windmill
+        | SheetKind::LavaGenerator
+        | SheetKind::Turbine => {
             power::sheet(game, level, pos, kind, t, &mut s);
         }
+        SheetKind::Mixer => mixer::sheet(game, dimension, pos, t, &mut s),
         SheetKind::Miner | SheetKind::Placer | SheetKind::Breaker => {
             mining::sheet(game, dimension, pos, kind, t, &mut s);
         }
@@ -1435,6 +1491,7 @@ fn turret_sheet(game: &Game<'_>, dimension: &str, pos: Pos, t: &Tuning, s: &mut 
         value: v(&Text::literal(format!("{e:.0} / {:.0} E", t.turret_buffer))),
         share: e / t.turret_buffer.max(1.0),
         energy: true,
+        colour: None,
     });
     let shown = turret_shown(dimension, pos);
     let severity = match shown {
@@ -1510,12 +1567,27 @@ fn dock_sheet(
     t: &Tuning,
     s: &mut Sheet,
 ) {
-    let machine = if kind == SheetKind::DockCharge {
-        Machine::DockCharge
-    } else {
-        Machine::DockUnload
+    let machine = match kind {
+        SheetKind::DockCharge => Machine::DockCharge,
+        SheetKind::DockLoad => Machine::DockLoad,
+        _ => Machine::DockUnload,
     };
     let text = workers::dock_text(game, dimension, pos, machine);
+    if machine == Machine::DockLoad {
+        s.rows.push(v(&line(
+            "rustcraft.dock.load_info",
+            "Loads a cargo worker standing by it",
+            &[],
+        )));
+        let empty = game.native_mod_block_entity(pos).is_none_or(|e| {
+            e.items
+                .iter()
+                .all(|x| x.as_ref().is_none_or(|x| x.count == 0))
+        });
+        let severity = if empty { Severity::Warn } else { Severity::Ok };
+        s.status = status(severity, &text);
+        return;
+    }
     if machine == Machine::DockCharge {
         let e = machines::buffer_energy(game, pos);
         s.bars.push(SheetBar {
@@ -1523,6 +1595,7 @@ fn dock_sheet(
             value: v(&Text::literal(format!("{e:.0} / {:.0} E", t.dock_buffer))),
             share: e / t.dock_buffer.max(1.0),
             energy: true,
+            colour: None,
         });
         s.rows.push(v(&line(
             "rustcraft.dock.draw",
@@ -1824,6 +1897,7 @@ pub(super) fn forget_area(game: &mut Game<'_>, dimension: &str, min: Pos, max: P
         forget_anchor(game, dimension, p);
     }
     mining::forget_area(dimension, min, max);
+    mixer::forget_area(dimension, min, max);
     let mut s = state();
     s.turrets.retain(|(d, p), _| d != dimension || !inside(*p));
     s.anchor_states

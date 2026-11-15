@@ -92,6 +92,8 @@ pub enum Holder {
     Battery,
     Miner,
     Placer,
+    /// Slice 10: the mixer.
+    Mixer,
 }
 
 impl Holder {
@@ -120,6 +122,8 @@ impl Holder {
             ),
             // Guide `placer`, `breaker`: speed and economy.
             Holder::Placer => matches!(kind, Module::Speed | Module::Economy),
+            // Guide `mixer`: speed and economy (capacity and stack are not made for it yet).
+            Holder::Mixer => matches!(kind, Module::Speed | Module::Economy),
         }
     }
 }

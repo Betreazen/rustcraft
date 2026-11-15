@@ -1,0 +1,17 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    "aca",
+    "c c",
+    "aca"
+  ],
+  "key": {
+    "a": "rustcraft:coppersteel",
+    "c": "minecraft:copper_ingot"
+  },
+  "result": {
+    "id": "rustcraft:turbine",
+    "count": 1
+  }
+}

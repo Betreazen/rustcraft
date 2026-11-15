@@ -22,7 +22,8 @@ use crate::game::{
     Game, rustcraft_alloy as alloy, rustcraft_base as base,
     rustcraft_content::{self as content, Kind, Machine},
     rustcraft_crafter as crafter, rustcraft_fluids as fluids, rustcraft_generator as generator,
-    rustcraft_mining as mining, rustcraft_monorail as monorail, rustcraft_power as power,
+    rustcraft_mining as mining, rustcraft_mixer as mixer, rustcraft_monorail as monorail,
+    rustcraft_power as power,
     rustcraft_server::LevelNet,
 };
 use horizon_client::{containers::ModBlockEntity, items::ItemStack};
@@ -32,6 +33,7 @@ use rustcraft_rules::{
     machines::{
         alloy::AlloyRecipe,
         crafter::CraftRecipe,
+        mixer::MixRecipe,
         panel::{self, Panel},
         processor::{Processor, Recipe, Shown, Spec, State, WorkMode},
         slots::{self, Slot},
@@ -54,6 +56,8 @@ pub const SMELTING: &str = "minecraft:smelting";
 /// The crusher's and the alloy smelter's recipe types, the content mod's files.
 const CRUSHING: &str = "rustcraft:crushing";
 const ALLOYING: &str = "rustcraft:alloying";
+/// Slice 10: the mixer's recipe type (rustcraft_mixer::parse_recipe).
+const MIXING: &str = "rustcraft:mixing";
 /// A crushing recipe without `time` takes this many ticks in normal mode.
 const CRUSH_TICKS: f64 = 100.0;
 /// Saved compound keys of a machine.
@@ -91,6 +95,8 @@ pub struct MachineRecipes {
     pub alloying: Vec<AlloyRecipe>,
     /// The autocrafter's patterns as the crafting table matched them, with the result's stack.
     pub crafting: HashMap<[Option<String>; 9], Option<(CraftRecipe, ItemStack)>>,
+    /// Slice 10: the mixer's, in file order.
+    pub mixing: Vec<MixRecipe>,
 }
 
 /// The machines' recipes the game holds now. A file without an ingredient or a result the game
@@ -124,10 +130,18 @@ pub(super) fn load_recipes(game: &Game<'_>) -> MachineRecipes {
             None => warn_once(&recipe.id),
         }
     }
+    let mut mixing = Vec::new();
+    for recipe in game.native_recipes_of_type(MIXING) {
+        match mixer::parse_recipe(game, &recipe.json) {
+            Some(r) => mixing.push(r),
+            None => warn_once(&recipe.id),
+        }
+    }
     MachineRecipes {
         crushing,
         alloying: rustcraft_rules::machines::alloy::ordered(alloying),
         crafting: HashMap::new(),
+        mixing,
     }
 }
 
@@ -278,6 +292,8 @@ enum Unit {
     Power(power::SourceHeld),
     /// The miner, the placer and the breaker.
     Mining(mining::Held),
+    /// Slice 10: the mixer.
+    Mixer(mixer::Held),
 }
 
 /// A buffer of energy as the machines' tick reads it (the station's, for the turret and the
@@ -356,7 +372,8 @@ pub(super) fn tick(game: &mut Game<'_>, level: &mut LevelNet, tuning: &Tuning) {
                     tuning,
                 )?),
                 Kind::Mining => Unit::Mining(mining::read(game, pos, machine, tuning)?),
-                Kind::Dock | Kind::Battery => return None,
+                Kind::Mixer => Unit::Mixer(mixer::read(game, pos, &level.recipes, tuning)?),
+                Kind::Dock | Kind::Battery | Kind::LoadDock => return None,
             };
             Some((pos, machine, unit))
         })
@@ -376,6 +393,7 @@ pub(super) fn tick(game: &mut Game<'_>, level: &mut LevelNet, tuning: &Tuning) {
                 Unit::Buffer(h) => h.request,
                 Unit::Anchor(r) => *r,
                 Unit::Mining(h) => h.request,
+                Unit::Mixer(h) => h.request,
                 Unit::Generator(_) | Unit::Power(_) => return None,
             };
             Some(Consumer {
@@ -460,6 +478,10 @@ pub(super) fn tick(game: &mut Game<'_>, level: &mut LevelNet, tuning: &Tuning) {
             }
             Unit::Mining(h) => {
                 mining::run(game, pos, machine, h, share, tuning);
+                None
+            }
+            Unit::Mixer(h) => {
+                mixer::run(game, pos, h, share, &level.recipes, tuning);
                 None
             }
         };
@@ -687,6 +709,8 @@ struct Accepts {
     fuels: BTreeSet<String>,
     /// Items that place a block: what the block placer takes.
     placeable: BTreeSet<String>,
+    /// Slice 10: the mixer's ingredients.
+    mixing: BTreeSet<String>,
 }
 
 static ACCEPTS: LazyLock<Mutex<Accepts>> = LazyLock::new(Mutex::default);
@@ -716,6 +740,14 @@ pub(super) fn slot_takes(
         Machine::Crusher => a.crushable.contains(item),
         Machine::Generator => a.fuels.contains(item),
         Machine::Placer => a.placeable.contains(item),
+        // The load dock takes anything a cargo worker may carry.
+        Machine::DockLoad => true,
+        Machine::Mixer => {
+            let inputs: Vec<Slot> = (0..content::MIXER_SLOTS)
+                .map(|i| slot_of(entity, i))
+                .collect();
+            a.mixing.contains(item) && slots::one_kind_takes(&inputs, slot, item)
+        }
         Machine::Alloy if slot == content::ALLOY_FUEL => a.fuels.contains(item),
         Machine::Alloy => {
             let inputs: Vec<Slot> = content::ALLOY_INPUTS.map(|i| slot_of(entity, i)).collect();
@@ -794,12 +826,16 @@ pub(super) fn teach_slot_rules(game: &Game<'_>, recipes: &MachineRecipes) {
         .map(|(item, _)| item.to_string())
         .filter(|item| item != "minecraft:air")
         .collect();
+    let mixing: BTreeSet<String> = rustcraft_rules::machines::mixer::ingredients(&recipes.mixing)
+        .into_iter()
+        .collect();
     let next = Accepts {
         smeltable,
         crushable,
         alloying,
         fuels,
         placeable,
+        mixing,
     };
     {
         let mut a = accepts();
@@ -840,6 +876,7 @@ pub(super) fn teach_slot_rules(game: &Game<'_>, recipes: &MachineRecipes) {
     );
     lists.extend((0..content::BLOCK_SLOTS).map(|i| (Machine::Placer.menu(), i, &next.placeable)));
     lists.extend(content::ALLOY_INPUTS.map(|i| (Machine::Alloy.menu(), i, &next.alloying)));
+    lists.extend((0..content::MIXER_SLOTS).map(|i| (Machine::Mixer.menu(), i, &next.mixing)));
     lists.extend(content::CRAFTER_MODULES.map(|i| (Machine::Crafter.menu(), i, &modules)));
     for (menu, slot, items) in lists {
         let name = format!("{TEACH}{menu}#{slot}");

@@ -19,6 +19,7 @@ pub mod magistral;
 pub mod miners;
 pub mod monorail;
 pub mod run;
+pub mod slice10;
 pub mod sources;
 pub mod storage;
 pub mod transport;
@@ -224,6 +225,15 @@ pub trait Bench {
         button: i32,
         carried: Option<(&str, u32)>,
     ) -> Result<Option<(String, u32)>, String>;
+
+    // ---- Slice 10 ----
+
+    /// The mixer at `pos`: its tanks and what it showed on its last tick.
+    fn mixer(&self, pos: Pos) -> Option<crate::machines::mixer::MixerView>;
+    /// An item entity of `count` `item` lying at `at`.
+    fn drop_item(&mut self, at: [f64; 3], item: &str, count: u32) -> Result<(), String>;
+    /// The item entities lying in the box `min`..`max`: item and count.
+    fn lying(&self, min: [f64; 3], max: [f64; 3]) -> Vec<(String, u32)>;
 }
 
 /// A mob as the self-test reads it.
@@ -388,6 +398,7 @@ pub fn catalog() -> Vec<Build> {
     all.extend(sources::ALL);
     all.extend(miners::ALL);
     all.extend(windows::ALL);
+    all.extend(slice10::ALL);
     all
 }
 

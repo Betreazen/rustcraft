@@ -9,6 +9,7 @@
 //!
 //! In this slice a worker rides floor rails only: a wall or ceiling rail ends its way.
 
+pub mod digging;
 pub mod hold;
 pub mod plants;
 pub mod trees;
@@ -24,6 +25,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
 pub const CHASSIS: &str = "rustcraft:chassis";
 pub const UNLOAD_DOCK: &str = "rustcraft:dock_unload";
 pub const CHARGE_DOCK: &str = "rustcraft:dock_charge";
+pub const LOAD_DOCK: &str = "rustcraft:dock_load";
 
 /// The world as the tools read it.
 pub trait BlockView {
@@ -37,20 +39,28 @@ pub trait BlockView {
     fn is_dirt(&self, pos: Pos) -> bool;
 }
 
-/// A worker's tool (spec 4.7 table; slice 7 has the two of slice 1).
+/// A worker's tool (spec 4.7 table): slice 7 has the two of slice 1, slice 10 the other tools of
+/// tier 2: the cargo hold (guide `tool_hold`, «грузовой отсек»), the grab (`tool_grab`) and the
+/// scoop (`tool_scoop`, spec 22).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Tool {
     Saw,
     Reaper,
+    Hold,
+    Grab,
+    Scoop,
 }
 
 impl Tool {
-    pub const ALL: [Tool; 2] = [Tool::Saw, Tool::Reaper];
+    pub const ALL: [Tool; 5] = [Tool::Saw, Tool::Reaper, Tool::Hold, Tool::Grab, Tool::Scoop];
 
     pub fn item(self) -> &'static str {
         match self {
             Tool::Saw => "rustcraft:tool_saw",
             Tool::Reaper => "rustcraft:tool_reaper",
+            Tool::Hold => "rustcraft:tool_hold",
+            Tool::Grab => "rustcraft:tool_grab",
+            Tool::Scoop => "rustcraft:tool_scoop",
         }
     }
 
@@ -59,10 +69,14 @@ impl Tool {
     }
 
     /// The tool word of Path-of-craft-tree's `break` report (contract, «break»).
+    /// The cargo hold breaks nothing.
     pub fn report_word(self) -> &'static str {
         match self {
             Tool::Saw => "axe",
             Tool::Reaper => "hoe",
+            Tool::Grab => "pickaxe",
+            Tool::Scoop => "shovel",
+            Tool::Hold => "",
         }
     }
 
@@ -71,6 +85,7 @@ impl Tool {
         match self {
             Tool::Saw => trees::is_sapling(item),
             Tool::Reaper => plants::is_seed(item),
+            Tool::Hold | Tool::Grab | Tool::Scoop => false,
         }
     }
 }
@@ -82,6 +97,8 @@ pub enum Errand {
     Work,
     Unload,
     Charge,
+    /// Slice 10: a cargo worker on its way to a load dock or loading there.
+    Load,
 }
 
 /// What the worker shows over itself and in its window (W5, A4).
@@ -107,6 +124,14 @@ pub enum Note {
     DockEmpty,
     /// It stands on a single rail cell or no floor rail.
     NoWay,
+    /// Slice 10, the cargo worker: on its way to a load dock, loading, no load dock on its rails,
+    /// and an empty load dock with an empty hold.
+    ToLoad,
+    Loading,
+    NoLoadDock,
+    NoCargo,
+    /// The scoop found nothing to dig along its whole way (guide «Рядом с путём нечего копать»).
+    NothingToDig,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -126,6 +151,9 @@ pub struct Worker {
     /// Ticks its tool still works where it stands.
     pub busy: f64,
     pub note: Note,
+    /// Slice 10: rail cells in a row its tool found nothing at (the scoop's diagnosis).
+    #[serde(default)]
+    pub idle: u32,
 }
 
 /// What one tick of riding came to.
@@ -146,6 +174,8 @@ pub struct Track<'a> {
     pub net: &'a Network,
     pub unload: &'a BTreeSet<Pos>,
     pub charge: &'a BTreeSet<Pos>,
+    /// Slice 10: the load docks (W6).
+    pub load: &'a BTreeSet<Pos>,
 }
 
 /// Whether `p` is a floor rail: the rails a worker rides in this slice.
@@ -217,6 +247,7 @@ impl Worker {
             errand: Errand::Work,
             busy: 0.0,
             note: Note::NoTool,
+            idle: 0,
         }
     }
 
@@ -231,8 +262,11 @@ impl Worker {
                 .powi(self.count(Module::Battery) as i32)
     }
 
-    /// The hold's size with its storage modules.
+    /// The hold's size with its storage modules; a cargo hold (guide `tool_hold`) makes it big.
     pub fn hold_size(&self, t: &Tuning) -> usize {
+        if self.tool == Some(Tool::Hold) {
+            return t.cargo_hold.min(t.worker_hold_max);
+        }
         (t.worker_hold + t.worker_hold_per_storage * self.count(Module::Storage) as usize)
             .min(t.worker_hold_max)
     }
@@ -333,6 +367,9 @@ impl Worker {
                 self.errand = Errand::Unload;
             } else if self.charge < t.worker_charge_below * self.capacity(t) {
                 self.errand = Errand::Charge;
+            } else if self.tool == Some(Tool::Hold) {
+                // W6: a cargo worker's work is the ride from the load dock to the unload dock.
+                self.errand = Errand::Load;
             }
         }
         if self.to.is_none() {
@@ -345,27 +382,22 @@ impl Worker {
                     }
                     self.note = Note::Working;
                 }
-                Errand::Unload | Errand::Charge => {
-                    let unload = self.errand == Errand::Unload;
-                    let docks =
-                        dock_cells(track.net, if unload { track.unload } else { track.charge });
+                Errand::Unload | Errand::Charge | Errand::Load => {
+                    let (docks, none, going) = match self.errand {
+                        Errand::Unload => (track.unload, Note::NoUnloadDock, Note::ToUnload),
+                        Errand::Charge => (track.charge, Note::NoChargeDock, Note::ToCharge),
+                        _ => (track.load, Note::NoLoadDock, Note::ToLoad),
+                    };
+                    let docks = dock_cells(track.net, docks);
                     if let Some(&dock) = docks.get(&self.cell) {
                         return Step::AtDock(dock);
                     }
                     let Some(path) = way_to(track.net, self.cell, &docks) else {
-                        self.note = if unload {
-                            Note::NoUnloadDock
-                        } else {
-                            Note::NoChargeDock
-                        };
+                        self.note = none;
                         return Step::Stopped;
                     };
                     self.to = path.first().copied();
-                    self.note = if unload {
-                        Note::ToUnload
-                    } else {
-                        Note::ToCharge
-                    };
+                    self.note = going;
                 }
             }
         }
@@ -411,6 +443,38 @@ impl Worker {
         self.hold
             .next_to_unload(|i| tool.is_some_and(|t| t.keeps(i)))
             .is_none()
+    }
+
+    /// At a load dock: whether it rides on to unload. A full hold does; so does a hold with
+    /// something in it when the dock has nothing more to give. An empty hold at an empty dock
+    /// waits there for cargo.
+    pub fn loaded(&mut self, dock_empty: bool) -> bool {
+        if self.hold.is_full() || (dock_empty && self.hold.used() > 0) {
+            self.errand = Errand::Unload;
+            return true;
+        }
+        self.note = if dock_empty {
+            Note::NoCargo
+        } else {
+            Note::Loading
+        };
+        false
+    }
+
+    /// Its tool came into a cell and found `done` things to do there: after `idle_after` cells in
+    /// a row with nothing, the scoop says so (guide `tool_scoop`).
+    pub fn found(&mut self, done: usize, idle_after: u32) {
+        if done > 0 {
+            self.idle = 0;
+            if self.note == Note::NothingToDig {
+                self.note = Note::Working;
+            }
+            return;
+        }
+        self.idle = self.idle.saturating_add(1);
+        if self.idle >= idle_after {
+            self.note = Note::NothingToDig;
+        }
     }
 
     /// Back to work once the errand is done.
@@ -542,6 +606,7 @@ pub(crate) mod tests {
             net: &net,
             unload: &none,
             charge: &none,
+            load: &none,
         };
         let mut w = worker(&t);
         let per_cell = (t.ticks_per_second / t.worker_speed).ceil() as usize;
@@ -565,6 +630,7 @@ pub(crate) mod tests {
             net: &net,
             unload: &unload,
             charge: &none,
+            load: &none,
         };
         let mut w = worker(&t);
         for _ in 0..t.worker_hold {
@@ -591,6 +657,7 @@ pub(crate) mod tests {
             net: &net,
             unload: &far,
             charge: &far,
+            load: &far,
         };
         let mut w = worker(&t);
         w.charge = 0.1 * t.worker_battery;
@@ -619,6 +686,69 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn a_cargo_worker_loads_then_unloads_and_comes_back() {
+        // W6: the cargo hold rides to the load dock, loads, rides to the unload dock.
+        let t = Tuning::default();
+        let net = line(6);
+        let load = BTreeSet::from([[0, 0, 1]]);
+        let unload = BTreeSet::from([[5, 0, 1]]);
+        let none = BTreeSet::new();
+        let track = Track {
+            net: &net,
+            unload: &unload,
+            charge: &none,
+            load: &load,
+        };
+        let mut w = Worker::new(1, 7, [2, 0, 0], &t);
+        w.tool = Some(Tool::Hold);
+        assert!(w.refit(&t).is_empty());
+        assert_eq!(w.hold.slots.len(), t.cargo_hold);
+        let steps = ride(&mut w, &track, &t, 60);
+        assert_eq!(w.errand, Errand::Load);
+        assert_eq!(steps.last(), Some(&Step::AtDock([0, 0, 1])));
+        // An empty dock and an empty hold: it waits for cargo.
+        assert!(!w.loaded(true));
+        assert_eq!(w.note, Note::NoCargo);
+        w.hold.add("minecraft:cobblestone", 10, 64);
+        assert!(!w.loaded(false));
+        assert!(w.loaded(true));
+        let steps = ride(&mut w, &track, &t, 100);
+        assert_eq!(steps.last(), Some(&Step::AtDock([5, 0, 1])));
+        assert!(!w.unloaded());
+        w.hold.take("minecraft:cobblestone", 10);
+        assert!(w.unloaded());
+        w.back_to_work();
+        w.tick(&track, &t);
+        assert_eq!(w.errand, Errand::Load);
+        // No load dock on its rails: it says so.
+        let track = Track {
+            net: &net,
+            unload: &unload,
+            charge: &none,
+            load: &none,
+        };
+        let mut w2 = Worker::new(2, 7, [2, 0, 0], &t);
+        w2.tool = Some(Tool::Hold);
+        assert_eq!(w2.tick(&track, &t), Step::Stopped);
+        assert_eq!(w2.note, Note::NoLoadDock);
+    }
+
+    #[test]
+    fn the_scoop_says_when_it_found_nothing_for_a_while() {
+        let t = Tuning::default();
+        let mut w = Worker::new(1, 7, [0, 0, 0], &t);
+        w.tool = Some(Tool::Scoop);
+        for _ in 0..3 {
+            w.found(0, 4);
+        }
+        assert_ne!(w.note, Note::NothingToDig);
+        w.found(0, 4);
+        assert_eq!(w.note, Note::NothingToDig);
+        w.found(2, 4);
+        assert_eq!((w.note, w.idle), (Note::Working, 0));
+    }
+
+    #[test]
     fn a_fleet_survives_its_json() {
         let t = Tuning::default();
         let mut f = Fleet::default();
@@ -628,5 +758,9 @@ pub(crate) mod tests {
         let back = Fleet::decode(&f.encode()).unwrap();
         assert_eq!(back, f);
         assert_eq!(back.workers[0].id, id);
+        // A fleet saved before slice 10 (no `idle`) still reads.
+        let old = f.encode().replace(",\"idle\":0", "");
+        assert!(!old.contains("idle"));
+        assert_eq!(Fleet::decode(&old), Some(f));
     }
 }

@@ -21,7 +21,8 @@ use crate::game::{
     rustcraft_content::Machine,
     rustcraft_fluids as fluids,
     rustcraft_machines::{self as machines, SMELTING, slot_of},
-    rustcraft_mining as mining, rustcraft_monorail as monorail, rustcraft_power as power,
+    rustcraft_mining as mining, rustcraft_mixer as mixer, rustcraft_monorail as monorail,
+    rustcraft_power as power,
     rustcraft_server::{self as server, read_slots, write_slots},
     rustcraft_storage as storage, rustcraft_window as window, rustcraft_workers as workers,
 };
@@ -652,6 +653,40 @@ impl Bench for GameBench<'_, '_> {
         } else {
             Err(format!("no block entity at {pos:?}"))
         }
+    }
+
+    fn mixer(&self, pos: Pos) -> Option<rustcraft_rules::machines::mixer::MixerView> {
+        mixer::view(self.game, DIMENSION, pos)
+    }
+
+    fn drop_item(&mut self, at: [f64; 3], item: &str, count: u32) -> Result<(), String> {
+        let stack = Tag::compound([
+            (
+                "id",
+                Tag::String(horizon_world::nbt::JavaString::from(item)),
+            ),
+            ("count", Tag::Int(count.min(99) as i32)),
+        ]);
+        // No pickup delay and no motion: it lies where it is put.
+        let nbt = Compound::from([
+            (horizon_world::nbt::JavaString::from("Item"), stack),
+            (
+                horizon_world::nbt::JavaString::from("Motion"),
+                Tag::List(vec![Tag::Double(0f64.to_bits()); 3]),
+            ),
+        ]);
+        self.game
+            .native_summon(DIMENSION, "minecraft:item", at, nbt)
+            .map(|_| ())
+            .ok_or_else(|| format!("no {item} dropped at {at:?}"))
+    }
+
+    fn lying(&self, min: [f64; 3], max: [f64; 3]) -> Vec<(String, u32)> {
+        self.game
+            .native_item_entities(DIMENSION, min, max)
+            .into_iter()
+            .map(|e| (e.stack.item.to_string(), e.stack.count))
+            .collect()
     }
 }
 

@@ -182,6 +182,35 @@ pub struct Tuning {
     /// Where SoulsCraft's mobs.json may be (its README, «Где лежат числа»), from the server's
     /// folder, first found first: its `turret_effects` and `effects.bleeding` (spec 27.1).
     pub soulscraft_mobs: Vec<String>,
+    /// Slice 10: the mixer (guide `mixer`, `fluids`): E/s in normal mode, ticks a bucket of
+    /// product takes in normal mode, and the buckets its water tank and its product tank each hold.
+    pub mixer_energy: f64,
+    pub mixer_ticks: f64,
+    pub mixer_buckets: u64,
+    /// Slice 10: the cargo hold tool (guide `tool_hold`): a cargo worker's hold, slots; the load
+    /// dock's slots and how fast it loads a worker, items a second.
+    pub cargo_hold: usize,
+    pub load_dock_slots: usize,
+    pub load_items_per_second: f64,
+    /// Slice 10: the grab (guide `tool_grab`): ticks and E an ore block takes; the scoop (guide
+    /// `tool_scoop`): ticks and E a block takes (2 a second, 4 E) and how deep under the way it
+    /// digs.
+    pub grab_ticks: f64,
+    pub grab_energy: f64,
+    pub scoop_ticks: f64,
+    pub scoop_energy: f64,
+    pub scoop_depth: i32,
+    /// Slice 10: the hydro turbine (round 15, E12): E/s in a current and in still water, the share
+    /// it gains a block of depth (at most `turbine_depth_max` blocks) and a turbine upstream in its
+    /// structure (at most `turbine_upstream_max`).
+    pub turbine_flowing: f64,
+    pub turbine_still: f64,
+    pub turbine_depth_bonus: f64,
+    pub turbine_depth_max: u32,
+    pub turbine_upstream_bonus: f64,
+    pub turbine_upstream_max: u32,
+    /// Slice 10: the backpacks' slots by tier (G4: sparksteel 27, crystallite 54).
+    pub backpack_slots: [usize; 2],
 }
 
 impl Default for Tuning {
@@ -299,6 +328,24 @@ impl Default for Tuning {
                 "horizon-mods/soulscraft/data/soulscraft/mobs.json".to_owned(),
                 "config/soulscraft/mobs.json".to_owned(),
             ],
+            mixer_energy: 8.0,
+            mixer_ticks: 100.0,
+            mixer_buckets: 4,
+            cargo_hold: 45,
+            load_dock_slots: 9,
+            load_items_per_second: 32.0,
+            grab_ticks: 10.0,
+            grab_energy: 4.0,
+            scoop_ticks: 10.0,
+            scoop_energy: 4.0,
+            scoop_depth: 3,
+            turbine_flowing: 6.0,
+            turbine_still: 1.0,
+            turbine_depth_bonus: 0.1,
+            turbine_depth_max: 8,
+            turbine_upstream_bonus: 0.05,
+            turbine_upstream_max: 10,
+            backpack_slots: [27, 54],
         }
     }
 }

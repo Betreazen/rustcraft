@@ -38,6 +38,10 @@ pub enum Kind {
     Miner,
     Placer,
     Breaker,
+    /// Slice 10: the mixer, the load dock and the hydro turbine.
+    Mixer,
+    DockLoad,
+    Turbine,
 }
 
 /// Which parts a window has, and how many of each it has room for.
@@ -57,7 +61,7 @@ pub struct Shape {
 }
 
 impl Kind {
-    pub const ALL: [Kind; 10] = [
+    pub const ALL: [Kind; 13] = [
         Kind::Turret,
         Kind::Anchor,
         Kind::DockUnload,
@@ -68,6 +72,9 @@ impl Kind {
         Kind::Miner,
         Kind::Placer,
         Kind::Breaker,
+        Kind::Mixer,
+        Kind::DockLoad,
+        Kind::Turbine,
     ];
 
     pub fn block(self) -> &'static str {
@@ -82,6 +89,9 @@ impl Kind {
             Kind::Miner => "rustcraft:miner",
             Kind::Placer => "rustcraft:placer",
             Kind::Breaker => "rustcraft:breaker",
+            Kind::Mixer => "rustcraft:mixer",
+            Kind::DockLoad => "rustcraft:dock_load",
+            Kind::Turbine => "rustcraft:turbine",
         }
     }
 
@@ -97,6 +107,7 @@ impl Kind {
             Kind::Battery => Some(Holder::Battery),
             Kind::Miner => Some(Holder::Miner),
             Kind::Placer | Kind::Breaker => Some(Holder::Placer),
+            Kind::Mixer => Some(Holder::Mixer),
             _ => None,
         }
     }
@@ -156,6 +167,24 @@ impl Kind {
                 slots: 9,
                 ..Shape::default()
             },
+            // Energy, water and product bars, a line of progress, its three input slots.
+            Kind::Mixer => Shape {
+                sockets,
+                mode: true,
+                rows: 1,
+                bars: 3,
+                slots: 3,
+                ..Shape::default()
+            },
+            Kind::DockLoad => Shape {
+                rows: 1,
+                slots: 9,
+                ..Shape::default()
+            },
+            Kind::Turbine => Shape {
+                rows: 3,
+                ..Shape::default()
+            },
         }
     }
 }
@@ -168,6 +197,9 @@ pub struct Bar {
     pub value: Value,
     pub share: f64,
     pub energy: bool,
+    /// A fluid bar's own colour (ARGB): water blue, the solution green; lava's when none.
+    #[serde(default)]
+    pub colour: Option<u32>,
 }
 
 /// One of the miner's ore toggles: its icon, its name and whether the ore is taken.
@@ -668,6 +700,7 @@ mod tests {
                 value: json!({"text": "400 / 800 E"}),
                 share: 0.5,
                 energy: true,
+                colour: None,
             }],
             status: Some(Status {
                 severity: severity_code(Severity::Warn),

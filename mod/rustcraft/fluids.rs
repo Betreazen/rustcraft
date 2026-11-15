@@ -21,6 +21,7 @@ use crate::game::{
     Game,
     rustcraft_content::{self as content, Machine},
     rustcraft_machines::{read_f64, read_int, write_f64, write_int},
+    rustcraft_mixer::{self as mixer, Tanks as MixerTanks},
     rustcraft_power::{self as power, Sink},
     rustcraft_server::{LevelNet, line},
 };
@@ -110,12 +111,14 @@ impl Fluids {
 }
 
 /// The default direction of a fluid joint on `block`: a tank takes, a pump gives, a lava generator
-/// and a crystal (its structure's solution) take.
+/// and a crystal (its structure's solution) take, a mixer takes water and gives its product.
 pub(super) fn default_mode(block: &str) -> Option<Mode> {
     if block == content::TANK || block == content::LAVA_GENERATOR || block == content::CRYSTAL {
         Some(TANK_DEFAULT)
     } else if block == content::PUMP {
         Some(PUMP_DEFAULT)
+    } else if block == content::MIXER {
+        Some(Mode::Both)
     } else {
         None
     }
@@ -225,10 +228,16 @@ struct Inventories<'a> {
     flow: &'a mut HashMap<Pos, (u64, u64)>,
     /// Slice 8: lava generators and crystal structures, by their key block.
     sinks: &'a mut BTreeMap<Pos, Sink>,
+    /// Slice 10: the mixers' tanks, and the size of each.
+    mixers: &'a mut BTreeMap<Pos, MixerTanks>,
+    mixer_tank: u64,
 }
 
 impl FluidInventories for Inventories<'_> {
     fn offered(&self, block: Pos) -> Vec<(FluidKey, u64)> {
+        if let Some(m) = self.mixers.get(&block) {
+            return m.product.iter().cloned().collect();
+        }
         if let Some(&g) = self.by_anchor.get(&block) {
             let g = &self.groups[g];
             return g.fluid.iter().map(|f| (f.clone(), g.amount)).collect();
@@ -245,12 +254,22 @@ impl FluidInventories for Inventories<'_> {
         if let Some(s) = self.sinks.get(&block) {
             return s.room_for(fluid);
         }
+        if let Some(m) = self.mixers.get(&block) {
+            return if fluid == WATER {
+                self.mixer_tank.saturating_sub(m.water)
+            } else {
+                0
+            };
+        }
         self.by_anchor
             .get(&block)
             .map_or(0, |&g| self.groups[g].room_for(fluid))
     }
 
     fn take(&mut self, block: Pos, fluid: &str, amount: u64) -> u64 {
+        if let Some(m) = self.mixers.get_mut(&block) {
+            return take_product(m, fluid, amount);
+        }
         if let Some(&g) = self.by_anchor.get(&block) {
             let n = self.groups[g].take(fluid, amount);
             self.flow.entry(block).or_default().1 += n;
@@ -279,6 +298,25 @@ impl FluidInventories for Inventories<'_> {
             s.held += n;
             return n;
         }
+        if let Some(m) = self.mixers.get_mut(&block) {
+            if fluid == WATER {
+                let n = self.mixer_tank.saturating_sub(m.water).min(amount);
+                m.water += n;
+                return n;
+            }
+            // Only its own product goes back into it (a move the target refused).
+            return match m.product.as_mut() {
+                Some((f, have)) if f.as_str() == fluid => {
+                    *have += amount;
+                    amount
+                }
+                None => {
+                    m.product = Some((fluid.to_owned(), amount));
+                    amount
+                }
+                _ => 0,
+            };
+        }
         if let Some(&g) = self.by_anchor.get(&block) {
             let n = self.groups[g].put(fluid, amount);
             self.flow.entry(block).or_default().0 += n;
@@ -299,6 +337,54 @@ impl FluidInventories for Inventories<'_> {
     }
 }
 
+/// Up to `amount` of a mixer's product `fluid` taken out of it.
+fn take_product(m: &mut MixerTanks, fluid: &str, amount: u64) -> u64 {
+    let Some((f, have)) = m.product.as_mut() else {
+        return 0;
+    };
+    if f.as_str() != fluid {
+        return 0;
+    }
+    let n = (*have).min(amount);
+    *have -= n;
+    if *have == 0 {
+        m.product = None;
+    }
+    n
+}
+
+/// Slice 10: each mixer drinks water from a water tank it touches and gives its product to the
+/// tank on top of it.
+fn mixers_and_tanks(
+    mixers: &mut BTreeMap<Pos, MixerTanks>,
+    groups: &mut [TankGroup],
+    group_of: &HashMap<Pos, usize>,
+    flow: &mut HashMap<Pos, (u64, u64)>,
+    size: u64,
+) {
+    for (&pos, m) in mixers.iter_mut() {
+        for face in Face::ALL {
+            let Some(&g) = group_of.get(&step(pos, face)) else {
+                continue;
+            };
+            let room = size.saturating_sub(m.water);
+            if room > 0 && groups[g].fluid.as_deref() == Some(WATER) {
+                let n = groups[g].take(WATER, room);
+                flow.entry(groups[g].anchor()).or_default().1 += n;
+                m.water += n;
+            }
+        }
+        let Some(&g) = group_of.get(&step(pos, Face::YPos)) else {
+            continue;
+        };
+        if let Some((fluid, amount)) = m.product.clone() {
+            let n = groups[g].put(&fluid, amount);
+            flow.entry(groups[g].anchor()).or_default().0 += n;
+            take_product(m, &fluid, n);
+        }
+    }
+}
+
 /// One move of the level's fluids: pumps into the tanks they touch, then every fluid net.
 pub(super) fn tick(game: &mut Game<'_>, level: &mut LevelNet, tuning: &Tuning) {
     let now = level.ticks;
@@ -308,8 +394,14 @@ pub(super) fn tick(game: &mut Game<'_>, level: &mut LevelNet, tuning: &Tuning) {
         .filter(|(_, m)| **m == Machine::Pump)
         .map(|(p, _)| *p)
         .collect();
+    let mixers_at: Vec<Pos> = level
+        .machines
+        .iter()
+        .filter(|(_, m)| **m == Machine::Mixer)
+        .map(|(p, _)| *p)
+        .collect();
     let f = &mut level.fluids;
-    if f.tanks.is_empty() && pumps_at.is_empty() {
+    if f.tanks.is_empty() && pumps_at.is_empty() && mixers_at.is_empty() {
         return;
     }
     let per_block = tuning.tank_buckets * BUCKET;
@@ -371,6 +463,13 @@ pub(super) fn tick(game: &mut Game<'_>, level: &mut LevelNet, tuning: &Tuning) {
             *held = (amount > n).then(|| (fluid, amount - n));
         }
     }
+    let mixer_tank = mixer::tank_size(tuning);
+    let mut mixers: BTreeMap<Pos, MixerTanks> = mixers_at
+        .iter()
+        .filter_map(|&p| Some((p, mixer::read_tanks(game, p)?)))
+        .collect();
+    let mixers_before = mixers.clone();
+    mixers_and_tanks(&mut mixers, &mut groups, &group_of, &mut f.flow, mixer_tank);
     let moves_per_second = tuning.ticks_per_second / EVERY as f64;
     let mut inv = Inventories {
         groups: &mut groups,
@@ -378,6 +477,8 @@ pub(super) fn tick(game: &mut Game<'_>, level: &mut LevelNet, tuning: &Tuning) {
         pumps: &mut pumps,
         flow: &mut f.flow,
         sinks: &mut sinks,
+        mixers: &mut mixers,
+        mixer_tank,
     };
     f.no_lane.retain(|_, (_, until)| *until > now);
     for net in &f.nets {
@@ -415,6 +516,11 @@ pub(super) fn tick(game: &mut Game<'_>, level: &mut LevelNet, tuning: &Tuning) {
     }
     write_back(game, &before, &groups, per_block);
     power::write_sinks(game, &sinks_before, &sinks);
+    for (pos, m) in &mixers {
+        if mixers_before.get(pos) != Some(m) {
+            mixer::write_tanks(game, *pos, m);
+        }
+    }
     for (pos, held) in &pumps {
         if pumps_before.get(pos) != Some(held) {
             game.native_with_mod_block_entity(*pos, |e| write_held(&mut e.nbt, held));
@@ -612,6 +718,7 @@ pub(super) fn fluid_name(fluid: &str) -> Text {
     match fluid {
         WATER => line("rustcraft.fluid.water", "water", &[]),
         "minecraft:lava" => line("rustcraft.fluid.lava", "lava", &[]),
+        "rustcraft:solution" => line("rustcraft.fluid.solution", "nutrient solution", &[]),
         other => Text::literal(other.to_owned()),
     }
 }

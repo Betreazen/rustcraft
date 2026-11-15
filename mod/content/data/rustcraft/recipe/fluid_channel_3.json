@@ -1,0 +1,17 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    " a ",
+    "aha",
+    " a "
+  ],
+  "key": {
+    "a": "rustcraft:crystallite",
+    "h": "minecraft:bucket"
+  },
+  "result": {
+    "id": "rustcraft:fluid_channel_3",
+    "count": 8
+  }
+}

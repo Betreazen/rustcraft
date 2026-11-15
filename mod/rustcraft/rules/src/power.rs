@@ -26,6 +26,8 @@ pub enum Shown {
     Blocked,
     /// A lava generator with no lava.
     NoLava,
+    /// Slice 10: a hydro turbine with no water beside it (guide `turbine`).
+    NotInWater,
     /// A crystal structure without solution gives one crystal's output (E8.a).
     NoSolution(f64),
     /// Crystals that touch but are no allowed box (guide `structure`): one crystal's output.
@@ -211,6 +213,62 @@ pub fn lava_capacity(t: &Tuning) -> f64 {
     t.lava_buckets as f64 * BUCKET
 }
 
+// ---- The hydro turbine (round 15, E12) ----
+
+/// The water at a hydro turbine: none, still water, or a current. A current's rank is the
+/// smallest flow level of the flowing water beside it (falling water ranks 0): the smaller, the
+/// nearer the source, so the further upstream.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Water {
+    None,
+    Still,
+    Flowing(u8),
+}
+
+impl Water {
+    /// The water of a turbine from the water blocks beside it, by their `level` property (0 a
+    /// source, 1..7 flowing, 8 and up falling).
+    pub fn of(levels: &[u8]) -> Water {
+        let flowing = levels
+            .iter()
+            .filter(|&&l| l > 0)
+            .map(|&l| if l >= 8 { 0 } else { l })
+            .min();
+        match flowing {
+            Some(rank) => Water::Flowing(rank),
+            None if levels.is_empty() => Water::None,
+            None => Water::Still,
+        }
+    }
+}
+
+/// E12: what one turbine gives: the base of its water × (1 + 0.1 × depth, at most 8 blocks) ×
+/// (1 + 0.05 × turbines upstream in its structure, at most 10).
+pub fn turbine_output(water: Water, depth: u32, upstream: u32, t: &Tuning) -> f64 {
+    let base = match water {
+        Water::None => return 0.0,
+        Water::Still => t.turbine_still,
+        Water::Flowing(_) => t.turbine_flowing,
+    };
+    base * (1.0 + t.turbine_depth_bonus * f64::from(depth.min(t.turbine_depth_max)))
+        * (1.0 + t.turbine_upstream_bonus * f64::from(upstream.min(t.turbine_upstream_max)))
+}
+
+/// For each turbine of one structure, how many of the others stand upstream of it: in a current
+/// of a smaller rank. Still water has no upstream.
+pub fn upstream_counts(waters: &[Water]) -> Vec<u32> {
+    waters
+        .iter()
+        .map(|w| match w {
+            Water::Flowing(r) => waters
+                .iter()
+                .filter(|o| matches!(o, Water::Flowing(q) if q < r))
+                .count() as u32,
+            _ => 0,
+        })
+        .collect()
+}
+
 // ---- The battery ----
 
 /// A battery structure's size: what it holds, and how fast it takes and gives, E and E/s.
@@ -264,6 +322,29 @@ pub fn shares(total: f64, n: usize) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_turbine_gives_by_its_water_depth_and_place_in_the_current() {
+        let t = Tuning::default();
+        assert_eq!(Water::of(&[]), Water::None);
+        assert_eq!(Water::of(&[0, 0]), Water::Still);
+        assert_eq!(Water::of(&[0, 3, 5]), Water::Flowing(3));
+        assert_eq!(Water::of(&[9, 2]), Water::Flowing(0));
+        assert_eq!(turbine_output(Water::None, 5, 5, &t), 0.0);
+        assert_eq!(turbine_output(Water::Still, 0, 0, &t), 1.0);
+        assert_eq!(turbine_output(Water::Flowing(1), 0, 0, &t), 6.0);
+        // The guide: one turbine at most 16.2 E/s (6 × 1.8 × 1.5), depth and upstream capped.
+        let most = turbine_output(Water::Flowing(4), 20, 30, &t);
+        assert!((most - 16.2).abs() < 1e-9, "{most}");
+        // Three turbines down a current: the last has two upstream.
+        let w = [
+            Water::Flowing(1),
+            Water::Flowing(3),
+            Water::Flowing(5),
+            Water::Still,
+        ];
+        assert_eq!(upstream_counts(&w), vec![0, 1, 2, 0]);
+    }
 
     fn set(list: &[Pos]) -> BTreeSet<Pos> {
         list.iter().copied().collect()

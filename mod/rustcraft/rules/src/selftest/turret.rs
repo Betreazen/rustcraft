@@ -304,6 +304,15 @@ fn kill_is_reported(o: Pos, t: &Tuning) -> Scenario {
         );
         Ok(b.reports().iter().any(|l| l.contains(&line)))
     })
+    // Spec 27.1: SoulsCraft's hunter book hears the kill too, with its block (sent when SoulsCraft
+    // is in the build, else counted as unsent).
+    .until("and to SoulsCraft's hunter book", 40, |b, m| {
+        let line = format!(
+            "soulscraft-kill turret {OWNER:032x} {} minecraft:spider ",
+            m.get("mob0") as u32
+        );
+        Ok(b.reports().iter().any(|l| l.contains(&line)))
+    })
 }
 
 fn soulscraft_resistances(o: Pos, t: &Tuning) -> Scenario {

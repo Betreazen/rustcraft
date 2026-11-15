@@ -7,6 +7,35 @@ use crate::geom::Pos;
 
 /// The console command Path-of-craft-tree registers.
 pub const COMMAND: &str = "pct-machine";
+/// The console command SoulsCraft registers for its hunter book (spec 27.1): every kill a
+/// RustCraft machine makes, whether Path-of-craft-tree is there or not.
+pub const SOULS_COMMAND: &str = "soulscraft-kill";
+
+/// A kill told to SoulsCraft: what made it (`turret`; the guard of plan slice 3 will say `guard`),
+/// whose it is, the victim's id and kind and its block position at death.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SoulsKill {
+    pub source: &'static str,
+    pub owner: u128,
+    pub entity: u32,
+    pub kind: String,
+    pub pos: Pos,
+}
+
+impl SoulsKill {
+    /// The command line, without a slash.
+    pub fn command(&self) -> String {
+        format!(
+            "{SOULS_COMMAND} {} {:032x} {} {} {} {} {}",
+            self.source, self.owner, self.entity, self.kind, self.pos[0], self.pos[1], self.pos[2]
+        )
+    }
+}
+
+/// The block a position at death lies in.
+pub fn block_of(at: [f64; 3]) -> Pos {
+    at.map(|c| c.floor() as i32)
+}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Report {
@@ -76,6 +105,21 @@ impl Report {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_kill_reads_as_soulscraft_takes_it() {
+        let k = SoulsKill {
+            source: "turret",
+            owner: 0x26a5132a990442e59cfd2cccd5083fa8,
+            entity: 77,
+            kind: "minecraft:zombie".into(),
+            pos: block_of([10.7, 64.0, -3.2]),
+        };
+        assert_eq!(
+            k.command(),
+            "soulscraft-kill turret 26a5132a990442e59cfd2cccd5083fa8 77 minecraft:zombie 10 64 -4"
+        );
+    }
 
     #[test]
     fn reports_read_as_the_contract_writes_them() {

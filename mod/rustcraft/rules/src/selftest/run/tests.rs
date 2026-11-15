@@ -224,6 +224,15 @@ impl Bench for Fake {
     ) -> Result<Option<(String, u32)>, String> {
         Ok(None)
     }
+    fn mixer(&self, _: Pos) -> Option<crate::machines::mixer::MixerView> {
+        None
+    }
+    fn drop_item(&mut self, _: [f64; 3], _: &str, _: u32) -> Result<(), String> {
+        Ok(())
+    }
+    fn lying(&self, _: [f64; 3], _: [f64; 3]) -> Vec<(String, u32)> {
+        Vec::new()
+    }
 }
 
 const PLOT: Area = Area {

@@ -2,6 +2,7 @@
 //! applies what they decide. Rule ids in comments (M3, N4…) refer to `docs/design/02-spec.md`.
 
 pub mod anchor;
+pub mod backpack;
 pub mod geom;
 pub mod housing;
 pub mod machines;

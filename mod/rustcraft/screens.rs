@@ -292,6 +292,9 @@ fn fallback_name(machine: Machine) -> &'static str {
         Machine::Miner => "Miner",
         Machine::Placer => "Block Placer",
         Machine::Breaker => "Block Breaker",
+        Machine::Mixer => "Mixer",
+        Machine::DockLoad => "Load Dock",
+        Machine::Turbine => "Hydro Turbine",
     }
 }
 

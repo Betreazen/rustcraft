@@ -37,7 +37,7 @@ use rustcraft_rules::{
     monorail::Network,
     reports::Report,
     tuning::Tuning,
-    worker::{BlockView, Errand, Fleet, Note, Step, Tool, Track, Worker, plants, trees},
+    worker::{BlockView, Errand, Fleet, Note, Step, Tool, Track, Worker, digging, plants, trees},
 };
 use std::{
     collections::{BTreeSet, HashMap},
@@ -69,6 +69,8 @@ const NOTE_CELL: usize = 7;
 const HOLD_FIRST: usize = 9;
 /// What the saw's loot is rolled for: an axe, as a player's would be.
 const SAW_TOOL: &str = "minecraft:iron_axe";
+/// Rail cells in a row with nothing to dig before the scoop says so.
+const SCOOP_IDLE_CELLS: u32 = 16;
 
 // ---- State ----
 
@@ -410,6 +412,7 @@ pub(super) fn tick(game: &mut Game<'_>, dimension: &str, net_level: &LevelNet, t
     };
     let unload = docks(Machine::DockUnload);
     let charge = docks(Machine::DockCharge);
+    let load = docks(Machine::DockLoad);
     if level.ticks.is_multiple_of(DOCK_PUSH_EVERY) {
         push_docks(game, dimension, &unload);
     }
@@ -423,7 +426,12 @@ pub(super) fn tick(game: &mut Game<'_>, dimension: &str, net_level: &LevelNet, t
                 continue;
             }
             let before = (w.cell, w.errand, w.hold.used(), w.note);
-            ride(game, dimension, &net, &unload, &charge, w, tuning);
+            let docks = Docks {
+                unload: &unload,
+                charge: &charge,
+                load: &load,
+            };
+            ride(game, dimension, &net, &docks, w, tuning);
             if before != (w.cell, w.errand, w.hold.used(), w.note) {
                 level.dirty = true;
             }
@@ -447,33 +455,116 @@ pub(super) fn tick(game: &mut Game<'_>, dimension: &str, net_level: &LevelNet, t
     put_level(dimension, level);
 }
 
+/// The level's docks of each kind.
+struct Docks<'a> {
+    unload: &'a BTreeSet<Pos>,
+    charge: &'a BTreeSet<Pos>,
+    load: &'a BTreeSet<Pos>,
+}
+
 fn ride(
     game: &mut Game<'_>,
     dimension: &str,
     net: &Network,
-    unload: &BTreeSet<Pos>,
-    charge: &BTreeSet<Pos>,
+    docks: &Docks<'_>,
     w: &mut Worker,
     t: &Tuning,
 ) {
     let track = Track {
         net,
-        unload,
-        charge,
+        unload: docks.unload,
+        charge: docks.charge,
+        load: docks.load,
     };
     match w.tick(&track, t) {
-        Step::Arrived(cell) => work(game, dimension, w, cell, t),
+        Step::Arrived(cell) => work(game, dimension, net, w, cell, t),
         Step::AtDock(dock) => serve(game, w, dock, t),
         Step::Busy | Step::Moved | Step::Stopped => {}
     }
 }
 
 /// The tool looks round the cell it came into.
-fn work(game: &mut Game<'_>, dimension: &str, w: &mut Worker, cell: Pos, t: &Tuning) {
+fn work(
+    game: &mut Game<'_>,
+    dimension: &str,
+    net: &Network,
+    w: &mut Worker,
+    cell: Pos,
+    t: &Tuning,
+) {
     match w.tool {
         Some(Tool::Saw) => saw(game, dimension, w, cell, t),
         Some(Tool::Reaper) => reap(game, dimension, w, cell, t),
-        None => {}
+        Some(Tool::Grab) => grab(game, dimension, w, cell, t),
+        Some(Tool::Scoop) => scoop(game, dimension, net, w, cell, t),
+        Some(Tool::Hold) | None => {}
+    }
+}
+
+/// The grab (guide `tool_grab`): every ore of its zone broken into the hold, and the items lying
+/// in its zone picked up.
+fn grab(game: &mut Game<'_>, dimension: &str, w: &mut Worker, cell: Pos, t: &Tuning) {
+    let zone = w.zone_cells(cell, t);
+    let ores: Vec<Pos> = zone
+        .into_iter()
+        .filter(|&p| digging::is_ore(&game.native_block(p)))
+        .collect();
+    let mut done = 0usize;
+    for p in ores {
+        let block = game.native_block(p);
+        if take_block(game, dimension, w, p, Some(digging::GRAB_TOOL)) {
+            done += 1;
+            report_break(dimension, w, p, block, Tool::Grab);
+        }
+    }
+    let (side, height) = w.zone(t);
+    let (lo, hi) = digging::pickup_box(cell, side, height);
+    for e in game.native_item_entities(dimension, lo, hi) {
+        let max = machines::max_stack(game, &e.stack.item);
+        let left = w.hold.add(&e.stack.item, e.stack.count, max);
+        if left == e.stack.count {
+            continue;
+        }
+        let mut rest = e.stack.clone();
+        rest.count = left;
+        game.native_set_item_entity(dimension, e.id, rest);
+        done += 1;
+    }
+    if done > 0 {
+        w.spend(t.grab_ticks * done as f64, t.grab_energy * done as f64, t);
+    }
+}
+
+/// The scoop (guide `tool_scoop`): earth, sand, gravel and clay beside and under the way, top
+/// down; the blocks under the rails stay.
+fn scoop(
+    game: &mut Game<'_>,
+    dimension: &str,
+    net: &Network,
+    w: &mut Worker,
+    cell: Pos,
+    t: &Tuning,
+) {
+    let (side, _) = w.zone(t);
+    let depth = t.scoop_depth;
+    let under_rail =
+        |p: Pos| (1..=depth).any(|dy| net.rails.contains_key(&[p[0], p[1] + dy, p[2]]));
+    let cells: Vec<Pos> = digging::scoop_cells(cell, side, depth, under_rail)
+        .into_iter()
+        .filter(|&p| digging::is_scooped(&game.native_block(p)))
+        .collect();
+    let mut done = 0usize;
+    for p in cells {
+        let block = game.native_block(p);
+        if take_block(game, dimension, w, p, Some(digging::SCOOP_TOOL)) {
+            done += 1;
+            report_break(dimension, w, p, block, Tool::Scoop);
+        }
+    }
+    // After a whole stretch with nothing to dig, it says so («Рядом с путём нечего копать»).
+    w.found(done, SCOOP_IDLE_CELLS);
+    if done > 0 {
+        w.spend(t.scoop_ticks * done as f64, t.scoop_energy * done as f64, t);
     }
 }
 
@@ -632,8 +723,56 @@ fn serve(game: &mut Game<'_>, w: &mut Worker, dock: Pos, t: &Tuning) {
     match w.errand {
         Errand::Unload => unload_into(game, w, dock, t),
         Errand::Charge => charge_from(game, w, dock, t),
+        Errand::Load => load_from(game, w, dock, t),
         Errand::Work => {}
     }
+}
+
+/// W6: the load dock fills a cargo worker's hold from its slots, as many items a tick as the
+/// unload dock takes; a full hold, or a hold with cargo at an empty dock, rides on to unload.
+fn load_from(game: &mut Game<'_>, w: &mut Worker, dock: Pos, t: &Tuning) {
+    let per_tick = (t.load_items_per_second / t.ticks_per_second)
+        .ceil()
+        .max(1.0) as u32;
+    let slots: Vec<Option<ItemStack>> = game
+        .native_mod_block_entity(dock)
+        .map(|e| e.items.clone())
+        .unwrap_or_default();
+    let mut moved = 0;
+    let mut taken: Vec<(usize, u32)> = Vec::new();
+    for (i, s) in slots.iter().enumerate() {
+        if moved >= per_tick || w.hold.is_full() {
+            break;
+        }
+        let Some(s) = s.as_ref().filter(|s| s.count > 0 && &*s.item != AIR) else {
+            continue;
+        };
+        let n = s.count.min(per_tick - moved);
+        let max = machines::max_stack(game, &s.item);
+        let left = w.hold.add(&s.item, n, max);
+        if n > left {
+            taken.push((i, n - left));
+            moved += n - left;
+        }
+    }
+    if !taken.is_empty() {
+        game.native_with_mod_block_entity(dock, |e| {
+            for (i, n) in &taken {
+                if let Some(Some(s)) = e.items.get_mut(*i) {
+                    s.count = s.count.saturating_sub(*n);
+                    if s.count == 0 {
+                        e.items[*i] = None;
+                    }
+                }
+            }
+        });
+    }
+    let empty = game.native_mod_block_entity(dock).is_none_or(|e| {
+        e.items
+            .iter()
+            .all(|x| x.as_ref().is_none_or(|x| x.count == 0))
+    });
+    w.loaded(empty);
 }
 
 fn unload_into(game: &mut Game<'_>, w: &mut Worker, dock: Pos, t: &Tuning) {
@@ -813,6 +952,9 @@ fn tool_name(tool: Option<Tool>) -> Text {
     match tool {
         Some(Tool::Saw) => line("rustcraft.worker.saw", "Lumberjack", &[]),
         Some(Tool::Reaper) => line("rustcraft.worker.reaper", "Reaper", &[]),
+        Some(Tool::Hold) => line("rustcraft.worker.cargo", "Cargo cart", &[]),
+        Some(Tool::Grab) => line("rustcraft.worker.grab", "Collector", &[]),
+        Some(Tool::Scoop) => line("rustcraft.worker.scoop", "Digger", &[]),
         None => line("rustcraft.worker.bare", "Chassis", &[]),
     }
 }
@@ -838,6 +980,14 @@ pub(super) fn note_text(note: Note) -> Text {
             "Waiting: the charge dock has no energy",
         ),
         Note::NoWay => ("rustcraft.worker.no_way", "No rail to ride"),
+        Note::ToLoad => ("rustcraft.worker.to_load", "Going to load"),
+        Note::Loading => ("rustcraft.worker.loading", "Loading"),
+        Note::NoLoadDock => ("rustcraft.worker.no_load", "No load dock on the way"),
+        Note::NoCargo => ("rustcraft.worker.no_cargo", "Waiting for cargo"),
+        Note::NothingToDig => (
+            "rustcraft.worker.nothing_to_dig",
+            "Nothing to dig beside the way",
+        ),
     };
     line(key, fallback, &[])
 }
@@ -855,6 +1005,8 @@ fn notes(game: &mut Game<'_>, level: &LevelFleet) {
             None => 0,
             Some(Tool::Saw) => 1,
             Some(Tool::Reaper) => 2,
+            // The worker model has no part for the slice-10 tools: the chassis alone.
+            Some(Tool::Hold | Tool::Grab | Tool::Scoop) => 0,
         });
     }
     if bytes.is_empty() {
@@ -979,6 +1131,9 @@ fn click(game: &mut Game<'_>, uuid: u128, slot: usize, w: &mut Worker, t: &Tunin
         let Some(tool) = w.tool else { return false };
         if give(game, uuid, tool.item(), 1) == 1 {
             w.tool = None;
+            for (item, n) in w.refit(t) {
+                give(game, uuid, &item, n);
+            }
             return true;
         }
         return false;
@@ -1023,6 +1178,10 @@ fn click(game: &mut Game<'_>, uuid: u128, slot: usize, w: &mut Worker, t: &Tunin
     let item = stack.item.to_string();
     let (keep, back): (u32, Option<String>) = if let Some(tool) = Tool::of(&item) {
         let old = w.tool.replace(tool);
+        // A cargo hold changes the hold's size (guide `tool_hold`).
+        for (i, n) in w.refit(t) {
+            give(game, uuid, &i, n);
+        }
         (1, old.map(|o| o.item().to_owned()))
     } else if let Some(m) = Module::of(&item).filter(|m| ModuleHolder::Worker.takes(*m)) {
         let Some(free) = w.upgrades.iter().position(Option::is_none) else {
@@ -1206,6 +1365,7 @@ pub(super) fn spawn_for_selftest(
     let id = level.fleet.add(owner, cell, t);
     if let Some(w) = level.fleet.workers.iter_mut().find(|w| w.id == id) {
         w.tool = tool;
+        w.refit(t);
         for (item, n) in hold {
             let max = machines::max_stack(game, item);
             w.hold.add(item, *n, max);
@@ -1276,6 +1436,24 @@ pub(super) fn dock_text(game: &Game<'_>, dimension: &str, pos: Pos, machine: Mac
                     "rustcraft.dock.charge",
                     "Charge dock · %s E",
                     &[Text::literal(format!("{e:.0}"))],
+                )
+            }
+        }
+        Machine::DockLoad => {
+            let n: u32 = game
+                .native_mod_block_entity(pos)
+                .map_or(0, |e| e.items.iter().flatten().map(|s| s.count).sum());
+            if n == 0 {
+                line(
+                    "rustcraft.dock.load_empty",
+                    "Load dock · nothing to load",
+                    &[],
+                )
+            } else {
+                line(
+                    "rustcraft.dock.load",
+                    "Load dock · %s items wait for a cargo worker",
+                    &[Text::literal(n.to_string())],
                 )
             }
         }

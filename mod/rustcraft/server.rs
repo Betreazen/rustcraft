@@ -13,12 +13,12 @@
 // `native_level_tick_post` it is the level that just ticked (`enter_level` before the hook,
 // SRC/crates/horizon-client/src/game/levels.rs:525-560).
 use crate::game::{
-    Game, rustcraft_base as base,
+    Game, rustcraft_backpack as backpack, rustcraft_base as base,
     rustcraft_content::{self as content, Kind, Machine},
     rustcraft_fluids as fluids, rustcraft_machines as machines, rustcraft_mining as mining,
-    rustcraft_monorail as monorail, rustcraft_power as power, rustcraft_selftest as selftest,
-    rustcraft_storage as storage, rustcraft_transport as transport, rustcraft_window as window,
-    rustcraft_workers as workers,
+    rustcraft_mixer as mixer, rustcraft_monorail as monorail, rustcraft_power as power,
+    rustcraft_selftest as selftest, rustcraft_storage as storage, rustcraft_transport as transport,
+    rustcraft_window as window, rustcraft_workers as workers,
 };
 use horizon_client::{
     containers::ModBlockEntity, items::ItemStack, mod_api::NativeServerPlayer, text::Text,
@@ -254,6 +254,7 @@ pub(super) fn on_level_tick(game: &mut Game<'_>, dimension: &str) {
         show_diagnoses(game, dimension);
     }
     // The self-test's scenarios, after the mod's own work of this tick (rustcraft_selftest).
+    backpack::tick(game);
     selftest::tick(game, dimension);
 }
 
@@ -288,7 +289,7 @@ pub(super) fn on_use_item_on(
 ) {
     workers::on_use_item_on(game, stack, pos, claimed);
     let item: &str = &stack.item;
-    let channel = content::channel_kind(item);
+    let channel = content::channel_of(item);
     if *claimed || (channel.is_none() && item != content::WRENCH) {
         return;
     }
@@ -299,9 +300,9 @@ pub(super) fn on_use_item_on(
     let Some(player) = game.native_acting_player() else {
         return;
     };
-    if let Some(kind) = channel {
+    if let Some(channel) = channel {
         *claimed = true;
-        put_channel(game, &player, pos, kind);
+        put_channel(game, &player, pos, channel);
     } else if item == content::WRENCH && player.sneaking {
         *claimed = true;
         take_channel(game, &player, pos);
@@ -420,7 +421,7 @@ pub(super) fn on_destroy_block(game: &mut Game<'_>, pos: [i32; 3]) {
         return;
     };
     for channel in held.slots.into_iter().flatten() {
-        let item = content::channel_item(channel.kind);
+        let item = content::channel_item(channel.kind, channel.tier);
         if game.native_give_items(item, 1) == 0 {
             drop_item(game, &player.dimension, pos, item);
         }
@@ -542,16 +543,15 @@ fn scan(game: &Game<'_>, dimension: &str, level: &mut LevelNet) -> Found {
     found
 }
 
-fn put_channel(game: &mut Game<'_>, player: &NativeServerPlayer, pos: Pos, kind: ChannelKind) {
-    let channel = Channel {
-        kind,
-        tier: FIRST_TIER,
-    };
+/// M2 and U4: the channel goes into the first free slot, or takes the place of a channel of its
+/// kind with a lower tier, which comes back to the player.
+fn put_channel(game: &mut Game<'_>, player: &NativeServerPlayer, pos: Pos, channel: Channel) {
+    let kind = channel.kind;
     // None: no block entity there; Some(None): all four slots taken.
     let placed = game.native_with_mod_block_entity(pos, |entity| {
-        let (next, slot) = housing::insert(read_slots(&entity.nbt), channel)?;
+        let (next, slot, old) = housing::put(read_slots(&entity.nbt), channel)?;
         write_slots(&mut entity.nbt, &next);
-        Some(slot)
+        Some((slot, old))
     });
     match placed {
         None => log::warn!("rustcraft: the housing at {pos:?} has no block entity"),
@@ -560,16 +560,29 @@ fn put_channel(game: &mut Game<'_>, player: &NativeServerPlayer, pos: Pos, kind:
             player.uuid,
             line("rustcraft.housing.full", "All four slots are taken", &[]),
         ),
-        Some(Some(slot)) => {
+        Some(Some((slot, old))) => {
             if player.game_mode != CREATIVE {
-                game.native_take_items(content::channel_item(kind), 1);
+                game.native_take_items(content::channel_item(kind, channel.tier), 1);
+                if let Some(old) = old {
+                    let item = content::channel_item(old.kind, old.tier);
+                    if game.native_give_items(item, 1) == 0 {
+                        drop_item(game, &player.dimension, pos, item);
+                    }
+                }
             }
             mark_stale(&player.dimension);
-            let text = line(
-                "rustcraft.housing.channel_set",
-                "%s went into slot %s",
-                &[kind_name(kind), number(slot + 1)],
-            );
+            let text = match old {
+                Some(old) => line(
+                    "rustcraft.housing.channel_swapped",
+                    "%s took the place of tier %s in slot %s",
+                    &[kind_name(kind), number(old.tier), number(slot + 1)],
+                ),
+                None => line(
+                    "rustcraft.housing.channel_set",
+                    "%s went into slot %s",
+                    &[kind_name(kind), number(slot + 1)],
+                ),
+            };
             tell(game, player.uuid, text);
         }
     }
@@ -588,7 +601,7 @@ fn take_channel(game: &mut Game<'_>, player: &NativeServerPlayer, pos: Pos) {
         return;
     };
     // Check the room first, so a full inventory leaves the channel where it is.
-    let item = content::channel_item(last.kind);
+    let item = content::channel_item(last.kind, last.tier);
     if game.native_room_for(item) == 0 {
         let text = line("rustcraft.housing.no_room", "No room for the channel", &[]);
         tell(game, player.uuid, text);
@@ -605,7 +618,7 @@ fn take_channel(game: &mut Game<'_>, player: &NativeServerPlayer, pos: Pos) {
     let Some((slot, channel)) = taken else {
         return;
     };
-    game.native_give_items(content::channel_item(channel.kind), 1);
+    game.native_give_items(content::channel_item(channel.kind, channel.tier), 1);
     mark_stale(&player.dimension);
     let text = line(
         "rustcraft.housing.channel_taken",
@@ -682,6 +695,18 @@ fn diagnosis_of(
         return Some(text);
     }
     if let Some(text) = mining::diagnosis(dimension, pos, block) {
+        return Some(text);
+    }
+    if let Some(mut text) = mixer::diagnosis(game, dimension, pos, block, &TUNING) {
+        let joint = level.transport.joint_blocks.get(&pos);
+        if let Some(modes) = joint.or(level.fluids.joint_blocks.get(&pos)) {
+            text.push(Text::literal(" · "));
+            text.push(transport::joint_text(modes));
+        }
+        if let Some(fluid) = level.fluids.no_lane(pos, level.ticks) {
+            text.push(Text::literal(" · "));
+            text.push(fluids::no_lane_text(fluid));
+        }
         return Some(text);
     }
     if let Some(text) = base::diagnosis(game, dimension, pos, block, &TUNING) {

@@ -23,14 +23,14 @@ use crate::game::{
 };
 use horizon_client::{items::ItemStack, mod_api::NativeHeightmap, text::Text};
 use rustcraft_rules::{
-    geom::Pos,
+    geom::{Face, Pos, step},
     machines::{
         sheet::{Bar as SheetBar, Kind as SheetKind, Sheet, Status as SheetStatus, severity_code},
         style::Severity,
     },
     modules::Module,
     net::energy::{Producer, Shared, Store, join_groups},
-    power::{self as rules, Battery, Form, PowerView, Shown},
+    power::{self as rules, Battery, Form, PowerView, Shown, Water},
     tuning::Tuning,
 };
 use std::collections::{BTreeMap, BTreeSet, HashMap};
@@ -40,6 +40,7 @@ const SOLUTION_KEY: &str = "solution";
 /// Panels and windmills look at the sky and the wind once a second.
 const REFRESH_EVERY: u64 = 20;
 const AIR: [&str; 3] = ["minecraft:air", "minecraft:cave_air", "minecraft:void_air"];
+const WATER: &str = "minecraft:water";
 
 /// One level's structures and what its sources showed last.
 #[derive(Default)]
@@ -49,6 +50,9 @@ pub struct Sources {
     batteries: Vec<BTreeSet<Pos>>,
     windmills: Vec<Pos>,
     lava: Vec<Pos>,
+    /// Slice 10: hydro turbines touching one another, and what each found round it last.
+    turbines: Vec<BTreeSet<Pos>>,
+    turbine_water: HashMap<Pos, (Water, u32, u32)>,
     /// Panels' and windmills' outputs as last looked at, with what they show.
     outputs: HashMap<Pos, (f64, Shown)>,
     ticks: u64,
@@ -72,6 +76,8 @@ pub(super) fn rescan(level: &mut LevelNet) {
     s.batteries = rules::groups(&of(Machine::Battery), false);
     s.windmills = of(Machine::Windmill).into_iter().collect();
     s.lava = of(Machine::LavaGenerator).into_iter().collect();
+    s.turbines = rules::groups(&of(Machine::Turbine), false);
+    s.turbine_water.clear();
     s.outputs.clear();
     s.views
         .retain(|p, _| level.crystals.contains(p) || level.machines.contains_key(p));
@@ -80,6 +86,7 @@ pub(super) fn rescan(level: &mut LevelNet) {
         .iter()
         .chain(&s.panels)
         .chain(&s.batteries)
+        .chain(&s.turbines)
         .filter(|g| g.len() > 1)
         .cloned()
         .collect();
@@ -125,6 +132,7 @@ fn refresh(game: &Game<'_>, s: &mut Sources, t: &Tuning) {
             .iter()
             .flatten()
             .chain(&s.windmills)
+            .chain(s.turbines.iter().flatten())
             .any(|p| !s.outputs.contains_key(p));
     if !due {
         return;
@@ -159,6 +167,48 @@ fn refresh(game: &Game<'_>, s: &mut Sources, t: &Tuning) {
             Shown::Blocked
         };
         s.outputs.insert(w, (out, shown));
+    }
+    for g in s.turbines.clone() {
+        turbines(game, s, &g, t);
+    }
+}
+
+/// E12: each turbine of a structure by the water round it, its depth and the turbines upstream.
+fn turbines(game: &Game<'_>, s: &mut Sources, g: &BTreeSet<Pos>, t: &Tuning) {
+    let level_of = |p: Pos| -> Option<u8> {
+        (game.native_block(p) == WATER).then(|| {
+            game.native_block_property(p, "level")
+                .and_then(|l| l.parse().ok())
+                .unwrap_or(0)
+        })
+    };
+    let cells: Vec<Pos> = g.iter().copied().collect();
+    let waters: Vec<Water> = cells
+        .iter()
+        .map(|&p| {
+            let levels: Vec<u8> = Face::ALL
+                .iter()
+                .filter_map(|&f| level_of(step(p, f)))
+                .collect();
+            Water::of(&levels)
+        })
+        .collect();
+    let upstream = rules::upstream_counts(&waters);
+    for (i, &p) in cells.iter().enumerate() {
+        let depth = (1..=t.turbine_depth_max as i32)
+            .take_while(|dy| {
+                let above = [p[0], p[1] + dy, p[2]];
+                level_of(above).is_some() || g.contains(&above)
+            })
+            .count() as u32;
+        let out = rules::turbine_output(waters[i], depth, upstream[i], t);
+        let shown = if waters[i] == Water::None {
+            Shown::NotInWater
+        } else {
+            Shown::Gives(out)
+        };
+        s.outputs.insert(p, (out, shown));
+        s.turbine_water.insert(p, (waters[i], depth, upstream[i]));
     }
 }
 
@@ -228,7 +278,11 @@ pub(super) fn run_source(
                 .get(&pos)
                 .copied()
                 .unwrap_or((0.0, Shown::Gives(0.0)));
-            let group = s.panels.iter().find(|g| g.contains(&pos));
+            let group = s
+                .panels
+                .iter()
+                .chain(&s.turbines)
+                .find(|g| g.contains(&pos));
             let total: f64 = group.map_or(output, |g| {
                 g.iter()
                     .map(|p| s.outputs.get(p).map_or(0.0, |o| o.0))
@@ -429,6 +483,11 @@ fn shown_text(v: &PowerView) -> Text {
             &[],
         ),
         Shown::NoLava => line("rustcraft.power.no_lava", "No lava", &[]),
+        Shown::NotInWater => line(
+            "rustcraft.power.no_water",
+            "The turbine is not in water",
+            &[],
+        ),
         Shown::NoSolution(x) => line(
             "rustcraft.power.no_solution",
             "No solution: gives %s E/s, as one crystal",
@@ -467,7 +526,13 @@ pub(super) fn diagnosis(
     let ours = block == content::CRYSTAL
         || matches!(
             Machine::of(block),
-            Some(Machine::Solar | Machine::Windmill | Machine::LavaGenerator | Machine::Battery)
+            Some(
+                Machine::Solar
+                    | Machine::Windmill
+                    | Machine::LavaGenerator
+                    | Machine::Battery
+                    | Machine::Turbine
+            )
         );
     if !ours {
         return None;
@@ -536,7 +601,7 @@ pub(super) fn cells(
 
 fn severity(v: &PowerView) -> Severity {
     match v.shown {
-        Shown::NoSky | Shown::Blocked | Shown::NoLava => Severity::Bad,
+        Shown::NoSky | Shown::Blocked | Shown::NoLava | Shown::NotInWater => Severity::Bad,
         Shown::NoSolution(_) | Shown::BrokenShape(_) | Shown::Holding => Severity::Warn,
         Shown::Gives(x) if x <= 0.0 => Severity::Warn,
         _ => Severity::Ok,
@@ -571,6 +636,7 @@ pub(super) fn sheet(
                     0.0
                 },
                 energy: true,
+                colour: None,
             });
             s.rows.push(base::v(&line(
                 "rustcraft.battery.blocks",
@@ -603,12 +669,58 @@ pub(super) fn sheet(
                     0.0
                 },
                 energy: false,
+                colour: None,
             });
             s.rows.push(base::v(&line(
                 "rustcraft.power.lava_hint",
                 "A bucket gives %s E at %s E/s",
                 &[e(t.lava_energy_per_bucket), e(t.lava_output)],
             )));
+        }
+        SheetKind::Turbine => {
+            let (water, depth, upstream) = level
+                .sources
+                .turbine_water
+                .get(&pos)
+                .copied()
+                .unwrap_or((Water::None, 0, 0));
+            s.rows.push(base::v(&line(
+                "rustcraft.power.gives",
+                "Gives %s E/s",
+                &[e(v.output)],
+            )));
+            let water = match water {
+                Water::Flowing(_) => line(
+                    "rustcraft.turbine.current",
+                    "In a current: %s E/s",
+                    &[e(t.turbine_flowing)],
+                ),
+                Water::Still => line(
+                    "rustcraft.turbine.still",
+                    "In still water: %s E/s",
+                    &[e(t.turbine_still)],
+                ),
+                Water::None => line("rustcraft.turbine.dry", "No water beside it", &[]),
+            };
+            s.rows.push(base::v(&water));
+            s.rows.push(base::v(&line(
+                "rustcraft.turbine.place",
+                "Depth %s · turbines upstream %s · structure of %s",
+                &[
+                    Text::literal(depth.to_string()),
+                    Text::literal(upstream.to_string()),
+                    Text::literal(v.blocks.to_string()),
+                ],
+            )));
+            s.hints = vec![
+                Vec::new(),
+                Vec::new(),
+                vec![base::v(&line(
+                    "rustcraft.turbine.hint",
+                    "+10% a block of depth, +5% a turbine upstream in the structure",
+                    &[],
+                ))],
+            ];
         }
         _ => {
             s.rows.push(base::v(&line(

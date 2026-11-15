@@ -284,7 +284,11 @@ fn bars(game: &Game<'_>, batch: &mut HudBatch, o: [f32; 2], l: &Layout, s: &Shee
     for (b, (y, r)) in s.bars.iter().zip(&l.bars) {
         label(game, batch, &read(&b.label), o, [r[0], *y]);
         text_right(game, batch, &read(&b.value), o, r[0] + r[2], *y, VALUE);
-        let fill = if b.energy { kit::ENERGY } else { LAVA };
+        let fill = if b.energy {
+            kit::ENERGY
+        } else {
+            b.colour.unwrap_or(LAVA)
+        };
         kit::bar(game, batch, kit::at(o, *r), b.share, fill);
     }
 }

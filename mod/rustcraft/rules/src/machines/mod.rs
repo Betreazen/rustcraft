@@ -5,6 +5,7 @@ pub mod alloy;
 pub mod crafter;
 pub mod fluid_windows;
 pub mod generator;
+pub mod mixer;
 pub mod panel;
 pub mod processor;
 pub mod pump;

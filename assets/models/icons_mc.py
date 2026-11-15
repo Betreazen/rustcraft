@@ -194,6 +194,113 @@ def saw_rows():
 ICONS['tool_saw'] = (saw_rows(), '#d8dce4', '#e2bd55', [])
 
 
+# ---- Slice 10 (icons.js `crate`, `claw`, `scoop`, `backpack`, the channels): the tier-2 tools,
+# the backpacks and the channels of tiers 2 and 3, whose tube carries a band of their alloy's colour.
+CRATE = [
+    '', '',
+    '.kkkkkkkkkkkkkk.',
+    '.kmhhhhhhhhhhmk.',
+    '.khhhhhhhhhhhhk.',
+    '.kiiiiiiiiiiiik.',
+    '.khhhhhhhhhhhhk.',
+    '.khhhhhhhhhhhhk.',
+    '.kiiiiiiiiiiiik.',
+    '.khhhhhhhhhhhhk.',
+    '.khhhhhhhhhhhhk.',
+    '.kiiiiiiiiiiiik.',
+    '.khhhhhhhhhhhhk.',
+    '.kmhhhhhhhhhhmk.',
+    '.kkkkkkkkkkkkkk.',
+]
+CLAW = [
+    '',
+    '......kkkk......',
+    '......knnk......',
+    '......kmmk......',
+    '....kkkmmkkk....',
+    '...kaaaaaaaak...',
+    '...kbbbbbbbbk...',
+    '..kmk......kmk..',
+    '.kmk........kmk.',
+    '.kmk........kmk.',
+    '.kmk........kmk.',
+    '..kmk......kmk..',
+    '...kak....kak...',
+    '....k......k....',
+]
+BACKPACK = [
+    '',
+    '.....kkkkkk.....',
+    '....kk....kk....',
+    '...kkkkkkkkkk...',
+    '..kcccccccccak..',
+    '..kaaaaaaaaaak..',
+    '..kbbbbbbbbbbk..',
+    '..kaaaayyaaaak..',
+    '..kaaaazzaaaak..',
+    '..kaaaaaaaaabk..',
+    '.kkaaaaaaaaabkk.',
+    '.kakaaaaaaaabkak',
+    '.kbkbbbbbbbbbkbk',
+    '.kkkkkkkkkkkkkkk',
+]
+
+
+def scoop_rows():
+    """icons.js `scoop`, outlined as `outlined` does."""
+    px = {}
+
+    def dot(x, y, ch):
+        px[(x, y)] = ch
+    for i in range(5):
+        dot(1 + i, 1 + i, 'm')
+        dot(2 + i, 1 + i, 'o')
+        dot(1 + i, 2 + i, 'n')
+    for x in range(7, 11):
+        dot(x, 4, 'h')
+    for x in range(5, 13):
+        dot(x, 5, 'i' if x % 3 else 'h')
+    for x in range(4, 14):
+        dot(x, 6, 'c')
+    for y in range(7, 11):
+        for x in range(4, 14):
+            dot(x, y, 'c' if x == 4 else 'b' if x == 13 else 'a')
+    for x in range(5, 14):
+        dot(x, 11, 'b' if x == 13 else 'a')
+    for x in range(6, 14):
+        dot(x, 12, 'b')
+    for x in (7, 9, 11, 13):
+        dot(x, 13, 'o')
+    dot(5, 7, 'x')
+    for x in range(6, 13):
+        dot(x, 9, 'b')
+    rows = []
+    for y in range(16):
+        row = ''
+        for x in range(16):
+            ch = px.get((x, y))
+            if ch:
+                row += ch
+            elif any((x + dx, y + dy) in px for dx, dy in ((-1, 0), (1, 0), (0, -1), (0, 1))):
+                row += 'k'
+            else:
+                row += '.'
+        rows.append(row)
+    return rows
+
+
+ICONS['tool_hold'] = (CRATE, '#a8793f', '#a8793f', [])
+ICONS['tool_grab'] = (CLAW, '#ffa53c', '#ffa53c', [])
+ICONS['tool_scoop'] = (scoop_rows(), '#e08a3a', '#e08a3a', [])
+ICONS['backpack'] = (BACKPACK, '#a8793f', TIER[2], [])
+# The crystallite backpack: the same bag with a crystallite clasp.
+ICONS['backpack_2'] = (BACKPACK, '#7a5a3a', TIER[3], [(7, 7, ['uu', 'jj'])])
+for _base in ('item_channel', 'fluid_channel', 'energy_channel'):
+    _rows, _a, _e, _over = ICONS[_base]
+    ICONS[_base + '_2'] = (_rows, _a, _e, _over + [(3, 10, ['yyyyyyyyyy'])])
+    ICONS[_base + '_3'] = (_rows, _a, _e, _over + [(3, 10, ['uuuuuuuuuu'])])
+
+
 def shade(color, f):
     """RC.shade of engine.js, with JavaScript's Math.round (half up)."""
     rgb = [int(color[i:i + 2], 16) for i in (1, 3, 5)]

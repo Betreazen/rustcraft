@@ -40,6 +40,8 @@ pub enum FluidShown {
     Lava,
     /// A mod's fluid: the window says «жидкость».
     Other,
+    /// Slice 10: the nutrient solution.
+    Solution,
 }
 
 impl FluidShown {
@@ -48,6 +50,7 @@ impl FluidShown {
             None => FluidShown::None,
             Some(crate::machines::pump::WATER) => FluidShown::Water,
             Some(crate::machines::pump::LAVA) => FluidShown::Lava,
+            Some(crate::power::SOLUTION) => FluidShown::Solution,
             Some(_) => FluidShown::Other,
         }
     }
@@ -58,6 +61,7 @@ impl FluidShown {
             FluidShown::Water => 1,
             FluidShown::Lava => 2,
             FluidShown::Other => 3,
+            FluidShown::Solution => 4,
         }
     }
 
@@ -66,6 +70,7 @@ impl FluidShown {
             1 => FluidShown::Water,
             2 => FluidShown::Lava,
             3 => FluidShown::Other,
+            4 => FluidShown::Solution,
             _ => FluidShown::None,
         }
     }

@@ -665,7 +665,8 @@ def worker_parts(out, report):
 # (machine_states); the solar panel alone still copies glass with a `facing` of its own
 # (rustcraft_content), and its blockstate turns the staged model as the machines' does.
 SLICE7_PANELS = ('dock_unload', 'dock_charge', 'turret', 'anchor',
-                 'solar', 'windmill', 'gen_lava', 'battery', 'miner', 'placer', 'breaker')
+                 'solar', 'windmill', 'gen_lava', 'battery', 'miner', 'placer', 'breaker',
+                 'mixer', 'dock_load', 'turbine')
 SLICE7_BLOCKS = ('solar',)
 
 

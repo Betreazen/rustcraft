@@ -58,6 +58,23 @@ pub fn insert(housing: Housing, channel: Channel) -> Option<(Housing, usize)> {
     Some((next, slot))
 }
 
+/// What a click with `channel` does to a housing (M2, U4): a channel of a higher tier takes the
+/// place of the first channel of its kind with a lower tier, which comes back (the slot keeps its
+/// joint settings, U3); otherwise it goes into the first free slot (M2). The housing after it,
+/// the slot, and the channel that came out; none when all four slots are taken by others.
+pub fn put(housing: Housing, channel: Channel) -> Option<(Housing, usize, Option<Channel>)> {
+    let lower = housing
+        .slots
+        .iter()
+        .position(|s| s.is_some_and(|c| c.kind == channel.kind && c.tier < channel.tier));
+    if let Some(slot) = lower {
+        let mut next = housing;
+        let old = next.slots[slot].replace(channel);
+        return Some((next, slot, old));
+    }
+    insert(housing, channel).map(|(h, slot)| (h, slot, None))
+}
+
 /// The wrench: the housing without its last channel (the highest slot that holds one), that
 /// slot and the channel; none when the housing is empty.
 pub fn remove_last(housing: Housing) -> Option<(Housing, usize, Channel)> {
@@ -139,6 +156,39 @@ mod tests {
 
     fn channel(kind: ChannelKind) -> Channel {
         Channel { kind, tier: 1 }
+    }
+
+    #[test]
+    fn a_higher_tier_channel_takes_the_place_of_a_lower_one() {
+        // U4: a tier-2 item channel replaces the tier-1 one in its slot; the old one comes back.
+        let h = Housing {
+            slots: [
+                Some(channel(ChannelKind::Energy)),
+                Some(channel(ChannelKind::Item)),
+                None,
+                None,
+            ],
+        };
+        let two = Channel {
+            kind: ChannelKind::Item,
+            tier: 2,
+        };
+        let (h, slot, old) = put(h, two).unwrap();
+        assert_eq!((slot, old), (1, Some(channel(ChannelKind::Item))));
+        assert_eq!(h.slots[1], Some(two));
+        // The same tier again, or a lower one, goes into a free slot (M2).
+        let (h, slot, old) = put(h, two).unwrap();
+        assert_eq!((slot, old), (2, None));
+        let (h, slot, old) = put(h, channel(ChannelKind::Item)).unwrap();
+        assert_eq!((slot, old), (3, None));
+        // All four taken, nothing lower of its kind: no room.
+        assert_eq!(put(h, channel(ChannelKind::Fluid)), None);
+        let three = Channel {
+            kind: ChannelKind::Energy,
+            tier: 3,
+        };
+        let (_, slot, old) = put(h, three).unwrap();
+        assert_eq!((slot, old), (0, Some(channel(ChannelKind::Energy))));
     }
 
     #[test]

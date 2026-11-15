@@ -75,13 +75,14 @@ fn fluid_name(f: FluidShown) -> String {
         FluidShown::Water => tr("rustcraft.fluid.water.name", "Water"),
         FluidShown::Lava => tr("rustcraft.fluid.lava.name", "Lava"),
         FluidShown::Other => tr("rustcraft.fluid.other.name", "Fluid"),
+        FluidShown::Solution => tr("rustcraft.fluid.solution.name", "Nutrient solution"),
     }
 }
 
 fn fluid_colour(f: FluidShown) -> u32 {
     match f {
         FluidShown::Lava => LAVA,
-        FluidShown::Other => OTHER,
+        FluidShown::Other | FluidShown::Solution => OTHER,
         _ => WATER,
     }
 }
