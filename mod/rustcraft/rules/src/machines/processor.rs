@@ -137,15 +137,20 @@ pub struct Processor {
     pub progress: f64,
     pub mode: WorkMode,
     pub modules: Vec<Module>,
+    /// Slice 11: the (speed, energy) multipliers of the catalyst it holds (K1).
+    pub catalyst: Option<(f64, f64)>,
+    /// Slice 11: whether the recipe it finishes next gives one more product (the enricher).
+    pub lucky: bool,
 }
 
 impl Processor {
-    /// Speed and energy multipliers of the mode and every module together.
+    /// Speed and energy multipliers of the mode, every module and the catalyst together.
     pub fn factors(&self) -> (f64, f64) {
         let mut speed = 1.0;
         let mut energy = 1.0;
-        for (s, e) in
-            std::iter::once(self.mode.factors()).chain(self.modules.iter().map(|m| m.factors()))
+        for (s, e) in std::iter::once(self.mode.factors())
+            .chain(self.modules.iter().map(|m| m.factors()))
+            .chain(self.catalyst)
         {
             speed *= s;
             energy *= e;
@@ -196,13 +201,14 @@ impl Processor {
         self.progress += self.factors().0 * share.min(1.0) / spec.ticks;
         if self.progress >= 1.0 - 1e-9 {
             self.progress = 0.0;
-            self.finish(&recipe);
+            self.finish(&recipe, spec.output_capacity);
         }
         State::Working
     }
 
-    /// Takes the recipe's input and adds its output.
-    fn finish(&mut self, recipe: &Recipe) {
+    /// Takes the recipe's input and adds its output, one product more when it is lucky and the
+    /// output has room.
+    fn finish(&mut self, recipe: &Recipe, capacity: u32) {
         if let Some((_, n)) = self.input.as_mut() {
             *n -= recipe.input_count;
             if *n == 0 {
@@ -212,6 +218,11 @@ impl Processor {
         match self.output.as_mut() {
             Some((_, n)) => *n += recipe.output_count,
             None => self.output = Some((recipe.output.clone(), recipe.output_count)),
+        }
+        if std::mem::take(&mut self.lucky)
+            && let Some((_, n)) = self.output.as_mut()
+        {
+            *n = (*n + recipe.output_count).min(capacity.max(*n));
         }
     }
 }
@@ -390,5 +401,30 @@ mod tests {
         assert_eq!(empty.request(&find, &FURNACE), 0.0);
         let mut unknown = with_input("minecraft:dirt", 4);
         assert_eq!(unknown.tick(&find, &FURNACE, 1.0), State::Idle);
+    }
+
+    #[test]
+    fn an_accelerator_works_half_again_as_fast_and_an_economizer_draws_less() {
+        // Slice 11, K1: the catalysts' multipliers join the mode's and the modules'.
+        let mut p = with_input("rc:dust_iron", 4);
+        p.catalyst = Some((1.5, 1.0));
+        assert_eq!(ticks_until(&mut p, &smelt(), &FURNACE, 1.0, 1), 67);
+        let mut e = with_input("rc:dust_iron", 4);
+        e.catalyst = Some((1.0, 0.7));
+        assert!((e.request(&smelt(), &FURNACE) - 5.6).abs() < 1e-9);
+    }
+
+    #[test]
+    fn a_lucky_recipe_gives_one_more_product_while_the_output_has_room() {
+        let mut p = with_input("minecraft:raw_iron", 2);
+        p.lucky = true;
+        assert_eq!(ticks_until(&mut p, &crush(), &FURNACE, 1.0, 2), 100);
+        assert_eq!(p.output, Some(("rc:dust_iron".into(), 4)));
+        assert!(!p.lucky, "the luck is spent");
+        let mut full = with_input("minecraft:raw_iron", 1);
+        full.output = Some(("rc:dust_iron".into(), 62));
+        full.lucky = true;
+        ticks_until(&mut full, &crush(), &FURNACE, 1.0, 64);
+        assert_eq!(full.output, Some(("rc:dust_iron".into(), 64)));
     }
 }

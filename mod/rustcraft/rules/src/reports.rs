@@ -60,6 +60,12 @@ pub enum Report {
         entity: u32,
         kind: String,
     },
+    /// Slice 11: a butcher killed a farm animal (round 26), sent the tick it died; no `kill`.
+    Slaughter {
+        owner: u128,
+        entity: u32,
+        kind: String,
+    },
 }
 
 impl Report {
@@ -89,6 +95,11 @@ impl Report {
                 entity,
                 kind,
             } => format!("{COMMAND} kill {owner:032x} {entity} {kind}"),
+            Report::Slaughter {
+                owner,
+                entity,
+                kind,
+            } => format!("{COMMAND} slaughter {owner:032x} {entity} {kind}"),
         }
     }
 
@@ -98,6 +109,7 @@ impl Report {
             Report::Break { .. } => "break",
             Report::Place { .. } => "place",
             Report::Kill { .. } => "kill",
+            Report::Slaughter { .. } => "slaughter",
         }
     }
 }
@@ -154,5 +166,15 @@ mod tests {
             p.command(),
             "pct-machine place minecraft:overworld 1 2 3 minecraft:stone"
         );
+        let s = Report::Slaughter {
+            owner: 2,
+            entity: 7,
+            kind: "minecraft:cow".into(),
+        };
+        assert_eq!(
+            s.command(),
+            "pct-machine slaughter 00000000000000000000000000000002 7 minecraft:cow"
+        );
+        assert_eq!(s.kind(), "slaughter");
     }
 }

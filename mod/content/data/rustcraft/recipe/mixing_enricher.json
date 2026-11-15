@@ -1,0 +1,19 @@
+{
+  "type": "rustcraft:mixing",
+  "ingredients": [
+    {
+      "item": "minecraft:nether_wart",
+      "count": 1
+    },
+    {
+      "item": "rustcraft:dust_gold",
+      "count": 1
+    }
+  ],
+  "water": 1000,
+  "result": {
+    "fluid": "rustcraft:enricher",
+    "amount": 1000
+  },
+  "time": 100
+}

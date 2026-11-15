@@ -42,6 +42,10 @@ pub enum FluidShown {
     Other,
     /// Slice 10: the nutrient solution.
     Solution,
+    /// Slice 11: the catalysts.
+    Accelerator,
+    Economizer,
+    Enricher,
 }
 
 impl FluidShown {
@@ -51,6 +55,9 @@ impl FluidShown {
             Some(crate::machines::pump::WATER) => FluidShown::Water,
             Some(crate::machines::pump::LAVA) => FluidShown::Lava,
             Some(crate::power::SOLUTION) => FluidShown::Solution,
+            Some(crate::machines::catalyst::ACCELERATOR) => FluidShown::Accelerator,
+            Some(crate::machines::catalyst::ECONOMIZER) => FluidShown::Economizer,
+            Some(crate::machines::catalyst::ENRICHER) => FluidShown::Enricher,
             Some(_) => FluidShown::Other,
         }
     }
@@ -62,6 +69,9 @@ impl FluidShown {
             FluidShown::Lava => 2,
             FluidShown::Other => 3,
             FluidShown::Solution => 4,
+            FluidShown::Accelerator => 5,
+            FluidShown::Economizer => 6,
+            FluidShown::Enricher => 7,
         }
     }
 
@@ -71,6 +81,9 @@ impl FluidShown {
             2 => FluidShown::Lava,
             3 => FluidShown::Other,
             4 => FluidShown::Solution,
+            5 => FluidShown::Accelerator,
+            6 => FluidShown::Economizer,
+            7 => FluidShown::Enricher,
             _ => FluidShown::None,
         }
     }

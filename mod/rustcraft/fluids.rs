@@ -20,7 +20,7 @@
 use crate::game::{
     Game,
     rustcraft_content::{self as content, Machine},
-    rustcraft_machines::{read_f64, read_int, write_f64, write_int},
+    rustcraft_machines::{self as machines, read_f64, read_int, write_f64, write_int},
     rustcraft_mixer::{self as mixer, Tanks as MixerTanks},
     rustcraft_power::{self as power, Sink},
     rustcraft_server::{LevelNet, line},
@@ -35,6 +35,7 @@ use rustcraft_rules::{
             pump::{self as pump_window, PumpPanel},
             tank::{self as tank_window, Note, TankPanel},
         },
+        catalyst::{Catalyst, Tank as CatalystTank},
         processor::Shown,
         pump::{Pump, Source, Under, WATER},
     },
@@ -117,6 +118,9 @@ pub(super) fn default_mode(block: &str) -> Option<Mode> {
         Some(TANK_DEFAULT)
     } else if block == content::PUMP {
         Some(PUMP_DEFAULT)
+    } else if machines::takes_catalyst(block) {
+        // Slice 11: a furnace or a crusher takes its catalyst (K1).
+        Some(TANK_DEFAULT)
     } else if block == content::MIXER {
         Some(Mode::Both)
     } else {
@@ -231,6 +235,9 @@ struct Inventories<'a> {
     /// Slice 10: the mixers' tanks, and the size of each.
     mixers: &'a mut BTreeMap<Pos, MixerTanks>,
     mixer_tank: u64,
+    /// Slice 11: the furnaces' and crushers' catalyst tanks.
+    catalysts: &'a mut BTreeMap<Pos, CatalystTank>,
+    tuning: &'a Tuning,
 }
 
 impl FluidInventories for Inventories<'_> {
@@ -251,6 +258,9 @@ impl FluidInventories for Inventories<'_> {
     }
 
     fn room_for(&self, block: Pos, fluid: &str) -> u64 {
+        if let Some(c) = self.catalysts.get(&block) {
+            return c.room_for(fluid, self.tuning);
+        }
         if let Some(s) = self.sinks.get(&block) {
             return s.room_for(fluid);
         }
@@ -293,6 +303,9 @@ impl FluidInventories for Inventories<'_> {
     }
 
     fn put(&mut self, block: Pos, fluid: &str, amount: u64) -> u64 {
+        if let Some(c) = self.catalysts.get_mut(&block) {
+            return c.put(fluid, amount, self.tuning);
+        }
         if let Some(s) = self.sinks.get_mut(&block) {
             let n = s.room_for(fluid).min(amount);
             s.held += n;
@@ -385,6 +398,34 @@ fn mixers_and_tanks(
     }
 }
 
+/// Slice 11: each furnace and crusher takes a catalyst from a tank it touches (K1), one catalyst at
+/// a time (K2).
+fn catalysts_from_tanks(
+    catalysts: &mut BTreeMap<Pos, CatalystTank>,
+    groups: &mut [TankGroup],
+    group_of: &HashMap<Pos, usize>,
+    flow: &mut HashMap<Pos, (u64, u64)>,
+    tuning: &Tuning,
+) {
+    for (&pos, c) in catalysts.iter_mut() {
+        for face in Face::ALL {
+            let Some(&g) = group_of.get(&step(pos, face)) else {
+                continue;
+            };
+            let Some(fluid) = groups[g].fluid.clone().filter(|f| Catalyst::of(f).is_some()) else {
+                continue;
+            };
+            let room = c.room_for(&fluid, tuning);
+            if room == 0 {
+                continue;
+            }
+            let n = groups[g].take(&fluid, room);
+            flow.entry(groups[g].anchor()).or_default().1 += n;
+            c.put(&fluid, n, tuning);
+        }
+    }
+}
+
 /// One move of the level's fluids: pumps into the tanks they touch, then every fluid net.
 pub(super) fn tick(game: &mut Game<'_>, level: &mut LevelNet, tuning: &Tuning) {
     let now = level.ticks;
@@ -398,6 +439,13 @@ pub(super) fn tick(game: &mut Game<'_>, level: &mut LevelNet, tuning: &Tuning) {
         .machines
         .iter()
         .filter(|(_, m)| **m == Machine::Mixer)
+        .map(|(p, _)| *p)
+        .collect();
+    // Slice 11: the machines that take a catalyst.
+    let catalysts_at: Vec<Pos> = level
+        .machines
+        .iter()
+        .filter(|(_, m)| matches!(**m, Machine::Furnace | Machine::Crusher))
         .map(|(p, _)| *p)
         .collect();
     let f = &mut level.fluids;
@@ -470,6 +518,12 @@ pub(super) fn tick(game: &mut Game<'_>, level: &mut LevelNet, tuning: &Tuning) {
         .collect();
     let mixers_before = mixers.clone();
     mixers_and_tanks(&mut mixers, &mut groups, &group_of, &mut f.flow, mixer_tank);
+    let mut catalysts: BTreeMap<Pos, CatalystTank> = catalysts_at
+        .iter()
+        .filter_map(|&p| Some((p, machines::catalyst_at(game, p)?)))
+        .collect();
+    let catalysts_before = catalysts.clone();
+    catalysts_from_tanks(&mut catalysts, &mut groups, &group_of, &mut f.flow, tuning);
     let moves_per_second = tuning.ticks_per_second / EVERY as f64;
     let mut inv = Inventories {
         groups: &mut groups,
@@ -479,6 +533,8 @@ pub(super) fn tick(game: &mut Game<'_>, level: &mut LevelNet, tuning: &Tuning) {
         sinks: &mut sinks,
         mixers: &mut mixers,
         mixer_tank,
+        catalysts: &mut catalysts,
+        tuning,
     };
     f.no_lane.retain(|_, (_, until)| *until > now);
     for net in &f.nets {
@@ -519,6 +575,11 @@ pub(super) fn tick(game: &mut Game<'_>, level: &mut LevelNet, tuning: &Tuning) {
     for (pos, m) in &mixers {
         if mixers_before.get(pos) != Some(m) {
             mixer::write_tanks(game, *pos, m);
+        }
+    }
+    for (pos, c) in &catalysts {
+        if catalysts_before.get(pos) != Some(c) {
+            machines::set_catalyst(game, *pos, c);
         }
     }
     for (pos, held) in &pumps {
@@ -719,6 +780,9 @@ pub(super) fn fluid_name(fluid: &str) -> Text {
         WATER => line("rustcraft.fluid.water", "water", &[]),
         "minecraft:lava" => line("rustcraft.fluid.lava", "lava", &[]),
         "rustcraft:solution" => line("rustcraft.fluid.solution", "nutrient solution", &[]),
+        "rustcraft:accelerator" => line("rustcraft.fluid.accelerator", "accelerator", &[]),
+        "rustcraft:economizer" => line("rustcraft.fluid.economizer", "economizer", &[]),
+        "rustcraft:enricher" => line("rustcraft.fluid.enricher", "enricher", &[]),
         other => Text::literal(other.to_owned()),
     }
 }

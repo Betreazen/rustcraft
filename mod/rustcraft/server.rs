@@ -727,6 +727,20 @@ fn diagnosis_of(
             || machine_text(Machine::of(block), Shown::Idle),
             |s| machine_text(Some(s.machine), s.shown),
         );
+        // Slice 11: the catalyst it holds and the seconds of work it has left (K1).
+        if let Some(tank) = machines::catalyst_at(game, pos)
+            && let Some(fluid) = tank.fluid.as_deref().filter(|_| tank.active().is_some())
+        {
+            text.push(Text::literal(" · "));
+            text.push(line(
+                "rustcraft.machine.catalyst",
+                "%s for %s s more",
+                &[
+                    fluids::fluid_name(fluid),
+                    Text::literal(format!("{:.0}", tank.seconds_left(&TUNING).ceil())),
+                ],
+            ));
+        }
         if let Some(modes) = joint.or(fluid_joint) {
             text.push(Text::literal(" · "));
             text.push(transport::joint_text(modes));

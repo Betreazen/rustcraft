@@ -17,7 +17,7 @@ use crate::game::{
     Game,
     native_mobs::NativeSpawn,
     native_world_edit::{NativeBlockEdit, NativeBlockRun},
-    rustcraft_base as base,
+    rustcraft_base as base, rustcraft_butcher as butcher,
     rustcraft_content::Machine,
     rustcraft_fluids as fluids,
     rustcraft_machines::{self as machines, SMELTING, slot_of},
@@ -657,6 +657,14 @@ impl Bench for GameBench<'_, '_> {
 
     fn mixer(&self, pos: Pos) -> Option<rustcraft_rules::machines::mixer::MixerView> {
         mixer::view(self.game, DIMENSION, pos)
+    }
+
+    fn catalyst(&self, pos: Pos) -> Option<rustcraft_rules::machines::catalyst::Tank> {
+        machines::catalyst_at(self.game, pos)
+    }
+
+    fn butcher(&self, pos: Pos) -> Option<rustcraft_rules::butcher::Shown> {
+        butcher::shown(DIMENSION, pos)
     }
 
     fn drop_item(&mut self, at: [f64; 3], item: &str, count: u32) -> Result<(), String> {

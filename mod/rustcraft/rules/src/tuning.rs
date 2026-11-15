@@ -211,6 +211,28 @@ pub struct Tuning {
     pub turbine_upstream_max: u32,
     /// Slice 10: the backpacks' slots by tier (G4: sparksteel 27, crystallite 54).
     pub backpack_slots: [usize; 2],
+    /// Slice 11: the catalysts (K1, K2, spec 4.12): the buckets a machine's catalyst tank holds,
+    /// the seconds of work one bucket lasts, and what each does: the accelerator's speed, the
+    /// economizer's energy, the enricher's chance of an extra product. **Proposals.**
+    pub catalyst_buckets: u64,
+    pub catalyst_seconds_per_bucket: f64,
+    pub accelerator_speed: f64,
+    pub economizer_energy: f64,
+    pub enricher_chance: f64,
+    /// Slice 11: the guard (P2, the shooter tool of tier 3): its range in blocks, a shot's damage,
+    /// its battery's E and the ticks it stands for a shot. **Proposals.**
+    pub guard_range: f64,
+    pub guard_damage: f64,
+    pub guard_shot_energy: f64,
+    pub guard_shot_ticks: f64,
+    /// Slice 11: the butcher (round 26, K1–K8): its radius, with a radius module, ticks between
+    /// strikes, and how many adults of a kind it leaves by default, at least and at most.
+    pub butcher_radius: f64,
+    pub butcher_radius_module: f64,
+    pub butcher_ticks: u64,
+    pub butcher_keep_default: u32,
+    pub butcher_keep_min: u32,
+    pub butcher_keep_max: u32,
 }
 
 impl Default for Tuning {
@@ -346,6 +368,21 @@ impl Default for Tuning {
             turbine_upstream_bonus: 0.05,
             turbine_upstream_max: 10,
             backpack_slots: [27, 54],
+            catalyst_buckets: 1,
+            catalyst_seconds_per_bucket: 300.0,
+            accelerator_speed: 1.5,
+            economizer_energy: 0.7,
+            enricher_chance: 0.15,
+            guard_range: 10.0,
+            guard_damage: 4.0,
+            guard_shot_energy: 40.0,
+            guard_shot_ticks: 20.0,
+            butcher_radius: 4.0,
+            butcher_radius_module: 8.0,
+            butcher_ticks: 200,
+            butcher_keep_default: 2,
+            butcher_keep_min: 2,
+            butcher_keep_max: 16,
         }
     }
 }

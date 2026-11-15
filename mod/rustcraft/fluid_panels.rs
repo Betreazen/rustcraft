@@ -30,6 +30,11 @@ const RIGHT: f32 = WIDTH - 8.0;
 const WATER: u32 = 0xFF3F76E4;
 const LAVA: u32 = 0xFFF2731C;
 const OTHER: u32 = 0xFF59D38C;
+/// Slice 11: the catalysts' colours: the accelerator glowstone yellow, the economizer honey
+/// amber, the enricher gold-violet.
+const ACCELERATOR: u32 = 0xFFF5D547;
+const ECONOMIZER: u32 = 0xFFE39A2E;
+const ENRICHER: u32 = 0xFFB65FD8;
 
 fn screen(height: f32, inventory: [f32; 2]) -> NativeScreen {
     NativeScreen {
@@ -76,6 +81,9 @@ fn fluid_name(f: FluidShown) -> String {
         FluidShown::Lava => tr("rustcraft.fluid.lava.name", "Lava"),
         FluidShown::Other => tr("rustcraft.fluid.other.name", "Fluid"),
         FluidShown::Solution => tr("rustcraft.fluid.solution.name", "Nutrient solution"),
+        FluidShown::Accelerator => tr("rustcraft.fluid.accelerator.name", "Accelerator"),
+        FluidShown::Economizer => tr("rustcraft.fluid.economizer.name", "Economizer"),
+        FluidShown::Enricher => tr("rustcraft.fluid.enricher.name", "Enricher"),
     }
 }
 
@@ -83,6 +91,9 @@ fn fluid_colour(f: FluidShown) -> u32 {
     match f {
         FluidShown::Lava => LAVA,
         FluidShown::Other | FluidShown::Solution => OTHER,
+        FluidShown::Accelerator => ACCELERATOR,
+        FluidShown::Economizer => ECONOMIZER,
+        FluidShown::Enricher => ENRICHER,
         _ => WATER,
     }
 }

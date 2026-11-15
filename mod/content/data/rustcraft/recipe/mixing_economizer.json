@@ -1,0 +1,19 @@
+{
+  "type": "rustcraft:mixing",
+  "ingredients": [
+    {
+      "item": "minecraft:honey_bottle",
+      "count": 1
+    },
+    {
+      "item": "rustcraft:dust_copper",
+      "count": 1
+    }
+  ],
+  "water": 1000,
+  "result": {
+    "fluid": "rustcraft:economizer",
+    "amount": 1000
+  },
+  "time": 100
+}

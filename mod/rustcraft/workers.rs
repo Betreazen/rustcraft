@@ -497,7 +497,26 @@ fn work(
         Some(Tool::Reaper) => reap(game, dimension, w, cell, t),
         Some(Tool::Grab) => grab(game, dimension, w, cell, t),
         Some(Tool::Scoop) => scoop(game, dimension, net, w, cell, t),
+        Some(Tool::Shooter) => guard(game, dimension, w, cell, t),
         Some(Tool::Hold) | None => {}
+    }
+}
+
+/// Slice 11: the guard (P2, P3): in each rail cell it comes into it shoots the nearest hostile mob
+/// in its range, if its battery has a shot, and stands while it shoots. Its kills count as a
+/// turret's for its owner (D5, X8) and go to SoulsCraft as `guard` (spec 27.1).
+fn guard(game: &mut Game<'_>, dimension: &str, w: &mut Worker, cell: Pos, t: &Tuning) {
+    if w.charge < t.guard_shot_energy {
+        return;
+    }
+    let at = [
+        f64::from(cell[0]) + 0.5,
+        f64::from(cell[1]) + 0.5,
+        f64::from(cell[2]) + 0.5,
+    ];
+    let range = w.guard_range(t);
+    if base::guard_shot(game, dimension, w.owner, at, range, t.guard_damage).is_some() {
+        w.spend(t.guard_shot_ticks, t.guard_shot_energy, t);
     }
 }
 
@@ -955,6 +974,7 @@ fn tool_name(tool: Option<Tool>) -> Text {
         Some(Tool::Hold) => line("rustcraft.worker.cargo", "Cargo cart", &[]),
         Some(Tool::Grab) => line("rustcraft.worker.grab", "Collector", &[]),
         Some(Tool::Scoop) => line("rustcraft.worker.scoop", "Digger", &[]),
+        Some(Tool::Shooter) => line("rustcraft.worker.guard", "Guard", &[]),
         None => line("rustcraft.worker.bare", "Chassis", &[]),
     }
 }
@@ -1006,7 +1026,7 @@ fn notes(game: &mut Game<'_>, level: &LevelFleet) {
             Some(Tool::Saw) => 1,
             Some(Tool::Reaper) => 2,
             // The worker model has no part for the slice-10 tools: the chassis alone.
-            Some(Tool::Hold | Tool::Grab | Tool::Scoop) => 0,
+            Some(Tool::Hold | Tool::Grab | Tool::Scoop | Tool::Shooter) => 0,
         });
     }
     if bytes.is_empty() {

@@ -42,6 +42,8 @@ pub enum Kind {
     Mixer,
     DockLoad,
     Turbine,
+    /// Slice 11: the butcher.
+    Butcher,
 }
 
 /// Which parts a window has, and how many of each it has room for.
@@ -61,7 +63,7 @@ pub struct Shape {
 }
 
 impl Kind {
-    pub const ALL: [Kind; 13] = [
+    pub const ALL: [Kind; 14] = [
         Kind::Turret,
         Kind::Anchor,
         Kind::DockUnload,
@@ -75,6 +77,7 @@ impl Kind {
         Kind::Mixer,
         Kind::DockLoad,
         Kind::Turbine,
+        Kind::Butcher,
     ];
 
     pub fn block(self) -> &'static str {
@@ -92,6 +95,7 @@ impl Kind {
             Kind::Mixer => "rustcraft:mixer",
             Kind::DockLoad => "rustcraft:dock_load",
             Kind::Turbine => "rustcraft:turbine",
+            Kind::Butcher => crate::butcher::BLOCK,
         }
     }
 
@@ -108,6 +112,7 @@ impl Kind {
             Kind::Miner => Some(Holder::Miner),
             Kind::Placer | Kind::Breaker => Some(Holder::Placer),
             Kind::Mixer => Some(Holder::Mixer),
+            Kind::Butcher => Some(Holder::Butcher),
             _ => None,
         }
     }
@@ -183,6 +188,15 @@ impl Kind {
             },
             Kind::Turbine => Shape {
                 rows: 3,
+                ..Shape::default()
+            },
+            // Its pen's line and the sword's, one toggle an animal (the number to keep), its nine
+            // drop slots and the sword slot.
+            Kind::Butcher => Shape {
+                sockets,
+                rows: 2,
+                toggles: crate::butcher::ANIMALS.len(),
+                slots: crate::butcher::SLOTS,
                 ..Shape::default()
             },
         }

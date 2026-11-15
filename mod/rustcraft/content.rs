@@ -111,6 +111,8 @@ pub const CHASSIS: &str = "rustcraft:chassis";
 pub const MIXER: &str = "rustcraft:mixer";
 pub const DOCK_LOAD: &str = "rustcraft:dock_load";
 pub const TURBINE: &str = "rustcraft:turbine";
+/// Slice 11: the butcher (rustcraft_butcher, round 26): nine drop slots and the sword slot.
+pub const BUTCHER: &str = rustcraft_rules::butcher::BLOCK;
 /// The mixer's input slots: one ingredient a slot.
 pub const MIXER_SLOTS: usize = rustcraft_rules::machines::mixer::INPUTS;
 /// Slice 10: the backpacks, sparksteel's and crystallite's (G4), one to a stack (rustcraft_backpack).
@@ -156,6 +158,7 @@ pub enum Machine {
     Mixer,
     DockLoad,
     Turbine,
+    Butcher,
 }
 
 /// How a machine works: the rules type that runs it.
@@ -188,10 +191,12 @@ pub enum Kind {
     Mixer,
     /// Slice 10, rustcraft_workers: the load dock, slots the net puts into for cargo workers.
     LoadDock,
+    /// Slice 11, rustcraft_butcher: culls a pen's farm animals with a sword.
+    Butcher,
 }
 
 impl Machine {
-    pub const ALL: [Machine; 21] = [
+    pub const ALL: [Machine; 22] = [
         Machine::Furnace,
         Machine::Crusher,
         Machine::Generator,
@@ -213,6 +218,7 @@ impl Machine {
         Machine::Mixer,
         Machine::DockLoad,
         Machine::Turbine,
+        Machine::Butcher,
     ];
 
     pub fn of(block: &str) -> Option<Machine> {
@@ -242,6 +248,7 @@ impl Machine {
             Machine::Mixer => MIXER,
             Machine::DockLoad => DOCK_LOAD,
             Machine::Turbine => TURBINE,
+            Machine::Butcher => BUTCHER,
         }
     }
 
@@ -264,6 +271,7 @@ impl Machine {
             Machine::Miner | Machine::Placer | Machine::Breaker => Kind::Mining,
             Machine::Mixer => Kind::Mixer,
             Machine::DockLoad => Kind::LoadDock,
+            Machine::Butcher => Kind::Butcher,
         }
     }
 
@@ -290,6 +298,7 @@ impl Machine {
             Kind::Mining => BLOCK_SLOTS,
             Kind::Mixer => MIXER_SLOTS,
             Kind::LoadDock => DOCK_SLOTS,
+            Kind::Butcher => rustcraft_rules::butcher::SLOTS,
             Kind::Charger | Kind::Turret | Kind::Anchor | Kind::Power | Kind::Battery => 0,
         }
     }
@@ -304,6 +313,7 @@ impl Machine {
             Kind::Mining if self == Machine::Placer => (0..BLOCK_SLOTS).collect(),
             Kind::Mixer => (0..MIXER_SLOTS).collect(),
             Kind::LoadDock => (0..DOCK_SLOTS).collect(),
+            Kind::Butcher => vec![rustcraft_rules::butcher::SWORD_SLOT],
             _ => Vec::new(),
         }
     }
@@ -316,6 +326,7 @@ impl Machine {
             Kind::Alloy => ALLOY_OUTPUTS.collect(),
             Kind::Crafter => CRAFTER_OUTPUTS.collect(),
             Kind::Dock => (0..DOCK_SLOTS).collect(),
+            Kind::Butcher => (0..rustcraft_rules::butcher::LOOT_SLOTS).collect(),
             Kind::Mining if self != Machine::Placer => (0..self.slots()).collect(),
             _ => Vec::new(),
         }
@@ -352,6 +363,7 @@ impl Machine {
                 | Kind::Mining
                 | Kind::Mixer
                 | Kind::LoadDock
+                | Kind::Butcher
         )
     }
 }

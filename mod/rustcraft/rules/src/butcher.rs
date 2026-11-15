@@ -1,0 +1,267 @@
+//! Slice 11: the butcher (spec 23, round 26, K1–K8). A machine of tier 2 in a pen: every
+//! `Tuning::butcher_ticks` it strikes one adult farm animal of a kind that has more adults in its
+//! radius than the number its window keeps (K3, at least 2 so the herd goes on breeding). It
+//! leaves babies, tamed, named and leashed animals, villagers and players alone (K2). It needs a
+//! sword in its sword slot (K5): a plain sword loses a point of durability a strike. The drops go
+//! into its nine slots, which the net and hoppers take from (K4). Each kill is the herdsman's:
+//! Path-of-craft-tree hears `slaughter`, never `kill` (contract, section 23).
+//!
+//! These rules choose the animal and say why the butcher stands; the bundle finds the animals,
+//! strikes, gathers the drops and wears the sword.
+
+use serde::{Deserialize, Serialize};
+
+use crate::tuning::Tuning;
+
+pub const BLOCK: &str = "rustcraft:butcher";
+/// Its slots: nine for the drops, then the sword.
+pub const LOOT_SLOTS: usize = 9;
+pub const SWORD_SLOT: usize = 9;
+pub const SLOTS: usize = 10;
+
+/// The farm animals it culls (K2), in the order its window lists them.
+pub const ANIMALS: [&str; 7] = [
+    "minecraft:cow",
+    "minecraft:sheep",
+    "minecraft:pig",
+    "minecraft:chicken",
+    "minecraft:goat",
+    "minecraft:rabbit",
+    "minecraft:mooshroom",
+];
+
+/// The spawn egg the window shows for each animal.
+pub fn icon(kind: &str) -> String {
+    format!("{kind}_spawn_egg")
+}
+
+/// Whether `item` goes into the sword slot: any sword (K5).
+pub fn is_sword(item: &str) -> bool {
+    item.ends_with("_sword")
+}
+
+/// An animal in its radius, as the bundle saw it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Animal {
+    pub id: u32,
+    pub kind: String,
+    pub baby: bool,
+    pub tamed: bool,
+    pub named: bool,
+    pub leashed: bool,
+}
+
+impl Animal {
+    /// K2: an adult farm animal nobody keeps.
+    pub fn cullable(&self) -> bool {
+        ANIMALS.contains(&self.kind.as_str())
+            && !self.baby
+            && !self.tamed
+            && !self.named
+            && !self.leashed
+    }
+}
+
+/// How many adults of each animal of [`ANIMALS`] it leaves (K3).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Keep(pub Vec<u32>);
+
+impl Keep {
+    pub fn new(t: &Tuning) -> Keep {
+        Keep(vec![t.butcher_keep_default; ANIMALS.len()])
+    }
+
+    /// The number for animal `i`, never under the least (K3).
+    pub fn of(&self, i: usize, t: &Tuning) -> u32 {
+        self.0
+            .get(i)
+            .copied()
+            .unwrap_or(t.butcher_keep_default)
+            .clamp(t.butcher_keep_min, t.butcher_keep_max.max(t.butcher_keep_min))
+    }
+
+    /// A press on animal `i`'s toggle: one more to keep, back to the least after the most.
+    pub fn step(&mut self, i: usize, t: &Tuning) {
+        if i >= ANIMALS.len() {
+            return;
+        }
+        self.0.resize(ANIMALS.len(), t.butcher_keep_default);
+        let now = self.of(i, t);
+        self.0[i] = if now >= t.butcher_keep_max {
+            t.butcher_keep_min
+        } else {
+            now + 1
+        };
+    }
+}
+
+/// Why the butcher stands, or what it does (K8).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Shown {
+    /// It struck this animal last, or waits for its next strike.
+    Working(String),
+    /// «Нет меча».
+    NoSword,
+    /// «Некого забивать: взрослых не больше, чем оставить».
+    NothingToCull,
+    /// «Добыче некуда деться»: its drop slots are full.
+    OutputFull,
+}
+
+/// The adults of each animal of [`ANIMALS`] in `animals` it may cull.
+pub fn adults(animals: &[Animal]) -> Vec<u32> {
+    ANIMALS
+        .iter()
+        .map(|k| {
+            animals
+                .iter()
+                .filter(|a| a.cullable() && a.kind == *k)
+                .count() as u32
+        })
+        .collect()
+}
+
+/// The animal to strike now: one of the kind with the most adults over its number to keep, the
+/// lowest id of that kind; none when every kind is at or under its number.
+pub fn victim<'a>(animals: &'a [Animal], keep: &Keep, t: &Tuning) -> Option<&'a Animal> {
+    let counts = adults(animals);
+    let (i, _) = counts
+        .iter()
+        .enumerate()
+        .map(|(i, &n)| (i, n.saturating_sub(keep.of(i, t))))
+        .filter(|(_, over)| *over > 0)
+        .max_by_key(|&(i, over)| (over, std::cmp::Reverse(i)))?;
+    animals
+        .iter()
+        .filter(|a| a.cullable() && a.kind == ANIMALS[i])
+        .min_by_key(|a| a.id)
+}
+
+/// What the butcher does this strike: no sword, no room or no animal to cull say why it stands.
+pub fn decide<'a>(
+    has_sword: bool,
+    full: bool,
+    animals: &'a [Animal],
+    keep: &Keep,
+    t: &Tuning,
+) -> Result<&'a Animal, Shown> {
+    if !has_sword {
+        return Err(Shown::NoSword);
+    }
+    if full {
+        return Err(Shown::OutputFull);
+    }
+    victim(animals, keep, t).ok_or(Shown::NothingToCull)
+}
+
+/// A plain sword after one strike: its new damage, or none when it broke.
+pub fn worn(damage: u32, max_damage: u32) -> Option<u32> {
+    if max_damage == 0 {
+        return Some(damage);
+    }
+    let next = damage + 1;
+    (next < max_damage).then_some(next)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn animal(id: u32, kind: &str) -> Animal {
+        Animal {
+            id,
+            kind: kind.into(),
+            baby: false,
+            tamed: false,
+            named: false,
+            leashed: false,
+        }
+    }
+
+    #[test]
+    fn it_leaves_two_adults_of_a_kind_by_default() {
+        let t = Tuning::default();
+        let keep = Keep::new(&t);
+        let two = [animal(1, "minecraft:cow"), animal(2, "minecraft:cow")];
+        assert_eq!(victim(&two, &keep, &t), None);
+        let three = [
+            animal(5, "minecraft:cow"),
+            animal(2, "minecraft:cow"),
+            animal(9, "minecraft:cow"),
+        ];
+        assert_eq!(victim(&three, &keep, &t).map(|a| a.id), Some(2));
+    }
+
+    #[test]
+    fn babies_tamed_named_and_leashed_animals_and_villagers_are_left_alone() {
+        // K2.
+        let t = Tuning::default();
+        let keep = Keep::new(&t);
+        let mut herd = vec![animal(1, "minecraft:sheep"), animal(2, "minecraft:sheep")];
+        let mut baby = animal(3, "minecraft:sheep");
+        baby.baby = true;
+        let mut named = animal(4, "minecraft:sheep");
+        named.named = true;
+        let mut leashed = animal(5, "minecraft:sheep");
+        leashed.leashed = true;
+        let mut tamed = animal(6, "minecraft:sheep");
+        tamed.tamed = true;
+        herd.extend([baby, named, leashed, tamed, animal(7, "minecraft:villager")]);
+        assert_eq!(victim(&herd, &keep, &t), None);
+        assert_eq!(adults(&herd)[1], 2);
+    }
+
+    #[test]
+    fn the_kind_most_over_its_number_goes_first() {
+        let t = Tuning::default();
+        let keep = Keep::new(&t);
+        let mut herd: Vec<Animal> = (0..3).map(|i| animal(i, "minecraft:cow")).collect();
+        herd.extend((10..15).map(|i| animal(i, "minecraft:pig")));
+        assert_eq!(victim(&herd, &keep, &t).map(|a| a.kind.as_str()), Some("minecraft:pig"));
+    }
+
+    #[test]
+    fn the_number_to_keep_steps_up_and_wraps_and_never_goes_under_two() {
+        // K3.
+        let t = Tuning::default();
+        let mut keep = Keep::new(&t);
+        assert_eq!(keep.of(0, &t), 2);
+        keep.step(0, &t);
+        assert_eq!(keep.of(0, &t), 3);
+        for _ in 0..13 {
+            keep.step(0, &t);
+        }
+        assert_eq!(keep.of(0, &t), 16);
+        keep.step(0, &t);
+        assert_eq!(keep.of(0, &t), 2);
+        let low = Keep(vec![0; ANIMALS.len()]);
+        assert_eq!(low.of(3, &t), 2, "a saved 0 still leaves two");
+        let mut keep = Keep(Vec::new());
+        keep.step(2, &t);
+        assert_eq!(keep.of(2, &t), 3);
+        assert_eq!(keep.of(0, &t), 2);
+    }
+
+    #[test]
+    fn no_sword_and_full_slots_have_their_diagnoses() {
+        // K8.
+        let t = Tuning::default();
+        let keep = Keep::new(&t);
+        let herd: Vec<Animal> = (0..4).map(|i| animal(i, "minecraft:cow")).collect();
+        assert_eq!(decide(false, false, &herd, &keep, &t), Err(Shown::NoSword));
+        assert_eq!(decide(true, true, &herd, &keep, &t), Err(Shown::OutputFull));
+        assert_eq!(decide(true, false, &herd[..2], &keep, &t), Err(Shown::NothingToCull));
+        assert_eq!(decide(true, false, &herd, &keep, &t).map(|a| a.id), Ok(0));
+    }
+
+    #[test]
+    fn a_plain_sword_wears_out() {
+        assert_eq!(worn(0, 250), Some(1));
+        assert_eq!(worn(248, 250), Some(249));
+        assert_eq!(worn(249, 250), None);
+        assert_eq!(worn(3, 0), Some(3), "an unbreakable sword stays");
+        assert!(is_sword("minecraft:iron_sword"));
+        assert!(!is_sword("minecraft:iron_axe"));
+        assert_eq!(icon("minecraft:cow"), "minecraft:cow_spawn_egg");
+    }
+}

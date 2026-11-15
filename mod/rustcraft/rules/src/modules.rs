@@ -94,6 +94,8 @@ pub enum Holder {
     Placer,
     /// Slice 10: the mixer.
     Mixer,
+    /// Slice 11: the butcher.
+    Butcher,
 }
 
 impl Holder {
@@ -124,6 +126,8 @@ impl Holder {
             Holder::Placer => matches!(kind, Module::Speed | Module::Economy),
             // Guide `mixer`: speed and economy (capacity and stack are not made for it yet).
             Holder::Mixer => matches!(kind, Module::Speed | Module::Economy),
+            // Round 26, K1: the radius module doubles its pen.
+            Holder::Butcher => matches!(kind, Module::Radius),
         }
     }
 }

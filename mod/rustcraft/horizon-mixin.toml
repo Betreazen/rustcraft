@@ -45,7 +45,7 @@
 # prototype hooked it.
 [mod]
 id = "rustcraft"
-version = "0.10.0"
+version = "0.11.0"
 
 # The commit the traversal prototype and path_of_craft_tree build on; every function used here
 # was checked in its source.
@@ -207,6 +207,14 @@ id = "backpack"
 file = "crates/horizon-client/src/game.rs"
 name = "rustcraft_backpack"
 source = "backpack.rs"
+
+# Slice 11: the butcher (round 26): it culls the adult farm animals of its pen over the number to
+# keep, gathers the drops and reports each kill to Path-of-craft-tree as `slaughter`.
+[[module]]
+id = "butcher"
+file = "crates/horizon-client/src/game.rs"
+name = "rustcraft_butcher"
+source = "butcher.rs"
 
 # Slice 9: the slice-7 and slice-8 blocks' drawn windows (sheets): the server sends each open
 # window what it shows, the client draws it in the «Кузня душ» style.

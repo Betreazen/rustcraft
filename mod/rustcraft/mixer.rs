@@ -363,11 +363,7 @@ pub(super) fn sheet(game: &Game<'_>, dimension: &str, pos: Pos, t: &Tuning, s: &
                 &[fluids::fluid_name(f)],
             ),
             *n,
-            if f == SOLUTION {
-                SOLUTION_COLOUR
-            } else {
-                WATER_COLOUR
-            },
+            fluid_colour(f),
         ),
         None => (
             line("rustcraft.mixer.product_none", "Product: none yet", &[]),
@@ -388,13 +384,24 @@ pub(super) fn sheet(game: &Game<'_>, dimension: &str, pos: Pos, t: &Tuning, s: &
     )));
     s.hints = vec![vec![base::v(&line(
         "rustcraft.mixer.hint",
-        "Water, bone meal and redstone make the nutrient solution",
+        "Water with bone meal and redstone: nutrient solution; sugar and glowstone: accelerator; honey and copper dust: economizer; nether wart and gold dust: enricher",
         &[],
     ))]];
     s.status = Some(SheetStatus {
         severity: severity_code(severity(shown)),
         text: base::v(&shown_text(shown)),
     });
+}
+
+/// A product's bar colour: the solution green, the catalysts their own (rustcraft_fluid_panels).
+fn fluid_colour(fluid: &str) -> u32 {
+    match fluid {
+        SOLUTION => SOLUTION_COLOUR,
+        rustcraft_rules::machines::catalyst::ACCELERATOR => 0xFFF5_D547,
+        rustcraft_rules::machines::catalyst::ECONOMIZER => 0xFFE3_9A2E,
+        rustcraft_rules::machines::catalyst::ENRICHER => 0xFFB6_5FD8,
+        _ => WATER_COLOUR,
+    }
 }
 
 /// What the self-test reads of a mixer.

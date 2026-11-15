@@ -3,6 +3,7 @@
 
 pub mod anchor;
 pub mod backpack;
+pub mod butcher;
 pub mod geom;
 pub mod housing;
 pub mod machines;

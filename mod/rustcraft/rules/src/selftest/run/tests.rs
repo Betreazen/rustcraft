@@ -233,6 +233,12 @@ impl Bench for Fake {
     fn lying(&self, _: [f64; 3], _: [f64; 3]) -> Vec<(String, u32)> {
         Vec::new()
     }
+    fn catalyst(&self, _: Pos) -> Option<crate::machines::catalyst::Tank> {
+        None
+    }
+    fn butcher(&self, _: Pos) -> Option<crate::butcher::Shown> {
+        None
+    }
 }
 
 const PLOT: Area = Area {

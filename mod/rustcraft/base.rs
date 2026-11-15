@@ -21,7 +21,8 @@
 use crate::game::{
     Game,
     rustcraft_content::{self as content, Kind, Machine},
-    rustcraft_machines as machines, rustcraft_mining as mining, rustcraft_mixer as mixer,
+    rustcraft_butcher as butcher, rustcraft_machines as machines, rustcraft_mining as mining,
+    rustcraft_mixer as mixer,
     rustcraft_power as power,
     rustcraft_server::{LevelNet, line},
     rustcraft_workers as workers,
@@ -89,11 +90,20 @@ struct TurretState {
     target_id: Option<u32>,
 }
 
-/// A mob a turret hit: its owner and when.
+/// Who struck a mob last: a turret, slice 11's guard (P2) or butcher (round 26).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Striker {
+    Turret,
+    Guard,
+    Butcher,
+}
+
+/// A mob a turret, a guard or a butcher hit: its owner, when, and which.
 #[derive(Clone, Copy)]
 struct Hit {
     owner: u128,
     tick: u64,
+    by: Striker,
 }
 
 /// The turret's own bleeding on a mob, without SoulsCraft.
@@ -497,6 +507,8 @@ pub(super) fn tick(game: &mut Game<'_>, dimension: &str, level: &LevelNet, t: &T
     for pos in turrets {
         run_turret(game, dimension, pos, now, t);
     }
+    // Slice 11: before the deaths, so a slaughter is told the tick the animal died.
+    butcher::tick(game, dimension, level, t);
     bleed(game, dimension, now, t);
     deaths(game, t);
     if now.is_multiple_of(ANCHOR_EVERY) {
@@ -691,7 +703,14 @@ fn attack(
     ts.cooldown = l.interval(t);
     machines::set_buffer_energy(game, pos, energy - cost);
     if let Some(owner) = owner {
-        state().hits.insert(id, Hit { owner, tick: now });
+        state().hits.insert(
+            id,
+            Hit {
+                owner,
+                tick: now,
+                by: Striker::Turret,
+            },
+        );
     }
     let resist = souls(game, t)
         .and_then(|d| d.resist.get(&kind).cloned())
@@ -761,10 +780,23 @@ fn deaths(game: &mut Game<'_>, t: &Tuning) {
         if now.saturating_sub(hit.tick) > KILL_MEMORY {
             continue;
         }
+        // Round 26: a butcher's animal is the herdsman's, not a fight's: its own report only.
+        if hit.by == Striker::Butcher {
+            report(Report::Slaughter {
+                owner: hit.owner,
+                entity,
+                kind,
+            });
+            continue;
+        }
         game.native_give_experience(hit.owner, t.turret_kill_experience);
         // SoulsCraft's hunter book (spec 27.1), apart from Path-of-craft-tree's report.
         state().souls_kills.push(SoulsKill {
-            source: "turret",
+            source: if hit.by == Striker::Guard {
+                "guard"
+            } else {
+                "turret"
+            },
             owner: hit.owner,
             entity,
             kind: kind.clone(),
@@ -779,6 +811,56 @@ fn deaths(game: &mut Game<'_>, t: &Tuning) {
     state()
         .hits
         .retain(|_, h| now.saturating_sub(h.tick) <= KILL_MEMORY);
+}
+
+/// Slice 11: a guard's shot (P2, P3): the nearest hostile mob within `range` of `at` takes
+/// `damage`, and its kill counts for `owner` as a turret's does (D5, X8, spec 27.1 `guard`).
+/// The mob's kind; none when no hostile mob is in range.
+pub(super) fn guard_shot(
+    game: &mut Game<'_>,
+    dimension: &str,
+    owner: u128,
+    at: [f64; 3],
+    range: f64,
+    damage: f64,
+) -> Option<String> {
+    let (id, kind, _) = game
+        .mobs
+        .iter()
+        .filter(|m| !m.removed && m.alive() && m.is_enemy())
+        .map(|m| {
+            (
+                m.id,
+                m.kind.id.to_string(),
+                distance(at, [m.position.x, m.position.y, m.position.z]),
+            )
+        })
+        .filter(|(_, _, d)| *d <= range)
+        .min_by(|a, b| a.2.total_cmp(&b.2))?;
+    strike(game, dimension, id, damage as f32, owner, Striker::Guard);
+    Some(kind)
+}
+
+/// Hurts mob `id` by `amount` with no attacker (see the module comment) and remembers who struck
+/// it, for its death.
+pub(super) fn strike(
+    game: &mut Game<'_>,
+    dimension: &str,
+    id: u32,
+    amount: f32,
+    owner: u128,
+    by: Striker,
+) -> bool {
+    let now = state().ticks;
+    state().hits.insert(
+        id,
+        Hit {
+            owner,
+            tick: now,
+            by,
+        },
+    );
+    game.native_hurt_entity(dimension, id, amount, SHOT_TYPE, None)
 }
 
 fn support(
@@ -1226,6 +1308,7 @@ pub(super) fn diagnosis(
         m @ (Machine::DockUnload | Machine::DockCharge | Machine::DockLoad) => {
             Some(workers::dock_text(game, dimension, pos, m))
         }
+        Machine::Butcher => Some(butcher::diagnosis(dimension, pos)),
         _ => None,
     }
 }
@@ -1371,6 +1454,7 @@ pub(super) fn sheet(
             power::sheet(game, level, pos, kind, t, &mut s);
         }
         SheetKind::Mixer => mixer::sheet(game, dimension, pos, t, &mut s),
+        SheetKind::Butcher => butcher::sheet(game, dimension, pos, t, &mut s),
         SheetKind::Miner | SheetKind::Placer | SheetKind::Breaker => {
             mining::sheet(game, dimension, pos, kind, t, &mut s);
         }
@@ -1655,6 +1739,7 @@ pub(super) fn on_sheet_button(
         }
         Press::Mode(mode) if kind.shape().mode => machines::write_work(&mut entity.nbt, mode),
         Press::Toggle(i) if kind == SheetKind::Miner => mining::toggle_ore(&mut entity.nbt, i),
+        Press::Toggle(i) if kind == SheetKind::Butcher => butcher::step_keep(&mut entity.nbt, i),
         _ => {}
     }
 }
@@ -1898,6 +1983,7 @@ pub(super) fn forget_area(game: &mut Game<'_>, dimension: &str, min: Pos, max: P
     }
     mining::forget_area(dimension, min, max);
     mixer::forget_area(dimension, min, max);
+    butcher::forget_area(dimension, min, max);
     let mut s = state();
     s.turrets.retain(|(d, p), _| d != dimension || !inside(*p));
     s.anchor_states

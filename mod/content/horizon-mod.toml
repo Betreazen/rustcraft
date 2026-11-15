@@ -3,8 +3,8 @@
 # mod's files (docs/native-mods.md, API 145). No code here.
 id = "rustcraft"
 name = "RustCraft"
-version = "0.10.0"
-description = "Resources of the RustCraft native mod: the magistral's housing and node, channels, the wrench, the energy crystal, the electric furnace, the crusher and its dusts, the fuel generator, the alloy smelter, the alloys, the autocrafter, the capacity module, the storage cell and terminal, the tank, the pump, the monorail, the station and the capsule, the worker with its saw, reaper and docks, the turret with its modules, the base anchor, the solar panel, the windmill, the lava generator, the battery with its modules, the miner, the block placer and the block breaker, the mixer and its nutrient solution, the channels of tiers 2 and 3, the cargo hold, grab and scoop tools with the load dock, the hydro turbine and the backpacks."
+version = "0.11.0"
+description = "Resources of the RustCraft native mod: the magistral's housing and node, channels, the wrench, the energy crystal, the electric furnace, the crusher and its dusts, the fuel generator, the alloy smelter, the alloys, the autocrafter, the capacity module, the storage cell and terminal, the tank, the pump, the monorail, the station and the capsule, the worker with its saw, reaper and docks, the turret with its modules, the base anchor, the solar panel, the windmill, the lava generator, the battery with its modules, the miner, the block placer and the block breaker, the mixer and its nutrient solution, the channels of tiers 2 and 3, the cargo hold, grab and scoop tools with the load dock, the hydro turbine, the backpacks, the catalysts (accelerator, economizer, enricher), the butcher and the guard's shooter tool."
 authors = ["RustCraft"]
 api = "0.2"
 # Both halves: the server compares id and version with each joining client (horizon:mod_list).

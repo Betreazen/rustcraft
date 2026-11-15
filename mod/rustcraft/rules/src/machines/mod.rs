@@ -2,6 +2,7 @@
 //! smelter, the autocrafter and the pump, with their windows' data and layouts (the tank's too).
 
 pub mod alloy;
+pub mod catalyst;
 pub mod crafter;
 pub mod fluid_windows;
 pub mod generator;

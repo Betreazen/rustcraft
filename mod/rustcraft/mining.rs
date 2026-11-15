@@ -419,7 +419,7 @@ fn take(
 }
 
 /// Puts `stack` into `slots`, merging first; what is left.
-fn store(slots: &mut [Option<ItemStack>], mut stack: ItemStack, max: u32) -> Option<ItemStack> {
+pub(super) fn store(slots: &mut [Option<ItemStack>], mut stack: ItemStack, max: u32) -> Option<ItemStack> {
     if stack.count == 0 || &*stack.item == "minecraft:air" {
         return None;
     }

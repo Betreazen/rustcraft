@@ -32,6 +32,7 @@ use rustcraft_rules::{
     geom::Pos,
     machines::{
         alloy::AlloyRecipe,
+        catalyst::Tank as CatalystTank,
         crafter::CraftRecipe,
         mixer::MixRecipe,
         panel::{self, Panel},
@@ -62,6 +63,9 @@ const MIXING: &str = "rustcraft:mixing";
 const CRUSH_TICKS: f64 = 100.0;
 /// Saved compound keys of a machine.
 const PROGRESS_KEY: &str = "progress";
+/// Slice 11: a furnace's or a crusher's catalyst tank (K1): its fluid and how much, mB.
+const CATALYST_FLUID_KEY: &str = "catalyst_fluid";
+const CATALYST_KEY: &str = "catalyst";
 pub const WORK_KEY: &str = "work";
 /// The stack size of an item the game does not know.
 pub const FALLBACK_STACK: u32 = 64;
@@ -373,7 +377,7 @@ pub(super) fn tick(game: &mut Game<'_>, level: &mut LevelNet, tuning: &Tuning) {
                 )?),
                 Kind::Mining => Unit::Mining(mining::read(game, pos, machine, tuning)?),
                 Kind::Mixer => Unit::Mixer(mixer::read(game, pos, &level.recipes, tuning)?),
-                Kind::Dock | Kind::Battery | Kind::LoadDock => return None,
+                Kind::Dock | Kind::Battery | Kind::LoadDock | Kind::Butcher => return None,
             };
             Some((pos, machine, unit))
         })
@@ -443,7 +447,7 @@ pub(super) fn tick(game: &mut Game<'_>, level: &mut LevelNet, tuning: &Tuning) {
             0.0
         };
         let shown = match unit {
-            Unit::Processor(h) => run(game, pos, h, share, request),
+            Unit::Processor(h) => run(game, pos, h, share, request, tuning),
             Unit::Generator(h) => {
                 let used = report.used.get(&pos).copied().unwrap_or(0.0);
                 let members = group_of(pos, &consumers, circuits);
@@ -510,6 +514,64 @@ struct Held {
     nominal: f64,
     /// The data slots its menu shows now.
     data: Vec<i32>,
+    /// Slice 11: its catalyst tank.
+    catalyst: CatalystTank,
+}
+
+/// Slice 11: the catalyst tank a furnace's or a crusher's saved compound holds.
+pub(super) fn read_catalyst(nbt: &Compound) -> CatalystTank {
+    let fluid = match nbt.get(&JavaString::from(CATALYST_FLUID_KEY)) {
+        Some(Tag::String(s)) => Some(s.to_string_lossy()).filter(|s| !s.is_empty()),
+        _ => None,
+    };
+    let amount = read_f64(nbt, CATALYST_KEY).max(0.0);
+    CatalystTank {
+        fluid: fluid.filter(|_| amount > 0.0),
+        amount,
+    }
+}
+
+pub(super) fn write_catalyst(nbt: &mut Compound, tank: &CatalystTank) {
+    nbt.insert(
+        JavaString::from(CATALYST_FLUID_KEY),
+        Tag::String(JavaString::from(tank.fluid.as_deref().unwrap_or(""))),
+    );
+    write_f64(nbt, CATALYST_KEY, tank.amount);
+}
+
+/// Slice 11: the machines that take a catalyst (K1): the electric furnace and the crusher.
+pub(super) fn takes_catalyst(block: &str) -> bool {
+    block == content::FURNACE || block == content::CRUSHER
+}
+
+/// Slice 11: the catalyst tank of the machine at `pos`, if it takes one.
+pub(super) fn catalyst_at(game: &Game<'_>, pos: Pos) -> Option<CatalystTank> {
+    let entity = game.native_mod_block_entity(pos)?;
+    takes_catalyst(&entity.id).then(|| read_catalyst(&entity.nbt))
+}
+
+/// Slice 11: writes a machine's catalyst tank back.
+pub(super) fn set_catalyst(game: &mut Game<'_>, pos: Pos, tank: &CatalystTank) {
+    let tank = tank.clone();
+    game.native_with_mod_block_entity(pos, move |e| write_catalyst(&mut e.nbt, &tank));
+}
+
+/// A number in [0, 1) for the enricher's chance: xorshift over a seed from the clock.
+fn roll() -> f64 {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static SEED: AtomicU64 = AtomicU64::new(0);
+    let mut x = SEED.load(Ordering::Relaxed);
+    if x == 0 {
+        x = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0x9E37_79B9_7F4A_7C15, |d| d.as_nanos() as u64)
+            | 1;
+    }
+    x ^= x << 13;
+    x ^= x >> 7;
+    x ^= x << 17;
+    SEED.store(x, Ordering::Relaxed);
+    (x >> 11) as f64 / (1u64 << 53) as f64
 }
 
 /// The recipe `machine` runs on `input`, if it has one.
@@ -572,12 +634,15 @@ fn read(
     let slot = |i: usize| entity.items.get(i).cloned().flatten();
     let input = slot(content::MACHINE_INPUT);
     let output = slot(content::MACHINE_OUTPUT);
+    let catalyst = read_catalyst(&entity.nbt);
     let processor = Processor {
         input: input.as_ref().map(|s| (s.item.to_string(), s.count)),
         output: output.as_ref().map(|s| (s.item.to_string(), s.count)),
         progress: read_f64(&entity.nbt, PROGRESS_KEY).clamp(0.0, 1.0),
         mode: read_work(&entity.nbt),
         modules: Vec::new(),
+        catalyst: catalyst.active().map(|c| c.factors(tuning)),
+        lucky: false,
     };
     let job = input
         .as_ref()
@@ -588,18 +653,27 @@ fn read(
         job,
         nominal,
         data: entity.data.clone(),
+        catalyst,
     })
 }
 
 /// Runs the machine's processor on `share` of its `request` and writes back what changed: the
 /// input's count, the result, the progress and the window's data slots. What it shows; none
 /// when the block entity is gone.
-fn run(game: &mut Game<'_>, pos: Pos, held: Held, share: f64, request: f64) -> Option<Shown> {
+fn run(
+    game: &mut Game<'_>,
+    pos: Pos,
+    held: Held,
+    share: f64,
+    request: f64,
+    tuning: &Tuning,
+) -> Option<Shown> {
     let Held {
         mut processor,
         job,
         nominal,
         data: shown_data,
+        mut catalyst,
     } = held;
     let recipes: Vec<Recipe> = job.iter().map(|j| j.recipe.clone()).collect();
     // Without a job any spec does: the processor only resets its progress.
@@ -611,9 +685,17 @@ fn run(game: &mut Game<'_>, pos: Pos, held: Held, share: f64, request: f64) -> O
         },
         |j| j.spec,
     );
+    // The enricher: each finished recipe has its chance of one more product.
+    processor.lucky = catalyst
+        .active()
+        .is_some_and(|c| roll() < c.extra_chance(tuning));
     let before = processor.clone();
     let state = processor.tick(&recipes, &spec, share);
     let working = state == State::Working;
+    let catalyst_before = catalyst.clone();
+    if working {
+        catalyst.spend(1.0 / tuning.ticks_per_second, share, tuning);
+    }
     let shown = Shown::of(state, share);
     let data = panel::encode(&Panel {
         progress: processor.progress,
@@ -624,7 +706,7 @@ fn run(game: &mut Game<'_>, pos: Pos, held: Held, share: f64, request: f64) -> O
     });
     // An idle machine changes nothing: leave its chunk alone (each call marks it for saving,
     // native_hooks.rs:10719-10739).
-    if processor == before && shown_data == data {
+    if processor == before && shown_data == data && catalyst == catalyst_before {
         return Some(shown);
     }
     let result: Vec<ItemStack> = job.map(|j| j.result).into_iter().collect();
@@ -638,6 +720,9 @@ fn run(game: &mut Game<'_>, pos: Pos, held: Held, share: f64, request: f64) -> O
         );
         if processor.progress != before.progress {
             write_f64(&mut entity.nbt, PROGRESS_KEY, processor.progress);
+        }
+        if catalyst != catalyst_before {
+            write_catalyst(&mut entity.nbt, &catalyst);
         }
         if entity.data != data {
             entity.data = data;
@@ -742,6 +827,8 @@ pub(super) fn slot_takes(
         Machine::Placer => a.placeable.contains(item),
         // The load dock takes anything a cargo worker may carry.
         Machine::DockLoad => true,
+        // Slice 11: the butcher's sword slot takes a sword (K5).
+        Machine::Butcher => rustcraft_rules::butcher::is_sword(item),
         Machine::Mixer => {
             let inputs: Vec<Slot> = (0..content::MIXER_SLOTS)
                 .map(|i| slot_of(entity, i))

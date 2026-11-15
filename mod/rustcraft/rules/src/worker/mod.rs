@@ -49,10 +49,20 @@ pub enum Tool {
     Hold,
     Grab,
     Scoop,
+    /// Slice 11: the shooter (tier 3), which makes a worker a guard (P2): it rides its ring and
+    /// shoots hostile mobs in range, never players, pets or peaceful mobs (P3).
+    Shooter,
 }
 
 impl Tool {
-    pub const ALL: [Tool; 5] = [Tool::Saw, Tool::Reaper, Tool::Hold, Tool::Grab, Tool::Scoop];
+    pub const ALL: [Tool; 6] = [
+        Tool::Saw,
+        Tool::Reaper,
+        Tool::Hold,
+        Tool::Grab,
+        Tool::Scoop,
+        Tool::Shooter,
+    ];
 
     pub fn item(self) -> &'static str {
         match self {
@@ -61,6 +71,7 @@ impl Tool {
             Tool::Hold => "rustcraft:tool_hold",
             Tool::Grab => "rustcraft:tool_grab",
             Tool::Scoop => "rustcraft:tool_scoop",
+            Tool::Shooter => "rustcraft:tool_shooter",
         }
     }
 
@@ -76,7 +87,7 @@ impl Tool {
             Tool::Reaper => "hoe",
             Tool::Grab => "pickaxe",
             Tool::Scoop => "shovel",
-            Tool::Hold => "",
+            Tool::Hold | Tool::Shooter => "",
         }
     }
 
@@ -85,7 +96,7 @@ impl Tool {
         match self {
             Tool::Saw => trees::is_sapling(item),
             Tool::Reaper => plants::is_seed(item),
-            Tool::Hold | Tool::Grab | Tool::Scoop => false,
+            Tool::Hold | Tool::Grab | Tool::Scoop | Tool::Shooter => false,
         }
     }
 }
@@ -269,6 +280,11 @@ impl Worker {
         }
         (t.worker_hold + t.worker_hold_per_storage * self.count(Module::Storage) as usize)
             .min(t.worker_hold_max)
+    }
+
+    /// Slice 11: a guard's range, blocks; a radius upgrade doubles it (A7).
+    pub fn guard_range(&self, t: &Tuning) -> f64 {
+        t.guard_range * if self.count(Module::Radius) > 0 { 2.0 } else { 1.0 }
     }
 
     /// H4: cells aside from the way and blocks up from it.
@@ -762,5 +778,17 @@ pub(crate) mod tests {
         let old = f.encode().replace(",\"idle\":0", "");
         assert!(!old.contains("idle"));
         assert_eq!(Fleet::decode(&old), Some(f));
+    }
+
+    #[test]
+    fn a_guard_shoots_twice_as_far_with_a_radius_upgrade() {
+        let t = Tuning::default();
+        let mut w = Worker::new(1, 7, [0, 0, 0], &t);
+        w.tool = Some(Tool::Shooter);
+        assert_eq!(Tool::of("rustcraft:tool_shooter"), Some(Tool::Shooter));
+        assert_eq!(w.guard_range(&t), t.guard_range);
+        w.upgrades[0] = Some(Module::Radius);
+        assert_eq!(w.guard_range(&t), 2.0 * t.guard_range);
+        assert!(!Tool::Shooter.keeps("minecraft:arrow"));
     }
 }

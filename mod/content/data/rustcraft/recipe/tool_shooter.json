@@ -1,0 +1,19 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    " c ",
+    "cdc",
+    "rbr"
+  ],
+  "key": {
+    "c": "rustcraft:crystallite",
+    "d": "minecraft:dispenser",
+    "r": "minecraft:redstone",
+    "b": "minecraft:bow"
+  },
+  "result": {
+    "id": "rustcraft:tool_shooter",
+    "count": 1
+  }
+}
