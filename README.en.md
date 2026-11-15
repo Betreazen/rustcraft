@@ -26,6 +26,8 @@ RustCraft is a mod about tidy automation. Inside a base everything is joined by 
 
 The mod is written entirely in Rust as a native Horizon mod and runs on the same server as [Path-of-craft-tree](https://github.com/Betreazen/path-of-craft-tree) and [SoulsCraft](https://github.com/Betreazen/soulscraft).
 
+<p align="center"><img src="docs/images/in-game.jpg" alt="In-game shot: the magistral with its nodes, machines in front, two rows of farm and workshop blocks behind" width="860"><br><sub>The mod in the game: the magistral, machines and farm blocks with the guide's models</sub></p>
+
 > [!NOTE]
 > The mod is in active development: version 0.12, with every block of the guide in the game. Everything listed below works in the game and is covered by the in-world self-test. Balance numbers are a first proposal and will change after playtests. The in-game texts and the design docs are Russian first. The game's blocks, windows and diagnoses also have English names.
 
@@ -59,11 +61,11 @@ The mod is written entirely in Rust as a native Horizon mod and runs on the same
 <td align="center"><b>Monorail</b>: named stations, the capsule drives itself</td>
 </tr>
 <tr>
-<td width="50%"><img src="docs/images/in-game.jpg" alt="In-game shot: magistral housings with coloured channel stripes and a diagnosis line above the hotbar"></td>
+<td width="50%"><img src="docs/images/in-game-machines.jpg" alt="In-game shot: two rows of the new blocks, repair stand, kitchen, feeder, shearer, apiary collector, brewing vat and more"></td>
 <td width="50%"><img src="docs/images/crusher.jpg" alt="Reference scene: the crusher on a stone pad"></td>
 </tr>
 <tr>
-<td align="center"><b>In game</b>: the housing's diagnosis above the hotbar</td>
+<td align="center"><b>In game</b>: farm and workshop blocks</td>
 <td align="center"><b>Crusher</b>: two dusts from one ore</td>
 </tr>
 </table>
