@@ -1,0 +1,18 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    "aba",
+    "bkb",
+    "aba"
+  ],
+  "key": {
+    "a": "rustcraft:crystallite",
+    "b": "minecraft:book",
+    "k": "minecraft:crafting_table"
+  },
+  "result": {
+    "id": "rustcraft:module_recipes",
+    "count": 1
+  }
+}

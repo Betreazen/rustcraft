@@ -129,6 +129,8 @@ struct Ride {
     /// The rider's teleport counter when the move began: any teleport after it is a correction.
     counter_start: Option<i32>,
     corrections: u32,
+    /// Slice 13: a zipline's ride: an invisible seat and no capsule drawn round it.
+    zipline: bool,
 }
 
 #[derive(Default)]
@@ -894,8 +896,55 @@ fn start(
             measured: false,
             counter_start: None,
             corrections: 0,
+            zipline: false,
         },
     );
+}
+
+/// Slice 13: a zipline's ride (12.5, Z3) from `from` to `to` straight at `speed` blocks a second
+/// (the zipline's 8, the harpoon's 14), on the capsule's seat (method b2, spec 16) but invisible
+/// and with no capsule drawn. False when the player rides now.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn zipline(
+    game: &mut Game<'_>,
+    player: u128,
+    entity: u32,
+    dimension: &str,
+    from: [f64; 3],
+    to: [f64; 3],
+    anchor: Pos,
+    speed: f64,
+) -> bool {
+    use rustcraft_rules::monorail::route::{Point, Route, distance};
+    if state().rides.contains_key(&player) {
+        return false;
+    }
+    let mount = rustcraft_rules::geom::Face::YPos;
+    let route = Route {
+        points: vec![Point { at: from, mount, speed }, Point { at: to, mount, speed }],
+        times: vec![0.0, distance(from, to) / speed],
+    };
+    state().rides.insert(
+        player,
+        Ride {
+            entity,
+            dimension: dimension.to_owned(),
+            from: anchor,
+            to: anchor,
+            destination: String::new(),
+            cost: 0.0,
+            route,
+            phase: Phase::Spawn,
+            tick: 0,
+            seat: None,
+            rise: capsule::SEAT_RISE,
+            measured: false,
+            counter_start: None,
+            corrections: 0,
+            zipline: true,
+        },
+    );
+    true
 }
 
 /// Closes the player's window (the station's menu is a block menu, which `native_close_menu`
@@ -943,6 +992,13 @@ fn send_all(game: &mut Game<'_>, channel: &str, bytes: &[u8]) {
 }
 
 fn ride_note(ride: &Ride) -> Option<Vec<u8>> {
+    if ride.zipline {
+        return Some(wire::encode_capsule(&CapsuleNote::Rope {
+            seat: ride.seat?,
+            rise: ride.rise,
+            to: ride.route.end(),
+        }));
+    }
     Some(wire::encode_capsule(&CapsuleNote::Ride {
         seat: ride.seat?,
         rise: ride.rise,
@@ -1117,6 +1173,9 @@ fn arrive(game: &mut Game<'_>, player: u128, ride: &Ride) {
         log::warn!("rustcraft: the rider was not set down at {ground:?}");
     }
     horizon_client::rustcraft_falls::spare_falls(ride.entity, FALL_GRACE);
+    if ride.zipline {
+        return;
+    }
     tell(
         game,
         player,

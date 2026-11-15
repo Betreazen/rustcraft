@@ -29,7 +29,7 @@ The mod is written entirely in Rust as a native Horizon mod and runs on the same
 <p align="center"><img src="docs/images/in-game.jpg" alt="In-game shot: the magistral with its nodes, machines in front, two rows of farm and workshop blocks behind" width="860"><br><sub>The mod in the game: the magistral, machines and farm blocks with the guide's models</sub></p>
 
 > [!NOTE]
-> The mod is in active development: version 0.13, with every block of the guide and the player gear in the game. Everything listed below works in the game and is covered by the in-world self-test. Balance numbers are a first proposal and will change after playtests. The in-game texts and the design docs are Russian first. The game's blocks, windows and diagnoses also have English names.
+> The mod is in active development: version 0.15, with every block of the guide and the player gear in the game. Everything listed below works in the game and is covered by the in-world self-test. Balance numbers are a first proposal and will change after playtests. The in-game texts and the design docs are Russian first. The game's blocks, windows and diagnoses also have English names.
 
 ## Features
 
@@ -38,17 +38,17 @@ The mod is written entirely in Rust as a native Horizon mod and runs on the same
 - **Machines.** Electric furnace, crusher (two dusts per ore), alloy smelter, autocrafter with recipe pages, mixer, miner, block placer and breaker, and a butcher for animal farms. Modules go into machine sockets.
 - **Catalysts.** The mixer makes an accelerator, an economizer and an enricher: the furnace and crusher run faster, use less energy, or sometimes give an extra product.
 - **Fluids.** Tanks, a pump and the fluid channel.
-- **Storage.** Cells add up to one storage. The terminal searches, filters by tabs and keeps limits.
+- **Storage.** Cells add up to one storage. The terminal searches, filters by tabs and keeps limits. With the recipe book the storage fills orders itself: it spreads the crafting chain over free machines and keeps N items in stock. The tablet shows the storage and hands out stacks from a distance.
 - **Monorail.** Rail on floors, walls and ceilings, named stations with a network map, a capsule at 32 blocks per second, a lift.
-- **Workers.** A chassis on the rails with tools: saw, reaper, cargo hold, grab, scoop, and the shooter that turns a worker into a guard. Unload, load and charge docks.
+- **Workers.** A chassis on the rails with tools: saw, reaper, cargo hold, grab, scoop, the shooter that turns a worker into a guard, and the tunneler bore that digs its own tunnel and lays its own rails. Unload, load and charge docks.
 - **Defence.** Turrets with bleeding, poison and slowness modules, and support turrets: healing, protection, strength, speed. The base anchor keeps chunks loaded.
 - **Farming and crafts.** Kitchen, fishing station, feeder, shearer-milker, apiary collector, brewing vat, experience condenser, enchanting machine, archaeology table, repair stand.
 - **Trash and disintegrator.** Surplus burns by filter; unwanted items come apart into half their ingredients.
 - **Holo-projector and building machine.** The projector remembers a building and shows its ghost; the machine builds it from its slots.
 - **Portal dock** sends cargo to another world; the **facade** hides the magistral under any block.
 - **Living blocks.** Rolls, drills, rotors, flames and lamps move as in the guide; tanks show their fluid, batteries their charge.
-- **Gear.** Technical armour in three tiers with player modules (night vision, jump, run, magnet, damper, shock absorber) and a jetpack, the energy blade, shield and rifle, technical enchantment books. All run on batteries charged at the charger and the charge plate.
-- The **living vein** grows ore, the **cartographer** maps biomes, the **scout compass** leads to new places.
+- **Gear.** Technical armour in three tiers with player modules (night vision, jump, run, dash, magnet, damper, shock absorber) and a jetpack, the energy blade, shield and rifle, the zipline and the harpoon, technical enchantment books. All run on batteries charged at the charger and the charge plate.
+- The **living vein** grows ore, a chosen ore or suspicious sand for archaeology, the **cartographer** maps biomes, the **scout compass** leads to new places.
 - **Backpacks** with 27 and 54 slots.
 - **Experience for machine work.** Machines tell Path-of-craft-tree what they did, and their owner earns profession experience in the skill tree. Turret and guard kills count in SoulsCraft's hunter's book.
 - **Two languages.** Names, windows and diagnoses in Russian and English.
@@ -97,7 +97,7 @@ Both parts are needed in the game and on the server, at the same version. Withou
 ### Client
 
 ```powershell
-git clone --branch v0.13.0 https://github.com/Betreazen/rustcraft
+git clone --branch v0.15.0 https://github.com/Betreazen/rustcraft
 horizon-launcher native-build rustcraft/mod/rustcraft --instance <instance> --trust-native-code
 ```
 
@@ -107,7 +107,7 @@ Then copy the contents of `mod/content` into the instance's `horizon-mods/rustcr
 
 ```powershell
 horizon-launcher native-build rustcraft/mod/rustcraft `
-    --server-output C:\horizon-engines\rustcraft-0.13.0 --trust-native-code
+    --server-output C:\horizon-engines\rustcraft-0.15.0 --trust-native-code
 horizon-server --dir <server folder> config set engine.path=C:\horizon-engines\rustcraft-0.12.0\horizon-engine.exe
 ```
 

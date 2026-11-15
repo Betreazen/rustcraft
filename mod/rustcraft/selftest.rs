@@ -687,6 +687,54 @@ impl Bench for GameBench<'_, '_> {
         crate::game::rustcraft_gear::held(&stack).map(|h| h.charge)
     }
 
+    fn craft_gear(&mut self, grid: &[Option<&str>; 9], charge: f64) -> Option<(String, Option<f64>)> {
+        let grid: Vec<Option<ItemStack>> = grid
+            .iter()
+            .map(|c| {
+                c.map(|item| {
+                    let mut stack = ItemStack::new(item, 1);
+                    if rustcraft_rules::gear::Gear::of(item).is_some() {
+                        crate::game::rustcraft_gear::number(&mut stack);
+                        crate::game::rustcraft_gear::set_held(
+                            &stack,
+                            rustcraft_rules::gear::Held { charge, ..Default::default() },
+                        );
+                    }
+                    stack
+                })
+            })
+            .collect();
+        let (_, result) = self.game.recipes().find(&grid, 3)?;
+        let kept = crate::game::rustcraft_gear::held(&result).map(|h| h.charge);
+        Some((result.item.to_string(), kept))
+    }
+
+    fn order(&mut self, pos: Pos, item: &str, count: u32) -> Result<(), String> {
+        let id = storage::storage_at(DIMENSION, pos).ok_or_else(|| format!("no storage at {pos:?}"))?;
+        crate::game::rustcraft_orders::order(DIMENSION, id, item, count)
+            .map_err(|(_, why)| why.to_owned())
+    }
+
+    fn orders(&self, pos: Pos) -> Vec<rustcraft_rules::orders::queue::Order> {
+        storage::storage_at(DIMENSION, pos)
+            .map(|id| crate::game::rustcraft_orders::queue_of(DIMENSION, id))
+            .unwrap_or_default()
+    }
+
+    fn set_keep(&mut self, pos: Pos, item: &str, n: u64) -> Result<(), String> {
+        if storage::set_keep_at(DIMENSION, pos, &keys::key(item, 0), n) {
+            Ok(())
+        } else {
+            Err(format!("no storage at {pos:?}"))
+        }
+    }
+
+    fn cancel_order(&mut self, pos: Pos, order: u16) -> Result<(), String> {
+        let id = storage::storage_at(DIMENSION, pos).ok_or_else(|| format!("no storage at {pos:?}"))?;
+        crate::game::rustcraft_orders::cancel(DIMENSION, id, order);
+        Ok(())
+    }
+
     fn anim(&self, pos: Pos) -> Option<rustcraft_rules::anim::Shown> {
         self.game
             .native_mod_block_entity(pos)

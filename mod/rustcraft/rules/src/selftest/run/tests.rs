@@ -248,6 +248,21 @@ impl Bench for Fake {
     fn gear_charge(&self, _: Pos, _: usize) -> Option<f64> {
         None
     }
+    fn craft_gear(&mut self, _: &[Option<&str>; 9], _: f64) -> Option<(String, Option<f64>)> {
+        None
+    }
+    fn order(&mut self, _: Pos, _: &str, _: u32) -> Result<(), String> {
+        Ok(())
+    }
+    fn orders(&self, _: Pos) -> Vec<crate::orders::queue::Order> {
+        Vec::new()
+    }
+    fn set_keep(&mut self, _: Pos, _: &str, _: u64) -> Result<(), String> {
+        Ok(())
+    }
+    fn cancel_order(&mut self, _: Pos, _: u16) -> Result<(), String> {
+        Ok(())
+    }
 }
 
 const PLOT: Area = Area {

@@ -18,6 +18,13 @@
 // into the inventory; with a stack on the cursor any place of the grid puts it in. In the «Лимиты»
 // mode a click chooses the item whose limit the row under the grid changes: «−» and «+» by 64 (by
 // 1 with the right button), «×» clears it, «Уничтожать» switches «уничтожать излишек».
+//
+// Slice 15 (O1–O8, O14): the recipe book's socket left of the grid takes the book from the cursor
+// and gives it back, as a slot would (a press with the cursor's stack). With the book, the search
+// also finds what the book can make and the storage has none of, veiled (O2). In the «Заказы»
+// mode a click chooses the item; the row under the grid orders 1, 8 or 64 of it (O3) and sets its
+// «держать N» (O14); the line under the status shows one order of the queue: what, how many done,
+// what it waits for (O6, O8, O13); a click on it shows the next, «×» cancels it (O7).
 use crate::game::{
     Game,
     rustcraft_content::{self as content, item_of_number},
@@ -34,13 +41,16 @@ use horizon_client::{
 use rustcraft_rules::{
     geom::Pos,
     machines::style::{self, Severity, colour},
+    modules::Module,
+    orders::KINDS,
     storage::{
         Limit,
         terminal::{
-            self as term, ItemRef, LimitChange, NO_PRESS, Part, Press, Take, cell, part_at,
+            self as term, ItemRef, LimitChange, NO_PRESS, ORDER_COUNTS, Part, Press, Take, cell,
+            part_in,
         },
         view::{self, Entry, Facts, PER_PAGE, Tab},
-        wire::{self, Line, Listing, State},
+        wire::{self, Line, Listing, OrderLine, OrderWait, Smart, State},
     },
 };
 use std::sync::{LazyLock, Mutex, MutexGuard, PoisonError};
@@ -54,6 +64,14 @@ const DIMMED: u32 = 0x9911_0D0B;
 const ESCAPE: &str = "key.keyboard.escape";
 const ENTER: [&str; 2] = ["key.keyboard.enter", "key.keyboard.keypad.enter"];
 const BACKSPACE: &str = "key.keyboard.backspace";
+/// The block of each machine kind an order step names (rustcraft_rules::orders::KINDS).
+const KIND_BLOCKS: [&str; 5] = [
+    content::CRAFTER,
+    content::FURNACE,
+    content::CRUSHER,
+    content::ALLOY,
+    content::MIXER,
+];
 
 /// What the window shows of the terminal it is open on: its own state, apart from the server.
 #[derive(Default)]
@@ -64,6 +82,9 @@ struct View {
     search: String,
     focused: bool,
     limits: bool,
+    /// Slice 15: the «Заказы» mode, and the order of the queue its line shows.
+    orders: bool,
+    shown_order: usize,
     selected: Option<ItemRef>,
 }
 
@@ -130,6 +151,18 @@ fn item_name(id: &str) -> String {
     tr(&format!("item.{key}"), &tr(&format!("block.{key}"), id))
 }
 
+/// The name of an item the list names by number.
+fn name_of(game: &Game<'_>, item: u16) -> String {
+    id_of(game, item).map_or_else(|| "?".to_owned(), item_name)
+}
+
+/// The name of a machine kind (rustcraft_rules::orders::KINDS) by its code.
+fn kind_name(code: u8) -> String {
+    KIND_BLOCKS
+        .get(usize::from(code))
+        .map_or_else(|| KINDS[0].to_owned(), |b| item_name(b))
+}
+
 fn facts(game: &Game<'_>, key: &ItemRef) -> Facts {
     id_of(game, key.0)
         .and_then(|id| game.items().get(id))
@@ -142,9 +175,10 @@ fn facts(game: &Game<'_>, key: &ItemRef) -> Facts {
         })
 }
 
-/// The lines the tab and the search let through, in the window's order.
+/// The lines the tab and the search let through, in the window's order. With the book and a
+/// search, the items the book can make and the storage has none of come last (O2).
 fn shown(game: &Game<'_>, listing: &Listing, v: &View) -> Vec<Entry<ItemRef>> {
-    let entries: Vec<Entry<ItemRef>> = listing
+    let mut entries: Vec<Entry<ItemRef>> = listing
         .lines
         .iter()
         .map(|l: &Line| Entry {
@@ -153,6 +187,25 @@ fn shown(game: &Game<'_>, listing: &Listing, v: &View) -> Vec<Entry<ItemRef>> {
             limit: l.limit,
         })
         .collect();
+    if listing.book && !v.search.is_empty() {
+        let listed: std::collections::BTreeSet<u16> = listing
+            .lines
+            .iter()
+            .filter(|l| l.damage == 0)
+            .map(|l| l.item)
+            .collect();
+        entries.extend(
+            listing
+                .orderable
+                .iter()
+                .filter(|n| !listed.contains(*n))
+                .map(|&n| Entry {
+                    key: (n, 0),
+                    count: 0,
+                    limit: None,
+                }),
+        );
+    }
     let names = |k: &ItemRef| {
         id_of(game, k.0).map_or_else(Vec::new, |id| vec![item_name(id), id.to_owned()])
     };
@@ -244,6 +297,8 @@ pub(super) fn draw(game: &Game<'_>, batch: &mut HudBatch, o: [f32; 2]) {
         [r[0] + (r[2] - w) / 2.0, r[1] + 3.0],
         VALUE,
     );
+    let orders_name = tr("rustcraft.terminal.orders", "Orders");
+    button(game, batch, o, term::ORDER_MODE, &orders_name, v.orders);
     button(
         game,
         batch,
@@ -252,9 +307,15 @@ pub(super) fn draw(game: &Game<'_>, batch: &mut HudBatch, o: [f32; 2]) {
         &tr("rustcraft.terminal.limits", "Limits"),
         v.limits,
     );
+    book_socket(game, batch, o, listing.as_ref());
     grid(game, batch, o, view::page(&list, v.page), v.selected);
-    limit_row(game, batch, o, &v, listing.as_ref());
-    status(game, batch, o, listing.as_ref());
+    if v.orders {
+        order_row(game, batch, o, &v, listing.as_ref());
+        orders_status(game, batch, o, &mut v, listing.as_ref());
+    } else {
+        limit_row(game, batch, o, &v, listing.as_ref());
+        status(game, batch, o, listing.as_ref());
+    }
     kit::inventory(game, batch, o, term::INVENTORY, term::INVENTORY_LABEL_Y);
 }
 
@@ -314,6 +375,17 @@ fn search_field(game: &Game<'_>, batch: &mut HudBatch, o: [f32; 2], v: &View) {
         kit::hover(game, batch, o, r);
     }
     text(game, batch, &shown, o, [x, r[1] + 3.0], colour);
+}
+
+/// O1: the recipe book's socket, with the book in it or empty.
+fn book_socket(game: &Game<'_>, batch: &mut HudBatch, o: [f32; 2], listing: Option<&Listing>) {
+    let held = listing.is_some_and(|l| l.book);
+    kit::socket(game, batch, o, term::BOOK, !held);
+    if held {
+        let p = term::BOOK;
+        let stack = ItemStack::new(Module::Recipes.item(), 1);
+        game.native_gui_draw_item_with(batch, &stack, [o[0] + p[0], o[1] + p[1]], None);
+    }
 }
 
 /// The page's items: icon, count and wear; a limit without items veiled; the chosen one framed.
@@ -398,6 +470,162 @@ fn limit_row(
     }
 }
 
+/// «Держать: 64» or «Держать: —».
+fn keep_text(keep: u64) -> String {
+    if keep == 0 {
+        tr("rustcraft.terminal.keep.none", "Keep: —")
+    } else {
+        tr_with("rustcraft.terminal.keep", "Keep: %s", &[keep.to_string()])
+    }
+}
+
+/// The orders mode's row under the grid: the chosen item, «1», «8», «64» to order, its N.
+fn order_row(
+    game: &Game<'_>,
+    batch: &mut HudBatch,
+    o: [f32; 2],
+    v: &View,
+    listing: Option<&Listing>,
+) {
+    let keep = v
+        .selected
+        .and_then(|key| listing.and_then(|l| l.lines.iter().find(|x| (x.item, x.damage) == key)))
+        .map_or(0, |l| l.keep);
+    if let Some(id) = v.selected.and_then(|key| id_of(game, key.0)) {
+        let p = term::LIMIT_ICON;
+        game.native_item(batch, id, [o[0] + p[0], o[1] + p[1]], 12.0);
+    }
+    for (r, n) in term::ORDER_BUTTONS.into_iter().zip(ORDER_COUNTS) {
+        button(game, batch, o, r, &n.to_string(), false);
+    }
+    let colour = if v.selected.is_some() { VALUE } else { LABEL };
+    text(game, batch, &keep_text(keep), o, term::KEEP_TEXT, colour);
+    button(game, batch, o, term::KEEP_MINUS, "-", false);
+    button(game, batch, o, term::KEEP_PLUS, "+", false);
+    button(game, batch, o, term::KEEP_CLEAR, "x", false);
+    let on = v.selected.is_some() && listing.is_some_and(|l| l.book);
+    if !on {
+        for r in term::ORDER_BUTTONS.into_iter().chain([
+            term::KEEP_MINUS,
+            term::KEEP_PLUS,
+            term::KEEP_CLEAR,
+        ]) {
+            game.native_fill(batch, at(o, r), DIMMED);
+        }
+    }
+}
+
+/// What an order waits for, in words: «в работе», «не хватает: железный слиток ×2»…
+fn wait_text(game: &Game<'_>, wait: &OrderWait) -> String {
+    match wait {
+        OrderWait::New => tr("rustcraft.orders.wait.new", "planning"),
+        OrderWait::Running => tr("rustcraft.orders.wait.running", "running"),
+        OrderWait::Items(items) => {
+            let named: Vec<String> = items
+                .iter()
+                .map(|(item, n)| format!("{} ×{n}", name_of(game, *item)))
+                .collect();
+            tr_with(
+                "rustcraft.orders.wait.items",
+                "missing: %s",
+                &[named.join(", ")],
+            )
+        }
+        OrderWait::Machines(kinds) => {
+            let named: Vec<String> = kinds.iter().map(|k| kind_name(*k)).collect();
+            tr_with(
+                "rustcraft.orders.wait.machine",
+                "no machine on the line: %s",
+                &[named.join(", ")],
+            )
+        }
+        OrderWait::Busy(kind) => tr_with(
+            "rustcraft.orders.wait.busy",
+            "waits for a free %s",
+            &[kind_name(*kind)],
+        ),
+    }
+}
+
+/// «Поршень 2/4 · не хватает: железный слиток ×2», «держать» orders marked.
+fn order_text(game: &Game<'_>, order: &OrderLine) -> String {
+    let mut name = name_of(game, order.item);
+    if order.keep {
+        name = tr_with("rustcraft.orders.kept", "%s (keep)", &[name]);
+    }
+    format!(
+        "{name} {}/{} · {}",
+        order.done,
+        order.count,
+        wait_text(game, &order.wait)
+    )
+}
+
+/// The orders mode's status line (M15, O1) and the line of one order of the queue (O8).
+fn orders_status(
+    game: &Game<'_>,
+    batch: &mut HudBatch,
+    o: [f32; 2],
+    v: &mut View,
+    listing: Option<&Listing>,
+) {
+    let (severity, s) = match listing {
+        None => (
+            Severity::Warn,
+            tr("rustcraft.terminal.loading", "Waiting for the storage…"),
+        ),
+        Some(l) if !l.book => (
+            Severity::Warn,
+            tr(
+                "rustcraft.orders.status.no_book",
+                "Put the recipe book into the socket on the left",
+            ),
+        ),
+        Some(l) if l.smart == Smart::LowTier => (
+            Severity::Bad,
+            tr(
+                "rustcraft.orders.low_tier",
+                "Orders need a node of tier 3 on the storage's line",
+            ),
+        ),
+        Some(l) if l.smart == Smart::NoNet => (
+            Severity::Bad,
+            tr(
+                "rustcraft.orders.no_net",
+                "The storage is on no item channel",
+            ),
+        ),
+        Some(l) => (
+            Severity::Ok,
+            plural(
+                l.orders.len() as u64,
+                "rustcraft.orders.status.queue",
+                ("%s order", "%s orders", "%s orders"),
+            ),
+        ),
+    };
+    kit::status_line(game, batch, o, term::STATUS, severity, &s);
+    let orders = listing.map_or(&[][..], |l| &l.orders[..]);
+    if orders.is_empty() {
+        let s = tr("rustcraft.orders.empty", "No orders");
+        text(game, batch, &s, o, term::DETAIL, LABEL);
+        return;
+    }
+    v.shown_order %= orders.len();
+    let order = &orders[v.shown_order];
+    let line = format!(
+        "{}/{} {}",
+        v.shown_order + 1,
+        orders.len(),
+        order_text(game, order)
+    );
+    let r = term::QUEUE;
+    kit::hover(game, batch, o, r);
+    let shown = kit::fit(game, &line, r[2] - 2.0);
+    text(game, batch, &shown, o, term::DETAIL, TEXT);
+    button(game, batch, o, term::CANCEL, "x", false);
+}
+
 /// The status line and the line under it: the storage's state, its slots or its missing cells.
 fn status(game: &Game<'_>, batch: &mut HudBatch, o: [f32; 2], listing: Option<&Listing>) {
     let (severity, s, detail) = match listing {
@@ -462,16 +690,18 @@ fn holes_line(l: &Listing) -> String {
 // ---- Presses ----
 
 /// `native_screen_click` on the terminal: the window's own parts change its view and send
-/// NO_PRESS (the press goes no further, native_hooks.rs:12160-12187); a place or a limit button is
-/// a press for the server.
+/// NO_PRESS (the press goes no further, native_hooks.rs:12160-12187); a place, a limit, the book's
+/// socket, an order or a «держать» button is a press for the server.
 pub(super) fn on_click(game: &Game<'_>, at: [f32; 2], right: bool) -> Option<i32> {
-    let part = part_at(at)?;
+    let orders_mode = view_for(game).orders;
+    let part = part_in(at, orders_mode)?;
     let listing = {
         let v = view_for(game);
         listing_of(v.terminal)
     };
     let mut v = view_for(game);
     v.focused = part == Part::Search;
+    let step = if right { 1 } else { 64 };
     match part {
         Part::Tab(tab) => {
             v.tab = tab;
@@ -480,14 +710,22 @@ pub(super) fn on_click(game: &Game<'_>, at: [f32; 2], right: bool) -> Option<i32
         Part::Search | Part::Status => {}
         Part::Prev => v.page = v.page.saturating_sub(1),
         Part::Next => v.page += 1,
-        Part::LimitMode => v.limits = !v.limits,
+        Part::LimitMode => {
+            v.limits = !v.limits;
+            v.orders &= !v.limits;
+        }
+        Part::OrderMode => {
+            v.orders = !v.orders;
+            v.limits &= !v.orders;
+        }
+        Part::Book => return term::encode(Press::Book).or(Some(NO_PRESS)),
         Part::Cell(i) => {
             let list = listing
                 .as_ref()
                 .map(|l| shown(game, l, &v))
                 .unwrap_or_default();
             let item = view::page(&list, v.page).get(i).map(|e| e.key);
-            if v.limits {
+            if v.limits || v.orders {
                 if item.is_some() {
                     v.selected = item;
                 }
@@ -504,7 +742,6 @@ pub(super) fn on_click(game: &Game<'_>, at: [f32; 2], right: bool) -> Option<i32
         }
         Part::LimitMinus | Part::LimitPlus | Part::LimitClear | Part::LimitDestroy => {
             let item = v.selected?;
-            let step = if right { 1 } else { 64 };
             let change = match part {
                 Part::LimitMinus => LimitChange::Add(-step),
                 Part::LimitPlus => LimitChange::Add(step),
@@ -512,6 +749,26 @@ pub(super) fn on_click(game: &Game<'_>, at: [f32; 2], right: bool) -> Option<i32
                 _ => LimitChange::ToggleDestroy,
             };
             return term::encode(Press::Limit { item, change }).or(Some(NO_PRESS));
+        }
+        Part::Order(k) => {
+            let (item, _) = v.selected?;
+            let count = *ORDER_COUNTS.get(k)?;
+            return term::encode(Press::Order { item, count }).or(Some(NO_PRESS));
+        }
+        Part::KeepMinus | Part::KeepPlus | Part::KeepClear => {
+            let (item, _) = v.selected?;
+            let change = match part {
+                Part::KeepMinus => LimitChange::Add(-step),
+                Part::KeepPlus => LimitChange::Add(step),
+                _ => LimitChange::Clear,
+            };
+            return term::encode(Press::Keep { item, change }).or(Some(NO_PRESS));
+        }
+        Part::Queue => v.shown_order += 1,
+        Part::Cancel => {
+            let orders = listing.as_ref().map_or(&[][..], |l| &l.orders[..]);
+            let order = orders.get(v.shown_order % orders.len().max(1))?.id;
+            return term::encode(Press::Cancel { order }).or(Some(NO_PRESS));
         }
     }
     Some(NO_PRESS)
@@ -568,58 +825,18 @@ pub(super) fn on_char(
 
 // ---- Tooltips ----
 
+fn hint(lines: &mut Vec<String>, key: &str, fallback: &str) {
+    lines.push(format!("§7{}", tr(key, fallback)));
+}
+
 /// `native_screen_tooltip` on the terminal.
 pub(super) fn tooltip(game: &Game<'_>, at: [f32; 2], lines: &mut Vec<String>) {
-    let Some(part) = part_at(at) else {
+    let orders_mode = view_for(game).orders;
+    let Some(part) = part_in(at, orders_mode) else {
         return;
     };
-    let hint = |lines: &mut Vec<String>, key: &str, fallback: &str| {
-        lines.push(format!("§7{}", tr(key, fallback)));
-    };
     match part {
-        Part::Cell(i) => {
-            let v = view_for(game);
-            let listing = listing_of(v.terminal);
-            let list = listing
-                .as_ref()
-                .map(|l| shown(game, l, &v))
-                .unwrap_or_default();
-            let Some(e) = view::page(&list, v.page).get(i).cloned() else {
-                return;
-            };
-            drop(v);
-            if let Some(id) = id_of(game, e.key.0) {
-                lines.push(item_name(id));
-            }
-            lines.push(tr_with(
-                "rustcraft.terminal.count",
-                "In storage: %s",
-                &[e.count.to_string()],
-            ));
-            if e.key.1 > 0 {
-                lines.push(tr_with(
-                    "rustcraft.terminal.worn",
-                    "Worn: %s",
-                    &[e.key.1.to_string()],
-                ));
-            }
-            if let Some(l) = e.limit {
-                let what = if l.destroy_surplus {
-                    tr(
-                        "rustcraft.terminal.over.destroy",
-                        "over the limit: destroyed",
-                    )
-                } else {
-                    tr("rustcraft.terminal.over.keep", "over the limit: not taken")
-                };
-                lines.push(format!("{} · {what}", limit_text(Some(l))));
-            }
-            hint(
-                lines,
-                "rustcraft.terminal.cell_hint",
-                "Left click: a stack · right: one · shift: into the inventory",
-            );
-        }
+        Part::Cell(i) => cell_tooltip(game, i, orders_mode, lines),
         Part::Search => hint(
             lines,
             "rustcraft.terminal.search_hint",
@@ -630,6 +847,11 @@ pub(super) fn tooltip(game: &Game<'_>, at: [f32; 2], lines: &mut Vec<String>) {
             lines,
             "rustcraft.terminal.limits_hint",
             "On: a click on an item picks it for its limit",
+        ),
+        Part::OrderMode => hint(
+            lines,
+            "rustcraft.terminal.orders_hint",
+            "On: a click on an item picks it to order; the queue under the status",
         ),
         Part::LimitMinus | Part::LimitPlus => hint(
             lines,
@@ -642,6 +864,36 @@ pub(super) fn tooltip(game: &Game<'_>, at: [f32; 2], lines: &mut Vec<String>) {
             "rustcraft.terminal.destroy_hint",
             "Destroy the surplus: what comes over the limit vanishes instead of staying in the line",
         ),
+        Part::Book => {
+            lines.push(item_name(Module::Recipes.item()));
+            hint(
+                lines,
+                "rustcraft.terminal.book_hint",
+                "The recipe book's socket: with it the storage takes orders",
+            );
+        }
+        Part::Order(k) => {
+            let n = ORDER_COUNTS.get(k).copied().unwrap_or(1);
+            lines.push(tr_with(
+                "rustcraft.terminal.order_hint",
+                "Order %s",
+                &[n.to_string()],
+            ));
+        }
+        Part::KeepMinus | Part::KeepPlus | Part::KeepClear => {
+            hint(
+                lines,
+                "rustcraft.terminal.keep_hint",
+                "Keep N: below N the storage orders the difference by itself",
+            );
+            hint(
+                lines,
+                "rustcraft.terminal.step_hint",
+                "Left click: by 64 · right click: by 1",
+            );
+        }
+        Part::Queue => queue_tooltip(game, lines),
+        Part::Cancel => hint(lines, "rustcraft.terminal.cancel_hint", "Cancel the order"),
         Part::Status => {
             let v = view_for(game);
             if let Some(l) = listing_of(v.terminal).filter(|l| l.state == State::Holes) {
@@ -652,4 +904,79 @@ pub(super) fn tooltip(game: &Game<'_>, at: [f32; 2], lines: &mut Vec<String>) {
         }
         Part::Prev | Part::Next => {}
     }
+}
+
+fn cell_tooltip(game: &Game<'_>, i: usize, orders_mode: bool, lines: &mut Vec<String>) {
+    let v = view_for(game);
+    let listing = listing_of(v.terminal);
+    let list = listing
+        .as_ref()
+        .map(|l| shown(game, l, &v))
+        .unwrap_or_default();
+    let Some(e) = view::page(&list, v.page).get(i).cloned() else {
+        return;
+    };
+    drop(v);
+    if let Some(id) = id_of(game, e.key.0) {
+        lines.push(item_name(id));
+    }
+    lines.push(tr_with(
+        "rustcraft.terminal.count",
+        "In storage: %s",
+        &[e.count.to_string()],
+    ));
+    let orderable = listing
+        .as_ref()
+        .is_some_and(|l| l.book && e.key.1 == 0 && l.orderable.contains(&e.key.0));
+    if e.count == 0 && orderable {
+        hint(lines, "rustcraft.terminal.orderable", "Can be ordered");
+    }
+    if e.key.1 > 0 {
+        lines.push(tr_with(
+            "rustcraft.terminal.worn",
+            "Worn: %s",
+            &[e.key.1.to_string()],
+        ));
+    }
+    if let Some(l) = e.limit {
+        let what = if l.destroy_surplus {
+            tr(
+                "rustcraft.terminal.over.destroy",
+                "over the limit: destroyed",
+            )
+        } else {
+            tr("rustcraft.terminal.over.keep", "over the limit: not taken")
+        };
+        lines.push(format!("{} · {what}", limit_text(Some(l))));
+    }
+    if orders_mode {
+        hint(
+            lines,
+            "rustcraft.terminal.pick_hint",
+            "Click: pick it to order",
+        );
+    } else {
+        hint(
+            lines,
+            "rustcraft.terminal.cell_hint",
+            "Left click: a stack · right: one · shift: into the inventory",
+        );
+    }
+}
+
+/// The whole queue (O8), one order a line.
+fn queue_tooltip(game: &Game<'_>, lines: &mut Vec<String>) {
+    let v = view_for(game);
+    let Some(listing) = listing_of(v.terminal) else {
+        return;
+    };
+    drop(v);
+    for (i, order) in listing.orders.iter().enumerate() {
+        lines.push(format!("{}. {}", i + 1, order_text(game, order)));
+    }
+    hint(
+        lines,
+        "rustcraft.terminal.queue_hint",
+        "Click: the next order · ×: cancel it",
+    );
 }

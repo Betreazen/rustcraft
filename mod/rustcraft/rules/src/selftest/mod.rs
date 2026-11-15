@@ -23,6 +23,8 @@ pub mod slice10;
 pub mod slice11;
 pub mod slice12;
 pub mod slice13;
+pub mod slice14;
+pub mod slice15;
 pub mod sources;
 pub mod storage;
 pub mod transport;
@@ -254,6 +256,22 @@ pub trait Bench {
     fn put_gear(&mut self, pos: Pos, slot: usize, item: &str, charge: f64) -> Result<(), String>;
     /// The charge of the gear piece in slot `slot` at `pos`.
     fn gear_charge(&self, pos: Pos, slot: usize) -> Option<f64>;
+
+    // Slice 14.
+    /// What the crafting grid `grid` makes when every gear piece in it has a number of its own and
+    /// `charge` E: the result's item and its charge (None when it has no number).
+    fn craft_gear(&mut self, grid: &[Option<&str>; 9], charge: f64) -> Option<(String, Option<f64>)>;
+    // Slice 15.
+    /// An order for `count` of `item` at the storage the cell or terminal at `pos` belongs to, as
+    /// a terminal's order button gives it (without the button's check of the book): Err names
+    /// why it was refused (no smart line yet, a full queue).
+    fn order(&mut self, pos: Pos, item: &str, count: u32) -> Result<(), String>;
+    /// The queue of the storage the cell or terminal at `pos` belongs to.
+    fn orders(&self, pos: Pos) -> Vec<crate::orders::queue::Order>;
+    /// «Держать N» of `item` at the storage the cell or terminal at `pos` belongs to.
+    fn set_keep(&mut self, pos: Pos, item: &str, n: u64) -> Result<(), String>;
+    /// O7: the order `order` of the storage the cell or terminal at `pos` belongs to cancelled.
+    fn cancel_order(&mut self, pos: Pos, order: u16) -> Result<(), String>;
 }
 
 /// A mob as the self-test reads it.
@@ -422,6 +440,8 @@ pub fn catalog() -> Vec<Build> {
     all.extend(slice11::ALL);
     all.extend(slice12::ALL);
     all.extend(slice13::ALL);
+    all.extend(slice14::ALL);
+    all.extend(slice15::ALL);
     all
 }
 

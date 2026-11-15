@@ -76,7 +76,7 @@ def write(out):
         }}, indent=2) + '\n')
     names = ['tech_%s_%d' % (p, t) for t in TIERS for p in PIECES]
     names += ['blade_%d' % t for t in TIERS] + ['eshield_%d' % t for t in TIERS]
-    names += ['rifle', 'jetpack', 'book_capacity', 'book_thrift', 'module_rare', 'tool_map', 'scout_compass'] + list(icons_mc.PM_SIGNS)
+    names += ['rifle', 'zipline', 'jetpack', 'book_capacity', 'book_thrift', 'module_rare', 'module_pick', 'module_stratum', 'module_tunnel', 'module_height', 'module_lava', 'module_build', 'module_recipes', 'tool_map', 'tool_bore', 'scout_compass', 'harpoon', 'tablet'] + list(icons_mc.PM_SIGNS)
     for n in names:
         parent = 'minecraft:item/handheld' if n.startswith(('blade', 'rifle')) else 'minecraft:item/generated'
         out.text('models/item/%s.json' % n, json.dumps({'parent': parent, 'textures': {'layer0': 'rustcraft:item/' + n}}, indent=2) + '\n')

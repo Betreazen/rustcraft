@@ -7,6 +7,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::geom::Pos;
+
 pub mod shot;
 
 /// A piece of technical armour.
@@ -41,6 +43,10 @@ pub enum Kind {
     Shield,
     /// R: the energy rifle, tier 4 only.
     Rifle,
+    /// 12.5 Z1–Z3: the zipline (tier 2); its charge is its charges, one a rope.
+    Zipline,
+    /// G5: the harpoon (tier 3), a battery like the weapons'.
+    Harpoon,
 }
 
 /// A gear item: its kind and tier (2 sparksteel, 3 crystallite, 4 starsteel; G7).
@@ -64,6 +70,8 @@ impl Gear {
             out.push(Gear { kind: Kind::Shield, tier });
         }
         out.push(Gear { kind: Kind::Rifle, tier: 4 });
+        out.push(Gear { kind: Kind::Zipline, tier: 2 });
+        out.push(Gear { kind: Kind::Harpoon, tier: 3 });
         out
     }
 
@@ -73,6 +81,8 @@ impl Gear {
             Kind::Blade => format!("rustcraft:blade_{}", self.tier),
             Kind::Shield => format!("rustcraft:eshield_{}", self.tier),
             Kind::Rifle => "rustcraft:rifle".to_owned(),
+            Kind::Zipline => "rustcraft:zipline".to_owned(),
+            Kind::Harpoon => "rustcraft:harpoon".to_owned(),
         }
     }
 
@@ -88,6 +98,8 @@ impl Gear {
             Kind::Blade => [10_000.0, 20_000.0, 40_000.0][i],
             Kind::Shield => [6_000.0, 12_000.0, 24_000.0][i],
             Kind::Rifle => 40_000.0,
+            Kind::Zipline => ZIP_CHARGES,
+            Kind::Harpoon => HARPOON_CAPACITY,
         }
     }
 
@@ -110,7 +122,7 @@ impl Gear {
             Kind::Blade if self.tier <= 2 => "minecraft:diamond_sword".to_owned(),
             Kind::Blade => "minecraft:netherite_sword".to_owned(),
             Kind::Shield => "minecraft:shield".to_owned(),
-            Kind::Rifle => "minecraft:stick".to_owned(),
+            Kind::Rifle | Kind::Zipline | Kind::Harpoon => "minecraft:stick".to_owned(),
         }
     }
 
@@ -197,6 +209,24 @@ impl Module {
 
 /// A dash costs this, E.
 pub const DASH_COST: f64 = 200.0;
+/// The dash (guide `pmodules`): two presses of forward within this many ticks throw the player
+/// forward about 4 blocks.
+pub const DASH_WINDOW_TICKS: u64 = 7;
+pub const DASH_SPEED: f32 = 1.1;
+/// The forward bit of a player's input flags (`PlayerInput`).
+pub const FORWARD: i32 = 1;
+
+/// Whether forward went down between two inputs.
+pub fn forward_pressed(before: i32, now: i32) -> bool {
+    before & FORWARD == 0 && now & FORWARD != 0
+}
+
+/// The push of a dash for a player looking along `yaw` (vanilla's: 0 south, 90 west), level.
+pub fn dash_push(yaw: f32) -> [f32; 3] {
+    let r = yaw.to_radians();
+    [-r.sin() * DASH_SPEED, 0.15, r.cos() * DASH_SPEED]
+}
+
 /// The shock absorber pays this per point of fall damage it takes, E.
 pub const ABSORB_PER_DAMAGE: f64 = 25.0;
 /// The damper: 5 s after damage, −20 % damage, this much a hit it softens.
@@ -215,6 +245,29 @@ pub const RIFLE_DAMAGE: f32 = 16.0;
 pub const RIFLE_RANGE: f64 = 64.0;
 pub const RIFLE_COOLDOWN_TICKS: u64 = 25;
 pub const RIFLE_SHOT: f64 = 400.0;
+
+/// 12.5: the zipline reaches 32 blocks, holds 16 charges (a string gives one back) and carries its
+/// rider at a cart's 8 blocks a second.
+pub const ZIP_RANGE: f64 = 32.0;
+pub const ZIP_CHARGES: f64 = 16.0;
+pub const ZIP_SPEED: f64 = 8.0;
+
+/// G5: the harpoon reaches 20 blocks (the guide) and pulls its player at 14 blocks a second on the
+/// zipline's seat; its battery holds 4 000 E, 100 E a shot (proposals; the charger fills it).
+pub const HARPOON_RANGE: f64 = 20.0;
+pub const HARPOON_SPEED: f64 = 14.0;
+pub const HARPOON_CAPACITY: f64 = 4_000.0;
+pub const HARPOON_SHOT: f64 = 100.0;
+
+/// Where the harpoon takes its player when it hooks the block `hit`, reached from the cell
+/// `before` (the ray's cell in front of the face it hit): onto the block when the space over it
+/// is free (G5), else to the cell in front of that face. None when neither has room.
+pub fn harpoon_anchor(hit: Pos, before: Option<Pos>, top_free: bool, before_free: bool) -> Option<Pos> {
+    if top_free {
+        return Some([hit[0], hit[1] + 1, hit[2]]);
+    }
+    before.filter(|_| before_free)
+}
 
 /// The fourth tier's blade strikes one point harder than the netherite sword it copies.
 pub fn blade_bonus(tier: u8) -> f32 {
@@ -321,7 +374,7 @@ mod tests {
         for g in Gear::all() {
             assert_eq!(Gear::of(&g.item()), Some(g));
         }
-        assert_eq!(Gear::all().len(), 19);
+        assert_eq!(Gear::all().len(), 21);
         assert_eq!(Gear::of("rustcraft:tech_boots_3").map(|g| g.sockets()), Some(2));
         assert_eq!(Gear::of("rustcraft:tech_boots_2").map(|g| g.sockets()), Some(1));
     }
@@ -355,6 +408,30 @@ mod tests {
         let blade = Gear { kind: Kind::Blade, tier: 2 };
         assert_eq!(window_slots(blade), 2);
         assert!(!window_takes(blade, 0, "rustcraft:pm_run", 1));
+    }
+
+    #[test]
+    fn a_dash_goes_the_way_the_player_looks() {
+        assert!(forward_pressed(0, FORWARD));
+        assert!(!forward_pressed(FORWARD, FORWARD));
+        let south = dash_push(0.0);
+        assert!(south[2] > 1.0 && south[0].abs() < 1e-6);
+        let west = dash_push(90.0);
+        assert!(west[0] < -1.0);
+    }
+
+    #[test]
+    fn the_harpoon_climbs_onto_a_free_block_or_stops_at_its_face() {
+        let h = Gear::of("rustcraft:harpoon").expect("the harpoon is gear");
+        assert_eq!((h.kind, h.tier), (Kind::Harpoon, 3));
+        assert_eq!(h.base_capacity(), HARPOON_CAPACITY);
+        assert_eq!(h.sockets(), 0);
+        let hit = [4, 10, 0];
+        assert_eq!(harpoon_anchor(hit, Some([3, 10, 0]), true, true), Some([4, 11, 0]));
+        assert_eq!(harpoon_anchor(hit, Some([3, 10, 0]), false, true), Some([3, 10, 0]));
+        assert_eq!(harpoon_anchor(hit, Some([3, 10, 0]), false, false), None);
+        assert_eq!(harpoon_anchor(hit, None, false, true), None);
+        assert!((HARPOON_CAPACITY / HARPOON_SHOT - 40.0).abs() < 1e-9, "forty shots a charge");
     }
 
     #[test]

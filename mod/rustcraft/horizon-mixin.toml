@@ -45,7 +45,7 @@
 # prototype hooked it.
 [mod]
 id = "rustcraft"
-version = "0.13.0"
+version = "0.15.0"
 
 # The commit the traversal prototype and path_of_craft_tree build on; every function used here
 # was checked in its source.
@@ -261,6 +261,14 @@ file = "crates/horizon-client/src/game.rs"
 name = "rustcraft_gear"
 source = "gear.rs"
 
+# Slice 14: the storage tablet (rustcraft_rules::storage::tablet): the storage of the magistral
+# whose node's range the player stands in, as a server chest window.
+[[module]]
+id = "tablet"
+file = "crates/horizon-client/src/game.rs"
+name = "rustcraft_tablet"
+source = "tablet.rs"
+
 # Slice 12: the blocks' moving parts (rustcraft_rules::anim): their standalone models, the state the
 # server sends clients, and the parts drawn each frame from the block entity.
 [[module]]
@@ -268,6 +276,14 @@ id = "anim"
 file = "crates/horizon-client/src/game.rs"
 name = "rustcraft_anim"
 source = "anim.rs"
+
+# Slice 15: orders from the storage terminal (rustcraft_rules::orders): the recipe book, the
+# queue of each storage, the autocrafters' temporary pages and the machines' order jobs.
+[[module]]
+id = "orders"
+file = "crates/horizon-client/src/game.rs"
+name = "rustcraft_orders"
+source = "orders.rs"
 
 [[module]]
 id = "selftest"
@@ -853,6 +869,42 @@ bindings = [
   { name = "uuid", ty = "u128", value = "uuid" },
   { name = "window", ty = "i32", value = "window" },
   { name = "slots", ty = "&mut Vec<Option<horizon_client::items::ItemStack>>", value = "&mut *slots" },
+]
+
+# Slice 14: an energy shield going up and down (API 90), for its charge (W2, W8).
+[[injection]]
+id = "living_entity_use_item_start"
+hook = "living_entity_use_item_start"
+hook_version = 1
+kind = "HEAD"
+helper = "hook_use_item_start.rs"
+bindings = [
+  { name = "stack", ty = "&horizon_client::items::ItemStack", value = "stack" },
+  { name = "entity", ty = "Option<i32>", value = "entity" },
+  { name = "canceled", ty = "&mut bool", value = "&mut *canceled" },
+]
+
+[[injection]]
+id = "living_entity_use_item_stop"
+hook = "living_entity_use_item_stop"
+hook_version = 1
+kind = "HEAD"
+helper = "hook_use_item_stop.rs"
+bindings = [
+  { name = "entity", ty = "Option<i32>", value = "entity" },
+]
+
+# Slice 13: a player's input flags (API 343), for the dash module.
+[[injection]]
+id = "player_input"
+hook = "player_input"
+hook_version = 1
+kind = "HEAD"
+helper = "hook_player_input.rs"
+bindings = [
+  { name = "game", ty = "&mut crate::game::Game<'_>", value = "&mut *self" },
+  { name = "player", ty = "u128", value = "player" },
+  { name = "flags", ty = "i32", value = "flags" },
 ]
 
 # Slice 12: what clients get of a block entity, its moving parts drawn each frame, and the

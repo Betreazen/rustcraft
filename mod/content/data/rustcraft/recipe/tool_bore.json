@@ -1,0 +1,18 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    " x ",
+    "xbx",
+    " r "
+  ],
+  "key": {
+    "x": "minecraft:diamond",
+    "b": "rustcraft:crystallite",
+    "r": "minecraft:redstone"
+  },
+  "result": {
+    "id": "rustcraft:tool_bore",
+    "count": 1
+  }
+}

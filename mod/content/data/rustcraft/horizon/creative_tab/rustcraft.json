@@ -129,6 +129,17 @@
     "rustcraft:vein",
     "rustcraft:module_rare",
     "rustcraft:tool_map",
-    "rustcraft:scout_compass"
+    "rustcraft:scout_compass",
+    "rustcraft:module_pick",
+    "rustcraft:module_stratum",
+    "rustcraft:zipline",
+    "rustcraft:tool_bore",
+    "rustcraft:module_tunnel",
+    "rustcraft:module_height",
+    "rustcraft:module_lava",
+    "rustcraft:module_build",
+    "rustcraft:harpoon",
+    "rustcraft:tablet",
+    "rustcraft:module_recipes"
   ]
 }

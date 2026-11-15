@@ -1,0 +1,19 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    "ana",
+    "psp",
+    "ana"
+  ],
+  "key": {
+    "a": "rustcraft:starsteel",
+    "n": "minecraft:netherite_ingot",
+    "p": "minecraft:ender_pearl",
+    "s": "minecraft:diamond"
+  },
+  "result": {
+    "id": "rustcraft:module_pick",
+    "count": 1
+  }
+}

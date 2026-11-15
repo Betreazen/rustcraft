@@ -1,19 +1,27 @@
 //! The list of a storage the server sends the players who have its terminal open, as one mod
 //! message (at most 30 000 bytes): the storage's state, its cells and slots, the cells its shape
-//! misses (S8), and every stored item with its count and limit. Items go as their number in the
-//! item table both sides share and their damage, so a worn tool is its own line (TM1).
+//! misses (S8), and every stored item with its count, limit and «держать N». Items go as their
+//! number in the item table both sides share and their damage, so a worn tool is its own line
+//! (TM1). Since slice 15 it also says whether the terminal holds the recipe book, whether the
+//! storage's line takes orders (M15), the queue of orders (O8) and, with the book, the items the
+//! book can make (O2), as many as the message has room for after the rest.
 
 use crate::geom::Pos;
+use crate::orders::queue::MAX_ORDERS;
 use crate::storage::Limit;
 
 /// The largest message a mod may send.
 pub const MAX_BYTES: usize = 30_000;
 /// Holes named in one message: the window names a few, the rest is a count.
 pub const MAX_HOLES: usize = 16;
-const VERSION: u8 = 1;
-const HEADER: usize = 1 + 12 + 1 + 4 + 8 + 8 + 1 + 2 + 4;
+/// Missing items or machines an order's line names.
+pub const MAX_WANTS: usize = 3;
+const VERSION: u8 = 2;
+const HEADER: usize = 1 + 12 + 1 + 4 + 8 + 8 + 1 + 2 + 4 + 1 + 1 + 1;
 const HOLE: usize = 12;
-const ENTRY: usize = 2 + 2 + 8 + 1 + 8;
+const ENTRY: usize = 2 + 2 + 8 + 1 + 8 + 8;
+const ORDER: usize = 2 + 2 + 4 + 4 + 1 + 1 + 1 + MAX_WANTS * 6;
+const ORDERS: usize = MAX_ORDERS * ORDER;
 
 /// Whether the storage works.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -44,13 +52,69 @@ impl State {
     }
 }
 
-/// One stored item: its number in the item table, its damage, how many, its limit.
+/// M15: whether the storage's line takes orders.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Smart {
+    #[default]
+    Works,
+    /// No node of the smart tier on the line of the storage's item net.
+    LowTier,
+    /// The storage is on no item net.
+    NoNet,
+}
+
+impl Smart {
+    fn code(self) -> u8 {
+        match self {
+            Smart::Works => 0,
+            Smart::LowTier => 1,
+            Smart::NoNet => 2,
+        }
+    }
+
+    fn of(code: u8) -> Smart {
+        match code {
+            1 => Smart::LowTier,
+            2 => Smart::NoNet,
+            _ => Smart::Works,
+        }
+    }
+}
+
+/// One stored item: its number in the item table, its damage, how many, its limit, its N.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Line {
     pub item: u16,
     pub damage: u16,
     pub count: u64,
     pub limit: Option<Limit>,
+    /// O14: «держать N», 0 for none.
+    pub keep: u64,
+}
+
+/// What an order waits for, as the window shows it.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub enum OrderWait {
+    #[default]
+    New,
+    Running,
+    /// O6: items (numbers) and how many are short, at most MAX_WANTS of them.
+    Items(Vec<(u16, u32)>),
+    /// O13: missing machine kinds (`orders::KINDS` places).
+    Machines(Vec<u8>),
+    /// Every machine of this kind is busy.
+    Busy(u8),
+}
+
+/// One order of the queue (O8).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct OrderLine {
+    pub id: u16,
+    pub item: u16,
+    pub count: u32,
+    pub done: u32,
+    pub keep: bool,
+    pub wait: OrderWait,
 }
 
 /// What a terminal's window shows.
@@ -65,16 +129,24 @@ pub struct Listing {
     pub holes: Vec<Pos>,
     pub hole_count: u32,
     pub lines: Vec<Line>,
+    /// O1: the terminal holds the recipe book.
+    pub book: bool,
+    pub smart: Smart,
+    /// O8: the storage's orders, at most MAX_ORDERS.
+    pub orders: Vec<OrderLine>,
+    /// O2: items the recipe book can make, as numbers.
+    pub orderable: Vec<u16>,
 }
 
 /// How many lines fit in one message.
-pub const MAX_LINES: usize = (MAX_BYTES - HEADER - MAX_HOLES * HOLE) / ENTRY;
+pub const MAX_LINES: usize = (MAX_BYTES - HEADER - MAX_HOLES * HOLE - ORDERS - 2) / ENTRY;
 
 /// The message for `listing`: lines past MAX_LINES are left out (the caller sends the most
-/// numerous first).
+/// numerous first), and orderable items past the room the rest leaves.
 pub fn encode(listing: &Listing) -> Vec<u8> {
     let holes = &listing.holes[..listing.holes.len().min(MAX_HOLES)];
     let lines = &listing.lines[..listing.lines.len().min(MAX_LINES)];
+    let orders = &listing.orders[..listing.orders.len().min(MAX_ORDERS)];
     let mut out = Vec::with_capacity(HEADER + holes.len() * HOLE + lines.len() * ENTRY);
     out.push(VERSION);
     for c in listing.terminal {
@@ -88,6 +160,9 @@ pub fn encode(listing: &Listing) -> Vec<u8> {
     let hole_count = u16::try_from(listing.hole_count).unwrap_or(u16::MAX);
     out.extend(hole_count.to_le_bytes());
     out.extend((lines.len() as u32).to_le_bytes());
+    out.push(u8::from(listing.book));
+    out.push(listing.smart.code());
+    out.push(orders.len() as u8);
     for h in holes {
         for c in h {
             out.extend(c.to_le_bytes());
@@ -107,8 +182,44 @@ pub fn encode(listing: &Listing) -> Vec<u8> {
                 out.extend(0u64.to_le_bytes());
             }
         }
+        out.extend(l.keep.to_le_bytes());
+    }
+    for o in orders {
+        encode_order(&mut out, o);
+    }
+    let room = MAX_BYTES.saturating_sub(out.len() + 2) / 2;
+    let orderable = &listing.orderable[..listing.orderable.len().min(room)];
+    out.extend((orderable.len() as u16).to_le_bytes());
+    for n in orderable {
+        out.extend(n.to_le_bytes());
     }
     out
+}
+
+fn encode_order(out: &mut Vec<u8>, o: &OrderLine) {
+    out.extend(o.id.to_le_bytes());
+    out.extend(o.item.to_le_bytes());
+    out.extend(o.count.to_le_bytes());
+    out.extend(o.done.to_le_bytes());
+    out.push(u8::from(o.keep));
+    match &o.wait {
+        OrderWait::New => out.extend([0, 0]),
+        OrderWait::Running => out.extend([1, 0]),
+        OrderWait::Items(items) => {
+            let items = &items[..items.len().min(MAX_WANTS)];
+            out.extend([2, items.len() as u8]);
+            for (item, n) in items {
+                out.extend(item.to_le_bytes());
+                out.extend(n.to_le_bytes());
+            }
+        }
+        OrderWait::Machines(kinds) => {
+            let kinds = &kinds[..kinds.len().min(MAX_WANTS)];
+            out.extend([3, kinds.len() as u8]);
+            out.extend(kinds);
+        }
+        OrderWait::Busy(kind) => out.extend([4, *kind]),
+    }
 }
 
 /// A reader over a message's bytes.
@@ -138,6 +249,39 @@ impl Reader<'_> {
     fn pos(&mut self) -> Option<Pos> {
         Some([self.i32()?, self.i32()?, self.i32()?])
     }
+
+    fn order(&mut self) -> Option<OrderLine> {
+        let id = self.u16()?;
+        let item = self.u16()?;
+        let count = self.u32()?;
+        let done = self.u32()?;
+        let keep = self.u8()? == 1;
+        let code = self.u8()?;
+        let arg = self.u8()?;
+        let wait = match code {
+            1 => OrderWait::Running,
+            2 => OrderWait::Items(
+                (0..arg.min(MAX_WANTS as u8))
+                    .map(|_| Some((self.u16()?, self.u32()?)))
+                    .collect::<Option<Vec<_>>>()?,
+            ),
+            3 => OrderWait::Machines(
+                (0..arg.min(MAX_WANTS as u8))
+                    .map(|_| self.u8())
+                    .collect::<Option<Vec<_>>>()?,
+            ),
+            4 => OrderWait::Busy(arg),
+            _ => OrderWait::New,
+        };
+        Some(OrderLine {
+            id,
+            item,
+            count,
+            done,
+            keep,
+            wait,
+        })
+    }
 }
 
 /// What `encode` wrote; none for a message of another version or cut short.
@@ -154,6 +298,9 @@ pub fn decode(bytes: &[u8]) -> Option<Listing> {
     let holes_sent = usize::from(r.u8()?);
     let hole_count = u32::from(r.u16()?);
     let line_count = r.u32()? as usize;
+    let book = r.u8()? == 1;
+    let smart = Smart::of(r.u8()?);
+    let order_count = usize::from(r.u8()?);
     let holes = (0..holes_sent)
         .map(|_| r.pos())
         .collect::<Option<Vec<_>>>()?;
@@ -164,6 +311,7 @@ pub fn decode(bytes: &[u8]) -> Option<Listing> {
         let count = r.u64()?;
         let flag = r.u8()?;
         let max = r.u64()?;
+        let keep = r.u64()?;
         let limit = (flag > 0).then_some(Limit {
             max,
             destroy_surplus: flag == 2,
@@ -173,8 +321,16 @@ pub fn decode(bytes: &[u8]) -> Option<Listing> {
             damage,
             count,
             limit,
+            keep,
         });
     }
+    let orders = (0..order_count)
+        .map(|_| r.order())
+        .collect::<Option<Vec<_>>>()?;
+    let orderable_count = usize::from(r.u16()?);
+    let orderable = (0..orderable_count)
+        .map(|_| r.u16())
+        .collect::<Option<Vec<_>>>()?;
     Some(Listing {
         terminal,
         state,
@@ -184,6 +340,10 @@ pub fn decode(bytes: &[u8]) -> Option<Listing> {
         holes,
         hole_count,
         lines,
+        book,
+        smart,
+        orders,
+        orderable,
     })
 }
 
@@ -209,8 +369,46 @@ mod tests {
                         max: 512,
                         destroy_surplus: i % 4 == 0,
                     }),
+                    keep: (i % 5) as u64,
                 })
                 .collect(),
+            book: true,
+            smart: Smart::LowTier,
+            orders: vec![
+                OrderLine {
+                    id: 3,
+                    item: 812,
+                    count: 4,
+                    done: 2,
+                    keep: false,
+                    wait: OrderWait::Running,
+                },
+                OrderLine {
+                    id: 4,
+                    item: 9,
+                    count: 64,
+                    done: 0,
+                    keep: true,
+                    wait: OrderWait::Items(vec![(5, 2), (6, 7)]),
+                },
+                OrderLine {
+                    id: 5,
+                    item: 9,
+                    count: 1,
+                    done: 0,
+                    keep: false,
+                    wait: OrderWait::Machines(vec![3]),
+                },
+                OrderLine {
+                    id: 6,
+                    item: 9,
+                    count: 1,
+                    done: 0,
+                    keep: false,
+                    wait: OrderWait::Busy(0),
+                },
+            ],
+            orderable: vec![1, 2, 812],
         }
     }
 
@@ -218,14 +416,33 @@ mod tests {
     fn a_listing_comes_back_as_it_went() {
         let l = listing(40);
         assert_eq!(decode(&encode(&l)), Some(l));
+        let empty = Listing::default();
+        assert_eq!(decode(&encode(&empty)), Some(empty));
     }
 
     #[test]
     fn a_big_storage_fits_one_message() {
-        let l = listing(MAX_LINES + 100);
+        let mut l = listing(MAX_LINES + 100);
+        l.orders = vec![
+            OrderLine {
+                wait: OrderWait::Items(vec![(1, 1); MAX_WANTS]),
+                ..OrderLine::default()
+            };
+            MAX_ORDERS
+        ];
+        l.orderable = (0..20_000).collect();
         let bytes = encode(&l);
+        assert!(bytes.len() <= MAX_BYTES, "{}", bytes.len());
+        let back = decode(&bytes).unwrap();
+        assert_eq!(back.lines.len(), MAX_LINES);
+        assert_eq!(back.orders.len(), MAX_ORDERS);
+        // The orderable items fill what is left: in a small storage, thousands of them.
+        let mut small = listing(100);
+        small.orderable = (0..20_000).collect();
+        let bytes = encode(&small);
         assert!(bytes.len() <= MAX_BYTES);
-        assert_eq!(decode(&bytes).map(|d| d.lines.len()), Some(MAX_LINES));
+        assert!(bytes.len() + 2 > MAX_BYTES);
+        assert!(decode(&bytes).unwrap().orderable.len() > 10_000);
     }
 
     #[test]

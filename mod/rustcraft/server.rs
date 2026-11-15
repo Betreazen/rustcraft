@@ -16,9 +16,10 @@ use crate::game::{
     Game, rustcraft_backpack as backpack, rustcraft_base as base,
     rustcraft_content::{self as content, Kind, Machine},
     rustcraft_fluids as fluids, rustcraft_machines as machines, rustcraft_mining as mining,
-    rustcraft_mixer as mixer, rustcraft_monorail as monorail, rustcraft_power as power,
-    rustcraft_selftest as selftest, rustcraft_storage as storage, rustcraft_transport as transport,
-    rustcraft_window as window, rustcraft_workers as workers,
+    rustcraft_mixer as mixer, rustcraft_monorail as monorail, rustcraft_orders as orders,
+    rustcraft_power as power, rustcraft_selftest as selftest, rustcraft_storage as storage,
+    rustcraft_tablet as tablet,
+    rustcraft_transport as transport, rustcraft_window as window, rustcraft_workers as workers,
 };
 use horizon_client::{
     containers::ModBlockEntity, items::ItemStack, mod_api::NativeServerPlayer, text::Text,
@@ -83,6 +84,8 @@ pub struct LevelNet {
     pub ticks: u64,
     /// Slice 12: whether each machine's moving parts move, as clients were last told.
     pub anim: BTreeMap<Pos, bool>,
+    /// Slice 15 (O4): the autocrafters' temporary pages from orders (rustcraft_orders).
+    pub temp_pages: BTreeMap<Pos, crate::game::rustcraft_crafter::TempPage>,
 }
 
 impl LevelNet {
@@ -101,6 +104,7 @@ impl LevelNet {
             stale: true,
             ticks: 0,
             anim: BTreeMap::new(),
+            temp_pages: BTreeMap::new(),
         }
     }
 }
@@ -241,10 +245,15 @@ pub(super) fn on_level_tick(game: &mut Game<'_>, dimension: &str) {
     if level.ticks.is_multiple_of(fluids::EVERY) {
         fluids::tick(game, &mut level, &TUNING);
     }
+    // Slice 15: the orders' jobs and a round of every storage's queue, once a second.
+    if second {
+        orders::tick(game, dimension, &mut level);
+    }
     storage::tick(game, dimension);
     monorail::tick(game, dimension, &TUNING);
     workers::tick(game, dimension, &level, &TUNING);
     base::tick(game, dimension, &level, &TUNING);
+    tablet::tick(game, dimension, &level);
     {
         let mut s = server();
         // A hook may have marked the level stale while it was out of the map.
@@ -349,12 +358,14 @@ pub(super) fn on_menu_clicked(
 ) {
     workers::on_menu_clicked(uuid, window_id, slot, mode);
     base::on_menu_clicked(uuid, window_id, slot, mode);
+    tablet::on_menu_clicked(uuid, window_id, slot, mode);
     window::on_menu_clicked(game, uuid, window_id, slot, button, mode);
 }
 
 pub(super) fn on_menu_closed(uuid: u128, window_id: i32) {
     workers::on_menu_closed(uuid, window_id);
     base::on_menu_closed(uuid, window_id);
+    tablet::on_menu_closed(uuid, window_id);
     window::on_menu_closed(uuid, window_id);
 }
 
@@ -429,6 +440,15 @@ pub(super) fn on_destroy_block(game: &mut Game<'_>, pos: [i32; 3]) {
     if block == content::CELL {
         storage::on_cell_broken(game, &player.dimension, pos);
     }
+    // Slice 15: a terminal broken in survival gives back its recipe book.
+    if block == content::TERMINAL && player.game_mode != CREATIVE {
+        let book = game
+            .native_mod_block_entity(pos)
+            .is_some_and(|e| orders::has_book(&e.nbt));
+        if book && game.native_give_items(orders::book_item(), 1) == 0 {
+            drop_item(game, &player.dimension, pos, orders::book_item());
+        }
+    }
     if block != content::HOUSING || player.game_mode == CREATIVE {
         return;
     }
@@ -454,6 +474,7 @@ pub(super) fn on_chunk_changed(dimension: &str) {
 /// `native_level_unload`: forget the level.
 pub(super) fn on_level_unload(dimension: &str) {
     server().levels.remove(dimension);
+    orders::on_level_unload(dimension);
     monorail::on_level_unload(dimension);
     workers::on_level_unload(dimension);
 }
@@ -480,6 +501,7 @@ fn rescan(game: &mut Game<'_>, dimension: &str, level: &mut LevelNet) {
     monorail::rescan(game, dimension, &found.rails, &stations);
     level.topology = topology::analyse(&level.layout, &TUNING);
     level.recipes = machines::load_recipes(game);
+    orders::forget_book();
     machines::teach_slot_rules(game, &level.recipes);
     let ports: BTreeMap<Pos, Port> = level
         .crystals

@@ -21,9 +21,44 @@ pub const ORES: [(&str, f64, bool); 10] = [
     ("minecraft:ancient_debris", 0.2, true),
 ];
 
-/// Whether `item` feeds it.
+/// Whether `item` feeds it: stone for ore, sand and gravel for the stratum module.
 pub fn is_rock(item: &str) -> bool {
-    matches!(item, "minecraft:cobblestone" | "minecraft:stone" | "minecraft:cobbled_deepslate" | "minecraft:deepslate")
+    matches!(
+        item,
+        "minecraft:cobblestone" | "minecraft:stone" | "minecraft:cobbled_deepslate" | "minecraft:deepslate" | "minecraft:sand" | "minecraft:gravel"
+    )
+}
+
+/// The ores the pick module can choose, one a toggle of its window (ancient debris is not one).
+pub const PICKS: [&str; 9] = [
+    "minecraft:coal_ore",
+    "minecraft:copper_ore",
+    "minecraft:iron_ore",
+    "minecraft:redstone_ore",
+    "minecraft:lapis_ore",
+    "minecraft:gold_ore",
+    "minecraft:nether_quartz_ore",
+    "minecraft:emerald_ore",
+    "minecraft:diamond_ore",
+];
+/// The pick module's price: three times the energy.
+pub const PICK_FACTOR: f64 = 3.0;
+/// ST3: the stratum grows a block in 120 s for 3000 E.
+pub const STRATUM_TICKS: u64 = 2400;
+pub const STRATUM_ENERGY: f64 = 3000.0;
+
+/// What grows from `rock` with the stratum module: suspicious sand from sand, gravel from gravel.
+pub fn stratum(rock: &str) -> Option<&'static str> {
+    match rock {
+        "minecraft:sand" => Some("minecraft:suspicious_sand"),
+        "minecraft:gravel" => Some("minecraft:suspicious_gravel"),
+        _ => None,
+    }
+}
+
+/// Whether `rock` feeds ore (not the stratum).
+pub fn is_stone(rock: &str) -> bool {
+    is_rock(rock) && stratum(rock).is_none()
 }
 
 /// The ore a draw `r` (0..1) gives with `rare` rarity modules.
@@ -65,5 +100,7 @@ mod tests {
         assert!(ORES.iter().any(|(id, _, rare)| *rare && *id == ore(0.70, 2)));
         assert_eq!(cells().len(), 124);
         assert!(is_rock("minecraft:cobblestone") && !is_rock("minecraft:dirt"));
+        assert_eq!(stratum("minecraft:gravel"), Some("minecraft:suspicious_gravel"));
+        assert!(is_stone("minecraft:stone") && !is_stone("minecraft:sand"));
     }
 }

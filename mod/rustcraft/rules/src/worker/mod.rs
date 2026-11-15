@@ -10,6 +10,7 @@
 //! In this slice a worker rides floor rails only: a wall or ceiling rail ends its way.
 
 pub mod digging;
+pub mod bore;
 pub mod hold;
 pub mod plants;
 pub mod trees;
@@ -54,10 +55,13 @@ pub enum Tool {
     Shooter,
     /// Slice 13: the cartographer (tier 3): it marks the chunks and biomes along its rails.
     Map,
+    /// Slice 14: the bore (tier 3): at the end of its rails it bores the tunnel ahead and lays the
+    /// next rail from its hold.
+    Bore,
 }
 
 impl Tool {
-    pub const ALL: [Tool; 7] = [
+    pub const ALL: [Tool; 8] = [
         Tool::Saw,
         Tool::Reaper,
         Tool::Hold,
@@ -65,6 +69,7 @@ impl Tool {
         Tool::Scoop,
         Tool::Shooter,
         Tool::Map,
+        Tool::Bore,
     ];
 
     pub fn item(self) -> &'static str {
@@ -76,6 +81,7 @@ impl Tool {
             Tool::Scoop => "rustcraft:tool_scoop",
             Tool::Shooter => "rustcraft:tool_shooter",
             Tool::Map => "rustcraft:tool_map",
+            Tool::Bore => "rustcraft:tool_bore",
         }
     }
 
@@ -89,7 +95,7 @@ impl Tool {
         match self {
             Tool::Saw => "axe",
             Tool::Reaper => "hoe",
-            Tool::Grab => "pickaxe",
+            Tool::Grab | Tool::Bore => "pickaxe",
             Tool::Scoop => "shovel",
             Tool::Hold | Tool::Shooter | Tool::Map => "",
         }
@@ -101,6 +107,8 @@ impl Tool {
             Tool::Saw => trees::is_sapling(item),
             Tool::Reaper => plants::is_seed(item),
             Tool::Hold | Tool::Grab | Tool::Scoop | Tool::Shooter | Tool::Map => false,
+            // The bore keeps its rails and the blocks it fills lava and gaps with.
+            Tool::Bore => item == bore::RAIL || bore::is_filler(item),
         }
     }
 }
@@ -147,6 +155,9 @@ pub enum Note {
     NoCargo,
     /// The scoop found nothing to dig along its whole way (guide «Рядом с путём нечего копать»).
     NothingToDig,
+    /// Slice 14, the bore: no rails in its hold, and lava ahead with nothing to close it with.
+    NoRails,
+    LavaAhead,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

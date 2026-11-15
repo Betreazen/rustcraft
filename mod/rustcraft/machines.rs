@@ -360,9 +360,13 @@ pub(super) fn tick(game: &mut Game<'_>, level: &mut LevelNet, tuning: &Tuning) {
                 }
                 Kind::Generator => Unit::Generator(generator::read(game, pos)?),
                 Kind::Alloy => Unit::Alloy(alloy::read(game, pos, &level.recipes, tuning)?),
-                Kind::Crafter => {
-                    Unit::Crafter(crafter::read(game, pos, &mut level.recipes, tuning)?)
-                }
+                Kind::Crafter => Unit::Crafter(crafter::read(
+                    game,
+                    pos,
+                    &mut level.recipes,
+                    level.temp_pages.get(&pos),
+                    tuning,
+                )?),
                 Kind::Pump => Unit::Pump(fluids::read_pump(game, pos, tuning)?),
                 Kind::Station => Unit::Station(monorail::read_station(game, pos, tuning)?),
                 Kind::Charger | Kind::Turret | Kind::Util => {
@@ -467,7 +471,9 @@ pub(super) fn tick(game: &mut Game<'_>, level: &mut LevelNet, tuning: &Tuning) {
                 generator::run(game, pos, h, used, balance, tuning)
             }
             Unit::Alloy(h) => alloy::run(game, pos, h, share, &level.recipes, tuning),
-            Unit::Crafter(h) => crafter::run(game, pos, h, share, tuning),
+            Unit::Crafter(h) => {
+                crafter::run(game, pos, h, share, level.temp_pages.get_mut(&pos), tuning)
+            }
             Unit::Pump(h) => {
                 let no_lane = level.fluids.no_lane(pos, level.ticks).is_some();
                 fluids::run_pump(game, pos, h, share, no_lane, tuning)

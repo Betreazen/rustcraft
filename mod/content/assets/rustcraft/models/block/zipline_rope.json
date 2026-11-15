@@ -1,0 +1,76 @@
+{
+  "textures": {
+    "particle": "rustcraft:block/rail",
+    "rope": "rustcraft:block/rail"
+  },
+  "elements": [
+    {
+      "from": [
+        7.5,
+        7.5,
+        0
+      ],
+      "to": [
+        8.5,
+        8.5,
+        16
+      ],
+      "faces": {
+        "down": {
+          "uv": [
+            0,
+            0,
+            1,
+            1
+          ],
+          "texture": "#rope"
+        },
+        "up": {
+          "uv": [
+            0,
+            0,
+            1,
+            1
+          ],
+          "texture": "#rope"
+        },
+        "north": {
+          "uv": [
+            0,
+            0,
+            1,
+            1
+          ],
+          "texture": "#rope"
+        },
+        "south": {
+          "uv": [
+            0,
+            0,
+            1,
+            1
+          ],
+          "texture": "#rope"
+        },
+        "west": {
+          "uv": [
+            0,
+            0,
+            1,
+            1
+          ],
+          "texture": "#rope"
+        },
+        "east": {
+          "uv": [
+            0,
+            0,
+            1,
+            1
+          ],
+          "texture": "#rope"
+        }
+      }
+    }
+  ]
+}

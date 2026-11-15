@@ -832,9 +832,13 @@ fn brush(game: &mut Game<'_>, pos: Pos, cost: f64) -> Shown {
 fn grow(game: &mut Game<'_>, dimension: &str, pos: Pos, cost: f64) -> Shown {
     use rustcraft_rules::utility::vein;
     let slots = items(game, pos);
-    let Some(slot) = slots.iter().position(|s| s.as_ref().is_some_and(|s| s.count > 0 && vein::is_rock(&s.item))) else {
+    let mods = base::modules_at(game, pos);
+    let stratum = modules::count(&mods, Module::Stratum) > 0;
+    let wanted = |item: &str| if stratum { vein::stratum(item).is_some() } else { vein::is_stone(item) };
+    let Some(slot) = slots.iter().position(|s| s.as_ref().is_some_and(|s| s.count > 0 && wanted(&s.item))) else {
         return Shown::Idle("vein_no_rock");
     };
+    let rock = slots[slot].as_ref().map(|s| s.item.to_string()).unwrap_or_default();
     let Some(cell) = vein::cells()
         .into_iter()
         .map(|c| [pos[0] + c[0], pos[1] + c[1], pos[2] + c[2]])
@@ -842,8 +846,19 @@ fn grow(game: &mut Game<'_>, dimension: &str, pos: Pos, cost: f64) -> Shown {
     else {
         return Shown::Blocked("vein_no_room");
     };
-    let rare = modules::count(&base::modules_at(game, pos), Module::Rare);
-    let ore = vein::ore(random(), rare);
+    let rare = modules::count(&mods, Module::Rare);
+    let pick = modules::count(&mods, Module::Pick) > 0;
+    let (ore, cost) = if stratum {
+        // ST3: slower and dearer; `paced` gave the ore's numbers.
+        if !state().ticks.values().any(|n| n.is_multiple_of(vein::STRATUM_TICKS)) {
+            return Shown::Working;
+        }
+        (vein::stratum(&rock).unwrap_or("minecraft:suspicious_sand"), cost / vein::BLOCK_ENERGY * vein::STRATUM_ENERGY)
+    } else if pick {
+        (vein::PICKS[choice(game, pos, vein::PICKS.len())], cost * vein::PICK_FACTOR)
+    } else {
+        (vein::ore(random(), rare), cost)
+    };
     let Some(state_id) = game.native_default_state(ore) else {
         return Shown::Blocked("vein_no_room");
     };
@@ -898,6 +913,10 @@ fn toggle_names(u: Util) -> Vec<(String, String)> {
             .iter()
             .map(|k| ((*k).to_owned(), "minecraft:experience_bottle".to_owned()))
             .collect(),
+        Util::Vein => rustcraft_rules::utility::vein::PICKS
+            .iter()
+            .map(|o| ((*o).to_owned(), (*o).to_owned()))
+            .collect(),
         Util::Projector => ["remember", "ghost", "clear"]
             .iter()
             .map(|k| ((*k).to_owned(), "minecraft:light_blue_stained_glass".to_owned()))
@@ -939,7 +958,7 @@ pub(super) fn sheet(game: &Game<'_>, dimension: &str, pos: Pos, u: Util, s: &mut
         .map(|(i, (key, icon))| Toggle {
             icon,
             name: base::v(&line(&format!("rustcraft.util.{short}.toggle.{}", key.replace([':', '/'], "_")), &key, &[])),
-            on: on.get(i).copied().unwrap_or(false) || (matches!(u, Util::Archeo | Util::Enchanter) && i == 0 && !on.iter().any(|t| *t)),
+            on: on.get(i).copied().unwrap_or(false) || (matches!(u, Util::Archeo | Util::Enchanter | Util::Vein) && i == 0 && !on.iter().any(|t| *t)),
             hint: base::v(&line(&format!("rustcraft.util.{short}.hint"), "Click to turn on or off", &[])),
         })
         .collect();
@@ -967,7 +986,7 @@ pub(super) fn on_button(game: &mut Game<'_>, pos: Pos, entity: &mut ModBlockEnti
         Util::XpTank => xp_press(game, entity, i),
         Util::Projector => builder::projector_press(game, pos, entity, i),
         // A choice: this one on, the rest off.
-        Util::Archeo | Util::Enchanter => {
+        Util::Archeo | Util::Enchanter | Util::Vein => {
             let mut t = vec![false; n];
             t[i] = true;
             write_toggles(&mut entity.nbt, &t);

@@ -23,12 +23,19 @@
 // open (`native_player_container_open`/`_close`, native_hooks.rs:8583-8640), again whenever the
 // storage changes. Its presses are menu buttons with the cursor stack (`native_menu_button_v2`):
 // take a stack, one item or a stack into the inventory, put the cursor's stack in, change a limit.
-// A shift-click from the inventory puts the stack in (`native_menu_quick_move`, API 309).
+// A shift-click from the inventory puts the stack in (`native_menu_quick_move`, API 309). A
+// shift-clicked recipe book goes into the terminal's socket instead.
+//
+// Slice 15: the terminal's recipe book socket (its saved compound), the orders and «держать N»
+// (rustcraft_orders): an order press needs the book in the pressed terminal; the N of each item is
+// saved with the storage's record, as its limits are. The list also carries the queue of orders
+// and, with the book, the items it can make (rustcraft_rules::storage::wire).
 use crate::game::{
     Game,
     rustcraft_content::{self as content, item_number, item_of_number},
     rustcraft_machines::{max_stack, read_int, write_int},
-    rustcraft_server::line,
+    rustcraft_orders as orders,
+    rustcraft_server::{line, tell},
 };
 use horizon_client::{
     containers::ModBlockEntity,
@@ -56,6 +63,8 @@ use std::{
 pub const CHANNEL: &str = "rustcraft:terminal";
 /// A cell's saved compound keeps its storage's id under this key.
 const ID_KEY: &str = "storage";
+/// An order pressed in a terminal without the recipe book (O1).
+const NO_BOOK: orders::Refusal = ("rustcraft.orders.no_book", "No recipe book in the terminal");
 /// How often, in level ticks, the server sends changed lists to the terminals' viewers.
 const SEND_EVERY: u64 = 5;
 
@@ -106,7 +115,8 @@ impl LevelStorage {
 struct Viewer {
     dimension: String,
     terminal: Pos,
-    sent: Option<(Option<u32>, u64)>,
+    /// The storage, its change count and the orders' change count last sent.
+    sent: Option<(Option<u32>, u64, u64)>,
 }
 
 #[derive(Default)]
@@ -154,7 +164,7 @@ fn long(n: u64) -> Tag {
     Tag::Long(i64::try_from(n).unwrap_or(i64::MAX))
 }
 
-/// `{next, stores: [{id, items: [{k, n}], limits: [{k, max, destroy}]}]}`.
+/// `{next, stores: [{id, items: [{k, n}], limits: [{k, max, destroy}], keep: [{k, n}]}]}`.
 fn encode_saved(saved: &Saved) -> Result<Compound, AttachmentError> {
     let stores = saved
         .stores
@@ -176,10 +186,16 @@ fn encode_saved(saved: &Saved) -> Result<Compound, AttachmentError> {
                     ])
                 })
                 .collect();
+            let keep = store
+                .keep
+                .iter()
+                .map(|(k, &n)| Tag::compound([("k", string(k)), ("n", long(n))]))
+                .collect();
             Tag::compound([
                 ("id", Tag::Int(*id as i32)),
                 ("items", Tag::List(items)),
                 ("limits", Tag::List(limits)),
+                ("keep", Tag::List(keep)),
             ])
         })
         .collect();
@@ -249,6 +265,13 @@ fn decode_saved(data: &Compound) -> Result<Saved, AttachmentError> {
                     destroy_surplus,
                 },
             );
+        }
+        for keep in compounds(field(entry, "keep")) {
+            if let (Some(k), Some(n)) = (as_string(field(keep, "k")), as_u64(field(keep, "n")))
+                && n > 0
+            {
+                store.keep.insert(k, n);
+            }
         }
         saved.stores.insert(id as u32, store);
     }
@@ -396,6 +419,40 @@ pub(super) fn net_store(dimension: &str, anchor: Pos) -> Option<NetStore> {
     .flatten()
 }
 
+/// Slice 15: every storage of the level that works as one: its id, its anchor and its
+/// terminals.
+pub(super) fn level_storages(dimension: &str) -> Vec<(u32, Pos, Vec<Pos>)> {
+    with_level(dimension, |level| {
+        level
+            .found
+            .iter()
+            .map(|(&id, f)| {
+                let terminals = level
+                    .terminals
+                    .iter()
+                    .filter(|(_, s)| **s == Some(id))
+                    .map(|(&t, _)| t)
+                    .collect();
+                (id, f.anchor, terminals)
+            })
+            .collect()
+    })
+    .unwrap_or_default()
+}
+
+/// Slice 15: what the storage `id` holds and its «держать N» counts; none while it does not work
+/// (S8).
+pub(super) fn stock(
+    dimension: &str,
+    id: u32,
+) -> Option<(BTreeMap<ItemKey, u64>, BTreeMap<ItemKey, u64>)> {
+    with_level(dimension, |level| {
+        let store = level.stores.get(&id).filter(|_| level.works(id))?;
+        Some((store.items.clone(), store.keep.clone()))
+    })
+    .flatten()
+}
+
 // ---- Items in and out ----
 
 /// The stack a key and a count make.
@@ -428,7 +485,7 @@ fn room_at(game: &Game<'_>, dimension: &str, anchor: Pos, key: &str) -> u64 {
 }
 
 /// Puts `count` of `key` into the storage `id`; how many it took (destroyed surplus counts).
-fn put_into(game: &Game<'_>, dimension: &str, id: u32, key: &str, count: u64) -> u64 {
+pub(super) fn put_into(game: &Game<'_>, dimension: &str, id: u32, key: &str, count: u64) -> u64 {
     let stack = |k: &str| max_stack(game, keys::item_of(k));
     with_level(dimension, |level| {
         if !level.works(id) {
@@ -446,7 +503,7 @@ fn put_into(game: &Game<'_>, dimension: &str, id: u32, key: &str, count: u64) ->
     .unwrap_or(0)
 }
 
-fn take_from(dimension: &str, id: u32, key: &str, count: u64) -> u64 {
+pub(super) fn take_from(dimension: &str, id: u32, key: &str, count: u64) -> u64 {
     with_level(dimension, |level| {
         let took = level.stores.get_mut(&id).map_or(0, |s| s.take(key, count));
         if took > 0 {
@@ -457,7 +514,7 @@ fn take_from(dimension: &str, id: u32, key: &str, count: u64) -> u64 {
     .unwrap_or(0)
 }
 
-fn restore_into(dimension: &str, id: u32, key: &str, count: u64) {
+pub(super) fn restore_into(dimension: &str, id: u32, key: &str, count: u64) {
     with_level(dimension, |level| {
         if let Some(s) = level.stores.get_mut(&id) {
             s.restore(key, count);
@@ -576,6 +633,7 @@ pub(super) fn tick(game: &mut Game<'_>, dimension: &str) {
     if !send {
         return;
     }
+    let orders_revision = orders::revision(dimension);
     let due: Vec<(u128, Pos, Option<u32>, u64)> = {
         let s = storages();
         let Some(level) = s.levels.get(dimension) else {
@@ -589,7 +647,8 @@ pub(super) fn tick(game: &mut Game<'_>, dimension: &str) {
                 let version = id
                     .and_then(|id| level.versions.get(&id).copied())
                     .unwrap_or(0);
-                (v.sent != Some((id, version))).then_some((*uuid, v.terminal, id, version))
+                (v.sent != Some((id, version, orders_revision)))
+                    .then_some((*uuid, v.terminal, id, version))
             })
             .collect()
     };
@@ -600,7 +659,7 @@ pub(super) fn tick(game: &mut Game<'_>, dimension: &str) {
             continue;
         }
         if let Some(v) = storages().viewers.get_mut(&uuid) {
-            v.sent = Some((id, version));
+            v.sent = Some((id, version, orders_revision));
         }
     }
 }
@@ -629,6 +688,7 @@ fn listing(game: &Game<'_>, dimension: &str, terminal: Pos, id: Option<u32>) -> 
     let mut lines: Vec<(u64, Line)> = Vec::new();
     let mut keys: BTreeSet<&ItemKey> = store.items.keys().collect();
     keys.extend(store.limits.keys());
+    keys.extend(store.keep.keys());
     for key in keys {
         let (item, damage) = keys::parse(key);
         let Some(number) = item_number(game, item).and_then(|n| u16::try_from(n).ok()) else {
@@ -645,11 +705,13 @@ fn listing(game: &Game<'_>, dimension: &str, terminal: Pos, id: Option<u32>) -> 
                 damage,
                 count,
                 limit: store.limits.get(key).copied(),
+                keep: store.keep.get(key).copied().unwrap_or(0),
             },
         ));
     }
     // The most numerous first: a message too small for them all keeps those.
     lines.sort_by(|a, b| b.0.cmp(&a.0));
+    let view = id.map(|id| orders::view(game, dimension, terminal, id));
     Listing {
         terminal,
         state: if holes.is_empty() {
@@ -663,6 +725,10 @@ fn listing(game: &Game<'_>, dimension: &str, terminal: Pos, id: Option<u32>) -> 
         hole_count: holes.len() as u32,
         holes: holes.into_iter().take(wire::MAX_HOLES).collect(),
         lines: lines.into_iter().map(|(_, l)| l).collect(),
+        book: view.as_ref().is_some_and(|v| v.book),
+        smart: view.as_ref().map_or_else(Default::default, |v| v.smart),
+        orders: view.as_ref().map_or_else(Vec::new, |v| v.orders.clone()),
+        orderable: view.map_or_else(Vec::new, |v| v.orderable),
     }
 }
 
@@ -701,11 +767,12 @@ fn terminal_storage(game: &Game<'_>, terminal: Pos) -> Option<(String, u32)> {
 }
 
 /// `native_menu_button_v2` on a terminal: a press of its window (rustcraft_rules::storage::
-/// terminal::Press).
+/// terminal::Press). The terminal's block entity is out of the world during the call, so the
+/// book's socket is read and written in `entity`.
 pub(super) fn on_button(
     game: &mut Game<'_>,
     pos: Pos,
-    entity: &ModBlockEntity,
+    entity: &mut ModBlockEntity,
     id: i32,
     carried: &mut Option<ItemStack>,
 ) {
@@ -715,10 +782,38 @@ pub(super) fn on_button(
     let Some(press) = term::decode(id) else {
         return;
     };
+    if press == Press::Book {
+        press_book(entity, carried);
+        match game.native_acting_player() {
+            Some(player) => orders::touch(&player.dimension),
+            None => orders::touch_all(),
+        }
+        return;
+    }
+    let book = orders::has_book(&entity.nbt);
     let Some((dimension, storage)) = terminal_storage(game, pos) else {
         return;
     };
     match press {
+        Press::Book => {}
+        Press::Order { item, count } => {
+            let refused = if book {
+                item_of_number(game, u32::from(item)).and_then(|item| {
+                    orders::order(&dimension, storage, item, u32::from(count)).err()
+                })
+            } else {
+                Some(NO_BOOK)
+            };
+            if let (Some((key, fallback)), Some(player)) = (refused, game.native_acting_player()) {
+                tell(game, player.uuid, line(key, fallback, &[]));
+            }
+        }
+        Press::Keep { item, change } => {
+            if let Some(key) = key_of_ref(game, (item, 0)).filter(|_| book) {
+                apply_keep(&dimension, storage, &key, change);
+            }
+        }
+        Press::Cancel { order } => orders::cancel(&dimension, storage, order),
         Press::Place { take, .. } if carried.is_some() => {
             put_carried(game, &dimension, storage, carried, take == Take::One);
         }
@@ -733,6 +828,52 @@ pub(super) fn on_button(
             }
         }
     }
+}
+
+/// O1: a press on the recipe book's socket, as a slot would take it: the book on the cursor goes
+/// in, an empty cursor takes it out.
+fn press_book(entity: &mut ModBlockEntity, carried: &mut Option<ItemStack>) {
+    let book = orders::book_item();
+    let cursor = carried.as_ref().map(|c| (&*c.item, c.count));
+    let Some((held, after)) = term::press_book(orders::has_book(&entity.nbt), cursor, book) else {
+        return;
+    };
+    orders::set_book(&mut entity.nbt, held);
+    *carried = after.map(|(item, n)| {
+        let mut stack = carried
+            .clone()
+            .filter(|c| *c.item == *item)
+            .unwrap_or_else(|| ItemStack::new(item.as_str(), n));
+        stack.count = n;
+        stack
+    });
+}
+
+/// O14: a «держать» button on the storage `storage`: the N of `key` changed.
+fn apply_keep(dimension: &str, storage: u32, key: &ItemKey, change: term::LimitChange) {
+    with_level(dimension, |level| {
+        if let Some(store) = level.stores.get_mut(&storage) {
+            term::change_keep(store, key, change);
+            level.changed(storage);
+        }
+    });
+}
+
+/// The self-test's «держать» N: the storage of the cell or terminal at `pos`; false when it
+/// belongs to none.
+pub(super) fn set_keep_at(dimension: &str, pos: Pos, key: &ItemKey, n: u64) -> bool {
+    let Some(id) = storage_id(dimension, pos) else {
+        return false;
+    };
+    apply_keep(dimension, id, key, term::LimitChange::Clear);
+    let n = i64::try_from(n).unwrap_or(i64::MAX);
+    apply_keep(dimension, id, key, term::LimitChange::Add(n));
+    true
+}
+
+/// The storage the cell or terminal at `pos` belongs to (rustcraft_orders' self-test view).
+pub(super) fn storage_at(dimension: &str, pos: Pos) -> Option<u32> {
+    storage_id(dimension, pos)
 }
 
 /// A limit button on the storage `storage` (S5): the limit of `key` changed.
@@ -890,6 +1031,15 @@ pub(super) fn on_quick_move(
     if slot < container_slots {
         return;
     }
+    // Slice 15: the recipe book goes into the empty socket, one of the stack.
+    if *stack.item == *orders::book_item() && stack.count > 0 && !orders::has_book(&entity.nbt) {
+        orders::set_book(&mut entity.nbt, true);
+        stack.count -= 1;
+        if let Some(player) = game.native_acting_player() {
+            orders::touch(&player.dimension);
+        }
+        return;
+    }
     let Some((dimension, storage)) = terminal_storage(game, pos) else {
         return;
     };
@@ -1029,4 +1179,68 @@ pub(super) fn holes_text(holes: &BTreeSet<Pos>) -> Text {
         ));
     }
     text
+}
+
+// ---- Slice 14: the storage tablet (rustcraft_tablet) ----
+
+/// The level's storages the tablet may open, each with the blocks it is joined to the magistral
+/// by: its cells and the terminals that touch it.
+pub(super) fn tablet_candidates(dimension: &str) -> Vec<storage::tablet::Candidate> {
+    with_level(dimension, |level| {
+        level
+            .found
+            .iter()
+            .map(|(id, f)| {
+                let mut blocks: Vec<Pos> = f.cells.iter().copied().collect();
+                blocks.extend(
+                    level
+                        .terminals
+                        .iter()
+                        .filter(|(_, t)| **t == Some(*id))
+                        .map(|(p, _)| *p),
+                );
+                storage::tablet::Candidate { id: *id, blocks }
+            })
+            .collect()
+    })
+    .unwrap_or_default()
+}
+
+/// What the storage `id` holds, as the tablet lists it: most numerous first.
+pub(super) fn tablet_items(dimension: &str, id: u32) -> Vec<(ItemKey, u64)> {
+    with_level(dimension, |level| {
+        level
+            .stores
+            .get(&id)
+            .map(|s| storage::tablet::entries(&s.items))
+    })
+    .flatten()
+    .unwrap_or_default()
+}
+
+/// The stack `count` of a stored key make.
+pub(super) fn stored_stack(key: &str, count: u32) -> ItemStack {
+    stack_of(key, count)
+}
+
+/// The tablet's click: a stack of `key` from the storage `id` into the inventory of `player`
+/// (`native_give_stack`, from any server hook); what does not fit stays in the storage. How
+/// many went.
+pub(super) fn take_to_player(
+    game: &mut Game<'_>,
+    dimension: &str,
+    id: u32,
+    key: &str,
+    player: u128,
+) -> u32 {
+    let want = max_stack(game, keys::item_of(key));
+    let took = take_from(dimension, id, key, u64::from(want)) as u32;
+    if took == 0 {
+        return 0;
+    }
+    let rest = game
+        .native_give_stack(player, stack_of(key, took))
+        .map_or(0, |r| r.count.min(took));
+    restore_into(dimension, id, key, u64::from(rest));
+    took - rest
 }

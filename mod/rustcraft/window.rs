@@ -492,7 +492,7 @@ fn stacks(game: &Game<'_>, ctx: &Context, page: &Page) -> Vec<Option<ItemStack>>
 }
 
 /// A text component as an item's name or lore line: not italic, in `color`.
-fn styled(text: &Text, color: &str) -> Tag {
+pub(super) fn styled(text: &Text, color: &str) -> Tag {
     let mut c = text.component();
     if let Some(o) = c.as_object_mut() {
         o.insert("italic".into(), false.into());

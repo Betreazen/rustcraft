@@ -814,6 +814,18 @@ def slice7_states(out):
         out.text('blockstates/%s.json' % block, '{\n  "variants": {\n%s\n  }\n}\n' % ',\n'.join(variants))
 
 
+# Slice 14: the zipline's rope (station.rs draw_rope): a bar one texel thick, one block along +z,
+# stretched and turned by the client; the rail's texture, its dark corner.
+ROPE_FACE = {'uv': [0, 0, 1, 1], 'texture': '#rope'}
+
+
+def rope(out):
+    model = {'textures': {'particle': 'rustcraft:block/rail', 'rope': 'rustcraft:block/rail'},
+             'elements': [{'from': [7.5, 7.5, 0], 'to': [8.5, 8.5, 16],
+                           'faces': {f: dict(ROPE_FACE) for f in ('down', 'up', 'north', 'south', 'west', 'east')}}]}
+    out.text('models/block/zipline_rope.json', json.dumps(model, indent=2) + '\n')
+
+
 def items(out):
     for name in icons_mc.ICONS:
         out.image('textures/item/%s.png' % name, icons_mc.icon(name))
@@ -828,6 +840,7 @@ def main():
     capsule(out, report)
     worker_parts(out, report)
     slice7_states(out)
+    rope(out)
     staged(out, report, skipped)
     rust_table(out)
     items(out)

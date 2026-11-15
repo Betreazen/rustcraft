@@ -11,6 +11,7 @@ use crate::net::items::ItemKey;
 
 pub mod cells;
 pub mod keys;
+pub mod tablet;
 pub mod terminal;
 pub mod view;
 pub mod wire;
@@ -36,6 +37,8 @@ pub struct Store {
     pub stack_module: u8,
     pub items: BTreeMap<ItemKey, u64>,
     pub limits: BTreeMap<ItemKey, Limit>,
+    /// O14: «держать N»: the items the storage orders whenever it holds fewer than N.
+    pub keep: BTreeMap<ItemKey, u64>,
 }
 
 impl Store {
@@ -94,14 +97,17 @@ impl Store {
         }
     }
 
-    /// Takes in everything `other` holds and the limits it has that this one has not: two
-    /// storages joined into one by a new cell (S1).
+    /// Takes in everything `other` holds and the limits and «держать» counts it has that this one
+    /// has not: two storages joined into one by a new cell (S1).
     pub fn absorb(&mut self, other: Store) {
         for (item, n) in other.items {
             self.restore(&item, n);
         }
         for (item, limit) in other.limits {
             self.limits.entry(item).or_insert(limit);
+        }
+        for (item, n) in other.keep {
+            self.keep.entry(item).or_insert(n);
         }
     }
 

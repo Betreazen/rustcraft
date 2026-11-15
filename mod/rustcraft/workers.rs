@@ -499,6 +499,7 @@ fn work(
         Some(Tool::Scoop) => scoop(game, dimension, net, w, cell, t),
         Some(Tool::Shooter) => guard(game, dimension, w, cell, t),
         Some(Tool::Map) => crate::game::rustcraft_explore::map(game, dimension, w, cell, t),
+        Some(Tool::Bore) => bore(game, dimension, net, w, cell, t),
         Some(Tool::Hold) | None => {}
     }
 }
@@ -586,6 +587,92 @@ fn scoop(
     if done > 0 {
         w.spend(t.scoop_ticks * done as f64, t.scoop_energy * done as f64, t);
     }
+}
+
+/// Slice 14: the bore at the end of its rails: the tunnel ahead bored, lava closed, the gap under
+/// the next rail filled, the rail laid; the monorail rescans it and the worker rides on.
+fn bore(game: &mut Game<'_>, dimension: &str, net: &Network, w: &mut Worker, cell: Pos, t: &Tuning) {
+    use rustcraft_rules::worker::bore;
+    let Some(ahead) = w.from.and_then(|f| bore::ahead(f, cell)) else { return };
+    if net.rails.contains_key(&ahead) {
+        return;
+    }
+    if w.hold.count(bore::RAIL) == 0 {
+        w.note = Note::NoRails;
+        return;
+    }
+    use rustcraft_rules::modules::Module as M;
+    let heading = [ahead[0] - cell[0], ahead[2] - cell[2]];
+    let has = |m: M| w.upgrades.iter().flatten().filter(|x| **x == m).count() as u32;
+    let (side, height) = bore::size(has(M::Tunnel), has(M::Radius) > 0);
+    let (lava_module, build_module) = (has(M::Lava) > 0, has(M::Build) > 0);
+    let cells = bore::cells(ahead, heading, side, height);
+    let filler = |w: &Worker| w.hold.find(bore::is_filler);
+    // Lava in the tunnel is closed first: with a block of the hold each, or with nothing at all
+    // (it turns to air) under the lava module.
+    for &p in cells.iter().chain(bore::shell(ahead, heading, side, height).iter()) {
+        if !game.native_block(p).contains("lava") {
+            continue;
+        }
+        if lava_module {
+            if let Some(state) = game.native_default_state("minecraft:cobblestone") {
+                game.native_set_block(dimension, p, state, 3);
+            }
+            continue;
+        }
+        let Some(item) = filler(w) else {
+            w.note = Note::LavaAhead;
+            return;
+        };
+        if let Some(state) = game.native_default_state(&item) {
+            game.native_set_block(dimension, p, state, 3);
+            w.hold.take(&item, 1);
+        }
+    }
+    let mut done = 0usize;
+    for &p in &cells {
+        let block = game.native_block(p);
+        if matches!(block.as_str(), "minecraft:air" | "minecraft:cave_air") {
+            continue;
+        }
+        if take_block(game, dimension, w, p, Some(digging::GRAB_TOOL)) {
+            done += 1;
+            report_break(dimension, w, p, block, Tool::Bore);
+        }
+    }
+    // The build module makes the floor, the walls and the roof good where they are open.
+    if build_module {
+        for p in bore::shell(ahead, heading, side, height) {
+            let b = game.native_block(p);
+            if !matches!(b.as_str(), "minecraft:air" | "minecraft:cave_air" | "minecraft:water") {
+                continue;
+            }
+            let Some(item) = filler(w) else { break };
+            if let Some(state) = game.native_default_state(&item) {
+                game.native_set_block(dimension, p, state, 3);
+                w.hold.take(&item, 1);
+            }
+        }
+    }
+    let under = [ahead[0], ahead[1] - 1, ahead[2]];
+    let ground = game.native_block(under);
+    if matches!(ground.as_str(), "minecraft:air" | "minecraft:cave_air" | "minecraft:water") || ground.contains("lava") {
+        let Some(item) = filler(w) else {
+            w.note = Note::LavaAhead;
+            return;
+        };
+        if let Some(state) = game.native_default_state(&item) {
+            game.native_set_block(dimension, under, state, 3);
+            w.hold.take(&item, 1);
+        }
+    }
+    if let Some(state) = game.native_default_state(bore::RAIL) {
+        game.native_set_block(dimension, ahead, state, 3);
+        w.hold.take(bore::RAIL, 1);
+        crate::game::rustcraft_monorail::touched(dimension, ahead);
+        done += 1;
+    }
+    w.spend(t.grab_ticks * done as f64, t.grab_energy * done as f64, t);
 }
 
 /// Breaks `pos` with its drops into the hold (what does not fit drops there); whether it broke.
@@ -977,6 +1064,7 @@ fn tool_name(tool: Option<Tool>) -> Text {
         Some(Tool::Scoop) => line("rustcraft.worker.scoop", "Digger", &[]),
         Some(Tool::Shooter) => line("rustcraft.worker.guard", "Guard", &[]),
         Some(Tool::Map) => line("rustcraft.worker.map", "Cartographer", &[]),
+        Some(Tool::Bore) => line("rustcraft.worker.bore", "Tunneler", &[]),
         None => line("rustcraft.worker.bare", "Chassis", &[]),
     }
 }
@@ -1006,6 +1094,8 @@ pub(super) fn note_text(note: Note) -> Text {
         Note::Loading => ("rustcraft.worker.loading", "Loading"),
         Note::NoLoadDock => ("rustcraft.worker.no_load", "No load dock on the way"),
         Note::NoCargo => ("rustcraft.worker.no_cargo", "Waiting for cargo"),
+        Note::NoRails => ("rustcraft.worker.no_rails", "Out of rails"),
+        Note::LavaAhead => ("rustcraft.worker.lava", "Lava ahead and no blocks"),
         Note::NothingToDig => (
             "rustcraft.worker.nothing_to_dig",
             "Nothing to dig beside the way",
@@ -1028,7 +1118,7 @@ fn notes(game: &mut Game<'_>, level: &LevelFleet) {
             Some(Tool::Saw) => 1,
             Some(Tool::Reaper) => 2,
             // The worker model has no part for the slice-10 tools: the chassis alone.
-            Some(Tool::Hold | Tool::Grab | Tool::Scoop | Tool::Shooter | Tool::Map) => 0,
+            Some(Tool::Hold | Tool::Grab | Tool::Scoop | Tool::Shooter | Tool::Map | Tool::Bore) => 0,
         });
     }
     if bytes.is_empty() {

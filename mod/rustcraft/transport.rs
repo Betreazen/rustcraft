@@ -100,6 +100,24 @@ impl Transport {
     pub fn is_full(&self, pos: Pos, now: u64) -> bool {
         self.full_until.get(&pos).is_some_and(|&until| until > now)
     }
+
+    /// Slice 15: the blocks behind the joints of every item net that has a joint at `block` (a
+    /// storage's anchor), and the housings of those joints; none when no net reaches it.
+    pub fn around(&self, block: Pos) -> Option<(BTreeSet<Pos>, BTreeSet<Pos>)> {
+        let mut blocks = BTreeSet::new();
+        let mut housings = BTreeSet::new();
+        for net in self
+            .nets
+            .iter()
+            .filter(|n| n.joints.iter().any(|j| j.block == block))
+        {
+            for j in &net.joints {
+                blocks.insert(j.block);
+                housings.insert(j.housing);
+            }
+        }
+        (!blocks.is_empty()).then_some((blocks, housings))
+    }
 }
 
 /// The side of the block that `face` names (`ModContainer.faces` and the item helpers take a

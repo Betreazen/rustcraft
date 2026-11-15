@@ -936,6 +936,13 @@ fn declare_gear(items: &mut Vec<Item>) {
         max_stack_size: Some(1),
         ..Item::default()
     });
+    // Slice 14: the storage tablet (S7, rustcraft_tablet), an item with no battery.
+    items.push(Item {
+        id: "rustcraft:tablet".into(),
+        template: "minecraft:iron_ingot".into(),
+        max_stack_size: Some(1),
+        ..Item::default()
+    });
     for book in [gear::BOOK_CAPACITY, gear::BOOK_THRIFT] {
         items.push(Item {
             id: book.into(),

@@ -130,6 +130,11 @@ SIGN = {
     'output': ['....ee..', '...ee...', '..ee....', '.eeeeee.', '....ee..', '...ee...', '..ee....', '........'],
     'scout': ['.eeee...', 'eg...e..', 'e....e..', 'e....e..', '.eeee...', '....ff..', '.....ff.', '......ff'],
     'area': ['ee....ee', 'e......e', '..gggg..', '..g..g..', '..g..g..', '..gggg..', 'e......e', 'ee....ee'],
+    'pick': ['nmmmmmmn', 'mmeemmmm', 'mmegmmem', 'mmmmmmee', 'memmmmmm', 'meemmgmm', 'mmmmmeem', 'nmmmmmmn'],
+    'tunnel': ['eeeeeeee', 'effffffe', 'efxxxxfe', 'efxxxxfe', 'efxxxxfe', 'efxxxxfe', 'effffffe', 'eeeeeeee'],
+    'height': ['gggggggg', '...ee...', '..eeee..', '.eeeeee.', '...ee...', '...ee...', '...ee...', 'ffffffff'],
+    'lava': ['...ee..x', '..eeeex.', '.eegexe.', '.egexee.', '.eexeee.', '..xeee..', '.x......', 'x.......'],
+    'build': ['eeefeeef', 'eeefeeef', 'ffffffff', 'efeeefee', 'efeeefee', 'ffffffff', 'eeefeeef', 'eeefeeef'],
     'rare': ['..eeee..', '.gwgeef.', 'eggeeeef', '.eeeeef.', '..eeef..', '...ef...', '........', '........'],
     'haste': ['....gee.', '...eee..', '..eee...', '.eeeeee.', '...eee..', '..eee...', '.ee.....', 'e.......'],
 }
@@ -149,6 +154,10 @@ for _name, _sign, _accent, _board in [
     ('module_scout', 'scout', '#e6e8ee', MACHINE_BOARD), ('module_area', 'area', '#7af0ff', MACHINE_BOARD),
     # Slice 13 (icons.js module('mod_rare', 'rare', …)).
     ('module_rare', 'rare', '#5fe6dd', MACHINE_BOARD),
+    ('module_pick', 'pick', '#f5d54a', MACHINE_BOARD), ('module_stratum', 'rare', '#d9c38a', MACHINE_BOARD),
+    # Slice 14 (icons.js module('mod_tunnel', …) and the bore's others).
+    ('module_tunnel', 'tunnel', '#9aa3b2', MACHINE_BOARD), ('module_height', 'height', '#7af0ff', MACHINE_BOARD),
+    ('module_lava', 'lava', '#ff7a2a', MACHINE_BOARD), ('module_build', 'build', '#d08060', MACHINE_BOARD),
 ]:
     ICONS[_name] = (MODULE, _board, _accent, [(4, 3, SIGN[_sign])])
 REAPER = [
@@ -443,8 +452,14 @@ for _t in (2, 3, 4):
     ICONS['eshield_%d' % _t] = (ESHIELD, TIER[_t], '#4fd2e6', [])
 ICONS['rifle'] = (outlined(_rifle), TIER[4], '#7af0ff', [])
 ICONS['jetpack'] = (JETPACK, TIER[4], '#ffe14a', [])
+ICONS['zipline'] = (['', '', '....kkk..kkk....', 'nnnkmmmknkmmmknn', '....kkk..kkk....', '.....k....k.....', '....kaaaaaak....',
+                     '....kbbbbbbk....', '......kaak......', '......kaak......', '...kkkkaakkkk...', '...khhhhhhhhk...', '...kkkkkkkkkk...'],
+                    TIER[2], TIER[2], [])
 ICONS['book_capacity'] = (BOOK, '#7a5ad0', '#ffffff', [(4, 4, STAR)] + dots([(3, 2), (11, 12), (10, 3), (5, 12)], 'l'))
 ICONS['book_thrift'] = (BOOK, '#3558d6', '#b8f6fa', [(4, 4, LEAF)] + dots([(3, 2), (11, 12), (10, 3), (5, 12)], 'l'))
+# Slice 15: the storage terminal's recipe book (icons.js book('mod_recipes', '#3558d6', 'grid', '#e6e8ee')).
+GRID = ['xxxxxxx', 'xexexex', 'xxxxxxx', 'xexexex', 'xxxxxxx', 'xexexex', 'xxxxxxx']
+ICONS['module_recipes'] = (BOOK, '#3558d6', '#e6e8ee', [(4, 4, GRID)])
 # Player modules: the module plate of the third tier with a sign of its own (drawn at 4, 3).
 PM_SIGNS = {
     'pm_dash': ['..e....', '..ee...', 'eeeee..', '..ee...', '..e....', '.......'],
@@ -509,4 +524,13 @@ def _compass_rows():
 
 
 ICONS['tool_map'] = (outlined(_map_drum), '#5ab0e6', '#7af0ff', [])
+# Slice 14: icons.js S.bore.
+ICONS['tool_bore'] = (['', '....kkkkkkkk....', '....kaaaaaak....', '....kbbbbbbk....', '...kkkkkkkkkk...', '...koomnoomnk...', '....kmnoomnk....', '....knoomnok....', '.....koomnk.....', '.....komnok.....', '......kmnk......', '......knok......', '.......kk.......'], TIER[3], TIER[3], [])
 ICONS['scout_compass'] = (_compass_rows(), '#8a919d', '#7af0ff', [])
+# Slice 14: icons.js S.tablet and S.harpoon.
+ICONS['tablet'] = (['', '..kkkkkkkkkkkk..', '.kaaaaaaaaaaaak.', '.kaxxxxxxxxxxak.', '.kaxegxegxegxak.', '.kaxffxffxffxak.',
+                    '.kaxxxxxxxxxxak.', '.kaxegxegxegxak.', '.kaxffxffxffxak.', '.kaxxxxxxxxxxak.', '.kaxeeeeggxxxak.',
+                    '.kaxxxxxxxxxxak.', '.kaaaaacaaaaaak.', '.kbbbbbbbbbbbbk.', '..kkkkkkkkkkkk..'], TIER[4], '#5ad1e6', [])
+ICONS['harpoon'] = (['..........kkkkk.', '...........kook.', '..........kmook.', '.........kmk.kk.', '........kak.....',
+                     '.......kak......', '......kak.......', '.....kak........', '....kak.........', '..kkak..........',
+                     '.khhk...........', 'khhhhk..........', 'khhhhk..........', '.kkkk...........'], TIER[3], TIER[3], [])

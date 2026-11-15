@@ -35,10 +35,22 @@ pub enum Module {
     Area,
     /// Slice 13: the living vein's rare ores ×2 a module.
     Rare,
+    /// Slice 13: the vein grows only the ore its window chooses, at three times the energy.
+    Pick,
+    /// Slice 13 (ST1–ST5): the vein grows suspicious sand or gravel from its sand or gravel.
+    Stratum,
+    /// Slice 14, the bore's (guide `tool_bore`): a wider tunnel, the way kept on its level, lava
+    /// cleared without the hold's blocks, the walls and floor made good.
+    Tunnel,
+    Height,
+    Lava,
+    Build,
+    /// Slice 15 (O1): the storage terminal's recipe book, which takes orders.
+    Recipes,
 }
 
 /// Every module with its item id.
-pub const ITEMS: [(Module, &str); 18] = [
+pub const ITEMS: [(Module, &str); 25] = [
     (Module::Speed, "rustcraft:module_speed"),
     (Module::Economy, "rustcraft:module_economy"),
     (Module::Radius, "rustcraft:module_radius"),
@@ -57,6 +69,13 @@ pub const ITEMS: [(Module, &str); 18] = [
     (Module::Scout, "rustcraft:module_scout"),
     (Module::Area, "rustcraft:module_area"),
     (Module::Rare, "rustcraft:module_rare"),
+    (Module::Pick, "rustcraft:module_pick"),
+    (Module::Stratum, "rustcraft:module_stratum"),
+    (Module::Tunnel, "rustcraft:module_tunnel"),
+    (Module::Height, "rustcraft:module_height"),
+    (Module::Lava, "rustcraft:module_lava"),
+    (Module::Build, "rustcraft:module_build"),
+    (Module::Recipes, "rustcraft:module_recipes"),
 ];
 
 impl Module {
@@ -118,7 +137,14 @@ impl Holder {
             // Guide `upgrades`: battery and speed upgrades, storage and radius modules.
             Holder::Worker => matches!(
                 kind,
-                Module::Battery | Module::WorkSpeed | Module::Storage | Module::Radius
+                Module::Battery
+                    | Module::WorkSpeed
+                    | Module::Storage
+                    | Module::Radius
+                    | Module::Tunnel
+                    | Module::Height
+                    | Module::Lava
+                    | Module::Build
             ),
             // Guide `battery`: capacity and output.
             Holder::Battery => matches!(kind, Module::StoreCapacity | Module::Output),
@@ -139,7 +165,7 @@ impl Holder {
                 matches!(kind, Module::Speed | Module::Economy)
                     || (u.has_radius() && kind == Module::Radius)
                     || (u == crate::utility::Util::Disintegrator && kind == Module::Output)
-                    || (u == crate::utility::Util::Vein && kind == Module::Rare)
+                    || (u == crate::utility::Util::Vein && matches!(kind, Module::Rare | Module::Pick | Module::Stratum))
             }
         }
     }

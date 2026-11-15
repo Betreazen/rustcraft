@@ -1,17 +1,10 @@
 {
-  "type": "minecraft:crafting_shaped",
+  "type": "minecraft:crafting_transmute",
   "category": "equipment",
-  "pattern": [
-    " a ",
-    "aba",
-    " a "
-  ],
-  "key": {
-    "a": "rustcraft:crystallite",
-    "b": "rustcraft:blade_2"
-  },
+  "input": "rustcraft:blade_2",
+  "material": "rustcraft:crystallite",
+  "material_count": 4,
   "result": {
-    "id": "rustcraft:blade_3",
-    "count": 1
+    "id": "rustcraft:blade_3"
   }
 }

@@ -13,6 +13,12 @@
 // 12133-12146), and the cell takes that stack's item, the stack staying where it is; a press with
 // an empty cursor clears the cell. The window sees the pattern through its data slots, items as
 // numbers (rustcraft_content::item_number).
+//
+// Slice 15 (O4): an order gives a free autocrafter a temporary page (rustcraft_orders), kept in the
+// server's memory, not in the block entity: it goes after the ordinary pages, is crafted before
+// them (rustcraft_rules::machines::crafter::Crafter::pick) and disappears once its crafts are done.
+// The order puts its ingredients straight into the buffer from the storage, so the net's own
+// filling (`buffer_takes`) does not know them.
 use crate::game::{
     Game,
     rustcraft_content::{self as content, item_number},
@@ -44,6 +50,13 @@ const PROGRESS_KEY: &str = "progress";
 
 /// A page's pattern: an item a cell, row by row.
 pub type Pattern = [Option<String>; CELLS];
+
+/// O4: an order's temporary page: its pattern and the crafts it still owes.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TempPage {
+    pub pattern: Pattern,
+    pub owed: u32,
+}
 
 fn read_patterns(nbt: &Compound) -> Vec<Pattern> {
     let Some(Tag::List(pages)) = nbt.get(&JavaString::from(PAGES_KEY)) else {
@@ -110,6 +123,17 @@ fn resolve<'r>(
         .or_insert_with(|| matched(game, pattern))
 }
 
+/// What `pattern` makes on the crafting table: its result's item and count; none for nothing.
+pub(super) fn makes(
+    game: &Game<'_>,
+    recipes: &mut MachineRecipes,
+    pattern: &Pattern,
+) -> Option<(String, u32)> {
+    resolve(game, recipes, pattern)
+        .as_ref()
+        .map(|(_, r)| (r.item.to_string(), r.count))
+}
+
 fn matched(game: &Game<'_>, pattern: &Pattern) -> Option<(CraftRecipe, ItemStack)> {
     if pattern.iter().all(Option::is_none) {
         return None;
@@ -152,6 +176,8 @@ pub(super) struct Held {
     shown: usize,
     /// Each page's result stack, components and all.
     results: Vec<Option<ItemStack>>,
+    /// The temporary page's result stack.
+    temp_result: Option<ItemStack>,
     /// The buffer's slots as the rules see them.
     buffer: Vec<Slot>,
     /// E a second it asks for this tick, and in its mode when it has work.
@@ -171,6 +197,7 @@ pub(super) fn read(
     game: &Game<'_>,
     pos: Pos,
     recipes: &mut MachineRecipes,
+    temp: Option<&TempPage>,
     tuning: &Tuning,
 ) -> Option<Held> {
     let entity = game.native_mod_block_entity(pos)?;
@@ -187,6 +214,17 @@ pub(super) fn read(
             order: None,
         });
     }
+    // O4: the order's page after the ordinary ones.
+    let mut temp_result = None;
+    if let Some(t) = temp.filter(|t| t.owed > 0) {
+        let resolved = resolve(game, recipes, &t.pattern).clone();
+        temp_result = resolved.as_ref().map(|(_, r)| r.clone());
+        pages.push(Page {
+            recipe: resolved.map(|(r, _)| r),
+            order: Some(t.owed),
+        });
+    }
+    let page_count = pages.len();
     let buffer: Vec<Slot> = content::CRAFTER_BUFFER
         .map(|i| slot_of(&entity, i))
         .collect();
@@ -200,7 +238,7 @@ pub(super) fn read(
     let nbt = &entity.nbt;
     let current = read_int(nbt, CURRENT_KEY)
         .and_then(|c| usize::try_from(c).ok())
-        .filter(|&c| c < allowed);
+        .filter(|&c| c < page_count);
     let crafter = Crafter {
         pages,
         buffer: stock,
@@ -223,6 +261,7 @@ pub(super) fn read(
         crafter,
         patterns,
         results,
+        temp_result,
         buffer,
         data: entity.data.clone(),
     })
@@ -235,6 +274,7 @@ pub(super) fn run(
     pos: Pos,
     held: Held,
     share: f64,
+    temp: Option<&mut TempPage>,
     tuning: &Tuning,
 ) -> Option<Shown> {
     let Held {
@@ -242,6 +282,7 @@ pub(super) fn run(
         patterns,
         shown: page,
         results,
+        temp_result,
         mut buffer,
         request,
         nominal,
@@ -249,6 +290,10 @@ pub(super) fn run(
     } = held;
     let before = crafter.clone();
     let state = crafter.tick(&spec(tuning), share);
+    // O4: the crafts the order's page still owes; none once it is gone.
+    if let Some(t) = temp {
+        t.owed = crafter.pages.iter().find_map(|p| p.order).unwrap_or(0);
+    }
     let shown = Shown::of(state, share);
     let data = window::encode(&panel(
         game,
@@ -270,7 +315,7 @@ pub(super) fn run(
             slots::take_from(&mut buffer, item, used);
         }
     }
-    let made: Vec<ItemStack> = results.into_iter().flatten().collect();
+    let made: Vec<ItemStack> = results.into_iter().chain([temp_result]).flatten().collect();
     game.native_with_mod_block_entity(pos, move |entity| {
         machines::write_slots(
             entity,
@@ -329,7 +374,7 @@ fn panel(
         shown: Some(shown),
         page,
         pages: results.len(),
-        crafting: crafter.current,
+        crafting: crafter.current.filter(|&c| c < results.len()),
         cells: std::array::from_fn(|i| {
             patterns
                 .get(page)

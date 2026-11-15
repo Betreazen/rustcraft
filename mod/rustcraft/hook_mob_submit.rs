@@ -5,5 +5,6 @@ fn rustcraft_mob_submit(
     drawn: &mut bool,
 ) {
     crate::game::rustcraft_station::draw_capsule(game, mob, draw, drawn);
+    crate::game::rustcraft_station::draw_rope(game, mob, draw, drawn);
     crate::game::rustcraft_station::draw_worker(game, mob, draw, drawn);
 }

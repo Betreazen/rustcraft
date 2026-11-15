@@ -19,6 +19,14 @@
 //   line, stopped by a solid block; 16 damage of the arrow's type from the player, so the base
 //   game and Path-of-craft-tree count it as a bow's; 400 E, a shot every 1.25 s.
 // - Chargers: `battery` and `charge` give the charger and the plate a piece's battery.
+// - Slice 14, the harpoon (G5): a right click hooks the first solid block looked at within 20
+//   blocks and pulls the player there at 14 blocks a second on the zipline's invisible seat
+//   (rustcraft_monorail::zipline, method b2): onto the block when the space over it is free, else
+//   to the cell in front of the face it hit; 100 E a shot from its 4 000 E battery.
+// - W6: a blade or shield of the next tier is made from the previous one by a transmute recipe
+//   (`minecraft:crafting_transmute`, horizon-client/src/crafting.rs `Template::over`: the input's
+//   component patch goes onto the result), so the new piece keeps the old one's number, and with
+//   it its charge and its books.
 use crate::game::{
     Game,
     native_player_state::NativeEffect,
@@ -79,7 +87,15 @@ struct State {
     /// Open gear windows: the player's window id and the piece's number and kind.
     open: HashMap<u128, (i32, u64, Gear)>,
     opening: Vec<(u128, u64, Gear)>,
+    /// The dash: each player's last input flags and the tick forward last went down.
+    input: HashMap<u128, (i32, u64)>,
+    /// Players holding up a charged energy shield, by entity id: the shield's number.
+    blocking: HashMap<i32, u64>,
 }
+
+/// The client's side of the dash: a push the server asked for, applied at the window's next tick.
+static PUSH: LazyLock<Mutex<Option<[f32; 3]>>> = LazyLock::new(Mutex::default);
+const DASH_CHANNEL: &str = "rustcraft:dash";
 
 static STATE: LazyLock<Mutex<State>> = LazyLock::new(Mutex::default);
 
@@ -161,6 +177,14 @@ pub(super) fn charge(stack: &ItemStack, charge_now: f64) {
     s.dirty = true;
 }
 
+/// A new zipline comes with its 16 charges; batteries come empty.
+fn needs_full(game: &mut Game<'_>, slot: i32) -> f64 {
+    game.native_carried_stack(slot)
+        .and_then(|s| Gear::of(&s.item))
+        .filter(|g| g.kind == Kind::Zipline)
+        .map_or(0.0, |_| rules::ZIP_CHARGES)
+}
+
 // ---- Hooks ----
 
 /// `native_inventory_tick`: a gear piece without a number gets one.
@@ -176,7 +200,8 @@ pub(super) fn on_inventory_tick(game: &mut Game<'_>, slot: i32) {
         load(&mut s, game);
         s.store.next += 1;
         let id = s.store.next;
-        s.store.held.insert(id, Held::default());
+        let full = needs_full(game, slot);
+        s.store.held.insert(id, Held { charge: full, ..Held::default() });
         s.dirty = true;
         save(&mut s);
         id
@@ -205,6 +230,117 @@ pub(super) fn on_use_item(game: &mut Game<'_>, stack: &ItemStack, claimed: &mut 
         *claimed = true;
         shoot(game, &player, stack);
     }
+    if g.kind == Kind::Zipline {
+        *claimed = true;
+        zip(game, &player, stack);
+    }
+    if g.kind == Kind::Harpoon {
+        *claimed = true;
+        harpoon(game, &player, stack);
+    }
+}
+
+/// Blocks a rope, a harpoon or a shot passes through.
+fn see_through(block: &str) -> bool {
+    matches!(
+        block,
+        "minecraft:air" | "minecraft:cave_air" | "minecraft:water" | "minecraft:short_grass" | "minecraft:tall_grass"
+    )
+}
+
+fn is_air(game: &Game<'_>, pos: [i32; 3]) -> bool {
+    matches!(game.native_block(pos).as_str(), "minecraft:air" | "minecraft:cave_air")
+}
+
+/// G5: the harpoon hooks the first solid block looked at within 20 blocks and pulls the player
+/// onto it when there is room over it (two blocks of air), else to the cell in front of the face
+/// it hit; 100 E a shot (less with Thrift), given back if the player rides already.
+fn harpoon(game: &mut Game<'_>, player: &horizon_client::mod_api::NativeServerPlayer, stack: &ItemStack) {
+    let Some(id) = id_of(stack) else { return };
+    let eye = [player.position[0], player.position[1] + f64::from(player.eye_height), player.position[2]];
+    let dir = ray::look_direction(player.yaw, player.pitch);
+    let path = ray::blocks_along(eye, dir, rules::HARPOON_RANGE);
+    let Some(i) = path.iter().skip(1).position(|p| !see_through(game.native_block(*p).as_str())).map(|i| i + 1) else {
+        tell(game, player.uuid, line("rustcraft.harpoon.far", "Nothing to hook within 20 blocks", &[]));
+        return;
+    };
+    let hit = path[i];
+    let top = [hit[0], hit[1] + 1, hit[2]];
+    let top_free = is_air(game, top) && is_air(game, [hit[0], hit[1] + 2, hit[2]]);
+    // The cell the ray came from; none when that is the player's own.
+    let before = (i >= 2).then(|| path[i - 1]);
+    let before_free = before.is_some_and(|b| see_through(game.native_block(b).as_str()));
+    let Some(anchor) = rules::harpoon_anchor(hit, before, top_free, before_free) else {
+        tell(game, player.uuid, line("rustcraft.harpoon.no_room", "No room to pull you there", &[]));
+        return;
+    };
+    let cost = {
+        let mut s = state();
+        let h = s.store.held.entry(id).or_default();
+        let cost = rules::cost(rules::HARPOON_SHOT, h);
+        if !rules::spend(h, cost) {
+            drop(s);
+            tell(game, player.uuid, line("rustcraft.gear.empty", "No charge: put it on a charger", &[]));
+            return;
+        }
+        s.dirty = true;
+        cost
+    };
+    let to = [f64::from(anchor[0]) + 0.5, f64::from(anchor[1]), f64::from(anchor[2]) + 0.5];
+    let from = player.position;
+    let entity = player.entity_id as u32;
+    let rides = crate::game::rustcraft_monorail::zipline(game, player.uuid, entity, &player.dimension, from, to, anchor, rules::HARPOON_SPEED);
+    if !rides {
+        state().store.held.entry(id).or_default().charge += cost;
+    }
+}
+
+/// 12.5 Z1–Z3: a string in the other hand gives a charge back; otherwise the rope goes to the top
+/// of the block looked at within 32 blocks and the player rides it there.
+fn zip(game: &mut Game<'_>, player: &horizon_client::mod_api::NativeServerPlayer, stack: &ItemStack) {
+    let Some(id) = id_of(stack) else { return };
+    let off = game.native_player_equipment(player.uuid, EquipmentSlot::OffHand);
+    if off.is_some_and(|s| &*s.item == "minecraft:string") {
+        let full = state().store.held.get(&id).is_some_and(|h| h.charge >= rules::ZIP_CHARGES);
+        if !full && game.native_take_items("minecraft:string", 1) > 0 {
+            let mut s = state();
+            let h = s.store.held.entry(id).or_default();
+            h.charge = (h.charge + 1.0).min(rules::ZIP_CHARGES);
+            s.dirty = true;
+        }
+        return;
+    }
+    let eye = [player.position[0], player.position[1] + f64::from(player.eye_height), player.position[2]];
+    let dir = ray::look_direction(player.yaw, player.pitch);
+    let Some(block) = ray::blocks_along(eye, dir, rules::ZIP_RANGE)
+        .into_iter()
+        .skip(1)
+        .find(|p| !see_through(game.native_block(*p).as_str()))
+    else {
+        tell(game, player.uuid, line("rustcraft.zipline.far", "Nothing to hook within 32 blocks", &[]));
+        return;
+    };
+    let anchor = [block[0], block[1] + 1, block[2]];
+    if !is_air(game, anchor) {
+        tell(game, player.uuid, line("rustcraft.zipline.no_room", "No room on top of that block", &[]));
+        return;
+    }
+    {
+        let mut s = state();
+        let h = s.store.held.entry(id).or_default();
+        if !rules::spend(h, 1.0) {
+            drop(s);
+            tell(game, player.uuid, line("rustcraft.zipline.empty", "No charges: a string gives one back", &[]));
+            return;
+        }
+        s.dirty = true;
+    }
+    let to = [f64::from(anchor[0]) + 0.5, f64::from(anchor[1]), f64::from(anchor[2]) + 0.5];
+    let from = player.position;
+    if !crate::game::rustcraft_monorail::zipline(game, player.uuid, player.entity_id as u32, &player.dimension, from, to, anchor, rules::ZIP_SPEED) {
+        let mut s = state();
+        s.store.held.entry(id).or_default().charge += 1.0;
+    }
 }
 
 fn shoot(game: &mut Game<'_>, player: &horizon_client::mod_api::NativeServerPlayer, stack: &ItemStack) {
@@ -232,10 +368,7 @@ fn shoot(game: &mut Game<'_>, player: &horizon_client::mod_api::NativeServerPlay
     let wall = ray::blocks_along(eye, dir, rules::RIFLE_RANGE)
         .into_iter()
         .skip(1)
-        .find(|p| {
-            let b = game.native_block(*p);
-            !matches!(b.as_str(), "minecraft:air" | "minecraft:cave_air" | "minecraft:water" | "minecraft:short_grass" | "minecraft:tall_grass")
-        })
+        .find(|p| !see_through(game.native_block(*p).as_str()))
         .map_or(f64::INFINITY, |p| {
             let c = p.map(|v| f64::from(v) + 0.5);
             ((c[0] - eye[0]).powi(2) + (c[1] - eye[1]).powi(2) + (c[2] - eye[2]).powi(2)).sqrt() - 0.5
@@ -307,6 +440,94 @@ pub(super) fn on_logout(uuid: u128) {
     s.flying.remove(&uuid);
 }
 
+// ---- The dash ----
+
+/// `native_player_input`: two presses of forward with the dash module in the leggings throw the
+/// player forward; the push is the client's own (`native_push_player`), so the server sends it.
+pub(super) fn on_player_input(game: &mut Game<'_>, player: u128, flags: i32) {
+    let dash = {
+        let mut s = state();
+        let now = s.now;
+        let (before, last) = s.input.get(&player).copied().unwrap_or((0, 0));
+        let pressed = rules::forward_pressed(before, flags);
+        let twice = pressed && last > 0 && now.saturating_sub(last) <= rules::DASH_WINDOW_TICKS;
+        s.input.insert(player, (flags, if pressed && !twice { now } else if twice { 0 } else { last }));
+        twice
+    };
+    if !dash {
+        return;
+    }
+    let Some(legs) = game.native_player_equipment(player, EquipmentSlot::Legs) else { return };
+    let paid = {
+        let mut s = state();
+        load(&mut s, game);
+        match held_of(&s, &legs) {
+            Some((id, Gear { kind: Kind::Armor(Piece::Leggings), .. }, h)) if h.has(Module::Dash) => {
+                let cost = rules::cost(rules::DASH_COST, &h);
+                let e = s.store.held.entry(id).or_default();
+                let ok = rules::spend(e, cost);
+                s.dirty |= ok;
+                ok
+            }
+            _ => false,
+        }
+    };
+    if !paid {
+        return;
+    }
+    let Some(p) = game.native_server_players().into_iter().find(|p| p.uuid == player) else { return };
+    let push = rules::dash_push(p.yaw);
+    let bytes: Vec<u8> = push.iter().flat_map(|v| v.to_le_bytes()).collect();
+    if let Err(e) = game.native_net_send_to_player(player, DASH_CHANNEL, &bytes) {
+        log::warn!("rustcraft: the dash was not sent: {e}");
+    }
+}
+
+/// `native_net_from_server` on a client: the server's dash.
+pub(super) fn on_net(channel: &str, data: &[u8]) {
+    if channel != DASH_CHANNEL || data.len() != 12 {
+        return;
+    }
+    let f = |i: usize| f32::from_le_bytes([data[i], data[i + 1], data[i + 2], data[i + 3]]);
+    *PUSH.lock().unwrap_or_else(PoisonError::into_inner) = Some([f(0), f(4), f(8)]);
+}
+
+/// The window's tick: a dash waiting is pushed.
+pub(super) fn client_tick(game: &mut Game<'_>) {
+    let push = PUSH.lock().unwrap_or_else(PoisonError::into_inner).take();
+    if let Some(p) = push {
+        game.native_push_player(p);
+    }
+}
+
+// ---- The shield ----
+
+/// `native_living_entity_use_item_start`: an energy shield without a block's charge does not go
+/// up (W2); a charged one is noted as held up.
+pub(super) fn on_use_start(stack: &ItemStack, entity: Option<i32>, canceled: &mut bool) {
+    let Some(g) = Gear::of(&stack.item) else { return };
+    if g.kind != Kind::Shield {
+        return;
+    }
+    let Some(id) = id_of(stack) else { return };
+    let mut s = state();
+    let charge = s.store.held.get(&id).map_or(0.0, |h| h.charge);
+    if charge < rules::SHIELD_PER_DAMAGE {
+        *canceled = true;
+        return;
+    }
+    if let Some(e) = entity {
+        s.blocking.insert(e, id);
+    }
+}
+
+/// `native_living_entity_use_item_stop` and the end of a use: the shield goes down.
+pub(super) fn on_use_stop(entity: Option<i32>) {
+    if let Some(e) = entity {
+        state().blocking.remove(&e);
+    }
+}
+
 // ---- The damage hook ----
 
 /// `native_living_incoming_damage`: the blade, the shock absorber and the damper.
@@ -327,6 +548,14 @@ pub(super) fn on_incoming_damage(entity: i32, kind: &str, damage_type: &str, cau
     }
     if kind != "minecraft:player" {
         return;
+    }
+    // W8: a hit from someone on a held-up energy shield costs 10 E a point, at least 10 E.
+    if causing != 0
+        && let Some(&id) = s.blocking.get(&entity)
+    {
+        let cost = (f64::from(*amount) * rules::SHIELD_PER_DAMAGE).max(rules::SHIELD_PER_DAMAGE);
+        let cost = s.store.held.get(&id).map_or(cost, |h| rules::cost(cost, h));
+        s.spent.push((id, cost));
     }
     let view = s.views.get(&entity).copied().unwrap_or_default();
     if damage_type == "minecraft:fall"

@@ -132,7 +132,7 @@ impl Util {
             Util::Projector => s("rustcraft:projector", 400.0, 16.0, 3, 2),
             Util::Builder => s("rustcraft:builder", 400.0, 32.0, 0, 2),
             Util::PortalDock => s("rustcraft:portal_dock", 400.0, 32.0, 0, 2),
-            Util::Vein => s("rustcraft:vein", 4000.0, 64.0, 0, 2),
+            Util::Vein => s("rustcraft:vein", 8000.0, 128.0, vein::PICKS.len(), 2),
         }
     }
 
