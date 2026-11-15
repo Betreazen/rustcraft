@@ -15,11 +15,13 @@
 use crate::game::{
     Game, rustcraft_backpack as backpack, rustcraft_base as base,
     rustcraft_content::{self as content, Kind, Machine},
-    rustcraft_fluids as fluids, rustcraft_machines as machines, rustcraft_mining as mining,
+    rustcraft_fluids as fluids, rustcraft_handbook as handbook, rustcraft_machines as machines,
+    rustcraft_mining as mining,
     rustcraft_mixer as mixer, rustcraft_monorail as monorail, rustcraft_orders as orders,
     rustcraft_power as power, rustcraft_selftest as selftest, rustcraft_storage as storage,
     rustcraft_tablet as tablet,
     rustcraft_transport as transport, rustcraft_window as window, rustcraft_workers as workers,
+    rustcraft_zipline as zipline,
 };
 use horizon_client::{
     containers::ModBlockEntity, items::ItemStack, mod_api::NativeServerPlayer, text::Text,
@@ -251,6 +253,7 @@ pub(super) fn on_level_tick(game: &mut Game<'_>, dimension: &str) {
     }
     storage::tick(game, dimension);
     monorail::tick(game, dimension, &TUNING);
+    zipline::tick(game, dimension);
     workers::tick(game, dimension, &level, &TUNING);
     base::tick(game, dimension, &level, &TUNING);
     tablet::tick(game, dimension, &level);
@@ -264,6 +267,8 @@ pub(super) fn on_level_tick(game: &mut Game<'_>, dimension: &str) {
     }
     if second {
         show_diagnoses(game, dimension);
+        // H2: the first alloy a player carries brings them the engineer's handbook.
+        handbook::tick(game, dimension);
     }
     // The self-test's scenarios, after the mod's own work of this tick (rustcraft_selftest).
     backpack::tick(game);
@@ -343,6 +348,7 @@ pub(super) fn on_right_click_block(
     face: [i32; 3],
     canceled: &mut bool,
 ) {
+    zipline::on_right_click_block(game, pos, canceled);
     base::on_right_click_block(game, pos, canceled);
     transport::on_right_click_block(game, pos, face, canceled);
 }
@@ -408,6 +414,8 @@ pub(super) fn on_place_block(game: &mut Game<'_>, stack: &ItemStack, pos: [i32; 
         mark_all_stale();
         return;
     };
+    // ST5: a block placed where the vein grew one is no grown block.
+    crate::game::rustcraft_utility::forget_grown(game, &player.dimension, pos);
     if is_ours(&stack.item) || touches_magistral(&player.dimension, pos) {
         mark_stale(&player.dimension);
     }
@@ -426,6 +434,11 @@ pub(super) fn on_destroy_block(game: &mut Game<'_>, pos: [i32; 3]) {
         return;
     };
     base::on_destroy_block(game, pos, &player.dimension, player.game_mode == CREATIVE);
+    crate::game::rustcraft_utility::forget_grown(game, &player.dimension, pos);
+    if block == rustcraft_rules::traversal::ANCHOR {
+        zipline::on_anchor_broken(game, &player.dimension, pos);
+        return;
+    }
     if !is_ours(&block) {
         if touches_magistral(&player.dimension, pos) {
             mark_stale(&player.dimension);
@@ -471,10 +484,10 @@ pub(super) fn on_chunk_changed(dimension: &str) {
     mark_stale(dimension);
 }
 
-/// `native_level_unload`: forget the level.
+/// `native_level_unload`: forget the level; the orders keep its temporary pages for its jobs.
 pub(super) fn on_level_unload(dimension: &str) {
-    server().levels.remove(dimension);
-    orders::on_level_unload(dimension);
+    let gone = server().levels.remove(dimension);
+    orders::on_level_unload(dimension, gone.map(|l| l.temp_pages).unwrap_or_default());
     monorail::on_level_unload(dimension);
     workers::on_level_unload(dimension);
 }
@@ -499,6 +512,7 @@ fn rescan(game: &mut Game<'_>, dimension: &str, level: &mut LevelNet) {
         .map(|(p, _)| *p)
         .collect();
     monorail::rescan(game, dimension, &found.rails, &stations);
+    zipline::rescan(game, dimension, &found.anchors);
     level.topology = topology::analyse(&level.layout, &TUNING);
     level.recipes = machines::load_recipes(game);
     orders::forget_book();
@@ -536,6 +550,8 @@ struct Found {
     terminals: BTreeSet<Pos>,
     tanks: BTreeSet<Pos>,
     rails: Vec<Pos>,
+    /// The zipline's anchors.
+    anchors: Vec<Pos>,
 }
 
 /// The magistral and the machines of the level in place, from its block entities: each
@@ -546,6 +562,7 @@ fn scan(game: &Game<'_>, dimension: &str, level: &mut LevelNet) -> Found {
         terminals: BTreeSet::new(),
         tanks: BTreeSet::new(),
         rails: Vec::new(),
+        anchors: Vec::new(),
     };
     let mut layout = Layout::default();
     level.crystals.clear();
@@ -576,6 +593,8 @@ fn scan(game: &Game<'_>, dimension: &str, level: &mut LevelNet) -> Found {
             found.tanks.insert(pos);
         } else if kind == content::MONORAIL {
             found.rails.push(pos);
+        } else if kind == rustcraft_rules::traversal::ANCHOR {
+            found.anchors.push(pos);
         }
     }
     level.joints = window::all_joints(game, layout.housings.keys().copied());

@@ -497,6 +497,40 @@ pub fn declare_blocks(blocks: &mut Vec<Block>) {
     declare_slice7(blocks);
     declare_storage_and_tanks(blocks);
     declare_monorail(blocks);
+    declare_zip_anchor(blocks);
+}
+
+/// The zipline's anchor (12.5 Z2, rustcraft_zipline): a stake with a ring a rope is tied to. It
+/// copies `minecraft:iron_block` (one state), its outline is the stake's and players walk through
+/// it, since a rider arrives standing in its cell. Its block entity keeps its rope.
+fn declare_zip_anchor(blocks: &mut Vec<Block>) {
+    use rustcraft_rules::traversal::{ANCHOR, ANCHOR_TOP};
+    const SIDE: f64 = 5.0 / 16.0;
+    blocks.push(Block {
+        id: ANCHOR.into(),
+        template: "minecraft:iron_block".into(),
+        properties: BlockProperties {
+            hardness: Some(0.5),
+            explosion_resistance: Some(1.0),
+            sounds: Some("minecraft:copper_block".into()),
+            occludes: Some(false),
+            ..BlockProperties::default()
+        },
+        shapes: Some(BlockShapes {
+            property: String::new(),
+            properties: Vec::new(),
+            values: BTreeMap::new(),
+            default: Some(vec![[SIDE, 0.0, SIDE, 1.0 - SIDE, ANCHOR_TOP, 1.0 - SIDE]]),
+        }),
+        collision_shapes: Some(BlockShapes {
+            property: String::new(),
+            properties: Vec::new(),
+            values: BTreeMap::new(),
+            default: Some(Vec::new()),
+        }),
+        item: true,
+        ..Block::default()
+    });
 }
 
 /// The monorail: it copies `minecraft:iron_block` (one state) and declares its tier, its mount
@@ -799,7 +833,7 @@ pub fn declare_items(items: &mut Vec<Item>) {
 /// (SRC/crates/horizon-client/src/game/native_hooks.rs:3292-3306); a mod block's entity is made
 /// by this hook, not by its template's (`new_block_entity`, native_hooks.rs:11641-11665).
 pub fn block_entity(block: &str, entity: &mut Option<(String, Compound)>) {
-    let ours = [HOUSING, NODE, CRYSTAL, CELL, TERMINAL, TANK, MONORAIL].contains(&block)
+    let ours = [HOUSING, NODE, CRYSTAL, CELL, TERMINAL, TANK, MONORAIL, rustcraft_rules::traversal::ANCHOR].contains(&block)
         || Machine::of(block).is_some();
     if entity.is_none() && ours {
         *entity = Some((block.to_owned(), Compound::new()));
@@ -939,6 +973,13 @@ fn declare_gear(items: &mut Vec<Item>) {
     // Slice 14: the storage tablet (S7, rustcraft_tablet), an item with no battery.
     items.push(Item {
         id: "rustcraft:tablet".into(),
+        template: "minecraft:iron_ingot".into(),
+        max_stack_size: Some(1),
+        ..Item::default()
+    });
+    // The engineer's handbook (H2, rustcraft_handbook): a right click opens its window.
+    items.push(Item {
+        id: rustcraft_rules::handbook::ITEM.into(),
         template: "minecraft:iron_ingot".into(),
         max_stack_size: Some(1),
         ..Item::default()

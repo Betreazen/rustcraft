@@ -306,6 +306,9 @@ pub enum CapsuleNote {
     /// Slice 14: the mob `seat` carries a zipline's rider (feet `rise` over it) to `to`: the client
     /// draws the rope to it in place of the seat.
     Rope { seat: u32, rise: f64, to: [f64; 3] },
+    /// The mob `seat` carries a rider along a zipline's rope, which its anchors draw: the client
+    /// draws nothing in place of the seat.
+    Seat { seat: u32 },
 }
 
 /// Points one message carries; a way with more keeps every n-th and its last.
@@ -317,6 +320,10 @@ pub fn encode_capsule(note: &CapsuleNote) -> Vec<u8> {
     match note {
         CapsuleNote::Gone { seat } => {
             w.u8(0);
+            w.u32(*seat);
+        }
+        CapsuleNote::Seat { seat } => {
+            w.u8(3);
             w.u32(*seat);
         }
         CapsuleNote::Rope { seat, rise, to } => {
@@ -357,6 +364,7 @@ pub fn decode_capsule(bytes: &[u8]) -> Option<CapsuleNote> {
     }
     match r.u8()? {
         0 => Some(CapsuleNote::Gone { seat: r.u32()? }),
+        3 => Some(CapsuleNote::Seat { seat: r.u32()? }),
         2 => {
             let seat = r.u32()?;
             let rise = r.f32()?;
@@ -478,6 +486,8 @@ mod tests {
         assert_eq!(decode_capsule(&encode_capsule(&note)), Some(note));
         let rope = CapsuleNote::Rope { seat: 9, rise: 0.5, to: [1.5, 64.0, -2.5] };
         assert_eq!(decode_capsule(&encode_capsule(&rope)), Some(rope));
+        let seat = CapsuleNote::Seat { seat: 11 };
+        assert_eq!(decode_capsule(&encode_capsule(&seat)), Some(seat));
         let gone = CapsuleNote::Gone { seat: 3 };
         assert_eq!(decode_capsule(&encode_capsule(&gone)), Some(gone));
     }

@@ -45,7 +45,7 @@
 # prototype hooked it.
 [mod]
 id = "rustcraft"
-version = "0.15.0"
+version = "0.16.0"
 
 # The commit the traversal prototype and path_of_craft_tree build on; every function used here
 # was checked in its source.
@@ -268,6 +268,23 @@ id = "tablet"
 file = "crates/horizon-client/src/game.rs"
 name = "rustcraft_tablet"
 source = "tablet.rs"
+
+# The zipline's saved ropes and their anchors, the aim's outline, and the harpoon on mobs
+# (rustcraft_rules::traversal; 12.5 Z1-Z3, G5).
+[[module]]
+id = "zipline"
+file = "crates/horizon-client/src/game.rs"
+name = "rustcraft_zipline"
+source = "zipline.rs"
+
+# The engineer's handbook (rustcraft_rules::handbook, spec H2, H5, H6): given once with the first
+# alloy, its window the mod's own screen on the client (API 111), drawn and clicked through the
+# screen hooks below.
+[[module]]
+id = "handbook"
+file = "crates/horizon-client/src/game.rs"
+name = "rustcraft_handbook"
+source = "handbook.rs"
 
 # Slice 12: the blocks' moving parts (rustcraft_rules::anim): their standalone models, the state the
 # server sends clients, and the parts drawn each frame from the block entity.
@@ -942,6 +959,64 @@ hook_version = 1
 kind = "HEAD"
 helper = "hook_block_entity_bounds.rs"
 bindings = [
+  { name = "pos", ty = "[i32; 3]", value = "pos" },
   { name = "block", ty = "&str", value = "block" },
+  { name = "entity", ty = "&horizon_client::containers::ModBlockEntity", value = "entity" },
   { name = "bounds", ty = "&mut [f32; 6]", value = "&mut *bounds" },
+]
+
+# Z1: the block the zipline in hand would hook, outlined (game/native_hooks.rs:2394-2412, API 86;
+# pushes from a bundle share one budget, game/native_visuals.rs:51-70; a rim needs a block that
+# is not air within 32 blocks, game/native_visuals.rs:80-100 and 225-229).
+[[injection]]
+id = "visuals"
+hook = "visuals"
+hook_version = 1
+kind = "HEAD"
+helper = "hook_visuals.rs"
+bindings = [
+  { name = "game", ty = "&crate::game::Game<'_>", value = "&*self" },
+  { name = "rims", ty = "&mut Vec<horizon_client::mod_api::NativeBlockRim>", value = "&mut *rims" },
+]
+
+# The handbook's window (rustcraft_handbook): the mod's own screen is drawn over the world after
+# the screen draws itself (API 78, native_hooks.rs:3779-3803) and takes the mouse's presses and
+# the wheel before the screen does (API 80 and 93, native_hooks.rs:3804-3838 and 3893-3933);
+# their callers ask no trait mod (game/screen_backgrounds.rs:12-20, game.rs:15326-15345 and
+# 15489-15500).
+[[injection]]
+id = "screen_render_post"
+hook = "screen_render_post"
+hook_version = 1
+kind = "HEAD"
+helper = "hook_screen_render_post.rs"
+bindings = [
+  { name = "game", ty = "&crate::game::Game<'_>", value = "&*self" },
+  { name = "batch", ty = "&mut horizon_client::hud::HudBatch", value = "&mut *batch" },
+  { name = "screen", ty = "&horizon_client::mod_api::NativeScreenView<'_>", value = "screen" },
+]
+
+[[injection]]
+id = "screen_mouse"
+hook = "screen_mouse_button_pressed_pre"
+hook_version = 1
+kind = "HEAD"
+helper = "hook_screen_mouse.rs"
+bindings = [
+  { name = "game", ty = "&crate::game::Game<'_>", value = "&*self" },
+  { name = "screen", ty = "&horizon_client::mod_api::NativeScreenView<'_>", value = "screen" },
+  { name = "button", ty = "i32", value = "button" },
+  { name = "canceled", ty = "&mut bool", value = "&mut *canceled" },
+]
+
+[[injection]]
+id = "screen_scroll"
+hook = "screen_mouse_scrolled_pre"
+hook_version = 1
+kind = "HEAD"
+helper = "hook_screen_scroll.rs"
+bindings = [
+  { name = "game", ty = "&crate::game::Game<'_>", value = "&*self" },
+  { name = "scroll", ty = "[f64; 2]", value = "scroll" },
+  { name = "canceled", ty = "&mut bool", value = "&mut *canceled" },
 ]

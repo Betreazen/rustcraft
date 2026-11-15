@@ -131,6 +131,8 @@ struct Ride {
     corrections: u32,
     /// Slice 13: a zipline's ride: an invisible seat and no capsule drawn round it.
     zipline: bool,
+    /// The harpoon's ride: its rope and tip are drawn from the rider (CapsuleNote::Rope).
+    harpoon: bool,
 }
 
 #[derive(Default)]
@@ -897,33 +899,31 @@ fn start(
             counter_start: None,
             corrections: 0,
             zipline: false,
+            harpoon: false,
         },
     );
 }
 
-/// Slice 13: a zipline's ride (12.5, Z3) from `from` to `to` straight at `speed` blocks a second
-/// (the zipline's 8, the harpoon's 14), on the capsule's seat (method b2, spec 16) but invisible
-/// and with no capsule drawn. False when the player rides now.
+/// Slice 13: a zipline's ride (12.5, Z3) through `points` (the player's feet first) straight at
+/// `speed` blocks a second (the zipline's 8, the harpoon's 14), on the capsule's seat (method b2,
+/// spec 16) but with no capsule drawn: the harpoon's rope from the rider's hands to its tip
+/// (`harpoon`), else nothing, since the zipline's rope is its anchors' (rustcraft_zipline). The
+/// rider is set down by `anchor`. False when the player rides now.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn zipline(
     game: &mut Game<'_>,
     player: u128,
     entity: u32,
     dimension: &str,
-    from: [f64; 3],
-    to: [f64; 3],
+    points: &[[f64; 3]],
     anchor: Pos,
     speed: f64,
+    harpoon: bool,
 ) -> bool {
-    use rustcraft_rules::monorail::route::{Point, Route, distance};
-    if state().rides.contains_key(&player) {
+    let route = rustcraft_rules::traversal::way(points, speed);
+    if state().rides.contains_key(&player) || route.points.len() < 2 {
         return false;
     }
-    let mount = rustcraft_rules::geom::Face::YPos;
-    let route = Route {
-        points: vec![Point { at: from, mount, speed }, Point { at: to, mount, speed }],
-        times: vec![0.0, distance(from, to) / speed],
-    };
     state().rides.insert(
         player,
         Ride {
@@ -942,9 +942,15 @@ pub(super) fn zipline(
             counter_start: None,
             corrections: 0,
             zipline: true,
+            harpoon,
         },
     );
     true
+}
+
+/// Whether the player is on a trip, a zipline's or a harpoon's ride.
+pub(super) fn riding(player: u128) -> bool {
+    state().rides.contains_key(&player)
 }
 
 /// Closes the player's window (the station's menu is a block menu, which `native_close_menu`
@@ -992,12 +998,15 @@ fn send_all(game: &mut Game<'_>, channel: &str, bytes: &[u8]) {
 }
 
 fn ride_note(ride: &Ride) -> Option<Vec<u8>> {
-    if ride.zipline {
+    if ride.harpoon {
         return Some(wire::encode_capsule(&CapsuleNote::Rope {
             seat: ride.seat?,
             rise: ride.rise,
             to: ride.route.end(),
         }));
+    }
+    if ride.zipline {
+        return Some(wire::encode_capsule(&CapsuleNote::Seat { seat: ride.seat? }));
     }
     Some(wire::encode_capsule(&CapsuleNote::Ride {
         seat: ride.seat?,

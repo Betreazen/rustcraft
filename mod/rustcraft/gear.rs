@@ -22,7 +22,9 @@
 // - Slice 14, the harpoon (G5): a right click hooks the first solid block looked at within 20
 //   blocks and pulls the player there at 14 blocks a second on the zipline's invisible seat
 //   (rustcraft_monorail::zipline, method b2): onto the block when the space over it is free, else
-//   to the cell in front of the face it hit; 100 E a shot from its 4 000 E battery.
+//   to the cell in front of the face it hit; 100 E a shot from its 4 000 E battery. A mob met
+//   first is pulled to the player, a big one pulls the player (rustcraft_zipline).
+// - The zipline's ropes and anchors are rustcraft_zipline's; a use here pays their charge.
 // - W6: a blade or shield of the next tier is made from the previous one by a transmute recipe
 //   (`minecraft:crafting_transmute`, horizon-client/src/crafting.rs `Template::over`: the input's
 //   component patch goes onto the result), so the new piece keeps the old one's number, and with
@@ -31,6 +33,7 @@ use crate::game::{
     Game,
     native_player_state::NativeEffect,
     rustcraft_server::{line, tell},
+    rustcraft_zipline as zipline,
 };
 use horizon_client::{items::ItemStack, text::Text};
 use horizon_world::{
@@ -40,6 +43,7 @@ use horizon_world::{
 use rustcraft_rules::{
     gear::{self as rules, Gear, Held, Kind, Module, Piece, shot},
     ray,
+    traversal::ANCHOR,
     utility::charge::Battery,
 };
 use std::{
@@ -248,19 +252,62 @@ fn see_through(block: &str) -> bool {
     )
 }
 
+/// How far from `eye` a shot or a hook meets the block `p`: to its middle less half a block.
+fn wall_at(eye: [f64; 3], p: [i32; 3]) -> f64 {
+    let c = p.map(|v| f64::from(v) + 0.5);
+    ((c[0] - eye[0]).powi(2) + (c[1] - eye[1]).powi(2) + (c[2] - eye[2]).powi(2)).sqrt() - 0.5
+}
+
 fn is_air(game: &Game<'_>, pos: [i32; 3]) -> bool {
     matches!(game.native_block(pos).as_str(), "minecraft:air" | "minecraft:cave_air")
 }
 
-/// G5: the harpoon hooks the first solid block looked at within 20 blocks and pulls the player
-/// onto it when there is room over it (two blocks of air), else to the cell in front of the face
-/// it hit; 100 E a shot (less with Thrift), given back if the player rides already.
+/// Takes `cost` from the piece `id`'s charge: false, with the player told, when it holds less.
+fn pay(game: &mut Game<'_>, player: u128, id: u64, cost: f64, empty: Text) -> bool {
+    let mut s = state();
+    let h = s.store.held.entry(id).or_default();
+    if !rules::spend(h, cost) {
+        drop(s);
+        tell(game, player, empty);
+        return false;
+    }
+    s.dirty = true;
+    true
+}
+
+fn refund(id: u64, cost: f64) {
+    let mut s = state();
+    s.store.held.entry(id).or_default().charge += cost;
+    s.dirty = true;
+}
+
+/// G5: the harpoon hooks the first mob or solid block looked at within 20 blocks. A mob is pulled
+/// to the player, a big one pulls the player to it (rustcraft_zipline::hook_mob); a block pulls
+/// the player onto it when there is room over it (two blocks of air), else to the cell in front
+/// of the face it hit. 100 E a shot (less with Thrift), given back when nothing moves.
 fn harpoon(game: &mut Game<'_>, player: &horizon_client::mod_api::NativeServerPlayer, stack: &ItemStack) {
     let Some(id) = id_of(stack) else { return };
+    if crate::game::rustcraft_monorail::riding(player.uuid) {
+        return;
+    }
     let eye = [player.position[0], player.position[1] + f64::from(player.eye_height), player.position[2]];
     let dir = ray::look_direction(player.yaw, player.pitch);
     let path = ray::blocks_along(eye, dir, rules::HARPOON_RANGE);
-    let Some(i) = path.iter().skip(1).position(|p| !see_through(game.native_block(*p).as_str())).map(|i| i + 1) else {
+    let hit_at = path.iter().skip(1).position(|p| !see_through(game.native_block(*p).as_str())).map(|i| i + 1);
+    let wall = hit_at.map_or(f64::INFINITY, |i| wall_at(eye, path[i]));
+    let empty = || line("rustcraft.gear.empty", "No charge: put it on a charger", &[]);
+    let cost = state().store.held.get(&id).map_or(rules::HARPOON_SHOT, |h| rules::cost(rules::HARPOON_SHOT, h));
+    if let Some((mob, w, h, at)) = zipline::harpoon_target(game, player, wall) {
+        if !pay(game, player.uuid, id, cost, empty()) {
+            return;
+        }
+        if !zipline::hook_mob(game, Some(player), &player.dimension, player.position, mob, w, h, at) {
+            refund(id, cost);
+            tell(game, player.uuid, line("rustcraft.harpoon.no_pull", "No room to pull it", &[]));
+        }
+        return;
+    }
+    let Some(i) = hit_at else {
         tell(game, player.uuid, line("rustcraft.harpoon.far", "Nothing to hook within 20 blocks", &[]));
         return;
     };
@@ -274,35 +321,26 @@ fn harpoon(game: &mut Game<'_>, player: &horizon_client::mod_api::NativeServerPl
         tell(game, player.uuid, line("rustcraft.harpoon.no_room", "No room to pull you there", &[]));
         return;
     };
-    let cost = {
-        let mut s = state();
-        let h = s.store.held.entry(id).or_default();
-        let cost = rules::cost(rules::HARPOON_SHOT, h);
-        if !rules::spend(h, cost) {
-            drop(s);
-            tell(game, player.uuid, line("rustcraft.gear.empty", "No charge: put it on a charger", &[]));
-            return;
-        }
-        s.dirty = true;
-        cost
-    };
+    if !pay(game, player.uuid, id, cost, empty()) {
+        return;
+    }
     let to = [f64::from(anchor[0]) + 0.5, f64::from(anchor[1]), f64::from(anchor[2]) + 0.5];
-    let from = player.position;
     let entity = player.entity_id as u32;
-    let rides = crate::game::rustcraft_monorail::zipline(game, player.uuid, entity, &player.dimension, from, to, anchor, rules::HARPOON_SPEED);
-    if !rides {
-        state().store.held.entry(id).or_default().charge += cost;
+    let points = [player.position, to];
+    if !crate::game::rustcraft_monorail::zipline(game, player.uuid, entity, &player.dimension, &points, anchor, rules::HARPOON_SPEED, true) {
+        refund(id, cost);
     }
 }
 
-/// 12.5 Z1–Z3: a string in the other hand gives a charge back; otherwise the rope goes to the top
-/// of the block looked at within 32 blocks and the player rides it there.
+/// 12.5 Z1–Z3: a string or an anchor in the other hand gives a charge back; else a rope within
+/// reach is ridden free, or a new one is tied to the top of the block looked at within 32 blocks
+/// for a charge and ridden (rustcraft_zipline).
 fn zip(game: &mut Game<'_>, player: &horizon_client::mod_api::NativeServerPlayer, stack: &ItemStack) {
     let Some(id) = id_of(stack) else { return };
     let off = game.native_player_equipment(player.uuid, EquipmentSlot::OffHand);
-    if off.is_some_and(|s| &*s.item == "minecraft:string") {
+    if let Some(refill) = off.map(|s| s.item.to_string()).filter(|i| i == "minecraft:string" || i == ANCHOR) {
         let full = state().store.held.get(&id).is_some_and(|h| h.charge >= rules::ZIP_CHARGES);
-        if !full && game.native_take_items("minecraft:string", 1) > 0 {
+        if !full && game.native_take_items(&refill, 1) > 0 {
             let mut s = state();
             let h = s.store.held.entry(id).or_default();
             h.charge = (h.charge + 1.0).min(rules::ZIP_CHARGES);
@@ -310,36 +348,14 @@ fn zip(game: &mut Game<'_>, player: &horizon_client::mod_api::NativeServerPlayer
         }
         return;
     }
-    let eye = [player.position[0], player.position[1] + f64::from(player.eye_height), player.position[2]];
-    let dir = ray::look_direction(player.yaw, player.pitch);
-    let Some(block) = ray::blocks_along(eye, dir, rules::ZIP_RANGE)
-        .into_iter()
-        .skip(1)
-        .find(|p| !see_through(game.native_block(*p).as_str()))
-    else {
-        tell(game, player.uuid, line("rustcraft.zipline.far", "Nothing to hook within 32 blocks", &[]));
+    let zipline::Plan::Tie { start, far } = zipline::plan(game, player) else {
         return;
     };
-    let anchor = [block[0], block[1] + 1, block[2]];
-    if !is_air(game, anchor) {
-        tell(game, player.uuid, line("rustcraft.zipline.no_room", "No room on top of that block", &[]));
+    if !pay(game, player.uuid, id, 1.0, line("rustcraft.zipline.empty", "No charges: a string or an anchor gives one back", &[])) {
         return;
     }
-    {
-        let mut s = state();
-        let h = s.store.held.entry(id).or_default();
-        if !rules::spend(h, 1.0) {
-            drop(s);
-            tell(game, player.uuid, line("rustcraft.zipline.empty", "No charges: a string gives one back", &[]));
-            return;
-        }
-        s.dirty = true;
-    }
-    let to = [f64::from(anchor[0]) + 0.5, f64::from(anchor[1]), f64::from(anchor[2]) + 0.5];
-    let from = player.position;
-    if !crate::game::rustcraft_monorail::zipline(game, player.uuid, player.entity_id as u32, &player.dimension, from, to, anchor, rules::ZIP_SPEED) {
-        let mut s = state();
-        s.store.held.entry(id).or_default().charge += 1.0;
+    if !zipline::tie_and_ride(game, player, start, far) {
+        refund(id, 1.0);
     }
 }
 
@@ -369,10 +385,7 @@ fn shoot(game: &mut Game<'_>, player: &horizon_client::mod_api::NativeServerPlay
         .into_iter()
         .skip(1)
         .find(|p| !see_through(game.native_block(*p).as_str()))
-        .map_or(f64::INFINITY, |p| {
-            let c = p.map(|v| f64::from(v) + 0.5);
-            ((c[0] - eye[0]).powi(2) + (c[1] - eye[1]).powi(2) + (c[2] - eye[2]).powi(2)).sqrt() - 0.5
-        });
+        .map_or(f64::INFINITY, |p| wall_at(eye, p));
     let me = player.entity_id as u32;
     let targets: Vec<shot::Target> = game
         .mobs
@@ -628,6 +641,7 @@ pub(super) fn tick(game: &mut Game<'_>, dimension: &str) {
     if now.is_multiple_of(200) {
         save(&mut state());
         crate::game::rustcraft_explore::save(game);
+        crate::game::rustcraft_utility::save_grown(game);
     }
 }
 

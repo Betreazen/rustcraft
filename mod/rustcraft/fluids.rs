@@ -813,6 +813,53 @@ pub(super) fn group_at(
         .find(|g| g.blocks.contains(&pos))
 }
 
+/// Slice 15 (O12): how much of `fluid` (mB) the mixers at `mixers` can draw on: the water in
+/// their own tanks, and what the tank groups hold that touch one of them or stand behind a joint
+/// that gives on a fluid net one of them is a joint of. Each group counts once.
+pub(super) fn reachable(
+    game: &Game<'_>,
+    level: &LevelNet,
+    mixers: &[Pos],
+    fluid: &str,
+    tuning: &Tuning,
+) -> u64 {
+    let mut near: BTreeSet<Pos> = BTreeSet::new();
+    for &m in mixers {
+        near.extend(Face::ALL.into_iter().map(|f| step(m, f)));
+        for net in &level.fluids.nets {
+            if net
+                .joints
+                .iter()
+                .any(|j| j.block == m && j.mode != Mode::From)
+            {
+                near.extend(
+                    net.joints
+                        .iter()
+                        .filter(|j| j.mode != Mode::Into)
+                        .map(|j| j.block),
+                );
+            }
+        }
+    }
+    let per_block = tuning.tank_buckets * BUCKET;
+    let in_tanks: u64 = read_groups(game, &level.fluids.tanks, per_block)
+        .iter()
+        .filter(|g| g.fluid.as_deref() == Some(fluid))
+        .filter(|g| g.blocks.iter().any(|b| near.contains(b)))
+        .map(|g| g.amount)
+        .sum();
+    let own: u64 = if fluid == WATER {
+        mixers
+            .iter()
+            .filter_map(|&m| mixer::read_tanks(game, m))
+            .map(|t| t.water)
+            .sum()
+    } else {
+        0
+    };
+    in_tanks + own
+}
+
 /// A tank's diagnosis: «Бак: вода, 20 из 32 вёдер», its joints and its note.
 pub(super) fn tank_text(game: &Game<'_>, level: &LevelNet, pos: Pos, tuning: &Tuning) -> Text {
     let Some(g) = group_at(game, level, pos, tuning) else {

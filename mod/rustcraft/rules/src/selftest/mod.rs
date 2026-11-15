@@ -15,9 +15,11 @@ pub mod anchor;
 pub mod energy;
 pub mod expect;
 pub mod fluids;
+pub mod handbook;
 pub mod magistral;
 pub mod miners;
 pub mod monorail;
+pub mod orders2;
 pub mod run;
 pub mod slice10;
 pub mod slice11;
@@ -25,8 +27,10 @@ pub mod slice12;
 pub mod slice13;
 pub mod slice14;
 pub mod slice15;
+pub mod explore2;
 pub mod sources;
 pub mod storage;
+pub mod traversal;
 pub mod transport;
 pub mod turret;
 pub mod windows;
@@ -272,12 +276,43 @@ pub trait Bench {
     fn set_keep(&mut self, pos: Pos, item: &str, n: u64) -> Result<(), String>;
     /// O7: the order `order` of the storage the cell or terminal at `pos` belongs to cancelled.
     fn cancel_order(&mut self, pos: Pos, order: u16) -> Result<(), String>;
+
+    // ST4, ST5.
+    /// `put` of a block the living vein grew, as a worker's hold gives it out (custom data
+    /// `rustcraft:grown`).
+    fn put_grown(&mut self, pos: Pos, slot: usize, item: &str, count: u32) -> Result<(), String>;
+    /// A restart of the server for the orders of the storage the cell or terminal at `pos`
+    /// belongs to: the level's storage record (its orders and jobs with it) through the binary NBT
+    /// a save writes and back, then the level's orders, jobs and temporary pages forgotten and
+    /// read again from what came back.
+    fn restart_orders(&mut self, pos: Pos) -> Result<(), String>;
+    // The zipline's ropes and the harpoon on mobs (12.5 Z2, G5).
+    /// Z2: a rope `owner` ties between anchors at `a` and `b` as a zipline's use ties it (the
+    /// anchors set, the rope saved, the owner's oldest beyond the limit untied), with no player and
+    /// no charge: its id.
+    fn tie_rope(&mut self, owner: u128, a: Pos, b: Pos) -> Result<u64, String>;
+    /// The saved ropes.
+    fn ropes(&self) -> Vec<crate::traversal::Rope>;
+    /// G5 on mobs: the harpoon of a player with feet at `from` hooks the mob `id`.
+    fn harpoon_mob(&mut self, from: [f64; 3], id: u32) -> Result<(), String>;
+    // The handbook (H2).
+    /// What the server's grant does for the player `player` carrying `carried`: true when they
+    /// get the handbook now (noted as given; no stack moves, the player is a pretend one).
+    fn handbook_offer(&mut self, player: u128, carried: &[&str]) -> bool;
+    /// The player forgotten by the grant, as if they never had the handbook.
+    fn handbook_forget(&mut self, player: u128);
+    /// Whether the game's item registry has `item`.
+    fn item_known(&self, item: &str) -> bool;
+    /// The 3 × 3 grid of the first crafting recipe of `item`, as the handbook's page reads it.
+    fn recipe_grid(&self, item: &str) -> Option<[Option<String>; 9]>;
 }
 
 /// A mob as the self-test reads it.
 #[derive(Clone, Debug, PartialEq)]
 pub struct MobView {
     pub kind: String,
+    /// Its feet.
+    pub pos: [f64; 3],
     pub health: f32,
     pub effects: Vec<(String, u32, u8)>,
 }
@@ -442,6 +477,10 @@ pub fn catalog() -> Vec<Build> {
     all.extend(slice13::ALL);
     all.extend(slice14::ALL);
     all.extend(slice15::ALL);
+    all.extend(explore2::ALL);
+    all.extend(orders2::ALL);
+    all.extend(traversal::ALL);
+    all.extend(handbook::ALL);
     all
 }
 

@@ -6,4 +6,5 @@ fn rustcraft_screen_key(
 ) {
     crate::game::rustcraft_terminal::on_key(game, screen, key, canceled);
     crate::game::rustcraft_station::on_key(game, screen, key, canceled);
+    crate::game::rustcraft_handbook::on_key(game, key, canceled);
 }

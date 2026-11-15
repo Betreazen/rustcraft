@@ -1,19 +1,26 @@
 // Slice 13: the cartographer and the scout compass on the server (rustcraft_rules::explore).
 //
 // - A worker with the map tool, in each rail cell it comes into, marks the band of chunks round it
-//   (its chunk and one each way, two with a radius module) and the biome there for its owner;
-//   each new one costs 10 E of its battery and is told to Path-of-craft-tree once (EX1: `chunk`,
-//   `biome`). The atlas is a file of the world (`data/rustcraft_explore.json`).
-// - Twice a second each player's biome is noted as visited; a player holding the scout compass
-//   reads over the hotbar the nearest found biome of the dimension they have not been in, how far
-//   and which way.
+//   (its chunk and one each way, two with a radius module), the biome there and the structures
+//   near its way for its owner; each new one costs 10 E of its battery and is told to
+//   Path-of-craft-tree once (EX1: `chunk`, `biome`, `structure`). The atlas is a file of the world
+//   (`data/rustcraft_explore.json`).
+// - Structures: `Game::structures_reaching` (SRC/crates/horizon-client/src/game/structures.rs:9,
+//   the starts whose whole box holds a cell, from the chunk's structure references and the
+//   generator's cached starts) at SAMPLE_BUDGET cells of a grid round the rail cell
+//   (rustcraft_rules::explore::structure_samples), the grid taken in turns from one cell to the
+//   next. A chunk with no structure reference answers at once.
+// - Twice a second each player's biome and the structures whose pieces hold their feet
+//   (`Game::structures_at`, structures.rs:47, as Path-of-craft-tree reads a player's) are noted as
+//   visited; a player holding the scout compass reads over the hotbar the nearest found biome or
+//   structure of the dimension they have not been in, how far and which way.
 use crate::game::{
     Game, rustcraft_base as base,
     rustcraft_server::{line, tell},
 };
 use horizon_client::text::Text;
 use rustcraft_rules::{
-    explore::{self as rules, Atlas},
+    explore::{self as rules, Atlas, Place},
     geom::Pos,
     modules::Module,
     reports::Report,
@@ -34,6 +41,8 @@ struct State {
     path: Option<PathBuf>,
     atlas: Atlas,
     dirty: bool,
+    /// Where the next structure samples start in the grid (rules::structure_samples).
+    turn: usize,
 }
 
 static STATE: LazyLock<Mutex<State>> = LazyLock::new(Mutex::default);
@@ -79,10 +88,35 @@ pub(super) fn save(game: &Game<'_>) {
     }
 }
 
+/// The structures whose boxes reach this turn's sample cells round `cell`: each id once, with the
+/// first cell it reached.
+fn structures_near(game: &Game<'_>, cell: Pos, side: i32) -> Vec<(String, Pos)> {
+    let turn = {
+        let mut s = state();
+        let turn = s.turn;
+        s.turn = s.turn.wrapping_add(rules::SAMPLE_BUDGET);
+        turn
+    };
+    let mut out: Vec<(String, Pos)> = Vec::new();
+    for p in rules::structure_samples(cell, side, turn, rules::SAMPLE_BUDGET) {
+        for (id, _) in game.structures_reaching(p) {
+            if !out.iter().any(|(o, _)| *o == id) {
+                out.push((id, p));
+            }
+        }
+    }
+    out
+}
+
 /// The cartographer in a rail cell.
 pub(super) fn map(game: &mut Game<'_>, dimension: &str, w: &mut Worker, cell: Pos, t: &Tuning) {
     let side = if w.count(Module::Radius) > 0 { 2 } else { 1 };
     let biome = game.native_biome(cell);
+    let structures = if w.charge >= MARK_ENERGY {
+        structures_near(game, cell, side)
+    } else {
+        Vec::new()
+    };
     let mut reports = Vec::new();
     {
         let mut s = state();
@@ -105,17 +139,32 @@ pub(super) fn map(game: &mut Game<'_>, dimension: &str, w: &mut Worker, cell: Po
             reports.push(Report::Biome { owner: w.owner, biome: b });
             s.dirty = true;
         }
+        for (id, at) in structures {
+            if w.charge < MARK_ENERGY {
+                break;
+            }
+            let sites = s.atlas.sites.get(dimension).map_or(0, Vec::len);
+            if s.atlas.mark_structure(w.owner, dimension, &id, at) {
+                w.spend(0.0, MARK_ENERGY, t);
+                reports.push(Report::Structure { owner: w.owner, id });
+                s.dirty = true;
+            } else if s.atlas.sites.get(dimension).map_or(0, Vec::len) != sites {
+                s.dirty = true;
+            }
+        }
     }
     for r in reports {
         base::report(r);
     }
 }
 
-/// Twice a second for a player of this level: their biome is visited; the compass speaks.
+/// Twice a second for a player of this level: their biome and the structures round their feet
+/// are visited; the compass speaks.
 pub(super) fn player(game: &mut Game<'_>, p: &horizon_client::mod_api::NativeServerPlayer, holds_compass: bool) {
     let at = p.position;
     let cell = at.map(|v| v.floor() as i32);
     let Some(biome) = game.native_biome(cell) else { return };
+    let inside = game.structures_at(cell);
     let target = {
         let mut s = state();
         load(&mut s, game);
@@ -123,20 +172,33 @@ pub(super) fn player(game: &mut Game<'_>, p: &horizon_client::mod_api::NativeSer
             s.atlas.visit(p.uuid, &biome);
             s.dirty = true;
         }
+        for id in &inside {
+            if s.atlas.enter(p.uuid, id) {
+                s.dirty = true;
+            }
+        }
         if holds_compass { s.atlas.target(p.uuid, &p.dimension, at) } else { None }
     };
     if !holds_compass {
         return;
     }
     let text = match target {
-        Some((b, to, d)) => {
-            let way = rules::direction(at, to);
+        Some(target) => {
+            let way = rules::direction(at, target.at);
+            let name = match &target.place {
+                Place::Biome(b) => Text::translate(&format!("biome.{}", b.replace(':', ".")), &[]),
+                Place::Structure(id) => line(
+                    &format!("rustcraft.structure.{}", id.replace(':', ".")),
+                    &rules::structure_words(id),
+                    &[],
+                ),
+            };
             line(
                 "rustcraft.compass.target",
                 "%s · %s blocks %s",
                 &[
-                    Text::translate(&format!("biome.{}", b.replace(':', ".")), &[]),
-                    Text::literal(format!("{d:.0}")),
+                    name,
+                    Text::literal(format!("{:.0}", target.distance)),
                     line(&format!("rustcraft.compass.{way}"), way, &[]),
                 ],
             )

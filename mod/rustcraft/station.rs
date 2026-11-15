@@ -69,8 +69,10 @@ const ABOVE: &str = "rustcraft:block/capsule_above";
 const SIDE: &str = "rustcraft:block/capsule_side";
 /// Slice 14: a zipline's rope, one block long along +z, a texel thick round the axis.
 const ROPE: &str = "rustcraft:block/zipline_rope";
+/// The harpoon's tip at the hook's end of its rope, pointing along +z.
+const HARPOON_TIP: &str = "rustcraft:block/harpoon_tip";
 /// The rider's hands over its feet, where the rope runs from.
-const ROPE_HANDS: f64 = 1.9;
+const ROPE_HANDS: f64 = rustcraft_rules::traversal::ROPE_HANDS;
 /// A label on the scheme is cut to this many characters.
 const MAP_LABEL: usize = 10;
 
@@ -91,8 +93,9 @@ static LISTING_NOW: Mutex<Option<Listing>> = Mutex::new(None);
 static RENAME_DUE: Mutex<Option<Rename>> = Mutex::new(None);
 /// The capsules the server told of, by seat mob: the rider's rise and the way's corners.
 static CAPSULES: LazyLock<Mutex<HashMap<u32, (f64, Vec<Point>)>>> = LazyLock::new(Mutex::default);
-/// Slice 14: zipline seats: the rider's rise and the rope's end.
-static ROPES: LazyLock<Mutex<HashMap<u32, (f64, [f64; 3])>>> = LazyLock::new(Mutex::default);
+/// Slice 14: zipline and harpoon seats: the harpoon rider's rise and its rope's end; none for a
+/// zipline's, whose rope its anchors draw.
+static ROPES: LazyLock<Mutex<HashMap<u32, Option<(f64, [f64; 3])>>>> = LazyLock::new(Mutex::default);
 /// The workers the server told of, by seat mob: their heading and tool (0 none, 1 saw, 2 reaper).
 static WORKER_SEATS: LazyLock<Mutex<HashMap<u32, (f32, u8)>>> = LazyLock::new(Mutex::default);
 /// The worker's parts as standalone models (assets/models/transport.py `worker`).
@@ -118,7 +121,7 @@ fn listing_of(station: Option<Pos>) -> Option<Listing> {
     l.as_ref().filter(|l| Some(l.station) == station).cloned()
 }
 
-fn ropes() -> MutexGuard<'static, HashMap<u32, (f64, [f64; 3])>> {
+fn ropes() -> MutexGuard<'static, HashMap<u32, Option<(f64, [f64; 3])>>> {
     ROPES.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
@@ -151,7 +154,10 @@ pub(super) fn on_net(channel: &str, data: &[u8]) {
                 ropes().remove(&seat);
             }
             Some(CapsuleNote::Rope { seat, rise, to }) => {
-                ropes().insert(seat, (rise, to));
+                ropes().insert(seat, Some((rise, to)));
+            }
+            Some(CapsuleNote::Seat { seat }) => {
+                ropes().insert(seat, None);
             }
             None => log::warn!("rustcraft: a capsule note that does not read"),
         }
@@ -671,6 +677,7 @@ pub(super) fn standalone_models(models: &mut Vec<String>) {
         ABOVE,
         SIDE,
         ROPE,
+        HARPOON_TIP,
         WORKER_BODY,
         WORKER_BELOW,
         WORKER_SAW,
@@ -720,13 +727,19 @@ fn heading(points: &[Point], i: usize) -> f32 {
         .unwrap_or(0.0)
 }
 
-/// `native_mob_submit`: a zipline's seat drawn as its rope, from the rider's hands to the hook
-/// over the block it went to, and the hook's line down to that block; the seat itself is not drawn.
+/// `native_mob_submit`: a harpoon's seat drawn as its rope, from the rider's hands to the hook
+/// over the block it went to with the harpoon's tip there, and the hook's line down to that
+/// block; a zipline's seat is drawn as nothing (its anchors draw its rope). The seat itself is
+/// never drawn.
 pub(super) fn draw_rope(game: &Game<'_>, mob: &NativeMobRender<'_>, draw: &mut BlockEntityDraw, drawn: &mut bool) {
     if *drawn {
         return;
     }
-    let Some((rise, to)) = ropes().get(&mob.id).copied() else {
+    let Some(seen) = ropes().get(&mob.id).copied() else {
+        return;
+    };
+    let Some((rise, to)) = seen else {
+        *drawn = true;
         return;
     };
     let Some(m) = game.mobs.iter().find(|m| m.id == mob.id) else {
@@ -744,22 +757,42 @@ pub(super) fn draw_rope(game: &Game<'_>, mob: &NativeMobRender<'_>, draw: &mut B
     draw.rotate_about([0.0, 1.0, 0.0], mob.body_yaw, [0.0; 3]);
     rope_bar(game, draw, hands, hook);
     rope_bar(game, draw, hook, ground);
+    draw_tip(game, draw, hands, hook);
     draw.pop();
 }
 
-/// One stretch of rope from `a` to `b` (blocks from the pose's origin, world axes).
-fn rope_bar(game: &Game<'_>, draw: &mut BlockEntityDraw, a: [f64; 3], b: [f64; 3]) {
+/// The harpoon's tip at `b`, pointing on from `a` to `b`.
+fn draw_tip(game: &Game<'_>, draw: &mut BlockEntityDraw, a: [f64; 3], b: [f64; 3]) {
     let d = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+    if d.iter().map(|c| c * c).sum::<f64>() < 0.0025 {
+        return;
+    }
+    draw.push();
+    turn_to(draw, b, d);
+    draw.translate([-0.5, -0.5, 0.0]);
+    game.native_draw_model(draw, HARPOON_TIP, 0xFFFFFF);
+    draw.pop();
+}
+
+/// The pose moved to `at` and turned so +z points along `d`: about y to its heading, then about
+/// x up or down to it.
+fn turn_to(draw: &mut BlockEntityDraw, at: [f64; 3], d: [f64; 3]) {
     let flat = d[0].hypot(d[2]);
-    let len = flat.hypot(d[1]);
+    draw.translate([at[0] as f32, at[1] as f32, at[2] as f32]);
+    draw.rotate_about([0.0, 1.0, 0.0], d[0].atan2(d[2]).to_degrees() as f32, [0.0; 3]);
+    draw.rotate_about([1.0, 0.0, 0.0], (-d[1].atan2(flat)).to_degrees() as f32, [0.0; 3]);
+}
+
+/// One stretch of rope from `a` to `b` (blocks from the pose's origin, world axes); the
+/// zipline's anchors draw their rope with it too (rustcraft_zipline).
+pub(super) fn rope_bar(game: &Game<'_>, draw: &mut BlockEntityDraw, a: [f64; 3], b: [f64; 3]) {
+    let d = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+    let len = d[0].hypot(d[2]).hypot(d[1]);
     if len < 0.05 {
         return;
     }
     draw.push();
-    draw.translate([a[0] as f32, a[1] as f32, a[2] as f32]);
-    // +z turned to the rope: about y to its heading, then about x up or down to it.
-    draw.rotate_about([0.0, 1.0, 0.0], d[0].atan2(d[2]).to_degrees() as f32, [0.0; 3]);
-    draw.rotate_about([1.0, 0.0, 0.0], (-d[1].atan2(flat)).to_degrees() as f32, [0.0; 3]);
+    turn_to(draw, a, d);
     draw.scale([1.0, 1.0, len as f32]);
     draw.translate([-0.5, -0.5, 0.0]);
     game.native_draw_model(draw, ROPE, 0xFFFFFF);

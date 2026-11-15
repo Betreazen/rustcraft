@@ -263,6 +263,31 @@ impl Bench for Fake {
     fn cancel_order(&mut self, _: Pos, _: u16) -> Result<(), String> {
         Ok(())
     }
+    fn put_grown(&mut self, _: Pos, _: usize, _: &str, _: u32) -> Result<(), String> {
+        Ok(())
+    }
+    fn restart_orders(&mut self, _: Pos) -> Result<(), String> {
+        Ok(())
+    }
+    fn tie_rope(&mut self, _: u128, _: Pos, _: Pos) -> Result<u64, String> {
+        Ok(1)
+    }
+    fn ropes(&self) -> Vec<crate::traversal::Rope> {
+        Vec::new()
+    }
+    fn harpoon_mob(&mut self, _: [f64; 3], _: u32) -> Result<(), String> {
+        Ok(())
+    }
+    fn handbook_offer(&mut self, _: u128, _: &[&str]) -> bool {
+        false
+    }
+    fn handbook_forget(&mut self, _: u128) {}
+    fn item_known(&self, _: &str) -> bool {
+        true
+    }
+    fn recipe_grid(&self, _: &str) -> Option<[Option<String>; 9]> {
+        None
+    }
 }
 
 const PLOT: Area = Area {

@@ -28,8 +28,10 @@
 //
 // Slice 15: the terminal's recipe book socket (its saved compound), the orders and «держать N»
 // (rustcraft_orders): an order press needs the book in the pressed terminal; the N of each item is
-// saved with the storage's record, as its limits are. The list also carries the queue of orders
-// and, with the book, the items it can make (rustcraft_rules::storage::wire).
+// saved with the storage's record, as its limits are, and so are the orders: each storage's queue
+// and jobs as rustcraft_rules::orders::saved's strings, handed back to rustcraft_orders on load.
+// The list also carries the queue of orders and, with the book, the items it can make
+// (rustcraft_rules::storage::wire).
 use crate::game::{
     Game,
     rustcraft_content::{self as content, item_number, item_of_number},
@@ -87,6 +89,9 @@ struct LevelStorage {
     terminals: BTreeMap<Pos, Option<u32>>,
     /// A storage's change count: its viewers get its list again when it moves on.
     versions: HashMap<u32, u64>,
+    /// Each storage's orders, queue and jobs, as rustcraft_orders last handed them
+    /// (rustcraft_rules::orders::saved's strings).
+    orders: BTreeMap<u32, Vec<String>>,
     /// Changed since the attachment was last written.
     dirty: bool,
     ticks: u64,
@@ -142,6 +147,8 @@ fn with_level<R>(dimension: &str, f: impl FnOnce(&mut LevelStorage) -> R) -> Opt
 struct Saved {
     next_id: u32,
     stores: BTreeMap<u32, Store>,
+    /// Slice 15's orders of each storage that has any.
+    orders: BTreeMap<u32, Vec<String>>,
 }
 
 static SAVED: AttachmentType<Saved> = AttachmentType {
@@ -164,7 +171,8 @@ fn long(n: u64) -> Tag {
     Tag::Long(i64::try_from(n).unwrap_or(i64::MAX))
 }
 
-/// `{next, stores: [{id, items: [{k, n}], limits: [{k, max, destroy}], keep: [{k, n}]}]}`.
+/// `{next, stores: [{id, items: [{k, n}], limits: [{k, max, destroy}], keep: [{k, n}],
+/// orders: [string]}]}`; `orders` only for a storage that has some.
 fn encode_saved(saved: &Saved) -> Result<Compound, AttachmentError> {
     let stores = saved
         .stores
@@ -191,12 +199,19 @@ fn encode_saved(saved: &Saved) -> Result<Compound, AttachmentError> {
                 .iter()
                 .map(|(k, &n)| Tag::compound([("k", string(k)), ("n", long(n))]))
                 .collect();
-            Tag::compound([
+            let mut entry = vec![
                 ("id", Tag::Int(*id as i32)),
                 ("items", Tag::List(items)),
                 ("limits", Tag::List(limits)),
                 ("keep", Tag::List(keep)),
-            ])
+            ];
+            if let Some(orders) = saved.orders.get(id).filter(|o| !o.is_empty()) {
+                entry.push((
+                    "orders",
+                    Tag::List(orders.iter().map(|s| string(s)).collect()),
+                ));
+            }
+            Tag::compound(entry)
         })
         .collect();
     Ok(Compound::from([
@@ -240,6 +255,7 @@ fn decode_saved(data: &Compound) -> Result<Saved, AttachmentError> {
     let mut saved = Saved {
         next_id: as_u64(field(data, "next")).unwrap_or(1) as u32,
         stores: BTreeMap::new(),
+        orders: BTreeMap::new(),
     };
     for entry in compounds(field(data, "stores")) {
         let Some(id) = as_u64(field(entry, "id")) else {
@@ -273,13 +289,21 @@ fn decode_saved(data: &Compound) -> Result<Saved, AttachmentError> {
                 store.keep.insert(k, n);
             }
         }
+        // Slice 15's orders (absent from a record of v0.15.0 or older).
+        if let Some(Tag::List(list)) = field(entry, "orders") {
+            let strings: Vec<String> = list.iter().filter_map(|t| as_string(Some(t))).collect();
+            if !strings.is_empty() {
+                saved.orders.insert(id as u32, strings);
+            }
+        }
         saved.stores.insert(id as u32, store);
     }
     Ok(saved)
 }
 
-/// The level's record, read once when the server first looks at the level's storages.
-fn load(game: &mut Game<'_>, level: &mut LevelStorage) {
+/// The level's record, read once when the server first looks at the level's storages; the
+/// orders it keeps go back to rustcraft_orders.
+fn load(game: &mut Game<'_>, dimension: &str, level: &mut LevelStorage) {
     if level.loaded {
         return;
     }
@@ -291,6 +315,21 @@ fn load(game: &mut Game<'_>, level: &mut LevelStorage) {
     level.stores = saved.stores;
     level.next_id = saved.next_id.max(1);
     level.loaded = true;
+    if !saved.orders.is_empty() {
+        orders::restore(dimension, &saved.orders);
+    }
+    level.orders = saved.orders;
+}
+
+/// Slice 15: the orders of the level's storages as rustcraft_orders keeps them now; the record
+/// is written again when they changed.
+pub(super) fn set_order_records(dimension: &str, records: BTreeMap<u32, Vec<String>>) {
+    with_level(dimension, |level| {
+        if level.loaded && level.orders != records {
+            level.orders = records;
+            level.dirty = true;
+        }
+    });
 }
 
 /// Writes the level's record when it changed. Only from the level's own tick, so the level in
@@ -300,6 +339,7 @@ fn save(game: &mut Game<'_>, dimension: &str) {
         std::mem::replace(&mut level.dirty, false).then(|| Saved {
             next_id: level.next_id,
             stores: level.stores.clone(),
+            orders: level.orders.clone(),
         })
     })
     .flatten();
@@ -328,7 +368,7 @@ pub(super) fn rescan(
     terminal_blocks: &BTreeSet<Pos>,
 ) {
     let mut level = storages().levels.remove(dimension).unwrap_or_default();
-    load(game, &mut level);
+    load(game, dimension, &mut level);
     let ids: BTreeMap<Pos, Option<u32>> = cell_blocks
         .iter()
         .map(|&p| {
@@ -798,8 +838,9 @@ pub(super) fn on_button(
         Press::Book => {}
         Press::Order { item, count } => {
             let refused = if book {
-                item_of_number(game, u32::from(item)).and_then(|item| {
-                    orders::order(&dimension, storage, item, u32::from(count)).err()
+                // A fluid (O12) by its number past the item table, in buckets.
+                orders::key_of_number(game, item).and_then(|key| {
+                    orders::order(&dimension, storage, &key, u32::from(count)).err()
                 })
             } else {
                 Some(NO_BOOK)
@@ -933,13 +974,36 @@ pub(super) fn round_trip(
     dimension: &str,
     through: impl Fn(&Compound) -> Result<Compound, String>,
 ) -> Result<(), String> {
+    through_record(dimension, through).map(|_| ())
+}
+
+/// The level's record as a save writes it, through `through` and back: what came back, or Err
+/// naming what came back different.
+fn through_record(
+    dimension: &str,
+    through: impl Fn(&Compound) -> Result<Compound, String>,
+) -> Result<Saved, String> {
     let saved = with_level(dimension, |level| Saved {
         next_id: level.next_id,
         stores: level.stores.clone(),
+        orders: level.orders.clone(),
     })
     .ok_or("no storage on this level")?;
     let encoded = encode_saved(&saved).map_err(|e| format!("{e:?}"))?;
     let back = decode_saved(&through(&encoded)?).map_err(|e| format!("{e:?}"))?;
+    // Orders of a storage the record no longer has are not saved.
+    let orders_kept: BTreeMap<u32, Vec<String>> = saved
+        .orders
+        .iter()
+        .filter(|&(id, o)| saved.stores.contains_key(id) && !o.is_empty())
+        .map(|(id, o)| (*id, o.clone()))
+        .collect();
+    if back.orders != orders_kept {
+        return Err(format!(
+            "orders {orders_kept:?} came back as {:?}",
+            back.orders
+        ));
+    }
     // A store's cells are counted again by each rescan, not saved.
     let kept = |s: &Saved| -> Vec<(u32, BTreeMap<ItemKey, u64>, BTreeMap<ItemKey, Limit>)> {
         s.stores
@@ -954,6 +1018,18 @@ pub(super) fn round_trip(
             kept(&back)
         ));
     }
+    Ok(back)
+}
+
+/// The self-test's restart for the orders: the level's record through `through` and back, and
+/// the level's orders and jobs read again from what came back, as a server start reads them.
+pub(super) fn restart_orders(
+    dimension: &str,
+    through: impl Fn(&Compound) -> Result<Compound, String>,
+) -> Result<(), String> {
+    let back = through_record(dimension, through)?;
+    orders::restore(dimension, &back.orders);
+    with_level(dimension, |level| level.orders = back.orders);
     Ok(())
 }
 

@@ -42,7 +42,7 @@ use rustcraft_rules::{
     geom::Pos,
     machines::style::{self, Severity, colour},
     modules::Module,
-    orders::KINDS,
+    orders::{KINDS, fluid_of_number},
     storage::{
         Limit,
         terminal::{
@@ -140,9 +140,14 @@ pub(super) fn layout() -> NativeScreen {
 
 // ---- What is shown ----
 
-/// An item's id.
+/// An item's id; for a fluid's number (O12) the bucket item its icon is drawn with.
 fn id_of(game: &Game<'_>, item: u16) -> Option<&'static str> {
-    item_of_number(game, u32::from(item))
+    match fluid_of_number(item) {
+        Some("minecraft:water") => Some("minecraft:water_bucket"),
+        Some("minecraft:lava") => Some("minecraft:lava_bucket"),
+        Some(_) => Some("minecraft:bucket"),
+        None => item_of_number(game, u32::from(item)),
+    }
 }
 
 /// An item's name in the player's language.
@@ -151,8 +156,12 @@ fn item_name(id: &str) -> String {
     tr(&format!("item.{key}"), &tr(&format!("block.{key}"), id))
 }
 
-/// The name of an item the list names by number.
+/// The name of an item the list names by number, or of a fluid (`rustcraft.fluid.<name>.name`).
 fn name_of(game: &Game<'_>, item: u16) -> String {
+    if let Some(fluid) = fluid_of_number(item) {
+        let name = fluid.rsplit(':').next().unwrap_or(fluid);
+        return tr(&format!("rustcraft.fluid.{name}.name"), fluid);
+    }
     id_of(game, item).map_or_else(|| "?".to_owned(), item_name)
 }
 
@@ -207,7 +216,10 @@ fn shown(game: &Game<'_>, listing: &Listing, v: &View) -> Vec<Entry<ItemRef>> {
         );
     }
     let names = |k: &ItemRef| {
-        id_of(game, k.0).map_or_else(Vec::new, |id| vec![item_name(id), id.to_owned()])
+        id_of(game, k.0).map_or_else(Vec::new, |id| {
+            let own = fluid_of_number(k.0).unwrap_or(id);
+            vec![name_of(game, k.0), own.to_owned()]
+        })
     };
     view::visible(&entries, v.tab, &v.search, |k| facts(game, k), names)
         .into_iter()
@@ -542,6 +554,11 @@ fn wait_text(game: &Game<'_>, wait: &OrderWait) -> String {
         OrderWait::Busy(kind) => tr_with(
             "rustcraft.orders.wait.busy",
             "waits for a free %s",
+            &[kind_name(*kind)],
+        ),
+        OrderWait::Energy(kind) => tr_with(
+            "rustcraft.orders.wait.energy",
+            "waits for energy: %s",
             &[kind_name(*kind)],
         ),
     }
@@ -917,8 +934,8 @@ fn cell_tooltip(game: &Game<'_>, i: usize, orders_mode: bool, lines: &mut Vec<St
         return;
     };
     drop(v);
-    if let Some(id) = id_of(game, e.key.0) {
-        lines.push(item_name(id));
+    if id_of(game, e.key.0).is_some() {
+        lines.push(name_of(game, e.key.0));
     }
     lines.push(tr_with(
         "rustcraft.terminal.count",

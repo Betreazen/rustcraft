@@ -9,6 +9,10 @@ fn rustcraft_block_entity_submit(
     if crate::game::rustcraft_builder::draw_facade(game, entity, draw) {
         return;
     }
+    if block == rustcraft_rules::traversal::ANCHOR {
+        crate::game::rustcraft_zipline::draw_anchor(game, pos, entity, draw);
+        return;
+    }
     if block == "rustcraft:projector" {
         crate::game::rustcraft_builder::draw_ghost(game, pos, entity, draw);
     }

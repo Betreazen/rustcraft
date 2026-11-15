@@ -26,38 +26,38 @@ pub const ALL: [Build; 5] = [
     keep_orders_the_difference,
 ];
 
-const CELL: &str = "rustcraft:cell";
-const TERMINAL: &str = "rustcraft:terminal";
-const CRAFTER: &str = "rustcraft:crafter";
-const FURNACE: &str = "rustcraft:furnace";
-const CRYSTAL: &str = "rustcraft:crystal";
-const BOOK: &str = "rustcraft:module_recipes";
-const PISTON: &str = "minecraft:piston";
-const PLANKS: &str = "minecraft:oak_planks";
-const COBBLE: &str = "minecraft:cobblestone";
-const IRON: &str = "minecraft:iron_ingot";
-const RAW_IRON: &str = "minecraft:raw_iron";
-const REDSTONE: &str = "minecraft:redstone";
+pub(super) const CELL: &str = "rustcraft:cell";
+pub(super) const TERMINAL: &str = "rustcraft:terminal";
+pub(super) const CRAFTER: &str = "rustcraft:crafter";
+pub(super) const FURNACE: &str = "rustcraft:furnace";
+pub(super) const CRYSTAL: &str = "rustcraft:crystal";
+pub(super) const BOOK: &str = "rustcraft:module_recipes";
+pub(super) const PISTON: &str = "minecraft:piston";
+pub(super) const PLANKS: &str = "minecraft:oak_planks";
+pub(super) const COBBLE: &str = "minecraft:cobblestone";
+pub(super) const IRON: &str = "minecraft:iron_ingot";
+pub(super) const RAW_IRON: &str = "minecraft:raw_iron";
+pub(super) const REDSTONE: &str = "minecraft:redstone";
 /// M15: the node's tier that opens orders.
 const SMART: u8 = crate::orders::queue::SMART_TIER;
 /// How long the storage may take to take in the chest's items.
-const FILL: u64 = 200;
+pub(super) const FILL: u64 = 200;
 
-fn terminal_at(o: Pos) -> Pos {
+pub(super) fn terminal_at(o: Pos) -> Pos {
     at(o, [5, 0, 1])
 }
 
-fn crafter_at(o: Pos) -> Pos {
+pub(super) fn crafter_at(o: Pos) -> Pos {
     at(o, [3, 0, -1])
 }
 
-fn furnace_at(o: Pos) -> Pos {
+pub(super) fn furnace_at(o: Pos) -> Pos {
     at(o, [5, 0, -1])
 }
 
 /// A node of tier 3, five housings with an item channel, a chest «из блока» at housing 1, and a
 /// storage of four cells with a terminal at housings 3 to 5; the chest holds `parts`.
-fn build(b: &mut dyn Bench, o: Pos, parts: &[(&str, u32)]) -> Result<(), String> {
+pub(super) fn build(b: &mut dyn Bench, o: Pos, parts: &[(&str, u32)]) -> Result<(), String> {
     line(
         b,
         o,
@@ -78,7 +78,12 @@ fn build(b: &mut dyn Bench, o: Pos, parts: &[(&str, u32)]) -> Result<(), String>
 }
 
 /// A machine on the line, `powered` by two crystals that touch it.
-fn machine(b: &mut dyn Bench, pos: Pos, block: &str, powered: bool) -> Result<(), String> {
+pub(super) fn machine(
+    b: &mut dyn Bench,
+    pos: Pos,
+    block: &str,
+    powered: bool,
+) -> Result<(), String> {
     b.place(pos, block, &[])?;
     if powered {
         b.place(at(pos, [0, 0, -1]), CRYSTAL, &[])?;
@@ -87,7 +92,7 @@ fn machine(b: &mut dyn Bench, pos: Pos, block: &str, powered: bool) -> Result<()
     Ok(())
 }
 
-fn held(b: &dyn Bench, o: Pos, item: &str) -> Result<u64, String> {
+pub(super) fn held(b: &dyn Bench, o: Pos, item: &str) -> Result<u64, String> {
     let v = b
         .storage(terminal_at(o))
         .ok_or("the terminal shows no storage")?;
@@ -95,7 +100,7 @@ fn held(b: &dyn Bench, o: Pos, item: &str) -> Result<u64, String> {
 }
 
 /// The storage holds every part.
-fn holds(b: &dyn Bench, o: Pos, parts: &[(&str, u32)]) -> Result<bool, String> {
+pub(super) fn holds(b: &dyn Bench, o: Pos, parts: &[(&str, u32)]) -> Result<bool, String> {
     for (item, n) in parts {
         if held(b, o, item)? != u64::from(*n) {
             return Ok(false);
@@ -105,14 +110,14 @@ fn holds(b: &dyn Bench, o: Pos, parts: &[(&str, u32)]) -> Result<bool, String> {
 }
 
 /// The recipe book goes into the terminal's socket from the cursor.
-fn put_book(b: &mut dyn Bench, o: Pos) -> Result<(), String> {
+pub(super) fn put_book(b: &mut dyn Bench, o: Pos) -> Result<(), String> {
     let id = terminal::encode(Press::Book).ok_or("the book's press has no id")?;
     let after = b.press_cursor(terminal_at(o), id, Some((BOOK, 1)))?;
     same("cursor after the book went in", after, None)
 }
 
 /// What `pistons` pistons take, the iron as `iron` (ingots, or raw iron to smelt).
-fn parts_for(pistons: u32, iron: &'static str) -> Vec<(&'static str, u32)> {
+pub(super) fn parts_for(pistons: u32, iron: &'static str) -> Vec<(&'static str, u32)> {
     vec![
         (PLANKS, 3 * pistons),
         (COBBLE, 4 * pistons),

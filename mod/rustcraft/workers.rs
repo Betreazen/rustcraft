@@ -14,6 +14,11 @@
 // Hands: the chassis clicked on a floor rail places a worker (`native_use_item_on`); a click on the
 // worker opens its window, a server menu like the joint window (rustcraft_window), and the wrench
 // with sneaking takes it back with its tool, upgrades and load (`native_interact_entity`, API 29).
+//
+// The hold keeps plain item names. ST4: the grab takes a suspicious block the living vein grew
+// whole, under a marked name (rustcraft_rules::utility::grown::hold_name); wherever a hold's name
+// becomes a stack again (the dock, the player's hand, the ground) it is rustcraft_utility's
+// `hold_stack`, which gives the grown block its custom data `rustcraft:grown` (ST5).
 use crate::game::{
     Game,
     native_inventories::NativeInventoryKind,
@@ -22,7 +27,7 @@ use crate::game::{
     rustcraft_content::{self as content, Machine},
     rustcraft_machines as machines, rustcraft_monorail as monorail,
     rustcraft_server::{self as server, LevelNet, line, tell},
-    rustcraft_transport as transport,
+    rustcraft_transport as transport, rustcraft_utility as util,
     rustcraft_window::named,
 };
 use horizon_client::{
@@ -37,6 +42,7 @@ use rustcraft_rules::{
     monorail::Network,
     reports::Report,
     tuning::Tuning,
+    utility::grown,
     worker::{BlockView, Errand, Fleet, Note, Step, Tool, Track, Worker, digging, plants, trees},
 };
 use std::{
@@ -319,21 +325,29 @@ fn pick_up(game: &mut Game<'_>, player: u128, dimension: &str, id: u64) {
     stacks.extend(taken.hold.slots.iter().flatten().cloned());
     let at = taken.feet();
     for (item, n) in stacks {
-        if let Some(left) = game.native_give_stack(player, ItemStack::new(&item, n)) {
-            drop_stack(game, dimension, at, &left.item, left.count);
+        if let Some(left) = game.native_give_stack(player, util::hold_stack(&item, n)) {
+            drop_stack(game, dimension, at, &util::hold_name(&left), left.count);
         }
     }
 }
 
-/// An item entity of `count` `item` at `at`.
+/// An item entity of `count` `item` (a hold's name: a grown block keeps its mark) at `at`.
 fn drop_stack(game: &mut Game<'_>, dimension: &str, at: [f64; 3], item: &str, count: u32) {
     if count == 0 {
         return;
     }
-    let stack = Tag::compound([
-        ("id", Tag::String(JavaString::from(item))),
+    let (id, marked) = grown::from_hold(item);
+    let mut fields = vec![
+        ("id", Tag::String(JavaString::from(id))),
         ("count", Tag::Int(count.min(99) as i32)),
-    ]);
+    ];
+    if marked {
+        let mark = Compound::from([(JavaString::from(grown::MARK), Tag::Byte(1))]);
+        let components =
+            Compound::from([(JavaString::from(util::CUSTOM_DATA), Tag::Compound(mark))]);
+        fields.push(("components", Tag::Compound(components)));
+    }
+    let stack = Tag::compound(fields);
     let nbt = Compound::from([(JavaString::from("Item"), stack)]);
     if game
         .native_summon(
@@ -522,12 +536,13 @@ fn guard(game: &mut Game<'_>, dimension: &str, w: &mut Worker, cell: Pos, t: &Tu
     }
 }
 
-/// The grab (guide `tool_grab`): every ore of its zone broken into the hold, and the items lying
-/// in its zone picked up.
+/// The grab (guide `tool_grab`): every ore of its zone broken into the hold, every suspicious
+/// block the vein grew there taken whole (ST4), and the items lying in its zone picked up.
 fn grab(game: &mut Game<'_>, dimension: &str, w: &mut Worker, cell: Pos, t: &Tuning) {
     let zone = w.zone_cells(cell, t);
     let ores: Vec<Pos> = zone
-        .into_iter()
+        .iter()
+        .copied()
         .filter(|&p| digging::is_ore(&game.native_block(p)))
         .collect();
     let mut done = 0usize;
@@ -538,6 +553,7 @@ fn grab(game: &mut Game<'_>, dimension: &str, w: &mut Worker, cell: Pos, t: &Tun
             report_break(dimension, w, p, block, Tool::Grab);
         }
     }
+    done += take_grown(game, dimension, w, &zone);
     let (side, height) = w.zone(t);
     let (lo, hi) = digging::pickup_box(cell, side, height);
     for e in game.native_item_entities(dimension, lo, hi) {
@@ -554,6 +570,35 @@ fn grab(game: &mut Game<'_>, dimension: &str, w: &mut Worker, cell: Pos, t: &Tun
     if done > 0 {
         w.spend(t.grab_ticks * done as f64, t.grab_energy * done as f64, t);
     }
+}
+
+/// ST4: the suspicious blocks of `zone` the vein grew, lifted whole into the hold under their
+/// marked name, no `break` told (the vein's `place` keeps the cell marked in Path-of-craft-tree);
+/// how many.
+fn take_grown(game: &mut Game<'_>, dimension: &str, w: &mut Worker, zone: &[Pos]) -> usize {
+    let Some(air) = game.native_default_state(AIR) else {
+        return 0;
+    };
+    let mut done = 0;
+    for &p in zone {
+        let block = game.native_block(p);
+        let grown_here = grown::is_suspicious(&block) && util::grown_at(game, dimension, p);
+        if !grown::grab_takes(&block, grown_here) {
+            continue;
+        }
+        let max = machines::max_stack(game, &block);
+        let name = grown::hold_name(&block, true);
+        if w.hold.add(&name, 1, max) > 0 {
+            break;
+        }
+        if !game.native_set_block(dimension, p, air, 3) {
+            w.hold.take(&name, 1);
+            continue;
+        }
+        util::forget_grown(game, dimension, p);
+        done += 1;
+    }
+    done
 }
 
 /// The scoop (guide `tool_scoop`): earth, sand, gravel and clay beside and under the way, top
@@ -687,6 +732,7 @@ fn take_block(
     let Some(drops) = game.native_machine_destroy_block(pos, tool.as_ref(), true) else {
         return false;
     };
+    util::forget_grown(game, dimension, pos);
     for d in drops {
         if d.count == 0 || &*d.item == AIR {
             continue;
@@ -856,7 +902,7 @@ fn load_from(game: &mut Game<'_>, w: &mut Worker, dock: Pos, t: &Tuning) {
         };
         let n = s.count.min(per_tick - moved);
         let max = machines::max_stack(game, &s.item);
-        let left = w.hold.add(&s.item, n, max);
+        let left = w.hold.add(&util::hold_name(s), n, max);
         if n > left {
             taken.push((i, n - left));
             moved += n - left;
@@ -897,9 +943,10 @@ fn unload_into(game: &mut Game<'_>, w: &mut Worker, dock: Pos, t: &Tuning) {
             break;
         };
         let n = count.min(per_tick - moved);
-        let max = machines::max_stack(game, &item);
+        let stack = util::hold_stack(&item, 1);
+        let max = machines::max_stack(game, &stack.item);
         let put = game
-            .native_with_mod_block_entity(dock, |e| into_slots(&mut e.items, &item, n, max))
+            .native_with_mod_block_entity(dock, |e| into_slots(&mut e.items, &stack, n, max))
             .unwrap_or(0);
         if put == 0 {
             break;
@@ -916,17 +963,19 @@ fn unload_into(game: &mut Game<'_>, w: &mut Worker, dock: Pos, t: &Tuning) {
     }
 }
 
-/// Puts up to `count` `item` into the dock's slots; how many went in.
-fn into_slots(items: &mut Vec<Option<ItemStack>>, item: &str, count: u32, max: u32) -> u32 {
+/// Puts up to `count` of `like`'s item into the dock's slots; how many went in. A grown block
+/// stacks only with grown ones.
+fn into_slots(items: &mut Vec<Option<ItemStack>>, like: &ItemStack, count: u32, max: u32) -> u32 {
     if items.len() < content::DOCK_SLOTS {
         items.resize(content::DOCK_SLOTS, None);
     }
+    let marked = util::is_grown(like);
     let mut left = count;
     for s in items.iter_mut().flatten() {
         if left == 0 {
             break;
         }
-        if &*s.item == item && s.count < max {
+        if s.item == like.item && util::is_grown(s) == marked && s.count < max {
             let k = (max - s.count).min(left);
             s.count += k;
             left -= k;
@@ -939,7 +988,9 @@ fn into_slots(items: &mut Vec<Option<ItemStack>>, item: &str, count: u32, max: u
         let empty = s.as_ref().is_none_or(|x| x.count == 0 || &*x.item == AIR);
         if empty {
             let k = max.min(left);
-            *s = Some(ItemStack::new(item, k));
+            let mut put = like.clone();
+            put.count = k;
+            *s = Some(put);
             left -= k;
         }
     }
@@ -1228,8 +1279,9 @@ fn windows(game: &mut Game<'_>, dimension: &str, level: &mut LevelFleet, t: &Tun
     }
 }
 
+/// Gives `count` of `item` (a hold's name) to the player; how many they took.
 fn give(game: &mut Game<'_>, uuid: u128, item: &str, count: u32) -> u32 {
-    match game.native_give_stack(uuid, ItemStack::new(item, count)) {
+    match game.native_give_stack(uuid, util::hold_stack(item, count)) {
         Some(left) => count - left.count.min(count),
         None => count,
     }
@@ -1306,7 +1358,7 @@ fn click(game: &mut Game<'_>, uuid: u128, slot: usize, w: &mut Worker, t: &Tunin
         (1, None)
     } else {
         let max = machines::max_stack(game, &item);
-        let left = w.hold.add(&item, stack.count, max);
+        let left = w.hold.add(&util::hold_name(&stack), stack.count, max);
         (stack.count - left, None)
     };
     if keep == 0 {
@@ -1437,7 +1489,7 @@ fn cells(game: &Game<'_>, w: &Worker, t: &Tuning) -> Vec<Option<ItemStack>> {
     ));
     for i in 0..(CELLS - HOLD_FIRST) {
         out[HOLD_FIRST + i] = match w.hold.slots.get(i) {
-            Some(Some((item, n))) => Some(ItemStack::new(item, *n)),
+            Some(Some((item, n))) => Some(util::hold_stack(item, *n)),
             Some(None) => None,
             None => Some(named(
                 "minecraft:black_stained_glass_pane",

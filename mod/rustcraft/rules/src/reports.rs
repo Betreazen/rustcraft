@@ -98,6 +98,8 @@ pub enum Report {
     },
     /// Slice 13: a cartographer found a biome new to its owner (EX1).
     Biome { owner: u128, biome: String },
+    /// A cartographer found a structure (its id as in `/locate structure`) new to its owner (EX1).
+    Structure { owner: u128, id: String },
     /// Slice 12: the building machine placed a cell of its projector's plan (instead of `place`).
     Build {
         owner: u128,
@@ -154,6 +156,7 @@ impl Report {
             Report::Milk { owner, entity } => format!("{COMMAND} milk {owner:032x} {entity}"),
             Report::Chunk { owner, dimension, x, z } => format!("{COMMAND} chunk {owner:032x} {dimension} {x} {z}"),
             Report::Biome { owner, biome } => format!("{COMMAND} biome {owner:032x} {biome}"),
+            Report::Structure { owner, id } => format!("{COMMAND} structure {owner:032x} {id}"),
             Report::Build {
                 owner,
                 dimension,
@@ -179,6 +182,7 @@ impl Report {
             Report::Milk { .. } => "milk",
             Report::Chunk { .. } => "chunk",
             Report::Biome { .. } => "biome",
+            Report::Structure { .. } => "structure",
             Report::Build { .. } => "build",
         }
     }
@@ -205,6 +209,9 @@ mod tests {
         };
         assert_eq!(b.command(), format!("pct-machine build {o} minecraft:overworld 1 2 -3 minecraft:stone"));
         assert_eq!(b.kind(), "build");
+        let s = Report::Structure { owner, id: "minecraft:village_plains".into() };
+        assert_eq!(s.command(), format!("pct-machine structure {o} minecraft:village_plains"));
+        assert_eq!(s.kind(), "structure");
     }
 
     #[test]

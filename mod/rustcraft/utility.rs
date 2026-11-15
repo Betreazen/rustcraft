@@ -17,7 +17,13 @@
 // - The enchanting machine: an item and lapis with the experience of a condenser beside it, as
 //   the enchanting table with 15 bookshelves offers it, the level its toggles choose.
 // - The archaeology table: a suspicious block and a brush into a find of the table its toggle
-//   chooses (spec 24, ST2), and the sand or gravel back.
+//   chooses (spec 24, ST2), and the sand or gravel back; `brush` to Path-of-craft-tree only for a
+//   block found in the world (ST5).
+// - The living vein: ore, or with the stratum module suspicious sand or gravel, in a free cell
+//   beside it, told as `place` (X6). A suspicious block it grows is remembered by its cell
+//   (rustcraft_rules::utility::grown, the world's `data/rustcraft_grown.json`) until a player
+//   breaks or places there; the grab (rustcraft_workers) takes it whole and its item carries custom
+//   data `rustcraft:grown`, so the table sends no `brush` for it (ST4, ST5).
 // The farm machines, the projector and builder and the portal dock are rustcraft_farm and
 // rustcraft_builder; this module runs their ticks too.
 use crate::game::{
@@ -38,11 +44,14 @@ use rustcraft_rules::{
     reports::Report,
     tuning::Tuning,
     utility::{
-        self as rules, ARCHEO_TABLES, KITCHEN_RECIPES, Shown, Util, charge, disassembly, repair, xp,
+        self as rules, ARCHEO_TABLES, KITCHEN_RECIPES, Shown, Util, charge, disassembly,
+        grown::{self, Grown},
+        repair, xp,
     },
 };
 use std::{
     collections::{BTreeMap, HashMap},
+    path::PathBuf,
     sync::{LazyLock, Mutex, MutexGuard, PoisonError},
 };
 
@@ -67,6 +76,96 @@ static STATE: LazyLock<Mutex<State>> = LazyLock::new(Mutex::default);
 
 fn state() -> MutexGuard<'static, State> {
     STATE.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+/// ST5: the cells the vein grew a suspicious block in, as the world's file keeps them.
+#[derive(Default)]
+struct GrownFile {
+    path: Option<PathBuf>,
+    cells: Grown,
+    dirty: bool,
+}
+
+static GROWN: LazyLock<Mutex<GrownFile>> = LazyLock::new(Mutex::default);
+
+/// The grown cells, read from the world's file the first time.
+fn grown_cells(game: &Game<'_>) -> MutexGuard<'static, GrownFile> {
+    let mut g = GROWN.lock().unwrap_or_else(PoisonError::into_inner);
+    if g.path.is_none()
+        && let Some(world) = game.native_world_dir()
+    {
+        let path = world.join("data").join("rustcraft_grown.json");
+        if let Ok(text) = std::fs::read_to_string(&path) {
+            match serde_json::from_str(&text) {
+                Ok(cells) => g.cells = cells,
+                Err(e) => log::warn!("rustcraft: {} does not read: {e}", path.display()),
+            }
+        }
+        g.path = Some(path);
+    }
+    g
+}
+
+/// Writes the grown cells when they changed, whole under another name first.
+pub(super) fn save_grown(game: &Game<'_>) {
+    let mut g = grown_cells(game);
+    if !g.dirty {
+        return;
+    }
+    let Some(path) = g.path.clone() else { return };
+    let Ok(json) = serde_json::to_string(&g.cells) else {
+        return;
+    };
+    g.dirty = false;
+    drop(g);
+    let fresh = path.with_extension("json.tmp");
+    let done = path
+        .parent()
+        .map_or(Ok(()), std::fs::create_dir_all)
+        .and_then(|()| std::fs::write(&fresh, json))
+        .and_then(|()| std::fs::rename(&fresh, &path));
+    if let Err(e) = done {
+        log::warn!("rustcraft: the grown cells were not saved: {e}");
+    }
+}
+
+/// ST5: whether the vein grew the block at `pos`.
+pub(super) fn grown_at(game: &Game<'_>, dimension: &str, pos: Pos) -> bool {
+    grown_cells(game).cells.contains(dimension, pos)
+}
+
+/// The block at `pos` changed or was taken: it is no grown block any more.
+pub(super) fn forget_grown(game: &Game<'_>, dimension: &str, pos: Pos) {
+    let mut g = grown_cells(game);
+    if g.cells.forget(dimension, pos) {
+        g.dirty = true;
+    }
+}
+
+/// Whether `stack` is a block the vein grew (custom data `rustcraft:grown`).
+pub(super) fn is_grown(stack: &ItemStack) -> bool {
+    stack
+        .custom_data()
+        .is_some_and(|d| d.get(&JavaString::from(grown::MARK)).is_some())
+}
+
+/// A stack of the item a worker's hold names `name`: a grown block's with its mark.
+pub(super) fn hold_stack(name: &str, count: u32) -> ItemStack {
+    let (item, marked) = grown::from_hold(name);
+    let mut stack = ItemStack::new(item, count);
+    if marked {
+        let mut data = stack.custom_data().cloned().unwrap_or_default();
+        data.insert(JavaString::from(grown::MARK), Tag::Byte(1));
+        stack
+            .data_mut()
+            .set_other(CUSTOM_DATA, Some(Tag::Compound(data)));
+    }
+    stack
+}
+
+/// The name a worker's hold keeps `stack` under: its item, marked when it was grown.
+pub(super) fn hold_name(stack: &ItemStack) -> String {
+    grown::hold_name(&stack.item, is_grown(stack))
 }
 
 /// A random number 0..1 (xorshift; the machines' chances need no better).
@@ -806,6 +905,7 @@ fn brush(game: &mut Game<'_>, pos: Pos, cost: f64) -> Shown {
     if !spend(game, pos, cost) {
         return Shown::NoEnergy;
     }
+    let was_grown = is_grown(&block);
     let finds = game.sequence_loot(table, table, Some(&brush));
     let max_damage = game.items().get(&brush.item).map_or(0, |i| i.max_damage);
     with_items(game, pos, |items| {
@@ -821,8 +921,9 @@ fn brush(game: &mut Game<'_>, pos: Pos, cost: f64) -> Shown {
     for f in finds {
         put(game, pos, 2..11, f);
     }
-    if let Some(o) = owner(game, pos) {
-        base::report(Report::Counted { kind: "brush", owner: o, count: 1 });
+    // ST5: a block the vein grew gives its find but no digger's experience.
+    if let Some(r) = grown::brush_report(owner(game, pos), was_grown) {
+        base::report(r);
     }
     Shown::Working
 }
@@ -842,7 +943,11 @@ fn grow(game: &mut Game<'_>, dimension: &str, pos: Pos, cost: f64) -> Shown {
     let Some(cell) = vein::cells()
         .into_iter()
         .map(|c| [pos[0] + c[0], pos[1] + c[1], pos[2] + c[2]])
-        .find(|p| matches!(game.native_block(*p).as_str(), "minecraft:air" | "minecraft:cave_air"))
+        .find(|p| {
+            matches!(game.native_block(*p).as_str(), "minecraft:air" | "minecraft:cave_air")
+                // A suspicious block falls where nothing holds it up, and leaves its mark behind.
+                && (!stratum || grown::holds_up(&game.native_block([p[0], p[1] - 1, p[2]])))
+        })
     else {
         return Shown::Blocked("vein_no_room");
     };
@@ -867,6 +972,11 @@ fn grow(game: &mut Game<'_>, dimension: &str, pos: Pos, cost: f64) -> Shown {
     }
     game.native_set_block(dimension, cell, state_id, 3);
     with_items(game, pos, |items| take_one(items, slot));
+    if grown::is_suspicious(ore) {
+        let mut g = grown_cells(game);
+        g.cells.grew(dimension, cell);
+        g.dirty = true;
+    }
     base::report(Report::Place { dimension: dimension.to_owned(), pos: cell, block: ore.to_owned() });
     Shown::Working
 }

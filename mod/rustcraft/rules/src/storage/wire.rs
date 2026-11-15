@@ -4,7 +4,9 @@
 //! number in the item table both sides share and their damage, so a worn tool is its own line
 //! (TM1). Since slice 15 it also says whether the terminal holds the recipe book, whether the
 //! storage's line takes orders (M15), the queue of orders (O8) and, with the book, the items the
-//! book can make (O2), as many as the message has room for after the rest.
+//! book can make (O2), as many as the message has room for after the rest. Version 3 adds an
+//! order's wait for energy; a fluid (O12) goes by its number past the item table
+//! (`orders::FLUID_NUMBERS`) wherever an item's number may stand.
 
 use crate::geom::Pos;
 use crate::orders::queue::MAX_ORDERS;
@@ -16,7 +18,9 @@ pub const MAX_BYTES: usize = 30_000;
 pub const MAX_HOLES: usize = 16;
 /// Missing items or machines an order's line names.
 pub const MAX_WANTS: usize = 3;
-const VERSION: u8 = 2;
+const VERSION: u8 = 3;
+/// Version 2 (v0.15.0) is laid out as 3 is; it only knew no wait for energy.
+const OLDER: u8 = 2;
 const HEADER: usize = 1 + 12 + 1 + 4 + 8 + 8 + 1 + 2 + 4 + 1 + 1 + 1;
 const HOLE: usize = 12;
 const ENTRY: usize = 2 + 2 + 8 + 1 + 8 + 8;
@@ -104,6 +108,8 @@ pub enum OrderWait {
     Machines(Vec<u8>),
     /// Every machine of this kind is busy.
     Busy(u8),
+    /// Its jobs stand on machines of this kind without energy or fuel.
+    Energy(u8),
 }
 
 /// One order of the queue (O8).
@@ -219,6 +225,7 @@ fn encode_order(out: &mut Vec<u8>, o: &OrderLine) {
             out.extend(kinds);
         }
         OrderWait::Busy(kind) => out.extend([4, *kind]),
+        OrderWait::Energy(kind) => out.extend([5, *kind]),
     }
 }
 
@@ -271,6 +278,7 @@ impl Reader<'_> {
                     .collect::<Option<Vec<_>>>()?,
             ),
             4 => OrderWait::Busy(arg),
+            5 => OrderWait::Energy(arg),
             _ => OrderWait::New,
         };
         Some(OrderLine {
@@ -287,7 +295,7 @@ impl Reader<'_> {
 /// What `encode` wrote; none for a message of another version or cut short.
 pub fn decode(bytes: &[u8]) -> Option<Listing> {
     let mut r = Reader(bytes);
-    if r.u8()? != VERSION {
+    if !matches!(r.u8()?, VERSION | OLDER) {
         return None;
     }
     let terminal = r.pos()?;
@@ -407,6 +415,14 @@ mod tests {
                     keep: false,
                     wait: OrderWait::Busy(0),
                 },
+                OrderLine {
+                    id: 7,
+                    item: crate::orders::FLUID_NUMBERS + 2,
+                    count: 1,
+                    done: 0,
+                    keep: false,
+                    wait: OrderWait::Energy(4),
+                },
             ],
             orderable: vec![1, 2, 812],
         }
@@ -443,6 +459,18 @@ mod tests {
         assert!(bytes.len() <= MAX_BYTES);
         assert!(bytes.len() + 2 > MAX_BYTES);
         assert!(decode(&bytes).unwrap().orderable.len() > 10_000);
+    }
+
+    #[test]
+    fn a_message_of_version_2_still_reads() {
+        // v0.15.0 sent the same layout under version 2, with no wait for energy.
+        let mut l = listing(3);
+        l.orders.retain(|o| !matches!(o.wait, OrderWait::Energy(_)));
+        let mut bytes = encode(&l);
+        bytes[0] = 2;
+        assert_eq!(decode(&bytes), Some(l));
+        bytes[0] = 1;
+        assert_eq!(decode(&bytes), None);
     }
 
     #[test]

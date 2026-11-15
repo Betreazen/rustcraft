@@ -133,6 +133,7 @@
     "rustcraft:module_pick",
     "rustcraft:module_stratum",
     "rustcraft:zipline",
+    "rustcraft:zip_anchor",
     "rustcraft:tool_bore",
     "rustcraft:module_tunnel",
     "rustcraft:module_height",
@@ -140,6 +141,7 @@
     "rustcraft:module_build",
     "rustcraft:harpoon",
     "rustcraft:tablet",
+    "rustcraft:handbook",
     "rustcraft:module_recipes"
   ]
 }

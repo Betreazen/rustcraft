@@ -15,6 +15,7 @@ mod/content/assets/rustcraft/:
   alloy, crafter, pump, terminal, tank, station), and monorail.json: the rail's parts by tier,
   turned onto its mount (slice 6);
 - the capsule's cabin and brackets as standalone models the client draws round its seat;
+- the zipline's rope, its anchor (a block with its blockstate) and the harpoon's tip;
 - textures/item/*.png: the guide's icons of the channels, the wrench, the dusts, the alloys and the
   capacity module (icons_mc.py).
 
@@ -826,6 +827,29 @@ def rope(out):
     out.text('models/block/zipline_rope.json', json.dumps(model, indent=2) + '\n')
 
 
+# The zipline's anchor (rustcraft_zipline, rules::traversal): a plate, a stake and the ring its
+# rope's cord goes up from (12 pixels, traversal::ANCHOR_TOP), in the rope's texture; and the
+# harpoon's tip at the hook's end of its rope (station.rs draw_tip), pointing along +z from z 0.
+ANCHOR_BOXES = (([5, 0, 5], [11, 1, 11]), ([7, 1, 7], [9, 10, 9]), ([6, 10, 6], [10, 12, 10]))
+TIP_BOXES = (([7, 7, 0], [9, 9, 1]), ([6.5, 6.5, 1], [9.5, 9.5, 3]), ([7.25, 7.25, 3], [8.75, 8.75, 5]),
+             ([7.75, 7.75, 5], [8.25, 8.25, 6]))
+
+
+def rope_boxes(boxes):
+    return [{'from': lo, 'to': hi, 'faces': {f: dict(ROPE_FACE) for f in ('down', 'up', 'north', 'south', 'west', 'east')}}
+            for lo, hi in boxes]
+
+
+def zip_parts(out):
+    textures = {'particle': 'rustcraft:block/rail', 'rope': 'rustcraft:block/rail'}
+    anchor = {'parent': BLOCK, 'ambientocclusion': False, 'textures': textures, 'elements': rope_boxes(ANCHOR_BOXES)}
+    out.text('models/block/zip_anchor.json', json.dumps(anchor, indent=2) + '\n')
+    out.text('blockstates/zip_anchor.json',
+             '{\n  "variants": {\n    "": {"model": "rustcraft:block/zip_anchor"}\n  }\n}\n')
+    tip = {'textures': textures, 'elements': rope_boxes(TIP_BOXES)}
+    out.text('models/block/harpoon_tip.json', json.dumps(tip, indent=2) + '\n')
+
+
 def items(out):
     for name in icons_mc.ICONS:
         out.image('textures/item/%s.png' % name, icons_mc.icon(name))
@@ -841,6 +865,7 @@ def main():
     worker_parts(out, report)
     slice7_states(out)
     rope(out)
+    zip_parts(out)
     staged(out, report, skipped)
     rust_table(out)
     items(out)

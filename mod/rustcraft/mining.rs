@@ -396,6 +396,7 @@ fn take(
     let Some(drops) = game.native_machine_destroy_block(cell, Some(&tool), true) else {
         return false;
     };
+    crate::game::rustcraft_utility::forget_grown(game, dimension, cell);
     let maxes: Vec<u32> = drops
         .iter()
         .map(|d| machines::max_stack(game, &d.item))

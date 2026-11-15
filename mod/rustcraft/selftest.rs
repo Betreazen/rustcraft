@@ -735,6 +735,52 @@ impl Bench for GameBench<'_, '_> {
         Ok(())
     }
 
+    fn put_grown(&mut self, pos: Pos, slot: usize, item: &str, count: u32) -> Result<(), String> {
+        let name = rustcraft_rules::utility::grown::hold_name(item, true);
+        let stack = crate::game::rustcraft_utility::hold_stack(&name, count);
+        self.change_entity(pos, |e| {
+            if e.items.len() <= slot {
+                e.items.resize(slot + 1, None);
+            }
+            e.items[slot] = Some(stack);
+        })
+    }
+
+    fn restart_orders(&mut self, pos: Pos) -> Result<(), String> {
+        storage::storage_at(DIMENSION, pos).ok_or_else(|| format!("no storage at {pos:?}"))?;
+        // A restart starts with no temporary pages: the record gives them back.
+        server::with_level(DIMENSION, |level| level.temp_pages.clear());
+        storage::restart_orders(DIMENSION, through_nbt)
+    }
+
+    fn tie_rope(&mut self, owner: u128, a: Pos, b: Pos) -> Result<u64, String> {
+        crate::game::rustcraft_zipline::tie_for_selftest(self.game, owner, DIMENSION, a, b)
+    }
+
+    fn ropes(&self) -> Vec<rustcraft_rules::traversal::Rope> {
+        crate::game::rustcraft_zipline::ropes_for_selftest(self.game)
+    }
+
+    fn harpoon_mob(&mut self, from: [f64; 3], id: u32) -> Result<(), String> {
+        crate::game::rustcraft_zipline::pull_for_selftest(self.game, DIMENSION, from, id)
+    }
+
+    fn handbook_offer(&mut self, player: u128, carried: &[&str]) -> bool {
+        crate::game::rustcraft_handbook::offer(self.game, player, carried)
+    }
+
+    fn handbook_forget(&mut self, player: u128) {
+        crate::game::rustcraft_handbook::forget(self.game, player);
+    }
+
+    fn item_known(&self, item: &str) -> bool {
+        self.game.items().get(item).is_some()
+    }
+
+    fn recipe_grid(&self, item: &str) -> Option<[Option<String>; 9]> {
+        crate::game::rustcraft_handbook::recipe_of(self.game, item).map(|(grid, _)| grid)
+    }
+
     fn anim(&self, pos: Pos) -> Option<rustcraft_rules::anim::Shown> {
         self.game
             .native_mod_block_entity(pos)
@@ -819,6 +865,7 @@ pub(super) fn slice7_mob(game: &Game<'_>, id: u32) -> Option<MobView> {
         .find(|m| m.id == id && !m.removed && m.alive())?;
     Some(MobView {
         kind: m.kind.id.to_string(),
+        pos: [m.position.x, m.position.y, m.position.z],
         health: m.health,
         effects: m
             .extra

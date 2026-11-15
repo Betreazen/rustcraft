@@ -86,6 +86,14 @@ fn smelter_of(entity: &ModBlockEntity) -> AlloySmelter {
     }
 }
 
+/// Slice 15: whether the smelter at `pos` can run on fuel: a fuel item in its fuel slot or a fuel
+/// still burning (rustcraft_orders gives a step to a machine with energy or fuel first).
+pub(super) fn has_fuel(game: &Game<'_>, pos: Pos) -> bool {
+    game.native_mod_block_entity(pos).is_some_and(|entity| {
+        slot_of(&entity, content::ALLOY_FUEL).is_some() || read_f64(&entity.nbt, BURN_KEY) > 0.0
+    })
+}
+
 pub(super) fn read(
     game: &Game<'_>,
     pos: Pos,

@@ -460,6 +460,10 @@ ICONS['book_thrift'] = (BOOK, '#3558d6', '#b8f6fa', [(4, 4, LEAF)] + dots([(3, 2
 # Slice 15: the storage terminal's recipe book (icons.js book('mod_recipes', '#3558d6', 'grid', '#e6e8ee')).
 GRID = ['xxxxxxx', 'xexexex', 'xxxxxxx', 'xexexex', 'xxxxxxx', 'xexexex', 'xxxxxxx']
 ICONS['module_recipes'] = (BOOK, '#3558d6', '#e6e8ee', [(4, 4, GRID)])
+# The engineer's handbook (icons.js book('guide', T[1], 'gear'): the emblem `gear` in the default
+# brass).
+GEAR = ['e.ee.e.', '.eeee..', 'ee..ee.', 'ee..ee.', '.eeee..', 'e.ee.e.', '.......']
+ICONS['handbook'] = (BOOK, TIER[1], '#e2bd55', [(4, 4, GEAR)])
 # Player modules: the module plate of the third tier with a sign of its own (drawn at 4, 3).
 PM_SIGNS = {
     'pm_dash': ['..e....', '..ee...', 'eeeee..', '..ee...', '..e....', '.......'],

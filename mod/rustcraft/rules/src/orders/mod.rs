@@ -7,16 +7,65 @@
 //! The recipe book (O1) is the game's crafting and smelting recipes and the mod's machine recipes,
 //! as `PlanRecipe`s; `PlanRecipe::crafting` builds the autocrafter's ones from a crafting grid. An
 //! input of a recipe may take any of several items (planks of any wood): the planner takes the one
-//! the storage has most of. `queue` runs the orders of one storage.
+//! the storage has most of. `queue` runs the orders of one storage; `saved` writes a queue and
+//! its running jobs into the storage's record and reads them back.
+//!
+//! O12: fluids are keys of their own (`fluid_key`), counted in buckets. The mixer's recipes take
+//! items and water and make a fluid; the fluid the line's tanks and mixers hold is the stock of
+//! it. The storage keeps no fluid: an order for one is done when the mixer has made it, and the
+//! fluid nets carry it on.
 
 use std::collections::BTreeMap;
+
+use serde::{Deserialize, Serialize};
 
 use crate::net::items::ItemKey;
 
 pub mod queue;
+pub mod saved;
 
 /// The machine kinds a step can name, in the order the terminal's list codes them.
 pub const KINDS: [&str; 5] = ["crafter", "furnace", "crusher", "alloy", "mixer"];
+
+/// O12: a fluid's key starts with this, so no item id (`namespace:path`) is one.
+pub const FLUID_PREFIX: &str = "fluid:";
+/// The fluids an order can name, in the order the terminal's list numbers them.
+pub const FLUIDS: [&str; 6] = [
+    "minecraft:water",
+    "minecraft:lava",
+    "rustcraft:solution",
+    "rustcraft:accelerator",
+    "rustcraft:economizer",
+    "rustcraft:enricher",
+];
+/// The terminal's list names fluid `k` of FLUIDS by this number plus `k`: past every item of
+/// the item table, and short of a press's «no item» (0xFFFF).
+pub const FLUID_NUMBERS: u16 = 0xFF00;
+
+/// The key of `fluid` (`minecraft:water` → `fluid:minecraft:water`).
+pub fn fluid_key(fluid: &str) -> ItemKey {
+    format!("{FLUID_PREFIX}{fluid}")
+}
+
+/// The fluid a key names; none for an item's key.
+pub fn fluid_of(key: &str) -> Option<&str> {
+    key.strip_prefix(FLUID_PREFIX)
+}
+
+/// The number the terminal's list gives a fluid; none for a fluid it does not know.
+pub fn fluid_number(fluid: &str) -> Option<u16> {
+    FLUIDS
+        .iter()
+        .position(|f| *f == fluid)
+        .map(|k| FLUID_NUMBERS + k as u16)
+}
+
+/// The fluid a number of the terminal's list stands for; none for an item's number.
+pub fn fluid_of_number(number: u16) -> Option<&'static str> {
+    FLUIDS
+        .get(usize::from(number.checked_sub(FLUID_NUMBERS)?))
+        .copied()
+}
 
 /// The most items the planner breaks down for one order before it takes the rest as missing: a
 /// guard against a recipe book whose recipes branch without end (the order is planned again
@@ -94,18 +143,29 @@ impl PlanRecipe {
 }
 
 /// One step of an order: run a recipe of the book `times` times with these items.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Step {
     /// The recipe's place in the book.
     pub recipe: usize,
     pub machine: String,
-    /// The item chosen for each input of the recipe, in its order, and how many one run takes.
+    /// The item chosen for each input of the recipe, in its order, and how many one run takes
+    /// (a fluid's key in buckets).
     pub inputs: Vec<(ItemKey, u32)>,
     pub output: (ItemKey, u32),
     pub times: u32,
 }
 
 impl Step {
+    /// The inputs the storage hands over: the items, not the fluids, which the line's fluid nets
+    /// bring (O12).
+    pub fn items(&self) -> Vec<(ItemKey, u32)> {
+        self.inputs
+            .iter()
+            .filter(|(k, _)| fluid_of(k).is_none())
+            .cloned()
+            .collect()
+    }
+
     /// The autocrafter's pattern for this step: each cell the item chosen for its input.
     pub fn pattern(&self, book: &[PlanRecipe]) -> [Option<ItemKey>; 9] {
         let cells = book.get(self.recipe).map_or(&[][..], |r| &r.cells[..]);
@@ -619,6 +679,89 @@ mod tests {
             .collect();
         let p = plan("x:0", 1, &BTreeMap::new(), &book, ALL);
         assert!(!p.ready());
+    }
+
+    fn solution_book() -> Vec<PlanRecipe> {
+        vec![r(
+            "mixer",
+            &[
+                ("minecraft:bone_meal", 1),
+                ("minecraft:redstone", 1),
+                ("fluid:minecraft:water", 1),
+            ],
+            ("fluid:rustcraft:solution", 1),
+        )]
+    }
+
+    #[test]
+    fn a_fluid_order_takes_water_from_the_line() {
+        // Rule O12: the water of the line's tanks is the stock of water, in buckets.
+        let s = stock(&[
+            ("minecraft:bone_meal", 5),
+            ("minecraft:redstone", 5),
+            ("fluid:minecraft:water", 8),
+        ]);
+        let p = plan(
+            "fluid:rustcraft:solution",
+            3,
+            &s,
+            &solution_book(),
+            &["mixer"],
+        );
+        assert!(p.ready(), "{p:?}");
+        assert_eq!(p.steps[0].machine, "mixer");
+        assert_eq!(p.steps[0].times, 3);
+        assert_eq!(p.reserved["fluid:minecraft:water"], 3);
+        assert_eq!(
+            p.steps[0].items(),
+            vec![
+                ("minecraft:bone_meal".to_string(), 1),
+                ("minecraft:redstone".to_string(), 1)
+            ]
+        );
+    }
+
+    #[test]
+    fn missing_water_is_named() {
+        // Rule O12: «не хватает: вода ×1».
+        let s = stock(&[
+            ("minecraft:bone_meal", 5),
+            ("minecraft:redstone", 5),
+            ("fluid:minecraft:water", 1),
+        ]);
+        let p = plan(
+            "fluid:rustcraft:solution",
+            2,
+            &s,
+            &solution_book(),
+            &["mixer"],
+        );
+        assert_eq!(p.missing, stock(&[("fluid:minecraft:water", 1)]));
+        // No mixer on the line: the machine is named (O13).
+        let p = plan(
+            "fluid:rustcraft:solution",
+            1,
+            &s,
+            &solution_book(),
+            &["crafter"],
+        );
+        assert_eq!(p.missing_machines, vec!["mixer".to_string()]);
+    }
+
+    #[test]
+    fn fluids_have_keys_and_numbers_of_their_own() {
+        assert_eq!(fluid_key("minecraft:water"), "fluid:minecraft:water");
+        assert_eq!(
+            fluid_of("fluid:rustcraft:solution"),
+            Some("rustcraft:solution")
+        );
+        assert_eq!(fluid_of("minecraft:water_bucket"), None);
+        for f in FLUIDS {
+            assert_eq!(fluid_number(f).and_then(fluid_of_number), Some(f));
+        }
+        assert_eq!(fluid_number("minecraft:milk"), None);
+        assert_eq!(fluid_of_number(812), None);
+        assert!(FLUID_NUMBERS + (FLUIDS.len() as u16) < 0xFFFF);
     }
 
     #[test]
