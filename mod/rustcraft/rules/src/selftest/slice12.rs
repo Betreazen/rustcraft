@@ -169,7 +169,7 @@ fn feeder_feeds_a_pair(o: Pos, _: &Tuning) -> Scenario {
             }
             Ok(())
         })
-        .until("it fed them two wheat", LIMIT, move |b, _| Ok(count_of(&b.items(p), "minecraft:wheat") == 2))
+        .until("it fed them two wheat", 2 * LIMIT, move |b, _| Ok(count_of(&b.items(p), "minecraft:wheat") == 2))
         .check("Path-of-craft-tree heard breed", move |b, _| {
             if reported(b, "breed") { Ok(()) } else { Err(format!("no breed in {:?}", b.reports())) }
         })

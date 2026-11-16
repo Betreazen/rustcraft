@@ -3702,5 +3702,8 @@
   "rustcraft.util.fishery.ready": "Леска заброшена",
   "rustcraft.util.fish_rod_worn": "Удочка изношена",
   "rustcraft.util.fishery.rod_wait": "%s · %s",
-  "rustcraft.util.kitchen.milk_line": "Молоко в баке: %s из %s вёдер"
+  "rustcraft.util.kitchen.milk_line": "Молоко в баке: %s из %s вёдер",
+  "rustcraft.util.feeder.none": "Рядом нет животных",
+  "rustcraft.util.feeder.heads": "Голов (не больше %s каждого вида): %s",
+  "rustcraft.util.feed_herd_full": "Предел животных"
 }

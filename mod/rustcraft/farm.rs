@@ -198,14 +198,10 @@ pub(super) fn fishery_rows(game: &Game<'_>, dimension: &str, pos: Pos, now: u64)
 
 // ---- The feeder ----
 
-fn feed(game: &mut Game<'_>, pos: Pos, cost: f64) -> Shown {
-    let slots = items(game, pos);
-    let foods: Vec<String> = slots.iter().flatten().filter(|s| s.count > 0).map(|s| s.item.to_string()).collect();
-    if foods.is_empty() {
-        return Shown::Idle("feed_empty");
-    }
+/// The animals round a feeder as it sees them.
+fn fed_round(game: &Game<'_>, pos: Pos) -> Vec<rules::Fed> {
     let r = radius(game, pos);
-    let animals: Vec<rules::Fed> = game
+    game
         .mobs
         .iter()
         .filter(|m| !m.removed && m.alive() && near(pos, r, [m.position.x, m.position.y, m.position.z]))
@@ -218,10 +214,59 @@ fn feed(game: &mut Game<'_>, pos: Pos, cost: f64) -> Shown {
                 named: m.custom_name.is_some(),
                 leashed: m.extra.leash.is_some(),
             },
-            takes_food: horizon_client::mobs::ai::takes_food(m) && m.extra.age == 0,
+            // An adult off its cool-down, or a baby (slice 18: babies are fed too).
+            takes_food: horizon_client::mobs::ai::takes_food(m) && (m.extra.age == 0 || m.is_baby()),
         })
+        .collect()
+}
+
+/// Slice 18 (guide `ui.js`, window `feeder`): heads of each kind round it, one row.
+pub(super) fn feeder_row(game: &Game<'_>, pos: Pos) -> Text {
+    let animals = fed_round(game, pos);
+    let heads = rules::heads(&animals);
+    if heads.is_empty() {
+        return line("rustcraft.util.feeder.none", "No animals round it", &[]);
+    }
+    let parts: Vec<String> = heads
+        .iter()
+        .map(|(k, n)| format!("{} {n}", k.rsplit(':').next().unwrap_or(k)))
         .collect();
+    line(
+        "rustcraft.util.feeder.heads",
+        "Heads (at most %s a kind): %s",
+        &[Text::literal(rules::HERD_MAX.to_string()), Text::literal(parts.join(" · "))],
+    )
+}
+
+fn feed(game: &mut Game<'_>, pos: Pos, cost: f64) -> Shown {
+    let slots = items(game, pos);
+    let foods: Vec<String> = slots.iter().flatten().filter(|s| s.count > 0).map(|s| s.item.to_string()).collect();
+    let food_count: u32 = slots.iter().flatten().map(|s| s.count).sum();
+    crate::game::rustcraft_anim::show_level_cached(game, pos, f64::from(food_count) / (3.0 * 64.0), 0);
+    if foods.is_empty() {
+        return Shown::Idle("feed_empty");
+    }
+    let animals = fed_round(game, pos);
     let Some((a, b, food)) = rules::pair_to_feed(&animals, &foods) else {
+        // Slice 18: no pair: a baby eats, and grows faster.
+        if let Some((baby, food)) = rules::baby_to_feed(&animals, &foods) {
+            let id = baby.animal.id;
+            if !spend(game, pos, cost) {
+                return Shown::NoEnergy;
+            }
+            for m in game.mobs.iter_mut().filter(|m| m.id == id) {
+                m.extra.age = rules::baby_fed(m.extra.age);
+            }
+            with_items(game, pos, |items| {
+                if let Some(slot) = items.iter().position(|s| s.as_ref().is_some_and(|s| &*s.item == food)) {
+                    take_one(items, slot);
+                }
+            });
+            return Shown::Working;
+        }
+        if rules::herd_full(&animals, &foods) {
+            return Shown::Blocked("feed_herd_full");
+        }
         return Shown::Idle("feed_nobody");
     };
     let (a, b) = (a.animal.id, b.animal.id);

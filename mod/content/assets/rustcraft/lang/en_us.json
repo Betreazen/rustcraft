@@ -1054,5 +1054,8 @@
   "rustcraft.util.fishery.ready": "The line is out",
   "rustcraft.util.fish_rod_worn": "The rod is worn out",
   "rustcraft.util.fishery.rod_wait": "%s · %s",
-  "rustcraft.util.kitchen.milk_line": "Milk in the tank: %s of %s buckets"
+  "rustcraft.util.kitchen.milk_line": "Milk in the tank: %s of %s buckets",
+  "rustcraft.util.feeder.none": "No animals round it",
+  "rustcraft.util.feeder.heads": "Heads (at most %s a kind): %s",
+  "rustcraft.util.feed_herd_full": "The herd is at its limit"
 }

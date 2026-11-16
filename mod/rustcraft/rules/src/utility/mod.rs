@@ -162,7 +162,8 @@ impl Util {
             Util::Kitchen => s(13, 0..9, 9..13),
             // 0 the rod, 1..19 the catch (9 slots, 18 with a storage module).
             Util::Fishery => s(1 + 2 * farm::FISH_BUFFER, 0..1, 1..1 + 2 * farm::FISH_BUFFER),
-            Util::Feeder => s(9, 0..9, 0..0),
+            // Slice 18 (guide `feeder`): 3 food cells.
+            Util::Feeder => s(3, 0..3, 0..0),
             // 0 shears, 1 empty buckets, 2..11 wool and milk.
             Util::Shearer => s(11, 0..2, 2..11),
             // 0 glass bottles, 1..10 honey and combs.
@@ -306,7 +307,9 @@ pub fn step_ticks(u: Util) -> u64 {
         // Slice 18 (guide `kitchen`): 4 s a dish.
         Util::Kitchen => 80,
         Util::Brewer => 400,
-        Util::Feeder | Util::Shearer | Util::Apiary => 100,
+        // Slice 18 (guide `feeder`): a pair every 20 s.
+        Util::Feeder => 400,
+        Util::Shearer | Util::Apiary => 100,
         Util::Builder => 20,
         Util::PortalDock => 20,
         Util::Vein => vein::STEP_TICKS,

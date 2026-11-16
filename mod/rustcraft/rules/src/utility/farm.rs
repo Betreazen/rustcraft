@@ -74,6 +74,45 @@ pub fn pair_to_feed<'a>(animals: &'a [Fed], foods: &[String]) -> Option<(&'a Fed
     None
 }
 
+/// Slice 18 (guide `feeder`): «детёнышей кормушка подкармливает, и они растут быстрее»: a fed
+/// baby's age after it eats, as the game's own feeding ages it (`AgeableMob.ageUp`: a tenth of
+/// the time left, in whole seconds).
+pub fn baby_fed(age: i32) -> i32 {
+    if age >= 0 {
+        return age;
+    }
+    let seconds = ((-age / 20) as f32 * 0.1) as i32;
+    (age + seconds * 20).min(0)
+}
+
+/// The first baby of a kind whose food the feeder holds that takes food, and the food.
+pub fn baby_to_feed<'a>(animals: &'a [Fed], foods: &[String]) -> Option<(&'a Fed, &'static str)> {
+    animals.iter().filter(|a| a.animal.baby && a.takes_food).find_map(|a| {
+        food_of(&a.animal.kind)
+            .iter()
+            .find(|f| foods.iter().any(|g| g == *f))
+            .map(|f| (a, *f))
+    })
+}
+
+/// «Предел животных»: a kind the feeder has food for is at the herd's limit.
+pub fn herd_full(animals: &[Fed], foods: &[String]) -> bool {
+    crate::butcher::ANIMALS.iter().any(|kind| {
+        food_of(kind).iter().any(|f| foods.iter().any(|g| g == *f))
+            && animals.iter().filter(|a| a.animal.kind == *kind && !a.animal.baby).count() >= HERD_MAX
+    })
+}
+
+/// Heads of each kind round the feeder, adults and babies, kinds with none left out (guide: «в
+/// окне видно, сколько голов каждого вида рядом»).
+pub fn heads(animals: &[Fed]) -> Vec<(&'static str, usize)> {
+    crate::butcher::ANIMALS
+        .iter()
+        .map(|k| (*k, animals.iter().filter(|a| a.animal.kind == *k).count()))
+        .filter(|(_, n)| *n > 0)
+        .collect()
+}
+
 /// Whether a column of `depths` (water blocks under each of the 5 × 5 cells) is open water.
 pub fn open_water(depths: &[i32]) -> bool {
     depths.len() == (WATER_SIDE * WATER_SIDE) as usize && depths.iter().all(|d| *d >= WATER_DEPTH)
@@ -119,6 +158,22 @@ pub fn harvest(has_bottle: bool) -> (&'static str, u32) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn babies_are_fed_heads_counted_and_a_full_herd_named() {
+        assert_eq!(baby_fed(-24000), -24000 + 120 * 20);
+        assert_eq!(baby_fed(-100), -100, "less than a tenth of a second's worth");
+        assert_eq!(baby_fed(5), 5);
+        let mut calf = fed(9, "minecraft:cow", true);
+        calf.animal.baby = true;
+        let animals = vec![fed(1, "minecraft:cow", false), calf];
+        let wheat = vec!["minecraft:wheat".to_owned()];
+        assert_eq!(baby_to_feed(&animals, &wheat).map(|(a, f)| (a.animal.id, f)), Some((9, "minecraft:wheat")));
+        assert_eq!(heads(&animals), vec![("minecraft:cow", 2)]);
+        let full: Vec<Fed> = (0..HERD_MAX as u32).map(|i| fed(i, "minecraft:cow", true)).collect();
+        assert!(herd_full(&full, &wheat));
+        assert!(!herd_full(&animals, &wheat));
+    }
 
     #[test]
     fn lure_shortens_the_wait_and_the_rod_keeps_its_last_point() {

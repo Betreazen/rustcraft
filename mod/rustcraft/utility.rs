@@ -1431,6 +1431,11 @@ fn craft_sheet(game: &Game<'_>, dimension: &str, pos: Pos, u: Util, s: &mut Shee
             });
         }
         Util::Kitchen => kitchen_sheet(game, pos, s),
+        Util::Feeder => {
+            if let Some(r) = s.rows.first_mut() {
+                *r = base::v(&farm::feeder_row(game, pos));
+            }
+        }
         Util::Fishery => {
             let now = state().ticks.get(dimension).copied().unwrap_or(0);
             s.rows = farm::fishery_rows(game, dimension, pos, now).iter().map(base::v).collect();
