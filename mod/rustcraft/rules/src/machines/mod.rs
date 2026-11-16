@@ -4,6 +4,7 @@
 pub mod alloy;
 pub mod catalyst;
 pub mod crafter;
+pub mod extras;
 pub mod fluid_windows;
 pub mod generator;
 pub mod mixer;

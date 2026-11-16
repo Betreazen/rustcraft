@@ -120,32 +120,45 @@ pub fn energy_text(value: f64) -> String {
 pub type Rect = [f32; 4];
 
 pub const WIDTH: f32 = 214.0;
-pub const HEIGHT: f32 = 214.0;
+/// Slice 18: the window in the guide's order (`ui.js` `machine`): the input with its queue
+/// cells, the progress («Ход работы»), the result, the energy, the modules beside the work mode,
+/// the status.
+pub const HEIGHT: f32 = INVENTORY[1] + 80.0;
 /// The player's inventory: its first row and left column (the hotbar is 58 below).
-pub const INVENTORY: [f32; 2] = [26.0, 131.0];
+pub const INVENTORY: [f32; 2] = [26.0, 183.0];
 /// Where the input and output slots' items go (a slot's frame is one pixel around them).
 pub const INPUT: [f32; 2] = [12.0, 28.0];
-pub const OUTPUT: [f32; 2] = [110.0, 28.0];
+pub const OUTPUT: [f32; 2] = [12.0, 82.0];
+/// The queue cells after the input (rustcraft_rules::machines::queue), as many as are open.
+pub fn cell(k: usize) -> [f32; 2] {
+    [INPUT[0] + 20.0 * (k as f32 + 1.0), INPUT[1]]
+}
 /// The progress arrow's shaft; its head follows it.
-pub const ARROW: Rect = [34.0, 33.0, 62.0, 8.0];
-pub const ENERGY_BAR: Rect = [8.0, 60.0, 198.0, 6.0];
+pub const ARROW: Rect = [12.0, 60.0, 184.0, 8.0];
+pub const ENERGY_BAR: Rect = [8.0, 114.0, 198.0, 6.0];
 /// The work mode switch: one well (`MODE_WELL`) with the three modes' segments, in
 /// `WorkMode::ALL` order (style::segment_rects of the well).
-pub const MODE_WELL: Rect = [8.0, 82.0, 198.0, 14.0];
+pub const MODE_WELL: Rect = [92.0, 136.0, 114.0, 14.0];
 pub const MODE_BUTTONS: [Rect; 3] = [
-    [9.0, 83.0, 65.0, 12.0],
-    [75.0, 83.0, 65.0, 12.0],
-    [141.0, 83.0, 64.0, 12.0],
+    [93.0, 137.0, 37.0, 12.0],
+    [131.0, 137.0, 37.0, 12.0],
+    [169.0, 137.0, 36.0, 12.0],
 ];
-/// The module slots (A5: three for a machine of tiers 1–2), where their items would go.
-pub const MODULE_SLOTS: [[f32; 2]; 3] = [[152.0, 28.0], [171.0, 28.0], [190.0, 28.0]];
-pub const STATUS: Rect = [8.0, 102.0, 198.0, 13.0];
-/// Label lines: the slots' labels, the energy line, the mode line.
+/// The module sockets (A5: three on tiers 1–2, four on 3–4), where their items go.
+pub const MODULE_SLOTS: [[f32; 2]; 4] = [[10.0, 135.0], [30.0, 135.0], [50.0, 135.0], [70.0, 135.0]];
+pub const STATUS: Rect = [8.0, 156.0, 198.0, 13.0];
+/// Label lines: the input's, the progress's, the result's, the energy line, the modules' and the
+/// mode's.
 pub const LABEL_SLOTS_Y: f32 = 18.0;
-pub const LABEL_ENERGY_Y: f32 = 50.0;
-pub const LABEL_MODE_Y: f32 = 72.0;
+pub const LABEL_WORK_Y: f32 = 50.0;
+pub const LABEL_OUTPUT_Y: f32 = 72.0;
+pub const LABEL_ENERGY_Y: f32 = 104.0;
+pub const LABEL_MODE_Y: f32 = 124.0;
 pub const TITLE: [f32; 2] = [8.0, 6.0];
 pub const INVENTORY_LABEL_Y: f32 = INVENTORY[1] - 10.0;
+/// Slice 18: the window's own data slots, then the extras (rustcraft_rules::machines::extras).
+pub const EXTRAS_AT: usize = DATA_SLOTS;
+pub const ALL_DATA_SLOTS: usize = DATA_SLOTS + super::extras::DATA;
 /// A slot's frame around an item drawn at `at`.
 pub fn slot_frame(at: [f32; 2]) -> Rect {
     [at[0] - 1.0, at[1] - 1.0, 18.0, 18.0]
@@ -230,10 +243,10 @@ mod tests {
 
     #[test]
     fn each_mode_button_is_its_own_rectangle_inside_the_window() {
-        assert_eq!(mode_button_at([10.0, 85.0]), Some(WorkMode::Economy));
-        assert_eq!(mode_button_at([100.0, 90.0]), Some(WorkMode::Normal));
-        assert_eq!(mode_button_at([204.0, 94.0]), Some(WorkMode::Boost));
-        assert_eq!(mode_button_at([74.0, 85.0]), None);
+        assert_eq!(mode_button_at([94.0, 140.0]), Some(WorkMode::Economy));
+        assert_eq!(mode_button_at([140.0, 140.0]), Some(WorkMode::Normal));
+        assert_eq!(mode_button_at([204.0, 148.0]), Some(WorkMode::Boost));
+        assert_eq!(mode_button_at([130.5, 140.0]), None);
         assert_eq!(
             crate::machines::style::segment_rects(MODE_WELL, 3),
             MODE_BUTTONS.to_vec()
@@ -243,9 +256,11 @@ mod tests {
             assert!(r[0] >= 2.0 && r[0] + r[2] <= WIDTH - 2.0);
             assert!(r[1] + r[3] < INVENTORY_LABEL_Y);
         }
-        assert_eq!(module_slot_at([153.0, 30.0]), Some(0));
-        assert_eq!(module_slot_at([200.0, 40.0]), Some(2));
+        assert_eq!(module_slot_at([11.0, 137.0]), Some(0));
+        assert_eq!(module_slot_at([80.0, 145.0]), Some(3));
         assert_eq!(module_slot_at([140.0, 30.0]), None);
+        // The queue cells keep inside the window.
+        assert!(cell(super::super::extras::MAX_CELLS - 1)[0] + 18.0 <= WIDTH - 2.0);
         // The inventory, nine slots wide and the hotbar 58 below, fits inside.
         const { assert!(INVENTORY[0] + 9.0 * 18.0 <= WIDTH) };
         const { assert!(INVENTORY[1] + 58.0 + 18.0 <= HEIGHT) };

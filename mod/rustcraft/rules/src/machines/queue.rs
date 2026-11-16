@@ -54,11 +54,12 @@ pub fn intake(intake: &mut Slot, cells: &mut Vec<Slot>, open: usize, size: u32) 
     }
 }
 
-/// Cells past `open` give back into `intake` (empty, or of their item) up to `max`; empty cells
-/// at the end are dropped.
-pub fn spill(intake: &mut Slot, cells: &mut Vec<Slot>, open: usize, max: u32) {
+/// Cells past `open` give back into `intake` (empty, or of their item) up to the item's stack
+/// `max`; empty cells at the end are dropped.
+pub fn spill(intake: &mut Slot, cells: &mut Vec<Slot>, open: usize, max: impl Fn(&str) -> u32) {
     for cell in cells.iter_mut().skip(open) {
         let Some((item, n)) = cell.as_mut() else { continue };
+        let max = max(item);
         let room = match intake {
             None => max,
             Some((i, c)) if i == item => max.saturating_sub(*c),
@@ -175,13 +176,13 @@ mod tests {
     fn a_closed_cell_gives_back_into_the_intake() {
         let mut cells = vec![s("iron", 3), s("gold", 100)];
         let mut slot = None;
-        spill(&mut slot, &mut cells, 1, 64);
+        spill(&mut slot, &mut cells, 1, |_| 64);
         assert_eq!(slot, s("gold", 64));
         assert_eq!(cells, vec![s("iron", 3), s("gold", 36)]);
-        spill(&mut slot, &mut cells, 1, 64);
+        spill(&mut slot, &mut cells, 1, |_| 64);
         assert_eq!(cells[1], s("gold", 36), "the intake is full");
         slot = None;
-        spill(&mut slot, &mut cells, 1, 64);
+        spill(&mut slot, &mut cells, 1, |_| 64);
         assert_eq!(cells, vec![s("iron", 3)], "an emptied closed cell goes");
     }
 
