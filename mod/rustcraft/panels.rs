@@ -52,10 +52,15 @@ pub(super) fn layout(machine: Machine) -> NativeScreen {
         ),
         _ => (cw::HEIGHT, cw::slot_positions(), cw::INVENTORY),
     };
+    let mut slots: Vec<Option<[f32; 2]>> = slots.into_iter().map(Some).collect();
+    if machine == Machine::Crafter {
+        // Slice 18: the old module slots are out of the menu (the modules live in the sockets).
+        slots.extend([None; cw::MODULE_SLOT_COUNT]);
+    }
     NativeScreen {
         width: WIDTH,
         height,
-        slots: slots.into_iter().map(Some).collect(),
+        slots,
         inventory_y: inventory[1],
         inventory_x: inventory[0],
         own_labels: true,
@@ -262,8 +267,14 @@ fn draw_crafter(game: &Game<'_>, data: &[i32], batch: &mut HudBatch, o: [f32; 2]
     for i in 0..p.pages {
         tab(game, batch, o, i, &p);
     }
-    for m in cw::MODULE_SLOTS {
-        socket(game, batch, o, m, true);
+    // Slice 18: the sockets its tier opens, and the queue cells beside the stock.
+    let ex = extras::decode(data, cw::EXTRAS_AT);
+    kit::sockets_part(game, batch, o, &ex, &cw::MODULE_SLOTS, None);
+    kit::cells_part(game, batch, o, &extras::Extras { open_cells: ex.open_cells.min(cw::QUEUE_DRAWN), ..ex.clone() }, cw::queue_cell);
+    if ex.shown_cells() > cw::QUEUE_DRAWN {
+        let more = format!("+{}", ex.shown_cells() - cw::QUEUE_DRAWN);
+        let p = cw::queue_cell(cw::QUEUE_DRAWN - 1);
+        text(game, batch, &more, o, [p[0], p[1] + 19.0], LABEL);
     }
     let pattern = tr("rustcraft.window.pattern", "Pattern");
     label(game, batch, &pattern, o, [8.0, cw::LABEL_GRID_Y]);
@@ -344,7 +355,10 @@ pub(super) fn button_at(machine: Machine, data: &[i32], at: [f32; 2]) -> Option<
             kit::socket_at(&extras::decode(data, aw::EXTRAS_AT), &aw::MODULE_SLOTS, at)
                 .map(|k| kit::SOCKET_BUTTON + k as i32)
         }),
-        Machine::Crafter => cw::button_at(at, cw::decode(data).pages),
+        Machine::Crafter => cw::button_at(at, cw::decode(data).pages).or_else(|| {
+            kit::socket_at(&extras::decode(data, cw::EXTRAS_AT), &cw::MODULE_SLOTS, at)
+                .map(|k| kit::SOCKET_BUTTON + k as i32)
+        }),
         _ => None,
     }
 }
@@ -379,7 +393,12 @@ pub(super) fn tooltip(
                 alloy_tooltip(data, at, lines);
             }
         }
-        Machine::Crafter => crafter_tooltip(game, data, at, lines),
+        Machine::Crafter => {
+            let ex = extras::decode(data, cw::EXTRAS_AT);
+            if !kit::extras_tooltip(game, "rustcraft:crafter", &ex, &cw::MODULE_SLOTS, cw::queue_cell, [-99.0, -99.0], at, lines) {
+                crafter_tooltip(game, data, at, lines);
+            }
+        }
         _ => {}
     }
 }

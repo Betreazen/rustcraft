@@ -281,7 +281,18 @@ pub mod crafter {
     const ROWS: [f32; 3] = [46.0, 64.0, 82.0];
     pub const ARROW: Rect = [66.0, 68.0, 10.0, 8.0];
     pub const RESULT: [f32; 2] = [86.0, 64.0];
-    pub const MODULE_SLOTS: [[f32; 2]; 3] = [[152.0, 16.0], [171.0, 16.0], [190.0, 16.0]];
+    /// The module sockets (A5: three on tier 2, four on 3–4); slice 18 keeps the modules in the
+    /// block entity, as the sheets do, so the old module slots 12–14 are out of the menu.
+    pub const MODULE_SLOTS: [[f32; 2]; 4] =
+        [[133.0, 16.0], [152.0, 16.0], [171.0, 16.0], [190.0, 16.0]];
+    /// Slice 18: the capacity and stack modules' queue cells drawn beside the stock (the first
+    /// three; the window counts the rest), and the extras after the window's own data slots.
+    pub const QUEUE_DRAWN: usize = 3;
+    pub fn queue_cell(k: usize) -> [f32; 2] {
+        [BUFFER_X + 54.0, ROWS[k.min(QUEUE_DRAWN - 1)]]
+    }
+    pub const EXTRAS_AT: usize = DATA_SLOTS;
+    pub const ALL_DATA_SLOTS: usize = DATA_SLOTS + crate::machines::extras::DATA;
     pub const LABEL_ENERGY_Y: f32 = 102.0;
     pub const ENERGY_BAR: Rect = [8.0, 111.0, 198.0, 5.0];
     /// The work mode switch: one well, three segments (style::segment_rects).
@@ -320,7 +331,6 @@ pub mod crafter {
         (0..BUFFER_SLOTS)
             .map(buffer)
             .chain((0..OUTPUT_SLOTS).map(output))
-            .chain(MODULE_SLOTS)
             .collect()
     }
 
@@ -436,10 +446,11 @@ mod tests {
         assert_eq!(button_at(second_tab, 2), Some(TAB_BUTTON + 1));
         assert_eq!(button_at(buffer(0), 4), None);
         assert_eq!(
-            slot_positions().len(),
+            slot_positions().len() + MODULE_SLOT_COUNT,
             BUFFER_SLOTS + OUTPUT_SLOTS + MODULE_SLOT_COUNT
         );
-        assert_eq!(module_slot_at([153.0, 18.0]), Some(0));
+        assert_eq!(module_slot_at([134.0, 18.0]), Some(0));
+        assert_eq!(module_slot_at([195.0, 20.0]), Some(3));
     }
 
     #[test]
@@ -464,6 +475,8 @@ mod tests {
             .copied()
             .chain((0..c::MAX_PAGES).map(c::tab))
             .chain(c::slot_positions().into_iter().map(slot_frame))
+            .chain(c::MODULE_SLOTS.iter().map(|p| slot_frame(*p)))
+            .chain((0..c::QUEUE_DRAWN).map(|k| slot_frame(c::queue_cell(k))))
             .chain((0..c::CELLS).map(|i| slot_frame(c::cell(i))))
         {
             fits(r, c::HEIGHT, c::INVENTORY_LABEL_Y);

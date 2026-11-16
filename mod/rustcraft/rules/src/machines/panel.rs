@@ -233,6 +233,7 @@ mod tests {
         for (menu, n) in [
             ("alloy", super::super::windows::alloy::ALL_DATA_SLOTS),
             ("pump", super::super::fluid_windows::pump::ALL_DATA_SLOTS),
+            ("crafter", super::super::windows::crafter::ALL_DATA_SLOTS),
         ] {
             let path = format!(
                 "{}/../../content/data/rustcraft/horizon/menu/{menu}.json",
