@@ -43,7 +43,7 @@ use rustcraft_rules::{
         slots::{self, Slot},
     },
     net::{
-        energy::{Circuit, Consumer, GroupBalance, Producer, group_of, supply_with_storage},
+        energy::{Circuit, Consumer, Ledger, Producer, supply_with_storage},
         joints::{self, Port},
         settings::HousingJoints,
         topology::{ChannelKind, Layout, Topology},
@@ -297,19 +297,52 @@ pub(super) fn max_stack(game: &Game<'_>, item: &str) -> u32 {
         .map_or(FALLBACK_STACK, |info| info.max_stack)
 }
 
+/// `key` in UTF-16 in a buffer kept per thread, to look it up in a compound without making a key
+/// each time (the machines' tick reads a few keys of every machine every tick). As
+/// horizon-world's own `with_key` for `Tag::get` (SRC/crates/horizon-world/src/nbt.rs:13-27).
+fn with_key<R>(key: &str, f: impl FnOnce(&JavaString) -> R) -> R {
+    thread_local! {
+        static KEY: std::cell::RefCell<JavaString> = Default::default();
+    }
+    KEY.with_borrow_mut(|units| {
+        units.0.clear();
+        units.0.extend(key.encode_utf16());
+        f(units)
+    })
+}
+
+/// The tag under `key`, looked up without making a key.
+pub(super) fn tag<'a>(nbt: &'a Compound, key: &str) -> Option<&'a Tag> {
+    with_key(key, |k| nbt.get(k))
+}
+
+/// Sets `key` to `value`: in place when it is there, so no key is made for each write.
+fn set_tag(nbt: &mut Compound, key: &str, value: Tag) {
+    let missing = with_key(key, |k| match nbt.get_mut(k) {
+        Some(t) => {
+            *t = value;
+            None
+        }
+        None => Some(value),
+    });
+    if let Some(value) = missing {
+        nbt.insert(JavaString::from(key), value);
+    }
+}
+
 pub(super) fn read_f64(nbt: &Compound, key: &str) -> f64 {
-    match nbt.get(&JavaString::from(key)) {
+    match tag(nbt, key) {
         Some(Tag::Double(bits)) => f64::from_bits(*bits),
         _ => 0.0,
     }
 }
 
 pub(super) fn write_f64(nbt: &mut Compound, key: &str, value: f64) {
-    nbt.insert(JavaString::from(key), Tag::Double(value.to_bits()));
+    set_tag(nbt, key, Tag::Double(value.to_bits()));
 }
 
 pub(super) fn read_int(nbt: &Compound, key: &str) -> Option<i32> {
-    match nbt.get(&JavaString::from(key)) {
+    match tag(nbt, key) {
         Some(Tag::Int(v)) => Some(*v),
         Some(Tag::Byte(v)) => Some(i32::from(*v)),
         _ => None,
@@ -317,7 +350,7 @@ pub(super) fn read_int(nbt: &Compound, key: &str) -> Option<i32> {
 }
 
 pub(super) fn write_int(nbt: &mut Compound, key: &str, value: i32) {
-    nbt.insert(JavaString::from(key), Tag::Int(value));
+    set_tag(nbt, key, Tag::Int(value));
 }
 
 // ---- The tick ----
@@ -492,6 +525,8 @@ pub(super) fn tick(game: &mut Game<'_>, level: &mut LevelNet, tuning: &Tuning) {
     let requests: HashMap<Pos, f64> = consumers.iter().map(|c| (c.block, c.request)).collect();
     let request_of = |pos: &Pos| requests.get(pos).copied().unwrap_or(0.0);
     let mut status = resting;
+    // Made for the first generator, if any.
+    let mut ledger: Option<Ledger> = None;
     for (pos, machine, unit) in units {
         let request = request_of(&pos);
         let received = report.got.get(&pos).copied().unwrap_or(0.0);
@@ -522,8 +557,9 @@ pub(super) fn tick(game: &mut Game<'_>, level: &mut LevelNet, tuning: &Tuning) {
             }
             Unit::Generator(h) => {
                 let used = report.used.get(&pos).copied().unwrap_or(0.0);
-                let members = group_of(pos, &consumers, circuits);
-                let balance = GroupBalance::of(&members, &producers, &consumers, &report.got);
+                let ledger = ledger.get_or_insert_with(|| Ledger::new(&producers, &consumers));
+                let members = ledger.group_of(pos, circuits);
+                let balance = ledger.balance(&members, &report.got);
                 generator::run(game, pos, h, used, balance, tuning)
             }
             Unit::Alloy(h) => alloy::run(game, pos, h, share, &level.recipes, tuning),
@@ -594,7 +630,7 @@ struct Held {
 
 /// Slice 11: the catalyst tank a furnace's or a crusher's saved compound holds.
 pub(super) fn read_catalyst(nbt: &Compound) -> CatalystTank {
-    let fluid = match nbt.get(&JavaString::from(CATALYST_FLUID_KEY)) {
+    let fluid = match tag(nbt, CATALYST_FLUID_KEY) {
         Some(Tag::String(s)) => Some(s.to_string_lossy()).filter(|s| !s.is_empty()),
         _ => None,
     };

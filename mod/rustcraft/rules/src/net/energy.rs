@@ -199,17 +199,53 @@ pub fn supply_report(
 /// The blocks whose energy a source's window sums up (E17): the source, the consumers touching
 /// it and every member of the circuits it is on.
 pub fn group_of(source: Pos, consumers: &[Consumer], circuits: &[Circuit]) -> BTreeSet<Pos> {
-    let mut members: BTreeSet<Pos> = BTreeSet::from([source]);
-    members.extend(
-        consumers
-            .iter()
-            .map(|c| c.block)
-            .filter(|b| Face::ALL.into_iter().any(|f| step(source, f) == *b)),
-    );
-    for c in circuits.iter().filter(|c| c.members.contains(&source)) {
-        members.extend(c.members.iter().copied());
+    Ledger::new(&[], consumers).group_of(source, circuits)
+}
+
+/// One tick's sources and consumers by block, for the windows of many generators: each asks its
+/// group (E17) by the group's own members, not by a walk over the level's every block.
+#[derive(Clone, Debug, Default)]
+pub struct Ledger {
+    outputs: HashMap<Pos, f64>,
+    requests: HashMap<Pos, f64>,
+}
+
+impl Ledger {
+    pub fn new(producers: &[Producer], consumers: &[Consumer]) -> Ledger {
+        let mut l = Ledger::default();
+        for p in producers {
+            *l.outputs.entry(p.block).or_insert(0.0) += p.output.max(0.0);
+        }
+        for c in consumers {
+            *l.requests.entry(c.block).or_insert(0.0) += c.request.max(0.0);
+        }
+        l
     }
-    members
+
+    /// `group_of`: the source, the consumers touching it and its circuits' members.
+    pub fn group_of(&self, source: Pos, circuits: &[Circuit]) -> BTreeSet<Pos> {
+        let mut members: BTreeSet<Pos> = BTreeSet::from([source]);
+        members.extend(
+            Face::ALL
+                .into_iter()
+                .map(|f| step(source, f))
+                .filter(|b| self.requests.contains_key(b)),
+        );
+        for c in circuits.iter().filter(|c| c.members.contains(&source)) {
+            members.extend(c.members.iter().copied());
+        }
+        members
+    }
+
+    /// `GroupBalance::of` for `members`.
+    pub fn balance(&self, members: &BTreeSet<Pos>, got: &BTreeMap<Pos, f64>) -> GroupBalance {
+        let sum = |map: &HashMap<Pos, f64>| members.iter().filter_map(|b| map.get(b)).sum();
+        GroupBalance {
+            produced: sum(&self.outputs),
+            requested: sum(&self.requests),
+            supplied: members.iter().filter_map(|b| got.get(b)).sum(),
+        }
+    }
 }
 
 /// E17: what a group of blocks makes, asks for and gets, E a second.
@@ -230,20 +266,7 @@ impl GroupBalance {
         consumers: &[Consumer],
         got: &BTreeMap<Pos, f64>,
     ) -> GroupBalance {
-        let mine = |b: &Pos| members.contains(b);
-        GroupBalance {
-            produced: producers
-                .iter()
-                .filter(|p| mine(&p.block))
-                .map(|p| p.output.max(0.0))
-                .sum(),
-            requested: consumers
-                .iter()
-                .filter(|c| mine(&c.block))
-                .map(|c| c.request.max(0.0))
-                .sum(),
-            supplied: got.iter().filter(|(b, _)| mine(b)).map(|(_, e)| e).sum(),
-        }
+        Ledger::new(producers, consumers).balance(members, got)
     }
 
     /// Whether every consumer gets all it asks for (E3).
