@@ -49,7 +49,7 @@
 | `swap_in_place(game, dimension, pos, item) -> Result<String, &'static str>` | сама замена (и для самотеста): ступень в состоянии блока, ответ — предмет старой ступени |
 | `tier_at(game, pos) -> u8` | ступень блока на сервере и на клиенте (окно берёт заголовок отсюда) |
 
-Узлу потока 1 достаточно добавить свою строку в `FAMILIES`, предметы `node_2..4` (контент) и рецепты: размещение и замена заработают сами. Шасси потока 6 — сущность, оно пользуется только `upgrade` и `Family::item/tier_of`.
+Узлу потока 1 достаточно добавить свою строку в `FAMILIES` (предметы ступеней объявляет `content.rs::declare_tier_items` для всех семейств — не объявлять их второй раз), рецепты, лут и модели — `py tools/tiers.py`: размещение и замена заработают сами. Шасси потока 6 — сущность, оно пользуется только `upgrade` и `Family::item/tier_of`.
 
 ## Пределы движка
 
@@ -68,24 +68,24 @@
 
 **Interfaces:** Produces — всё из таблицы контракта выше.
 
-- [ ] Тесты (RED): `family_items_by_tier` (furnace: 1→`rustcraft:furnace`, 2→`rustcraft:furnace_2`, 5→None; crafter first 2: 1→None, 2→`rustcraft:crafter`, 3→`rustcraft:crafter_3`), `tier_of_round_trips`, `tier_from_clamps`, `swap_only_upward` (furnace_3 по furnace tier 1 → Up{to:3, give_back:"rustcraft:furnace"}; furnace_2 по tier 2 → NotHigher; crusher_2 по furnace → Other), `sockets_three_three_four_four`, `speed_grows_from_first_tier`, `every_family_block_is_unique`.
-- [ ] Реализация, GREEN, коммит `feat(rules): machine tiers and the U2 swap rule`.
+- [x] Тесты (RED): `family_items_by_tier` (furnace: 1→`rustcraft:furnace`, 2→`rustcraft:furnace_2`, 5→None; crafter first 2: 1→None, 2→`rustcraft:crafter`, 3→`rustcraft:crafter_3`), `tier_of_round_trips`, `tier_from_clamps`, `swap_only_upward` (furnace_3 по furnace tier 1 → Up{to:3, give_back:"rustcraft:furnace"}; furnace_2 по tier 2 → NotHigher; crusher_2 по furnace → Other), `sockets_three_three_four_four`, `speed_grows_from_first_tier`, `every_family_block_is_unique`.
+- [x] Реализация, GREEN, коммит `feat(rules): machine tiers and the U2 swap rule`.
 
 ### Task 2: ступени в игре — блоки, предметы, рецепты, лут, размещение, заголовок окна
 
 **Files:** Create `mod/rustcraft/tiers.rs`, `mod/rustcraft/hook_*` не нужно (хуки уже есть); `tools/tiers.py` (генератор); Modify `mod/rustcraft/content.rs` (свойство `tier` у блоков семейств, предметы ступеней), `mod/rustcraft/horizon-mixin.toml` (модуль `tiers`), `mod/rustcraft/hook_state_for_placement.rs` (+1 строка), `mod/rustcraft/screens.rs` (`title` берёт `tier_at`), `mod/rustcraft/sheets.rs` (заголовок листа «· ступень N» для семейств); контент: `data/rustcraft/recipe/<блок>_<n>.json`, `loot_table/blocks/<блок>.json` (по `block_state_property`), `assets/rustcraft/items/<блок>_<n>.json`, lang (свой блок: «Электропечь · ступень 2»).
 
-- [ ] Генератор `tools/tiers.py`: для каждого семейства берёт рецепт первой ступени, заменяет сплав первой ступени на сплав ступени n, пишет рецепт, предмет-модель (модель блока), лут-таблицу с альтернативами по `tier`, строки lang.
-- [ ] `content.rs`: у блоков семейств `state_properties` `tier` (значения 1..4, по умолчанию первая ступень); предметы ступеней `place_block` = блок.
-- [ ] `tiers.rs::state_for_placement`, `tier_at`; заголовок окна печи/дробилки/плавильни/автокрафтера/насоса/листов — из блока.
-- [ ] Тест правил генератора не нужен (данные), но `cargo test` зелёный; коммит `feat: machine tiers 2-4 - items, recipes, loot, tier in the window title`.
+- [x] Генератор `tools/tiers.py`: для каждого семейства берёт рецепт первой ступени, заменяет сплав первой ступени на сплав ступени n, пишет рецепт, предмет-модель (модель блока), лут-таблицу с альтернативами по `tier`, строки lang.
+- [x] `content.rs`: у блоков семейств `state_properties` `tier` (значения 1..4, по умолчанию первая ступень); предметы ступеней `place_block` = блок.
+- [x] `tiers.rs::state_for_placement`, `tier_at`; заголовок окна печи/дробилки/плавильни/автокрафтера/насоса/листов — из блока.
+- [x] Тест правил генератора не нужен (данные), но `cargo test` зелёный; коммит `feat: machine tiers 2-4 - items, recipes, loot, tier in the window title`.
 
 ### Task 3: замена правым кликом (U2) и самотест
 
 **Files:** Modify `mod/rustcraft/tiers.rs` (`on_right_click_block`, `swap_in_place`), `mod/rustcraft/server.rs` (+1 строка в `on_right_click_block`), `mod/rustcraft/selftest.rs` (метод скамьи `swap_tier`), `mod/rustcraft/rules/src/selftest/mod.rs` (метод трейта с реализацией по умолчанию, `all.extend(slice18_machine::ALL)`), Create `mod/rustcraft/rules/src/selftest/slice18_machine.rs`; lang (`rustcraft.tier.swapped`).
 
-- [ ] Самотест `tier_swap_keeps_contents`: печь ступени 1 с 5 сырого железа во вводе и режимом «форсаж» → `swap_tier(pos, "rustcraft:furnace_3")` → свойство `tier` = 3, во вводе те же 5, режим тот же, ответ — `rustcraft:furnace`; `swap_tier(pos, "rustcraft:furnace_2")` → отказ.
-- [ ] Коммит `feat: replace a machine by a higher tier with a right click (U2)`.
+- [x] Самотест `tier_swap_keeps_contents`: печь ступени 1 с 5 сырого железа во вводе и режимом «форсаж» → `swap_tier(pos, "rustcraft:furnace_3")` → свойство `tier` = 3, во вводе те же 5, режим тот же, ответ — `rustcraft:furnace`; `swap_tier(pos, "rustcraft:furnace_2")` → отказ.
+- [x] Коммит `feat: replace a machine by a higher tier with a right click (U2)`.
 
 ### Task 4: скорость и гнёзда по ступеням в машинах потока
 
@@ -96,7 +96,7 @@
 
 ### Task 5: модули в печи, дробилке, плавильне, насосе (гнёзда в окне, эффекты)
 
-**Files:** Create `rules/src/machines/sockets.rs` (общая логика гнёзд машин без листа: чтение, нажатие, число по ступени), `rules/src/machines/queue.rs` (очередь ёмкости и запас стака); Modify `rules/src/modules.rs` (свой блок: `Holder::Processor`, `Holder::Alloy`, `Holder::Pump`, `Holder::Crafter`; модули `Capacity`, `Stack`, `Yield`, если поток 4 их ещё не завёл), `machines.rs`, `alloy.rs`, `fluids.rs`, `screens.rs`, `panels.rs`, `fluid_panels.rs`, lang.
+**Files:** Create `rules/src/machines/sockets.rs` (сделано: 464e7f8; `queue.rs`, `extras.rs`, раскладка окна процессора — b95cef6; модули потока 4 взяты 1:1 — c9e2ce1) (общая логика гнёзд машин без листа: чтение, нажатие, число по ступени), `rules/src/machines/queue.rs` (очередь ёмкости и запас стака); Modify `rules/src/modules.rs` (свой блок: `Holder::Processor`, `Holder::Alloy`, `Holder::Pump`, `Holder::Crafter`; модули `Capacity`, `Stack`, `Yield`, если поток 4 их ещё не завёл), `machines.rs`, `alloy.rs`, `fluids.rs`, `screens.rs`, `panels.rs`, `fluid_panels.rs`, lang.
 
 - [ ] Тесты: гнёзда принимают только свои модули и не больше `sockets(tier)`; скорость/экономия меняют факторы процессора; выход — шанс 15% лишнего продукта; ёмкость — +2 ячейки очереди на модуль; стак — ячейка 256.
 - [ ] Самотест: печь с модулем скорости плавит вдвое быстрее; дробилка с выходом даёт иногда третью пыль (правило), ёмкость — очередь принимает больше 64.
