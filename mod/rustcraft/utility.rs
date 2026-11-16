@@ -56,7 +56,7 @@ use rustcraft_rules::{
     reports::Report,
     tuning::Tuning,
     utility::{
-        self as rules, ARCHEO_TABLES, KITCHEN_RECIPES, Shown, Util, charge, disassembly,
+        self as rules, KITCHEN_RECIPES, Shown, Util, charge, disassembly,
         found::{self, Found, Lift},
         grown::{self, Grown},
         repair, xp,
@@ -976,6 +976,16 @@ fn xp_press(game: &mut Game<'_>, entity: &mut ModBlockEntity, i: usize) {
     }
 }
 
+const ENCHANT_LEVEL_KEY: &str = "enchant_level";
+
+/// The enchanting level the machine's window chose (30 until one is chosen).
+fn enchant_level(game: &Game<'_>, pos: Pos) -> u32 {
+    game.native_mod_block_entity(pos)
+        .map(|e| read_i64(&e.nbt, ENCHANT_LEVEL_KEY))
+        .filter(|l| *l > 0)
+        .map_or(xp::LEVEL_MAX, |l| (l as u32).clamp(xp::LEVEL_MIN, xp::LEVEL_MAX))
+}
+
 fn enchant(game: &mut Game<'_>, pos: Pos, cost: f64) -> Shown {
     let slots = items(game, pos);
     let Some(item) = slots.first().cloned().flatten() else {
@@ -984,26 +994,27 @@ fn enchant(game: &mut Game<'_>, pos: Pos, cost: f64) -> Shown {
     let Some(tank) = neighbour_of(game, pos, Util::XpTank.spec().block) else {
         return Shown::Blocked("enchant_no_tank");
     };
-    let tier = choice(game, pos, 3);
-    let need = tier as u32 + 1;
+    // Slice 18: the level the player chose, 1–30; its price by tens.
+    let level = enchant_level(game, pos);
+    let need = xp::enchant_cost(level);
+    let tier = need as usize - 1;
     let lapis = slots.get(1).cloned().flatten().map_or(0, |s| s.count);
     if lapis < need {
         return Shown::Blocked("enchant_no_lapis");
     }
+    if !xp::enough_for(xp_of(game, tank), level) {
+        return Shown::Blocked("enchant_no_xp");
+    }
     let seed = (random() * f64::from(i32::MAX)) as i32;
     let e = &game.stations().enchantments;
     let offers = horizon_client::stations::enchant_offers(e, game.items(), seed, 15, Some(&item));
-    let level_cost = offers.costs[tier];
-    if level_cost <= 0 {
+    if offers.costs.iter().all(|c| *c <= 0) {
         return Shown::Blocked("enchant_not_enchantable");
     }
-    let Some(enchanted) = horizon_client::stations::apply_enchantment(e, game.items(), seed, tier, level_cost, &item) else {
+    let Some(enchanted) = horizon_client::stations::apply_enchantment(e, game.items(), seed, tier, level as i32, &item) else {
         return Shown::Blocked("enchant_not_enchantable");
     };
-    let points = xp::enchant_points(level_cost as u32, need);
-    if xp_of(game, tank) < points {
-        return Shown::Blocked("enchant_no_xp");
-    }
+    let points = xp::enchant_points(level, need);
     if !fits(game, pos, 2..3, std::slice::from_ref(&enchanted)) {
         return Shown::Blocked("output_full");
     }
@@ -1037,7 +1048,8 @@ fn brush(game: &mut Game<'_>, pos: Pos, cost: f64) -> Shown {
     let Some(brush) = slots.get(1).cloned().flatten() else {
         return Shown::Blocked("archeo_no_brush");
     };
-    let table = ARCHEO_TABLES[choice(game, pos, ARCHEO_TABLES.len())];
+    // Slice 18: a block that remembers no place brushes by its kind's usual table.
+    let table = found::default_table(&block.item);
     let back = if &*block.item == "minecraft:suspicious_gravel" { "minecraft:gravel" } else { "minecraft:sand" };
     if !fits(game, pos, 2..11, &[stack(back, 1), stack("minecraft:stone", 1)]) {
         return Shown::Blocked("output_full");
@@ -1346,11 +1358,10 @@ fn toggle_names(u: Util) -> Vec<(String, String)> {
         Util::Kitchen => (1..=rustcraft_rules::utility::kitchen::PAGES_MAX)
             .map(|p| (format!("page{p}"), "minecraft:paper".to_owned()))
             .collect(),
-        Util::Archeo => ARCHEO_TABLES
+        Util::Enchanter => ["minus10", "minus1", "plus1", "plus10"]
             .iter()
-            .map(|t| ((*t).to_owned(), "minecraft:suspicious_sand".to_owned()))
+            .map(|k| ((*k).to_owned(), "minecraft:lapis_lazuli".to_owned()))
             .collect(),
-        Util::Enchanter => (1..=3).map(|l| (format!("level{l}"), "minecraft:lapis_lazuli".to_owned())).collect(),
         Util::XpTank => ["give1", "give10", "give_all", "take1", "take10", "take_all"]
             .iter()
             .map(|k| ((*k).to_owned(), "minecraft:experience_bottle".to_owned()))
@@ -1413,7 +1424,7 @@ pub(super) fn sheet(game: &Game<'_>, dimension: &str, pos: Pos, u: Util, s: &mut
         .map(|(i, (key, icon))| Toggle {
             icon,
             name: base::v(&line(&format!("rustcraft.util.{short}.toggle.{}", key.replace([':', '/'], "_")), &key, &[])),
-            on: on.get(i).copied().unwrap_or(false) || (matches!(u, Util::Archeo | Util::Enchanter | Util::Vein | Util::Apiary) && i == 0 && !on.iter().any(|t| *t)),
+            on: on.get(i).copied().unwrap_or(false) || (matches!(u, Util::Vein | Util::Apiary) && i == 0 && !on.iter().any(|t| *t)),
             hint: base::v(&line(&format!("rustcraft.util.{short}.hint"), "Click to turn on or off", &[])),
         })
         .collect();
@@ -1459,6 +1470,43 @@ fn craft_sheet(game: &Game<'_>, dimension: &str, pos: Pos, u: Util, s: &mut Shee
             });
         }
         Util::Kitchen => kitchen_sheet(game, pos, s),
+        Util::Enchanter => {
+            let level = enchant_level(game, pos);
+            let need = xp::enchant_cost(level);
+            let row = line(
+                "rustcraft.util.enchanter.level",
+                "Enchanting level %s · costs %s levels and %s lapis",
+                &[
+                    Text::literal(level.to_string()),
+                    Text::literal(need.to_string()),
+                    Text::literal(need.to_string()),
+                ],
+            );
+            if let Some(r) = s.rows.get_mut(1) {
+                *r = base::v(&row);
+            }
+        }
+        Util::Archeo => {
+            // «Расчищает: песок из пустынного храма».
+            let block = items(game, pos).first().cloned().flatten();
+            let row = match block {
+                Some(b) => {
+                    let remembered = found_of(&b);
+                    let table = found::brush_table(remembered.as_ref().map(|(f, _)| f), found::default_table(&b.item)).to_owned();
+                    let key = format!("rustcraft.util.archeo.toggle.{}", table.replace([':', '/'], "_"));
+                    let place = line(&key, &table, &[]);
+                    line(
+                        "rustcraft.util.archeo.brushes",
+                        "Brushes: %s from %s",
+                        &[line(&item_key(&b.item).replace("item.", "block."), &b.item, &[]), place],
+                    )
+                }
+                None => line("rustcraft.util.archeo_empty", "No suspicious block", &[]),
+            };
+            if let Some(r) = s.rows.get_mut(1) {
+                *r = base::v(&row);
+            }
+        }
         Util::XpTank => {
             // «Хранит» as a bar; the row says whether an enchanting machine stands beside it.
             let points = xp_of(game, pos);
@@ -1614,7 +1662,13 @@ pub(super) fn on_button(game: &mut Game<'_>, pos: Pos, entity: &mut ModBlockEnti
         Util::Projector => builder::projector_press(game, pos, entity, i),
         Util::Kitchen => kitchen_press(game, pos, entity, i),
         // A choice: this one on, the rest off.
-        Util::Archeo | Util::Enchanter | Util::Vein | Util::Apiary => {
+        Util::Enchanter => {
+            let now = read_i64(&entity.nbt, ENCHANT_LEVEL_KEY);
+            let now = if now > 0 { now as u32 } else { xp::LEVEL_MAX };
+            let by = xp::LEVEL_STEPS[i];
+            write_i64(&mut entity.nbt, ENCHANT_LEVEL_KEY, i64::from(xp::step_level(now, by)));
+        }
+        Util::Archeo | Util::Vein | Util::Apiary => {
             let mut t = vec![false; n];
             t[i] = true;
             write_toggles(&mut entity.nbt, &t);

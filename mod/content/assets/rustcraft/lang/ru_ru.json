@@ -585,9 +585,9 @@
   "rustcraft.util.xp_tank.hint": "Клик включает или выключает",
   "block.rustcraft.enchanter": "Зачаровательный автомат",
   "rustcraft.util.enchanter.what": "Зачаровывает опытом соседнего конденсатора и лазуритом",
-  "rustcraft.util.enchanter.hint": "Клик включает или выключает",
+  "rustcraft.util.enchanter.hint": "Клик меняет уровень чар (1–30)",
   "block.rustcraft.archeo": "Археологический стол",
-  "rustcraft.util.archeo.what": "Расчищает подозрительный песок и гравий",
+  "rustcraft.util.archeo.what": "Расчищает подозрительный песок и гравий по таблице места, где блок лежал",
   "rustcraft.util.archeo.hint": "Клик включает или выключает",
   "block.rustcraft.projector": "Голопроектор",
   "rustcraft.util.projector.what": "Запоминает постройку и показывает её призрак",
@@ -3719,5 +3719,11 @@
   "rustcraft.util.xp_tank.alone": "Вплотную нет зачаровательного автомата",
   "rustcraft.util.xp_full": "Конденсатор полон",
   "rustcraft.util.xp_tank.toggle.give10": "Сдать 10 уровней",
-  "rustcraft.util.xp_tank.toggle.take_all": "Забрать всё"
+  "rustcraft.util.xp_tank.toggle.take_all": "Забрать всё",
+  "rustcraft.util.enchanter.level": "Уровень чар %s · цена: %s ур. и %s лазурита",
+  "rustcraft.util.enchanter.toggle.minus10": "Уровень −10",
+  "rustcraft.util.enchanter.toggle.minus1": "Уровень −1",
+  "rustcraft.util.enchanter.toggle.plus1": "Уровень +1",
+  "rustcraft.util.enchanter.toggle.plus10": "Уровень +10",
+  "rustcraft.util.archeo.brushes": "Расчищает: %s, место: %s"
 }

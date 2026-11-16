@@ -136,8 +136,10 @@ impl Util {
             Util::Brewer => s("rustcraft:brewer", 400.0, 16.0, 0, 2),
             // Slice 18: six buttons (give 1 / 10 / all, take 1 / 10 / all).
             Util::XpTank => s("rustcraft:xp_tank", 100.0, 4.0, xp::PRESSES.len(), 2),
-            Util::Enchanter => s("rustcraft:enchanter", 600.0, 32.0, 3, 2),
-            Util::Archeo => s("rustcraft:archeo", 200.0, 16.0, ARCHEO_TABLES.len(), 2),
+            // Slice 18: the level buttons −10, −1, +1, +10.
+            Util::Enchanter => s("rustcraft:enchanter", 600.0, 32.0, xp::LEVEL_STEPS.len(), 2),
+            // Slice 18: the table is the block's own place, a line not a choice.
+            Util::Archeo => s("rustcraft:archeo", 200.0, 16.0, 0, 2),
             Util::Projector => s("rustcraft:projector", 400.0, 16.0, 3, 2),
             Util::Builder => s("rustcraft:builder", 400.0, 32.0, 0, 2),
             Util::PortalDock => s("rustcraft:portal_dock", 400.0, 32.0, 0, 2),
@@ -304,7 +306,9 @@ pub const ARCHEO_TABLES: [&str; 5] = [
 pub fn step_ticks(u: Util) -> u64 {
     match u {
         Util::Trash => 20,
-        Util::Disintegrator | Util::Repair | Util::Archeo | Util::Enchanter => 100,
+        Util::Disintegrator | Util::Repair => 100,
+        // Slice 18 (guide): 10 s a block, 10 s an item.
+        Util::Archeo | Util::Enchanter => 200,
         // Slice 18 (guide `kitchen`): 4 s a dish.
         Util::Kitchen => 80,
         Util::Brewer => 400,

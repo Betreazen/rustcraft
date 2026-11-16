@@ -90,6 +90,29 @@ pub fn levels_from(level: u32, points: u32) -> u32 {
     l - level
 }
 
+/// Slice 18 (guide `enchanter`): the enchanting level a player chooses, 1 to 30.
+pub const LEVEL_MIN: u32 = 1;
+pub const LEVEL_MAX: u32 = 30;
+/// The enchanting machine's level buttons: −10, −1, +1, +10.
+pub const LEVEL_STEPS: [i32; 4] = [-10, -1, 1, 10];
+
+/// The level after a button, kept in 1..=30.
+pub fn step_level(level: u32, by: i32) -> u32 {
+    (level as i32 + by).clamp(LEVEL_MIN as i32, LEVEL_MAX as i32) as u32
+}
+
+/// What enchanting at `level` costs: 1–10 one level and one lapis, 11–20 two and two, 21–30
+/// three and three (the table's three rows).
+pub fn enchant_cost(level: u32) -> u32 {
+    level.clamp(LEVEL_MIN, LEVEL_MAX).div_ceil(10)
+}
+
+/// «В конденсаторе не меньше уровней, чем уровень чар»: the condenser holds what `level` levels
+/// are worth from zero.
+pub fn enough_for(stored: u32, level: u32) -> bool {
+    stored >= total(level)
+}
+
 /// The points an enchantment with `cost` (the table's offer, up to 30) for `levels` levels takes
 /// from the condenser: what those levels are worth at that cost.
 pub fn enchant_points(cost: u32, levels: u32) -> u32 {
@@ -106,6 +129,10 @@ mod tests {
         assert_eq!(total(16), 352);
         assert_eq!(total(30), 1395);
         assert_eq!(total(50), 5345);
+        assert_eq!((enchant_cost(1), enchant_cost(10), enchant_cost(11), enchant_cost(30)), (1, 1, 2, 3));
+        assert_eq!(step_level(30, 10), 30);
+        assert_eq!(step_level(5, -10), 1);
+        assert!(enough_for(total(30), 30) && !enough_for(total(30) - 1, 30));
         assert_eq!(total(100), CAPACITY, "the guide's 30 970: 100 levels from 0");
         assert_eq!(give_levels(30, Amount::Ten, CAPACITY), (10, total(30) - total(20)));
         assert_eq!(give_levels(30, Amount::All, CAPACITY).0, 30);

@@ -585,9 +585,9 @@
   "rustcraft.util.xp_tank.hint": "Click to turn on or off",
   "block.rustcraft.enchanter": "Enchanting Machine",
   "rustcraft.util.enchanter.what": "Enchants with the condenser beside it and lapis",
-  "rustcraft.util.enchanter.hint": "Click to turn on or off",
+  "rustcraft.util.enchanter.hint": "Click to change the enchanting level (1–30)",
   "block.rustcraft.archeo": "Archaeology Table",
-  "rustcraft.util.archeo.what": "Brushes suspicious sand and gravel",
+  "rustcraft.util.archeo.what": "Brushes suspicious sand and gravel by the table of the place it lay in",
   "rustcraft.util.archeo.hint": "Click to turn on or off",
   "block.rustcraft.projector": "Holo-Projector",
   "rustcraft.util.projector.what": "Remembers a building and shows its ghost",
@@ -1071,5 +1071,11 @@
   "rustcraft.util.xp_tank.alone": "No enchanting machine beside it",
   "rustcraft.util.xp_full": "The condenser is full",
   "rustcraft.util.xp_tank.toggle.give10": "Give 10 levels",
-  "rustcraft.util.xp_tank.toggle.take_all": "Take all"
+  "rustcraft.util.xp_tank.toggle.take_all": "Take all",
+  "rustcraft.util.enchanter.level": "Enchanting level %s · costs %s levels and %s lapis",
+  "rustcraft.util.enchanter.toggle.minus10": "Level −10",
+  "rustcraft.util.enchanter.toggle.minus1": "Level −1",
+  "rustcraft.util.enchanter.toggle.plus1": "Level +1",
+  "rustcraft.util.enchanter.toggle.plus10": "Level +10",
+  "rustcraft.util.archeo.brushes": "Brushes: %s from %s"
 }
