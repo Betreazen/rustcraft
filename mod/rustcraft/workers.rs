@@ -630,12 +630,17 @@ pub(super) fn tick(game: &mut Game<'_>, dimension: &str, net_level: &LevelNet, t
             .map(|(p, _)| *p)
             .collect()
     };
-    let unload = docks(Machine::DockUnload);
+    // PD2 (slice 18): a portal dock takes a cargo worker's load as an unload dock does, and hands
+    // what comes from its pair to a container beside it.
+    let portal = docks(Machine::Util(rustcraft_rules::utility::Util::PortalDock));
+    let mut unload = docks(Machine::DockUnload);
     let charge = docks(Machine::DockCharge);
     let load = docks(Machine::DockLoad);
     if level.ticks.is_multiple_of(DOCK_PUSH_EVERY) {
         push_docks(game, dimension, &unload);
+        push_docks(game, dimension, &portal);
     }
+    unload.extend(portal.iter().copied());
     if !level.fleet.workers.is_empty() {
         let net = monorail::network(dimension);
         let mut workers = std::mem::take(&mut level.fleet.workers);
@@ -1187,6 +1192,7 @@ fn unload_into(game: &mut Game<'_>, w: &mut Worker, dock: Pos, t: &Tuning) {
         .max(1.0) as u32;
     let tool = w.tool;
     let keep = |i: &str| tool.is_some_and(|t| t.keeps(i));
+    let portal_dock = game.native_block(dock) == PORTAL_DOCK;
     let mut moved = 0;
     while moved < per_tick {
         let Some(slot) = w.hold.next_to_unload(keep) else {
@@ -1198,9 +1204,14 @@ fn unload_into(game: &mut Game<'_>, w: &mut Worker, dock: Pos, t: &Tuning) {
         let n = count.min(per_tick - moved);
         let stack = util::hold_stack(&item, 1);
         let max = machines::max_stack(game, &stack.item);
-        let put = game
-            .native_with_mod_block_entity(dock, |e| into_slots(&mut e.items, &stack, n, max))
-            .unwrap_or(0);
+        let put = if portal_dock {
+            // Into the slots a portal dock sends from (rustcraft_builder: 0..18).
+            let left = util::put(game, dock, PORTAL_SEND, util::hold_stack(&item, n));
+            n - left.map_or(0, |l| l.count.min(n))
+        } else {
+            game.native_with_mod_block_entity(dock, |e| into_slots(&mut e.items, &stack, n, max))
+                .unwrap_or(0)
+        };
         if put == 0 {
             break;
         }
@@ -1216,7 +1227,12 @@ fn unload_into(game: &mut Game<'_>, w: &mut Worker, dock: Pos, t: &Tuning) {
     }
 }
 
+/// The portal dock (rustcraft_builder) and the slots it sends to its pair from.
+const PORTAL_DOCK: &str = "rustcraft:portal_dock";
+const PORTAL_SEND: std::ops::Range<usize> = 0..18;
+
 /// Puts up to `count` of `like`'s item into the dock's slots; how many went in. A grown block
+
 /// stacks only with grown ones.
 fn into_slots(items: &mut Vec<Option<ItemStack>>, like: &ItemStack, count: u32, max: u32) -> u32 {
     if items.len() < content::DOCK_SLOTS {

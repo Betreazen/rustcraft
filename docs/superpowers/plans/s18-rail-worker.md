@@ -114,8 +114,9 @@ Audit lines: chassis «Ставится на монорельс», «Ездит 
 
 ### Task 11: Portal dock as a worker's dock (PD2), fluids, «Буфер дока полон», chest beside, buffer 27
 
-- [ ] Tests: the worker's unload targets include portal docks; buffer 27 slots; fluid buffer 16 buckets (rules in `rules/src/utility`, stream 5's file, own block).
-- [ ] Self-test `worker_unloads_into_a_portal_dock`.
+- [x] The worker's unload targets include portal docks (into its send slots 0..18); the unload docks' push hands the portal dock's received slots to a container beside it; «Буфер дока полон» when its pair's store has no room.
+- [ ] Fluids, 16 buckets, and the window's «Тот мир · выгружен» (stream 5's builder.rs and utility rules: left to stream 5, see the report).
+- [x] Self-test `worker_unloads_into_a_portal_dock`.
 - [ ] Commit.
 
 ### Task 12: Dock windows' lines, dock_load takes from the chest beside it

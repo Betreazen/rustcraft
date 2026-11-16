@@ -324,12 +324,15 @@ fn dock(game: &mut Game<'_>, pos: Pos, cost: f64) -> Shown {
     }
     // What the net gave it goes.
     let slots = items(game, pos);
+    // Slice 18 (stream 6): items wait and its pair's store has no room: «Буфер дока полон».
+    let mut full = false;
     for slot in 0..18 {
         let Some(Some(st)) = slots.get(slot) else { continue };
         let max = crate::game::rustcraft_machines::max_stack(game, &st.item);
         let room = state().transit.room(partner, &st.item, max);
         let n = st.count.min(room);
         if n == 0 {
+            full |= st.count > 0;
             continue;
         }
         if !spend(game, pos, cost * f64::from(n)) {
@@ -346,7 +349,14 @@ fn dock(game: &mut Game<'_>, pos: Pos, cost: f64) -> Shown {
         });
         moved = true;
     }
-    if moved { Shown::Working } else { Shown::Idle("dock_idle") }
+    if moved {
+        Shown::Working
+    } else if full {
+        Shown::Blocked("dock_full")
+    } else {
+        Shown::Idle("dock_idle")
+    }
+
 }
 
 /// A wrench click on a portal dock: pairs it with the dock clicked before.

@@ -8,7 +8,9 @@ use crate::monorail::shape;
 use crate::tuning::Tuning;
 use crate::worker::{Errand, Tool, Worker};
 
-pub const ALL: [Build; 10] = [
+pub const ALL: [Build; 11] = [
+    unloads_into_a_portal_dock,
+
     map_says_all_mapped,
 
     reaper_filter_pumpkins,
@@ -366,5 +368,26 @@ fn map_says_all_mapped(o: Pos, _: &Tuning) -> Scenario {
         })
         .until("it says all round its way is mapped", 1200, |b, m| {
             Ok(worker_of(b, m)?.note == crate::worker::Note::AllMapped)
+        })
+}
+
+fn unloads_into_a_portal_dock(o: Pos, t: &Tuning) -> Scenario {
+    // PD2: a cargo worker with a full hold stops at the portal dock beside its rails and the dock
+    // takes the load into the slots it sends to its pair from.
+    let n = t.cargo_hold as u32;
+    let dock = at(o, [6, 1, 1]);
+    Scenario::new("worker_unloads_into_a_portal_dock", plot_area(o))
+        .then("a track with a portal dock at its end", move |b, _| {
+            floor(b, o, -1..=7, -2..=2)?;
+            for x in 0..=6 {
+                rail(b, at(o, [x, 1, 0]), Face::YNeg)?;
+            }
+            b.place(dock, "rustcraft:portal_dock", &[])
+        })
+        .then("a cargo worker with a full hold", move |b, m| {
+            spawn(b, m, at(o, [0, 1, 0]), Tool::Hold, &[("minecraft:wooden_shovel", n)])
+        })
+        .until("the dock takes its load", RIDE, move |b, _| {
+            Ok(count_of(&b.items(dock), "minecraft:wooden_shovel") >= 18)
         })
 }

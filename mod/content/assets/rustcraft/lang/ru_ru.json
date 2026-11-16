@@ -3681,5 +3681,6 @@
   "rustcraft.worker.hold_title": "Трюм",
   "rustcraft.worker.hold_slots": "%s из %s слотов",
   "rustcraft.worker.all_mapped": "Вокруг пути всё нанесено",
-  "rustcraft.station.charted": "Нанесено чанков: %s"
+  "rustcraft.station.charted": "Нанесено чанков: %s",
+  "rustcraft.util.dock_full": "Буфер дока полон"
 }
