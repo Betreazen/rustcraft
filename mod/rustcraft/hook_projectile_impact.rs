@@ -1,4 +1,3 @@
-#[allow(clippy::too_many_arguments)]
 fn rustcraft_projectile_impact(
     game: &mut crate::game::Game<'_>,
     dimension: &str,
