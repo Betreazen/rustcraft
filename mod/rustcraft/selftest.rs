@@ -912,5 +912,6 @@ pub(super) fn slice7_mob(game: &Game<'_>, id: u32) -> Option<MobView> {
             base::SLOW_ID,
         )
         .map(|a| -a),
+        slow_ticks: base::slow_ticks_left(id),
     })
 }

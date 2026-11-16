@@ -346,15 +346,11 @@ fn soulscraft_resistances(o: Pos, t: &Tuning) -> Scenario {
                 if !b.souls_found() {
                     return Err("SoulsCraft is in the build but its mobs.json was not found".into());
                 }
-                let Some(p) = mob(b, m, "mob0")?.effect("minecraft:slowness") else {
+                let Some(left) = mob(b, m, "mob0")?.slow_ticks else {
                     return Ok(false);
                 };
-                if p.0 > base / 2 {
-                    return Err(format!(
-                        "slowness {} ticks, expected at most {}",
-                        p.0,
-                        base / 2
-                    ));
+                if left > base / 2 {
+                    return Err(format!("slowness {left} ticks, expected at most {}", base / 2));
                 }
                 Ok(true)
             },

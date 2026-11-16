@@ -763,6 +763,15 @@ fn slow_mob(game: &mut Game<'_>, dimension: &str, id: u32, share: f64, until: u6
     state().slows.insert((dimension.to_owned(), id), until);
 }
 
+/// Ticks left of a turret's slowness on mob `id` (the self-test reads it).
+pub(super) fn slow_ticks_left(id: u32) -> Option<u32> {
+    let s = state();
+    s.slows
+        .iter()
+        .find(|((_, m), _)| *m == id)
+        .map(|(_, until)| u32::try_from(until.saturating_sub(s.ticks)).unwrap_or(u32::MAX))
+}
+
 /// Slowness past its time comes off; once a second also from a mob nobody remembers slowing (a
 /// restart forgets the timers, the modifier stays on the mob).
 fn unslow(game: &mut Game<'_>, dimension: &str, now: u64) {

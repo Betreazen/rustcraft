@@ -334,6 +334,8 @@ pub struct MobView {
     /// Slice 18: the share of its speed a turret's slowness takes now (its movement speed
     /// modifier `rustcraft:turret_slow`), if it is slowed.
     pub slow: Option<f64>,
+    /// Ticks left of that slowness.
+    pub slow_ticks: Option<u32>,
 }
 
 impl MobView {
