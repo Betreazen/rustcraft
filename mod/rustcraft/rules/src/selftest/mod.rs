@@ -18,6 +18,8 @@ pub mod fluids;
 pub mod handbook;
 pub mod magistral;
 pub mod miners;
+// Slice 18, the module stream.
+pub mod modules18;
 pub mod monorail;
 pub mod orders2;
 pub mod rest;
@@ -496,6 +498,8 @@ pub fn catalog() -> Vec<Build> {
     all.extend(traversal::ALL);
     all.extend(handbook::ALL);
     all.extend(rest::ALL);
+    // Slice 18, the module stream.
+    all.extend(modules18::ALL);
     all
 }
 
