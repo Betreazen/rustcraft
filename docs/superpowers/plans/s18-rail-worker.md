@@ -146,6 +146,16 @@ Audit lines: chassis «Ставится на монорельс», «Ездит 
 
 - Tasks 1–4 and Task 9's models and poses: db932ff. Task 5: 3259831. Task 6: 2528e24.
 
+## Left after this run (for a resumed run or the owning stream)
+
+- Portal dock: fluids with a 16-bucket buffer, the window's «Тот мир · выгружен», a 27-slot buffer laid out as the handbook's window (now 18 to send + 9 received). The code is stream 5's (`builder.rs`, `rules/src/utility`).
+- Monorail shapes: a climb cell with a fork, a floor rail's half up under a wall rail (new `shape` states and models). Cabin room over every cell the 2.5× cabin touches; the capsule's scale.
+- The miner putting into a load dock (`mining.rs`, stream 2).
+- The grab's grown block through unload dock → magistral → archaeology table: no self-test yet.
+- The guard's kill drops that need a player's kill: not checked.
+- The cartographer's structure detection limits (`/place structure`, deep structures): unchanged.
+- W5 board over the mod's model: needs a look in the game (README item 12).
+
 ## Пределы движка
 
-(filled in as found, each with SRC evidence)
+None found: every line above is doable with the Horizon API at 7e4e421 (mod configs API 397, drawing over a server menu API 78, standalone models API 151, mob drawing API 110 were all used).
