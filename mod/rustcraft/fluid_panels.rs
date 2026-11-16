@@ -20,6 +20,7 @@ use rustcraft_rules::machines::{
         pump::{self as pw, PumpPanel},
         tank::{self as tw, Note, TankPanel},
     },
+    extras,
     panel::{inside, slot_frame},
     pump::Source,
     style::{self, Severity},
@@ -234,7 +235,7 @@ pub(super) fn draw_pump(game: &Game<'_>, data: &[i32], batch: &mut HudBatch, o: 
         Some(Source::Water) => tr("rustcraft.pump.under.water", "water"),
         Some(Source::Lava) => tr("rustcraft.pump.under.lava", "lava"),
     };
-    let rate = pump_rate(&p);
+    let rate = pump_rate(&p, data.get(pw::TICKS_AT).copied());
     let rows = [
         (tr("rustcraft.pump.under", "Under the pump"), under),
         (tr("rustcraft.pump.rate", "Pumps"), rate),
@@ -263,9 +264,9 @@ pub(super) fn draw_pump(game: &Game<'_>, data: &[i32], batch: &mut HudBatch, o: 
         o,
         [8.0, pw::LABEL_MODULES_Y],
     );
-    for m in pw::MODULE_SLOTS {
-        socket(game, batch, o, m, true);
-    }
+    // Slice 18: the sockets its tier opens, with their modules.
+    let ex = extras::decode(data, pw::EXTRAS_AT);
+    kit::sockets_part(game, batch, o, &ex, &pw::MODULE_SLOTS, None);
     if p.no_lane {
         let s = tr(
             "rustcraft.fluid.no_lane.short",
@@ -279,12 +280,14 @@ pub(super) fn draw_pump(game: &Game<'_>, data: &[i32], batch: &mut HudBatch, o: 
 }
 
 /// «1 ведро за 10 с» at the speed it gets energy for now; «—» while it does not pump.
-fn pump_rate(p: &PumpPanel) -> String {
+fn pump_rate(p: &PumpPanel, ticks: Option<i32>) -> String {
     if p.under.is_none() || p.asked <= 0.0 || p.got <= 0.0 {
         return "—".to_owned();
     }
     let share = (p.got / p.asked).clamp(0.01, 1.0);
-    let seconds = (PUMP_SECONDS / share).round() as u64;
+    // Slice 18: the server says how long a bucket takes on its tier and modules.
+    let full = ticks.filter(|t| *t > 0).map_or(PUMP_SECONDS, |t| f64::from(t) / 20.0);
+    let seconds = (full / share).round().max(1.0) as u64;
     tr_with(
         "rustcraft.pump.rate_value",
         "1 bucket in %s s",
@@ -292,13 +295,19 @@ fn pump_rate(p: &PumpPanel) -> String {
     )
 }
 
+/// Slice 18: where the pump's window keeps its extras and its sockets, for the clicks.
+pub(super) const PUMP_EXTRAS_AT: usize = pw::EXTRAS_AT;
+pub(super) const PUMP_SOCKETS: [[f32; 2]; 4] = pw::MODULE_SLOTS;
+
 /// Seconds a bucket takes on full energy, as rustcraft_rules::tuning says (200 ticks).
 const PUMP_SECONDS: f64 = 10.0;
 
-pub(super) fn pump_tooltip(_data: &[i32], at: [f32; 2], lines: &mut Vec<String>) {
-    if pw::MODULE_SLOTS.iter().any(|&m| inside(slot_frame(m), at)) {
-        kit::module_slot_tooltip(lines);
-    } else if inside(pw::ENERGY_BAR, at) {
+pub(super) fn pump_tooltip(game: &Game<'_>, data: &[i32], at: [f32; 2], lines: &mut Vec<String>) {
+    let ex = extras::decode(data, pw::EXTRAS_AT);
+    if kit::extras_tooltip(game, "rustcraft:pump", &ex, &pw::MODULE_SLOTS, |_| [-99.0, -99.0], [-99.0, -99.0], at, lines) {
+        return;
+    }
+    if inside(pw::ENERGY_BAR, at) {
         kit::energy_tooltip(lines);
     } else if inside([8.0, pw::ROWS[0], RIGHT - 8.0, 22.0], at) {
         lines.push(tr(

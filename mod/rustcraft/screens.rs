@@ -867,7 +867,12 @@ pub(super) fn on_click(
     };
     match machine.kind() {
         Kind::Processor => {}
-        Kind::Pump => return,
+        Kind::Pump => {
+            // Slice 18: the pump's sockets.
+            let ex = extras::decode(data, fluid_panels::PUMP_EXTRAS_AT);
+            *button = socket_at(&ex, &fluid_panels::PUMP_SOCKETS, at).map(|k| SOCKET_BUTTON + k as i32);
+            return;
+        }
         _ => {
             *button = panels::button_at(machine, data, at);
             return;
@@ -948,7 +953,7 @@ pub(super) fn tooltip(
     match machine.kind() {
         Kind::Processor => {}
         Kind::Pump => {
-            fluid_panels::pump_tooltip(data, at, lines);
+            fluid_panels::pump_tooltip(game, data, at, lines);
             return;
         }
         _ => {

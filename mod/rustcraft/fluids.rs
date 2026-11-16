@@ -661,6 +661,20 @@ pub struct PumpHeld {
     under: Under,
     pub request: f64,
     data: Vec<i32>,
+    /// Slice 18: its modules and tier, and the ticks and E/s a bucket takes on them.
+    fitted: machines::Fitted,
+    ticks: f64,
+    energy: f64,
+}
+
+/// A8, A7: a higher tier and speed modules pump faster; economy modules cost less.
+fn pump_numbers(fitted: &machines::Fitted, tuning: &Tuning) -> (f64, f64) {
+    let tier = fitted.speed(Machine::Pump, tuning);
+    let (work, energy) = rustcraft_rules::modules::factors(&fitted.modules, tuning);
+    (
+        (tuning.pump_ticks / (tier * work)).max(1.0),
+        tuning.pump_energy * tier * energy,
+    )
 }
 
 /// What is under the pump at `pos`.
@@ -702,11 +716,16 @@ pub(super) fn read_pump(game: &Game<'_>, pos: Pos, tuning: &Tuning) -> Option<Pu
         held: read_held(&entity.nbt),
     };
     let under = under(game, pos);
+    let fitted = machines::fitted(game, pos, entity);
+    let (ticks, energy) = pump_numbers(&fitted, tuning);
     Some(PumpHeld {
-        request: pump.request(&under, tuning.pump_energy),
+        request: pump.request(&under, energy),
         pump,
         under,
         data: entity.data.clone(),
+        fitted,
+        ticks,
+        energy,
     })
 }
 
@@ -725,9 +744,12 @@ pub(super) fn run_pump(
         under,
         request,
         data: shown_data,
+        fitted,
+        ticks,
+        energy,
     } = held;
     let before = pump.clone();
-    let tick = pump.tick(&under, share, tuning.pump_ticks);
+    let tick = pump.tick(&under, share, ticks);
     let shown = Pump::shown(tick, share);
     if let Some(source) = tick.pumped
         && !under.endless()
@@ -739,14 +761,18 @@ pub(super) fn run_pump(
         endless: under.endless(),
         progress: pump.progress,
         got: if request > 0.0 { share * request } else { 0.0 },
-        asked: tuning.pump_energy,
+        asked: energy,
         shown,
         no_lane,
     });
-    if pump == before && shown_data == data {
+    let mut data = data;
+    data.extend(fitted.extras(game, &[], 0, &None));
+    data.push(ticks.round() as i32);
+    if pump == before && shown_data == data && fitted.tier_saved() {
         return Some(shown);
     }
     game.native_with_mod_block_entity(pos, move |e| {
+        fitted.save_tier(&mut e.nbt);
         if pump.progress != before.progress {
             write_f64(&mut e.nbt, PROGRESS_KEY, pump.progress);
         }
