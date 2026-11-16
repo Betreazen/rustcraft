@@ -30,7 +30,11 @@
 
 (Filled in as found, each with SRC evidence.)
 
-- Ghost translucency: to check `native_draw_block` / `native_draw_model` for alpha in SRC before Task 22.
+- **Ghost translucency.** `native_draw_block(draw, block, properties)` and `native_draw_model(draw, model, tint)` take no alpha (SRC/docs/native-mods.md:920-930, 1247; native_block_entity_draw.rs:663-668): a block entity draws block models as they are. The ghost is each block's own model at 0.6 scale in its cell; a cell with another block gets red stained glass (translucent by its texture).
+- **Order kinds.** Only the kitchen joins the order kinds: the brewer and the enchanting machine make potions and enchanted items from settings their windows choose, which a recipe book entry does not name; the disintegrator un-makes. Not an engine limit: recorded as the closest honest reading of «через машины магистрали».
+- **The 4th socket (tier 3–4).** Not an engine limit: waits for stream 3's per-tier sockets in sheet.rs (rules ready: `Util::opening_tier`, `sockets_for_tier`).
+- **Tanks by channel.** The kitchen and the shearer use the tank they touch (as the mixer's water and the catalysts do, fluids.rs:371-430), not a fluid-channel joint: joints for them would be stream 3's fluids.rs net code.
+- **Stack module in machines (256 a slot).** Not made in this stream: per-slot max stacks of the craft machines' menus are content menu types (stream 3/4).
 
 ---
 
@@ -161,13 +165,13 @@
 ## Part D — the projector and the builder
 
 ### Task 22: Projector — area by two wrench corners up to 32³, plan kept in the item on break, rotate / mirror, block states, compact plan encoding
-- [ ] done
+- [x] done 47782db 4c05f7d (rules `plan`: `Area::of`, states with 18 kept properties, `turn_state`, `transformed`, `pack/unpack` runs; bundle `projector.rs` (new module); wrench on the projector arms it, two wrench clicks set corners; sneaking wrench lifts it into an item with custom data `rustcraft:plan`, placing restores it)
 
 ### Task 23: Projector — missing-block list with storage counts, «В руку», red cell for a foreign block, 4 E/s while the ghost is shown, «Нет сохранённой постройки», «Нет склада на магистрали»
-- [ ] done
+- [x] done 4c05f7d (rows: remembers/turn, missing with storage counts; «В руку» from `storage::storage_by`; red stained glass in a foreign cell; `ghost_lit` off without energy)
 
 ### Task 24: Builder — blocks from the storage on the same magistral, 2 blocks/s, places block states, waits naming what is missing, «Клетка занята чужим блоком», window rows (layer N of M, progress, missing, skipped)
-- [ ] done
+- [x] done 4c05f7d 914c6ac (from the storage on its magistral first, then own slots; self-test `builder18_turned_plan_from_storage`; try pending)
 
 ## Part E — hand-off
 
