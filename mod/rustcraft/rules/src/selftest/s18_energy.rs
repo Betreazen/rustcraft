@@ -5,13 +5,14 @@ use super::{Build, Scenario, at, plot_area, same};
 use crate::grow::{self, DRUSE, SEED, SHARD, STAGE};
 use crate::tuning::Tuning;
 
-pub const ALL: [Build; 6] = [
+pub const ALL: [Build; 7] = [
     shard_recipes,
     druse_breaks_into_shards,
     seed_grows_on_solution,
     seed_stands_without_solution,
     structure_window_and_look,
     structure_unfed_window_and_look,
+    miner_fills_a_load_dock,
 ];
 
 const TANK: &str = "rustcraft:tank";
@@ -173,6 +174,41 @@ fn structure_window_and_look(o: crate::geom::Pos, t: &Tuning) -> Scenario {
 
 fn structure_unfed_window_and_look(o: crate::geom::Pos, t: &Tuning) -> Scenario {
     structure_scenario("s18_structure_unfed_window_and_look", o, t, false)
+}
+
+/// MN1: with no chest and no housing beside it, the miner puts its ore into a load dock beside
+/// it; with a chest as well, the chest gets it and the dock nothing.
+fn miner_fills_a_load_dock(o: crate::geom::Pos, _t: &Tuning) -> Scenario {
+    let m = at(o, [5, 6, 3]);
+    let dock = at(m, [0, 1, 0]);
+    let chest = at(m, [0, 0, 1]);
+    let ores = [at(m, [2, -6, -1]), at(m, [-2, -6, 1])];
+    let raw = |b: &dyn super::Bench, p| super::count_of(&b.items(p), "minecraft:raw_iron");
+    Scenario::new("s18_miner_fills_a_load_dock", plot_area(o))
+        .then("a miner on two crystals, a load dock on it, an iron ore below", move |b, _| {
+            b.place(m, "rustcraft:miner", &[])?;
+            b.place(at(m, [1, 0, 0]), CRYSTAL, &[])?;
+            b.place(at(m, [-1, 0, 0]), CRYSTAL, &[])?;
+            b.place(dock, "rustcraft:dock_load", &[])?;
+            for p in ores {
+                for d in [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]] {
+                    b.place(at(p, d), "minecraft:stone", &[])?;
+                }
+            }
+            b.place(ores[0], "minecraft:iron_ore", &[])
+        })
+        .until("the raw iron went into the load dock", 600, move |b, _| Ok(raw(b, dock) >= 1))
+        .then("a chest beside it too, another ore, the miner set anew", move |b, m2| {
+            m2.mark("dock", f64::from(raw(b, dock)));
+            b.place(chest, "minecraft:chest", &[])?;
+            b.place(ores[1], "minecraft:iron_ore", &[])?;
+            b.place(m, "minecraft:air", &[])?;
+            b.place(m, "rustcraft:miner", &[])
+        })
+        .until("the chest comes first", 1200, move |b, _| Ok(raw(b, chest) >= 1))
+        .check("and the dock got no more", move |b, m2| {
+            same("dock", f64::from(raw(b, dock)), m2.get("dock"))
+        })
 }
 
 /// CR2: on a tank of water the seed stands; broken, it gives its one shard back.

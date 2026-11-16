@@ -389,6 +389,62 @@ pub fn front(facing: &str) -> Option<Face> {
     }
 }
 
+/// MN1 (guide `miner`): where the miner puts what it dug, in order: a chest beside it, else the
+/// magistral (a housing beside it takes from its slots), else a load dock beside it, where a cargo
+/// worker picks it up.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Outlet {
+    Chest,
+    Magistral,
+    LoadDock,
+    Nowhere,
+}
+
+impl Outlet {
+    /// The guide's order.
+    pub const ORDER: [Outlet; 3] = [Outlet::Chest, Outlet::Magistral, Outlet::LoadDock];
+
+    pub fn of(chest: bool, magistral: bool, dock: bool) -> Outlet {
+        if chest {
+            Outlet::Chest
+        } else if magistral {
+            Outlet::Magistral
+        } else if dock {
+            Outlet::LoadDock
+        } else {
+            Outlet::Nowhere
+        }
+    }
+
+    /// The word its chip's lang key uses.
+    pub fn key(self) -> &'static str {
+        match self {
+            Outlet::Chest => "chest",
+            Outlet::Magistral => "magistral",
+            Outlet::LoadDock => "dock",
+            Outlet::Nowhere => "nowhere",
+        }
+    }
+
+    /// A block to show its chip with.
+    pub fn icon(self) -> &'static str {
+        match self {
+            Outlet::Chest => "minecraft:chest",
+            Outlet::Magistral => "rustcraft:housing",
+            Outlet::LoadDock => "rustcraft:dock_load",
+            Outlet::Nowhere => "minecraft:barrier",
+        }
+    }
+}
+
+/// Whether `block` is a container a miner fills as «сундук вплотную»: a chest, a barrel, a shulker
+/// box or a hopper of the base game (or a mod's chest).
+pub fn holds_items(block: &str) -> bool {
+    let name = block.rsplit(':').next().unwrap_or(block);
+    !block.starts_with("rustcraft:")
+        && (name.ends_with("chest") || name == "barrel" || name.ends_with("shulker_box") || name == "hopper")
+}
+
 /// What a miner, a placer or a breaker shows (A4).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Shown {
@@ -562,6 +618,21 @@ mod tests {
         assert_eq!(fired, 2);
         assert_eq!(Shown::working(0.5), Shown::Slowed(50));
         assert_eq!(Shown::working(0.0), Shown::NoEnergy);
+    }
+
+    #[test]
+    fn the_miner_puts_its_ore_in_the_guides_order() {
+        // MN1: chest beside it → magistral → load dock.
+        assert_eq!(Outlet::of(true, true, true), Outlet::Chest);
+        assert_eq!(Outlet::of(false, true, true), Outlet::Magistral);
+        assert_eq!(Outlet::of(false, false, true), Outlet::LoadDock);
+        assert_eq!(Outlet::of(false, false, false), Outlet::Nowhere);
+        assert!(holds_items("minecraft:chest"));
+        assert!(holds_items("minecraft:copper_chest"));
+        assert!(holds_items("minecraft:red_shulker_box"));
+        assert!(holds_items("minecraft:barrel"));
+        assert!(!holds_items("minecraft:stone"));
+        assert!(!holds_items("rustcraft:dock_load"));
     }
 
     #[test]

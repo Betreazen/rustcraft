@@ -15,7 +15,7 @@ use crate::game::{
     Game, rustcraft_base as base,
     rustcraft_content::{self as content, Machine},
     rustcraft_machines::{self as machines, read_f64, read_int, write_f64, write_int},
-    rustcraft_server::{self as server, line},
+    rustcraft_server::line,
     rustcraft_transport as transport,
 };
 use horizon_client::{items::ItemStack, mod_api::NativeUseTarget, text::Text};
@@ -28,7 +28,7 @@ use rustcraft_rules::{
         },
         style::Severity,
     },
-    mining::{self as rules, Cycle, Miner, Ore, Shown, Step},
+    mining::{self as rules, Cycle, Miner, Ore, Outlet, Shown, Step},
     reports::Report,
     tuning::Tuning,
 };
@@ -46,11 +46,15 @@ const PROGRESS_KEY: &str = "progress";
 /// MN1: what a miner or a breaker holds goes to a container beside it this often, this many.
 const PUSH_EVERY: u64 = 8;
 const PUSH: u32 = 16;
+/// Slice 18: into a chest beside it, as much as fits.
+const PUSH_TO_CHEST: u32 = 27 * 64;
 
 #[derive(Default)]
 struct State {
     ticks: u64,
     shown: HashMap<(String, Pos), Shown>,
+    /// Slice 18: where each miner and breaker puts what it dug (MN1).
+    outlets: HashMap<(String, Pos), Outlet>,
 }
 
 static STATE: LazyLock<Mutex<State>> = LazyLock::new(Mutex::default);
@@ -327,7 +331,8 @@ pub(super) fn run(
         s.ticks.is_multiple_of(PUSH_EVERY)
     };
     if push && machine != Machine::Placer {
-        push_out(game, &dimension, pos);
+        let outlet = push_out(game, &dimension, pos);
+        state().outlets.insert((dimension, pos), outlet);
     }
 }
 
@@ -523,25 +528,47 @@ fn place(game: &mut Game<'_>, dimension: &str, pos: Pos, slot: usize, face: Face
     });
 }
 
-/// MN1: a miner's or a breaker's slots go to a container beside it; the magistral takes from them
-/// as from any machine's products.
-fn push_out(game: &mut Game<'_>, dimension: &str, pos: Pos) {
+/// MN1 (slice 18: the guide's order): a miner's or a breaker's slots go to a chest beside it; with
+/// none, the magistral takes from them as from any machine's products (a housing beside it); with
+/// neither, they go into a load dock beside it for a cargo worker. Where they go now.
+fn push_out(game: &mut Game<'_>, dimension: &str, pos: Pos) -> Outlet {
+    let mut chests = Vec::new();
+    let mut docks = Vec::new();
+    let mut magistral = false;
     for f in Face::ALL {
-        let n = step(pos, f);
-        let block = game.native_block(n);
-        if block == "minecraft:air" || server::is_ours(&block) {
-            continue;
+        let block = game.native_block(step(pos, f));
+        if rules::holds_items(&block) {
+            chests.push(f);
+        } else if block == content::DOCK_LOAD {
+            docks.push(f);
+        } else if block == content::HOUSING {
+            magistral = true;
         }
+    }
+    let outlet = Outlet::of(!chests.is_empty(), magistral, !docks.is_empty());
+    let (faces, max) = match outlet {
+        // The chest first: it takes all it can, before the magistral's next pull.
+        Outlet::Chest => (chests, PUSH_TO_CHEST),
+        Outlet::LoadDock => (docks, PUSH),
+        _ => (Vec::new(), 0),
+    };
+    for f in faces {
         game.native_move_items(
             dimension,
             pos,
             transport::direction(f),
-            n,
+            step(pos, f),
             transport::direction(f.opposite()),
             None,
-            PUSH,
+            max,
         );
     }
+    outlet
+}
+
+/// Where the miner or breaker at `pos` put what it dug last (MN1), for its window.
+pub(super) fn outlet_at(dimension: &str, pos: Pos) -> Option<Outlet> {
+    state().outlets.get(&(dimension.to_owned(), pos)).copied()
 }
 
 // ---- What they show ----
