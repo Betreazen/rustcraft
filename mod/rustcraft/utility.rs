@@ -1263,7 +1263,11 @@ pub(super) fn sheet(game: &Game<'_>, dimension: &str, pos: Pos, u: Util, s: &mut
         colour: None,
     });
     let on = toggles_at(game, pos, spec.toggles);
+    // Slice 18, guide `mod_pick`: the vein's ore choice appears with the ore choice module only.
+    let choice_shown = u != Util::Vein || modules::count(&base::modules_at(game, pos), Module::Pick) > 0;
     s.toggles = toggle_names(u)
+        .into_iter()
+        .filter(|_| choice_shown)
         .into_iter()
         .enumerate()
         .map(|(i, (key, icon))| Toggle {

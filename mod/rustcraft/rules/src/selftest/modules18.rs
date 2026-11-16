@@ -4,6 +4,7 @@
 //!   two yield modules give 2 of a bucket's 3 ingots (70%), where it gives 1 bare.
 //! - Economy slows a slice-12 machine's step by ×0.85 (guide `mod_eco`): the trash's window shows a
 //!   step of 1.2 s instead of 1.0 s.
+//! - The vein's ore choice appears in its window with the ore choice module only (guide `mod_pick`).
 
 use super::{Bench, Build, Scenario, at, count_of, plot_area, same};
 use crate::geom::Pos;
@@ -11,7 +12,7 @@ use crate::modules::{self, Module};
 use crate::tuning::Tuning;
 use crate::utility::{self, Util};
 
-pub const ALL: [Build; 2] = [disintegrator_yield, economy_slows_a_step];
+pub const ALL: [Build; 3] = [disintegrator_yield, economy_slows_a_step, vein_choice_with_the_module];
 
 const OWNER: u128 = 0x5e1f_7e57_0000_0000_0000_0000_0000_0a18;
 const LIMIT: u64 = 400;
@@ -79,5 +80,22 @@ fn economy_slows_a_step(o: Pos, t: &Tuning) -> Scenario {
         })
         .until("the bare one steps every 1.0 s, the economy one every 1.2 s", 60, move |b, _| {
             Ok(step_shown(b, bare, &bare_s) && step_shown(b, eco, &eco_s))
+        })
+}
+
+fn vein_choice_with_the_module(o: Pos, _: &Tuning) -> Scenario {
+    let bare = at(o, [1, 1, 0]);
+    let pick = at(o, [6, 1, 0]);
+    let choices = crate::utility::vein::PICKS.len();
+    Scenario::new("module_vein_choice_with_the_module", plot_area(o))
+        .then("two veins, one with the ore choice module", move |b, _| {
+            floor(b, o)?;
+            machine(b, bare, "rustcraft:vein")?;
+            machine(b, pick, "rustcraft:vein")?;
+            b.set_modules(pick, &[Module::Pick.item()])
+        })
+        .until("only the one with the module offers the ores", 60, move |b, _| {
+            let toggles = |p| b.sheet(p).map(|s| s.toggles.len());
+            Ok(toggles(bare) == Some(0) && toggles(pick) == Some(choices))
         })
 }
