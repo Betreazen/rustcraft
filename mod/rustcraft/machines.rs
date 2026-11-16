@@ -521,7 +521,16 @@ pub(super) fn tick(game: &mut Game<'_>, level: &mut LevelNet, tuning: &Tuning) {
         circuits,
         1.0 / tuning.ticks_per_second,
     );
-    power::settle(game, &mut level.sources, &report, tuning);
+    // Slice 18: with what it needs for the windows' circuit balance.
+    power::settle(
+        game,
+        &mut level.sources,
+        &report,
+        &producers,
+        &consumers,
+        circuits,
+        tuning,
+    );
     let requests: HashMap<Pos, f64> = consumers.iter().map(|c| (c.block, c.request)).collect();
     let request_of = |pos: &Pos| requests.get(pos).copied().unwrap_or(0.0);
     let mut status = resting;
@@ -560,6 +569,8 @@ pub(super) fn tick(game: &mut Game<'_>, level: &mut LevelNet, tuning: &Tuning) {
                 let ledger = ledger.get_or_insert_with(|| Ledger::new(&producers, &consumers));
                 let members = ledger.group_of(pos, circuits);
                 let balance = ledger.balance(&members, &report.got);
+                // Slice 18: what the batteries of its circuit hold (rustcraft_power).
+                let balance = power::with_storage(&level.sources, &members, balance);
                 generator::run(game, pos, h, used, balance, tuning)
             }
             Unit::Alloy(h) => alloy::run(game, pos, h, share, &level.recipes, tuning),

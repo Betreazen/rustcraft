@@ -46,6 +46,8 @@ pub enum Kind {
     Butcher,
     /// Slice 12: the last blocks of the guide.
     Util(crate::utility::Util),
+    /// Slice 18: a crystal or crystal structure (guide `structure`, ui.js).
+    Structure,
 }
 
 /// Which parts a window has, and how many of each it has room for.
@@ -65,7 +67,7 @@ pub struct Shape {
 }
 
 impl Kind {
-    pub const ALL: [Kind; 14] = [
+    pub const ALL: [Kind; 15] = [
         Kind::Turret,
         Kind::Anchor,
         Kind::DockUnload,
@@ -80,6 +82,7 @@ impl Kind {
         Kind::DockLoad,
         Kind::Turbine,
         Kind::Butcher,
+        Kind::Structure,
     ];
 
     pub fn block(self) -> &'static str {
@@ -97,6 +100,7 @@ impl Kind {
             Kind::Mixer => "rustcraft:mixer",
             Kind::DockLoad => "rustcraft:dock_load",
             Kind::Turbine => "rustcraft:turbine",
+            Kind::Structure => "rustcraft:crystal",
             Kind::Butcher => crate::butcher::BLOCK,
             Kind::Util(u) => u.spec().block,
         }
@@ -159,9 +163,11 @@ impl Kind {
                 rows: 2,
                 ..Shape::default()
             },
+            // Slice 18 (ui.js `gen_lava`): the lava and output bars, the hint and the circuit's
+            // balance.
             Kind::LavaGenerator => Shape {
-                rows: 1,
-                bars: 1,
+                rows: 3,
+                bars: 2,
                 ..Shape::default()
             },
             Kind::Miner => Shape {
@@ -193,6 +199,13 @@ impl Kind {
                 slots: 9,
                 ..Shape::default()
             },
+            // Slice 18 (ui.js `structure`): crystals and form, the output and solution bars, the
+            // circuit's balance.
+            Kind::Structure => Shape {
+                rows: 4,
+                bars: 2,
+                ..Shape::default()
+            },
             Kind::Turbine => Shape {
                 rows: 3,
                 ..Shape::default()
@@ -211,11 +224,13 @@ impl Kind {
             Kind::Util(u) => {
                 let spec = u.spec();
                 let count = u.slots().count;
+                // Slice 18: the living vein has the work modes and a progress bar (ui.js `vein`).
+                let vein = u == crate::utility::Util::Vein;
                 Shape {
                     sockets,
-                    mode: false,
+                    mode: vein,
                     rows: spec.rows,
-                    bars: 1,
+                    bars: if vein { 2 } else { 1 },
                     toggles: spec.toggles,
                     slots: if count > 1 { count } else { 0 },
                     ..Shape::default()

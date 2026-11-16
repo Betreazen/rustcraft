@@ -1449,7 +1449,8 @@ pub(super) fn sheet(
         SheetKind::Battery
         | SheetKind::Windmill
         | SheetKind::LavaGenerator
-        | SheetKind::Turbine => {
+        | SheetKind::Turbine
+        | SheetKind::Structure => {
             power::sheet(game, level, pos, kind, t, &mut s);
         }
         SheetKind::Mixer => mixer::sheet(game, dimension, pos, t, &mut s),

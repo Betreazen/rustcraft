@@ -358,9 +358,9 @@ fn crystal_pair(name: &'static str, o: Pos, t: &Tuning, solution: bool) -> Scena
             move |b, _| Ok(view(b, first).is_ok_and(|v| v.blocks == 2 && v.shown == wanted)),
         )
         .until(
-            "the furnace by one crystal gets that crystal's half",
+            "slice 18: the furnace by one crystal gets the whole structure's output",
             LIMIT,
-            move |b, _| Ok(fed(b, oven, total / 2.0, need)),
+            move |b, _| Ok(fed(b, oven, total, need)),
         );
     if !solution {
         return s;

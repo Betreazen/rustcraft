@@ -807,6 +807,31 @@ impl Bench for GameBench<'_, '_> {
         Ok(said)
     }
 
+    // ---- Slice 18, energy stream ----
+
+    fn break_block(&mut self, pos: Pos, tool: Option<&str>) -> Result<Vec<(String, u32)>, String> {
+        let tool = tool.map(|t| ItemStack::new(t, 1));
+        let drops = self
+            .game
+            .native_machine_destroy_block(pos, tool.as_ref(), true)
+            .ok_or_else(|| format!("nothing broken at {pos:?}"))?;
+        Ok(drops.into_iter().map(|d| (d.item.to_string(), d.count)).collect())
+    }
+
+    fn seed(&self, pos: Pos) -> Option<rustcraft_rules::grow::Seed> {
+        power::seed_at(self.game, pos)
+    }
+
+    fn set_seed(&mut self, pos: Pos, progress: f64) -> Result<(), String> {
+        self.change_entity(pos, |e| machines::write_f64(&mut e.nbt, "grow", progress))
+    }
+
+    fn crystal_drawn(&self, pos: Pos) -> Option<(Option<[i32; 3]>, bool, bool)> {
+        self.game
+            .native_mod_block_entity(pos)
+            .map(|e| power::drawn_of(&e.nbt))
+    }
+
     fn anim(&self, pos: Pos) -> Option<rustcraft_rules::anim::Shown> {
         self.game
             .native_mod_block_entity(pos)

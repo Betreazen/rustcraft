@@ -299,6 +299,18 @@ impl Bench for Fake {
     ) -> Result<crate::utility::found::Lift, String> {
         Ok(crate::utility::found::Lift::Grown)
     }
+    fn break_block(&mut self, _: Pos, _: Option<&str>) -> Result<Vec<(String, u32)>, String> {
+        Ok(Vec::new())
+    }
+    fn seed(&self, _: Pos) -> Option<crate::grow::Seed> {
+        None
+    }
+    fn set_seed(&mut self, _: Pos, _: f64) -> Result<(), String> {
+        Ok(())
+    }
+    fn crystal_drawn(&self, _: Pos) -> Option<(Option<[i32; 3]>, bool, bool)> {
+        None
+    }
 }
 
 const PLOT: Area = Area {

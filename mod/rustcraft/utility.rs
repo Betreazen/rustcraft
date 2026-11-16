@@ -288,6 +288,10 @@ pub(super) fn paced(game: &Game<'_>, pos: Pos, u: Util) -> (u64, f64) {
     let eco = modules::count(&slots, Module::Economy);
     let ticks = (rules::step_ticks(u) >> speed.min(4)).max(1);
     let cost = rules::step_energy(u) * 2.5f64.powi(speed as i32) * 0.6f64.powi(eco as i32);
+    // Slice 18: the living vein's work mode (rustcraft_mining).
+    if u == Util::Vein {
+        return crate::game::rustcraft_mining::vein_paced(game, pos, ticks, cost);
+    }
     (ticks, cost)
 }
 
@@ -1180,6 +1184,8 @@ fn grow(game: &mut Game<'_>, dimension: &str, pos: Pos, cost: f64) -> Shown {
         g.dirty = true;
     }
     base::report(Report::Place { dimension: dimension.to_owned(), pos: cell, block: ore.to_owned() });
+    // Slice 18: «Выращено всего» (rustcraft_mining).
+    crate::game::rustcraft_mining::vein_grew(game, pos);
     Shown::Working
 }
 
@@ -1279,6 +1285,11 @@ pub(super) fn sheet(game: &Game<'_>, dimension: &str, pos: Pos, u: Util, s: &mut
         severity: severity_code(severity(&shown)),
         text: base::v(&shown_text(u, &shown)),
     });
+    // Slice 18: the living vein's mode, progress and counts (rustcraft_mining).
+    if u == Util::Vein {
+        let now = state().ticks.get(dimension).copied().unwrap_or(0);
+        crate::game::rustcraft_mining::vein_sheet(game, pos, now, paced(game, pos, u).0, s);
+    }
 }
 
 /// A press in a slice-12 machine's window (`native_menu_button_v2`); the block entity is out of

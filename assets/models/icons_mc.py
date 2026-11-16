@@ -538,3 +538,22 @@ ICONS['tablet'] = (['', '..kkkkkkkkkkkk..', '.kaaaaaaaaaaaak.', '.kaxxxxxxxxxxak
 ICONS['harpoon'] = (['..........kkkkk.', '...........kook.', '..........kmook.', '.........kmk.kk.', '........kak.....',
                      '.......kak......', '......kak.......', '.....kak........', '....kak.........', '..kkak..........',
                      '.khhk...........', 'khhhhk..........', 'khhhhk..........', '.kkkk...........'], TIER[3], TIER[3], [])
+
+
+# ---- Slice 18 (energy): the crystal shard, icons.js `shard` (S.shard, a '#56dbe2', e white).
+SHARD = [
+    '',
+    '..........kk....',
+    '.........kvuk...',
+    '........kvuujk..',
+    '.......kvuuujk..',
+    '......kvuuujk...',
+    '.....kvuuujk....',
+    '....kvuuujk.....',
+    '...kvuuujk......',
+    '..kuuuujk.......',
+    '..kjuujk........',
+    '...kjjk.........',
+    '....kk..........',
+]
+ICONS['crystal_shard'] = (SHARD, '#56dbe2', '#ffffff', dots([(3, 3), (13, 9), (6, 11)], 'w'))

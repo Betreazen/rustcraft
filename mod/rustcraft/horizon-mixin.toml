@@ -188,6 +188,13 @@ file = "crates/horizon-client/src/game.rs"
 name = "rustcraft_power"
 source = "power.rs"
 
+# Slice 18: the crystal shard, the druses and growing crystals (rustcraft_rules::grow).
+[[module]]
+id = "crystals"
+file = "crates/horizon-client/src/game.rs"
+name = "rustcraft_crystals"
+source = "crystals.rs"
+
 [[module]]
 id = "mining"
 file = "crates/horizon-client/src/game.rs"

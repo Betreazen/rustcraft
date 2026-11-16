@@ -15,7 +15,7 @@ use crate::game::{
     Game, rustcraft_base as base,
     rustcraft_content::{self as content, Machine},
     rustcraft_machines::{self as machines, read_f64, read_int, write_f64, write_int},
-    rustcraft_server::{self as server, line},
+    rustcraft_server::line,
     rustcraft_transport as transport,
 };
 use horizon_client::{items::ItemStack, mod_api::NativeUseTarget, text::Text};
@@ -24,11 +24,12 @@ use rustcraft_rules::{
     geom::{Face, Pos, step},
     machines::{
         sheet::{
-            Kind as SheetKind, Sheet, Status as SheetStatus, Toggle as SheetToggle, severity_code,
+            Bar as SheetBar, Kind as SheetKind, Sheet, Status as SheetStatus,
+            Toggle as SheetToggle, severity_code,
         },
         style::Severity,
     },
-    mining::{self as rules, Cycle, Miner, Ore, Shown, Step},
+    mining::{self as rules, Cycle, Miner, Ore, Outlet, Shown, Step, Survey},
     reports::Report,
     tuning::Tuning,
 };
@@ -43,14 +44,25 @@ const DIG_KEY: &str = "dig";
 const CARRY_KEY: &str = "carry";
 const OFF_KEY: &str = "ores_off";
 const PROGRESS_KEY: &str = "progress";
+/// Slice 18: the ores a miner has dug («Найдено руды»).
+const FOUND_KEY: &str = "found";
+/// Cells of its square a miner's open window counts ahead each time it is looked at.
+const SURVEY_BUDGET: u64 = 2048;
 /// MN1: what a miner or a breaker holds goes to a container beside it this often, this many.
 const PUSH_EVERY: u64 = 8;
 const PUSH: u32 = 16;
+/// Slice 18: into a chest beside it, as much as fits.
+const PUSH_TO_CHEST: u32 = 27 * 64;
 
 #[derive(Default)]
 struct State {
     ticks: u64,
     shown: HashMap<(String, Pos), Shown>,
+    /// Slice 18: where each miner and breaker puts what it dug (MN1), what it got and asked, E/s,
+    /// and each miner's count of the ores ahead (its window's «Осталось»).
+    outlets: HashMap<(String, Pos), Outlet>,
+    energy: HashMap<(String, Pos), (f64, f64)>,
+    surveys: HashMap<(String, Pos), Survey>,
 }
 
 static STATE: LazyLock<Mutex<State>> = LazyLock::new(Mutex::default);
@@ -324,10 +336,12 @@ pub(super) fn run(
         let mut s = state();
         s.ticks += 1;
         s.shown.insert((dimension.clone(), pos), shown);
+        s.energy.insert((dimension.clone(), pos), (share * request, request));
         s.ticks.is_multiple_of(PUSH_EVERY)
     };
     if push && machine != Machine::Placer {
-        push_out(game, &dimension, pos);
+        let outlet = push_out(game, &dimension, pos);
+        state().outlets.insert((dimension, pos), outlet);
     }
 }
 
@@ -366,6 +380,14 @@ fn dig(
     if let Some(state) = game.native_default_state(rock) {
         game.native_set_block(dimension, p, state, 3);
     }
+    // Slice 18: one more found, one fewer ahead.
+    game.native_with_mod_block_entity(miner, |e| {
+        let n = read_long(&e.nbt, FOUND_KEY) + 1;
+        e.nbt.insert(JavaString::from(FOUND_KEY), Tag::Long(n as i64));
+    });
+    if let Some(s) = self::state().surveys.get_mut(&(dimension.to_owned(), miner)) {
+        s.dug();
+    }
     if let Some(owner) = base::owner_at(game, miner) {
         base::report(Report::Break {
             owner,
@@ -397,9 +419,11 @@ fn take(
         return false;
     };
     crate::game::rustcraft_utility::forget_grown(game, dimension, cell);
+    // Slice 18: a stack module makes the slots hold four times as much (guide `mod_stack`).
+    let modules = base::module_items(game, at);
     let maxes: Vec<u32> = drops
         .iter()
-        .map(|d| machines::max_stack(game, &d.item))
+        .map(|d| rules::slot_max(&modules, machines::max_stack(game, &d.item)))
         .collect();
     let left: Vec<ItemStack> = game
         .native_with_mod_block_entity(at, |e| {
@@ -523,25 +547,47 @@ fn place(game: &mut Game<'_>, dimension: &str, pos: Pos, slot: usize, face: Face
     });
 }
 
-/// MN1: a miner's or a breaker's slots go to a container beside it; the magistral takes from them
-/// as from any machine's products.
-fn push_out(game: &mut Game<'_>, dimension: &str, pos: Pos) {
+/// MN1 (slice 18: the guide's order): a miner's or a breaker's slots go to a chest beside it; with
+/// none, the magistral takes from them as from any machine's products (a housing beside it); with
+/// neither, they go into a load dock beside it for a cargo worker. Where they go now.
+fn push_out(game: &mut Game<'_>, dimension: &str, pos: Pos) -> Outlet {
+    let mut chests = Vec::new();
+    let mut docks = Vec::new();
+    let mut magistral = false;
     for f in Face::ALL {
-        let n = step(pos, f);
-        let block = game.native_block(n);
-        if block == "minecraft:air" || server::is_ours(&block) {
-            continue;
+        let block = game.native_block(step(pos, f));
+        if rules::holds_items(&block) {
+            chests.push(f);
+        } else if block == content::DOCK_LOAD {
+            docks.push(f);
+        } else if block == content::HOUSING {
+            magistral = true;
         }
+    }
+    let outlet = Outlet::of(!chests.is_empty(), magistral, !docks.is_empty());
+    let (faces, max) = match outlet {
+        // The chest first: it takes all it can, before the magistral's next pull.
+        Outlet::Chest => (chests, PUSH_TO_CHEST),
+        Outlet::LoadDock => (docks, PUSH),
+        _ => (Vec::new(), 0),
+    };
+    for f in faces {
         game.native_move_items(
             dimension,
             pos,
             transport::direction(f),
-            n,
+            step(pos, f),
             transport::direction(f.opposite()),
             None,
-            PUSH,
+            max,
         );
     }
+    outlet
+}
+
+/// Where the miner or breaker at `pos` put what it dug last (MN1), for its window.
+pub(super) fn outlet_at(dimension: &str, pos: Pos) -> Option<Outlet> {
+    state().outlets.get(&(dimension.to_owned(), pos)).copied()
 }
 
 // ---- What they show ----
@@ -608,26 +654,65 @@ pub(super) fn sheet(
         let m = read_miner(&entity.nbt);
         let layer = m.cursor / (side as u64).pow(2);
         let size = Text::literal(format!("{side}×{side}"));
-        s.rows.push(base::v(&line(
-            "rustcraft.miner.area",
-            "Area %s down to y %s",
-            &[size, Text::literal(min_y.to_string())],
-        )));
-        s.rows.push(base::v(&line(
-            "rustcraft.miner.scanned",
-            "Scanned %s of %s cells, layer y %s",
-            &[
-                Text::literal(m.cursor.min(total).to_string()),
-                Text::literal(total.to_string()),
-                Text::literal((pos[1] - 1 - layer as i32).max(min_y).to_string()),
-            ],
-        )));
-        s.hints = vec![vec![base::v(&line(
-            "rustcraft.miner.area_hint",
-            "An area module: 22×22, two: 33×33",
-            &[],
-        ))]];
         let off = read_int(&entity.nbt, OFF_KEY).map_or(0, |v| v as u16);
+        // Slice 18 (ui.js `miner`): «Найдено руды» and «Осталось», counted ahead a little each
+        // time the window is looked at.
+        let left = survey(game, dimension, pos, &m, side, min_y, off, total);
+        let found = read_long(&entity.nbt, FOUND_KEY);
+        let left_text = match left {
+            Some(n) => Text::literal(n.to_string()),
+            None => line("rustcraft.miner.counting", "counting…", &[]),
+        };
+        s.rows.push(base::v(&line(
+            "rustcraft.miner.found_left",
+            "Ore found %s · left %s",
+            &[Text::literal(found.to_string()), left_text],
+        )));
+        // «Куда складывает»: the guide's three places, the one it uses now marked.
+        let now = outlet_at(dimension, pos);
+        let mut places = line("rustcraft.miner.outlet", "Puts it: ", &[]);
+        for (i, o) in Outlet::ORDER.into_iter().enumerate() {
+            if i > 0 {
+                places.push(Text::literal(" · "));
+            }
+            let name = line(&format!("rustcraft.miner.outlet.{}", o.key()), o.key(), &[]);
+            if now == Some(o) {
+                places.push(Text::literal("["));
+                places.push(name);
+                places.push(Text::literal("]"));
+            } else {
+                places.push(name);
+            }
+        }
+        s.rows.push(base::v(&places));
+        s.hints = vec![
+            vec![
+                base::v(&line(
+                    "rustcraft.miner.area",
+                    "Area %s down to y %s",
+                    &[size, Text::literal(min_y.to_string())],
+                )),
+                base::v(&line(
+                    "rustcraft.miner.scanned",
+                    "Scanned %s of %s cells, layer y %s",
+                    &[
+                        Text::literal(m.cursor.min(total).to_string()),
+                        Text::literal(total.to_string()),
+                        Text::literal((pos[1] - 1 - layer as i32).max(min_y).to_string()),
+                    ],
+                )),
+                base::v(&line(
+                    "rustcraft.miner.area_hint",
+                    "An area module: 22×22, two: 33×33",
+                    &[],
+                )),
+            ],
+            vec![base::v(&line(
+                "rustcraft.miner.outlet_hint",
+                "A chest beside it first, else the magistral, else a load dock",
+                &[],
+            ))],
+        ];
         s.toggles = Ore::LISTED
             .iter()
             .map(|ore| {
@@ -692,17 +777,118 @@ pub(super) fn sheet(
         Some(Shown::NoEnergy) => Severity::Bad,
         _ => Severity::Warn,
     };
-    let text = shown.map_or_else(|| Text::literal("…"), shown_text);
+    let mut text = shown.map_or_else(|| Text::literal("…"), shown_text);
+    // Slice 18 (ui.js `energy`): what it gets of what it asks.
+    if let Some((got, asked)) = state().energy.get(&(dimension.to_owned(), pos)).copied()
+        && asked > 0.0
+    {
+        text.push(Text::literal(" · "));
+        text.push(line(
+            "rustcraft.miner.energy",
+            "%s of %s E/s",
+            &[
+                Text::literal(format!("{got:.0}")),
+                Text::literal(format!("{asked:.0}")),
+            ],
+        ));
+    }
     s.status = Some(SheetStatus {
         severity: severity_code(severity),
         text: base::v(&text),
     });
 }
 
+/// The miner's count of the wanted ores ahead of its scan, `SURVEY_BUDGET` more cells a call;
+/// none while it still counts.
+#[allow(clippy::too_many_arguments)]
+fn survey(
+    game: &Game<'_>,
+    dimension: &str,
+    pos: Pos,
+    m: &Miner,
+    side: i32,
+    min_y: i32,
+    off: u16,
+    total: u64,
+) -> Option<u64> {
+    let key = (dimension.to_owned(), pos);
+    let mut s = state()
+        .surveys
+        .get(&key)
+        .copied()
+        .filter(|s| s.fits(off, total))
+        .unwrap_or_else(|| Survey::new(m.cursor, off, total));
+    if !s.done {
+        s.step(SURVEY_BUDGET, |i| {
+            rules::cell(pos, side, min_y, i).is_some_and(|p| rules::wanted(&game.native_block(p), off))
+        });
+    }
+    state().surveys.insert(key, s);
+    s.done.then_some(s.ores)
+}
+
+// ---- Slice 18: the living vein's mode and window (guide `vein`, ui.js `vein`) ----
+
+const GROWN_KEY: &str = "grown";
+
+/// The vein's step and cost under its work mode.
+pub(super) fn vein_paced(game: &Game<'_>, pos: Pos, ticks: u64, cost: f64) -> (u64, f64) {
+    let mode = crate::game::rustcraft_machines::entity(game, pos)
+        .map(|e| machines::read_work(&e.nbt))
+        .unwrap_or_default();
+    rules::vein_paced(mode, ticks, cost)
+}
+
+/// The vein grew a block: one more for «Выращено всего».
+pub(super) fn vein_grew(game: &mut Game<'_>, pos: Pos) {
+    game.native_with_mod_block_entity(pos, |e| {
+        let n = read_long(&e.nbt, GROWN_KEY) + 1;
+        e.nbt.insert(JavaString::from(GROWN_KEY), Tag::Long(n as i64));
+    });
+}
+
+/// ui.js `vein`: its mode, «Ход работы», «Свободных клеток вокруг» and «Выращено всего» (what it
+/// does and its pace go to the rows' hints).
+pub(super) fn vein_sheet(game: &Game<'_>, pos: Pos, now: u64, every: u64, s: &mut Sheet) {
+    let Some(entity) = crate::game::rustcraft_machines::entity(game, pos) else {
+        return;
+    };
+    s.mode = Some(machines::read_work(&entity.nbt).code());
+    let free = rustcraft_rules::utility::vein::cells()
+        .into_iter()
+        .map(|c| [pos[0] + c[0], pos[1] + c[1], pos[2] + c[2]])
+        .filter(|p| matches!(game.native_block(*p).as_str(), "minecraft:air" | "minecraft:cave_air"))
+        .count();
+    let old_rows = std::mem::take(&mut s.rows);
+    s.rows.push(base::v(&line(
+        "rustcraft.vein.free",
+        "Free cells around: %s",
+        &[Text::literal(free.to_string())],
+    )));
+    s.rows.push(base::v(&line(
+        "rustcraft.vein.grown",
+        "Grown in all: %s blocks",
+        &[Text::literal(read_long(&entity.nbt, GROWN_KEY).to_string())],
+    )));
+    s.hints = vec![old_rows.clone(), old_rows];
+    s.bars.push(SheetBar {
+        label: base::v(&line("rustcraft.vein.progress", "Progress", &[])),
+        value: base::v(&Text::literal(format!(
+            "{:.0}%",
+            rules::vein_progress(now, every) * 100.0
+        ))),
+        share: rules::vein_progress(now, every),
+        energy: false,
+        colour: None,
+    });
+}
+
 /// The self-test's plot cleared: what it showed goes.
 pub(super) fn forget_area(dimension: &str, min: Pos, max: Pos) {
     let inside = |p: Pos| (0..3).all(|k| p[k] >= min[k] && p[k] <= max[k]);
-    state()
-        .shown
-        .retain(|(d, p), _| d != dimension || !inside(*p));
+    let mut s = state();
+    s.shown.retain(|(d, p), _| d != dimension || !inside(*p));
+    s.outlets.retain(|(d, p), _| d != dimension || !inside(*p));
+    s.energy.retain(|(d, p), _| d != dimension || !inside(*p));
+    s.surveys.retain(|(d, p), _| d != dimension || !inside(*p));
 }

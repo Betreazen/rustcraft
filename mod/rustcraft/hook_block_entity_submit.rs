@@ -16,5 +16,9 @@ fn rustcraft_block_entity_submit(
     if block == "rustcraft:projector" {
         crate::game::rustcraft_builder::draw_ghost(game, pos, entity, draw);
     }
+    // Slice 18: crystals as one structure, the connectors of crystals, panels and windmills.
+    if crate::game::rustcraft_power::draw(game, block, entity, draw) {
+        return;
+    }
     crate::game::rustcraft_anim::draw(game, block, state, entity, draw);
 }

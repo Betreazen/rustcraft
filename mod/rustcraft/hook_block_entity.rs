@@ -3,4 +3,5 @@ fn rustcraft_block_entity(
     entity: &mut Option<(String, horizon_world::nbt::Compound)>,
 ) {
     crate::game::rustcraft_content::block_entity(block, entity);
+    crate::game::rustcraft_crystals::block_entity(block, entity);
 }

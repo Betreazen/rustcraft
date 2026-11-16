@@ -93,7 +93,8 @@ fn draw_generator(game: &Game<'_>, data: &[i32], batch: &mut HudBatch, o: [f32; 
         [gw::FUEL[0] - 4.0, gw::LABEL_SLOTS_Y],
     );
     slot(game, batch, o, gw::FUEL);
-    let burning = tr("rustcraft.window.burning", "Burns");
+    // Slice 18: the guide's «Ход работы»: how long the lit fuel still burns.
+    let burning = tr("rustcraft.window.burn_progress", "Progress");
     // Over the bar's right end: «ТОПЛИВО» over the slot is wider than the gap before the bar.
     let flame_right = gw::FLAME[0] + gw::FLAME[2];
     label_right(game, batch, &burning, o, flame_right, gw::LABEL_SLOTS_Y);
@@ -126,6 +127,7 @@ fn draw_generator(game: &Game<'_>, data: &[i32], batch: &mut HudBatch, o: [f32; 
         produced: p.produced,
         requested: p.requested,
         supplied: p.supplied,
+        ..GroupBalance::default()
     };
     let per_second = |v: f64| tr_with("rustcraft.window.per_second", "%s E/s", &[energy_text(v)]);
     let enough = if balance.enough() {
@@ -148,7 +150,16 @@ fn draw_generator(game: &Game<'_>, data: &[i32], batch: &mut HudBatch, o: [f32; 
         ),
         (
             tr("rustcraft.window.stored", "Stored"),
-            tr("rustcraft.window.stored.none", "no batteries"),
+            if p.capacity > 0.0 {
+                // Slice 18: the batteries on its circuit.
+                tr_with(
+                    "rustcraft.window.stored.of",
+                    "%s of %s E",
+                    &[energy_text(p.stored), energy_text(p.capacity)],
+                )
+            } else {
+                tr("rustcraft.window.stored.none", "no batteries")
+            },
         ),
         (tr("rustcraft.window.enough", "Enough"), enough),
     ];

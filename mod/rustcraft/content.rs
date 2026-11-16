@@ -711,15 +711,19 @@ fn declare_machines(blocks: &mut Vec<Block>) {
         values: BTreeMap::new(),
         default: Some(vec![CRYSTAL_BOX]),
     };
+    // Slice 18: the crystal copies the furnace, for its window on use (the structure's sheet,
+    // ui.js `structure`); its block model stays out of the chunk mesh and its block entity draws
+    // it, a merged structure as one crystal (rustcraft_power::draw_crystal).
     blocks.push(Block {
         id: CRYSTAL.into(),
-        template: "minecraft:amethyst_block".into(),
+        template: "minecraft:furnace".into(),
         properties: BlockProperties {
             hardness: Some(1.5),
             explosion_resistance: Some(3.0),
             light: Some(7),
             sounds: Some("minecraft:amethyst_block".into()),
             occludes: Some(false),
+            render_shape: Some(horizon_mods::content::RenderShape::EntityblockAnimated),
             ..BlockProperties::default()
         },
         shapes: Some(crystal_shape()),
@@ -848,7 +852,8 @@ pub fn block_entity(block: &str, entity: &mut Option<(String, Compound)>) {
 /// engine saves the slots with the block entity and drops them when the block breaks
 /// (docs/native-mods.md:224).
 pub fn block_entity_container(block: &str, container: &mut Option<ModContainer>) {
-    if container.is_none() && [TERMINAL, TANK, STATION].contains(&block) {
+    // Slice 18: the crystal's window is a sheet with only the menu's hidden slot.
+    if container.is_none() && [TERMINAL, TANK, STATION, CRYSTAL].contains(&block) {
         *container = Some(hidden_container(block));
         return;
     }

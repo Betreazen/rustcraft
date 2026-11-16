@@ -188,6 +188,47 @@ pub fn slots_of(slots: &[Option<Module>], t: &Tuning) -> usize {
     (t.miner_slots << n.min(8)).min(t.miner_slots_max)
 }
 
+/// Slice 18 (guide `miner`, `mod_stack`): the item ids of the stack modules (stream «modules»
+/// names them in `modules::Module`; the miner knows them by id, so it reads them either way).
+pub const STACK_MODULES: [&str; 3] = [
+    "rustcraft:module_stack",
+    "rustcraft:module_stack_2",
+    "rustcraft:module_stack_3",
+];
+
+/// A miner's slot size for an item the game stacks to `base_max`: with a stack module in it, 64
+/// becomes 256 (16 becomes 64); a single item stays single.
+pub fn slot_max(modules: &[Option<String>], base_max: u32) -> u32 {
+    let stacked = modules
+        .iter()
+        .flatten()
+        .any(|m| STACK_MODULES.contains(&m.as_str()));
+    if stacked && base_max > 1 {
+        base_max * 4
+    } else {
+        base_max
+    }
+}
+
+// ---- Slice 18: the living vein's mode and window (guide `vein`, ui.js `vein`) ----
+
+/// The vein's pace under work mode `mode` (A1): its step of `ticks` and its `cost` in E, the
+/// guide's «Экономный: скорость ×0,5, энергия ×0,35; Форсаж: скорость ×2, энергия ×3».
+pub fn vein_paced(mode: WorkMode, ticks: u64, cost: f64) -> (u64, f64) {
+    let (work, energy) = mode.factors();
+    (((ticks as f64 / work).round() as u64).max(1), cost * energy)
+}
+
+/// How far the vein is to its next block (ui.js `work`): `now` its level's tick count, `every`
+/// its step.
+pub fn vein_progress(now: u64, every: u64) -> f64 {
+    if every == 0 {
+        0.0
+    } else {
+        (now % every) as f64 / every as f64
+    }
+}
+
 // ---- The miner ----
 
 /// The square's offsets along one axis: `side` cells round the miner, one more on the low side
@@ -296,6 +337,56 @@ impl Miner {
     }
 }
 
+/// Slice 18 (ui.js `miner`: «Найдено руды», «Осталось»): a count of the wanted ores the miner has
+/// not reached yet, made a few cells at a time from where its scan stood when the count began.
+/// Once done it goes down by one for each ore dug; it starts again when the ores switched off or
+/// the square change.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Survey {
+    /// The next cell to look at, and the ores found from the start.
+    pub next: u64,
+    pub ores: u64,
+    pub done: bool,
+    /// What it counts for: the ores switched off and the square's cells.
+    pub off: u16,
+    pub total: u64,
+}
+
+impl Survey {
+    /// A count from the miner's scan cursor `cursor`.
+    pub fn new(cursor: u64, off: u16, total: u64) -> Survey {
+        Survey {
+            next: cursor,
+            ores: 0,
+            done: cursor >= total,
+            off,
+            total,
+        }
+    }
+
+    /// Whether it still counts for `off` and `total`.
+    pub fn fits(&self, off: u16, total: u64) -> bool {
+        self.off == off && self.total == total
+    }
+
+    /// Looks at up to `budget` more cells: `wanted` says which hold an ore to take.
+    pub fn step(&mut self, budget: u64, mut wanted: impl FnMut(u64) -> bool) {
+        let end = (self.next + budget).min(self.total);
+        while self.next < end {
+            if wanted(self.next) {
+                self.ores += 1;
+            }
+            self.next += 1;
+        }
+        self.done = self.next >= self.total;
+    }
+
+    /// An ore was dug.
+    pub fn dug(&mut self) {
+        self.ores = self.ores.saturating_sub(1);
+    }
+}
+
 /// Ticks a miner at `share`, `work` and `scout` takes to reach and dig the `index`th cell, from a
 /// fresh start: what the self-test waits for.
 pub fn ticks_to_dig(index: u64, share: f64, work: f64, scout: f64, t: &Tuning) -> u64 {
@@ -387,6 +478,62 @@ pub fn front(facing: &str) -> Option<Face> {
         "east" => Some(Face::XPos),
         _ => None,
     }
+}
+
+/// MN1 (guide `miner`): where the miner puts what it dug, in order: a chest beside it, else the
+/// magistral (a housing beside it takes from its slots), else a load dock beside it, where a cargo
+/// worker picks it up.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Outlet {
+    Chest,
+    Magistral,
+    LoadDock,
+    Nowhere,
+}
+
+impl Outlet {
+    /// The guide's order.
+    pub const ORDER: [Outlet; 3] = [Outlet::Chest, Outlet::Magistral, Outlet::LoadDock];
+
+    pub fn of(chest: bool, magistral: bool, dock: bool) -> Outlet {
+        if chest {
+            Outlet::Chest
+        } else if magistral {
+            Outlet::Magistral
+        } else if dock {
+            Outlet::LoadDock
+        } else {
+            Outlet::Nowhere
+        }
+    }
+
+    /// The word its chip's lang key uses.
+    pub fn key(self) -> &'static str {
+        match self {
+            Outlet::Chest => "chest",
+            Outlet::Magistral => "magistral",
+            Outlet::LoadDock => "dock",
+            Outlet::Nowhere => "nowhere",
+        }
+    }
+
+    /// A block to show its chip with.
+    pub fn icon(self) -> &'static str {
+        match self {
+            Outlet::Chest => "minecraft:chest",
+            Outlet::Magistral => "rustcraft:housing",
+            Outlet::LoadDock => "rustcraft:dock_load",
+            Outlet::Nowhere => "minecraft:barrier",
+        }
+    }
+}
+
+/// Whether `block` is a container a miner fills as «сундук вплотную»: a chest, a barrel, a shulker
+/// box or a hopper of the base game (or a mod's chest).
+pub fn holds_items(block: &str) -> bool {
+    let name = block.rsplit(':').next().unwrap_or(block);
+    !block.starts_with("rustcraft:")
+        && (name.ends_with("chest") || name == "barrel" || name.ends_with("shulker_box") || name == "hopper")
 }
 
 /// What a miner, a placer or a breaker shows (A4).
@@ -562,6 +709,59 @@ mod tests {
         assert_eq!(fired, 2);
         assert_eq!(Shown::working(0.5), Shown::Slowed(50));
         assert_eq!(Shown::working(0.0), Shown::NoEnergy);
+    }
+
+    #[test]
+    fn the_veins_mode_sets_its_pace_and_cost() {
+        assert_eq!(vein_paced(WorkMode::Normal, 1200, 2000.0), (1200, 2000.0));
+        let (t, e) = vein_paced(WorkMode::Economy, 1200, 2000.0);
+        assert_eq!(t, 2400);
+        assert!((e - 700.0).abs() < 1e-9);
+        let (t, e) = vein_paced(WorkMode::Boost, 1200, 2000.0);
+        assert_eq!(t, 600);
+        assert!((e - 6000.0).abs() < 1e-9);
+        assert!((vein_progress(1500, 1200) - 0.25).abs() < 1e-9);
+        assert_eq!(vein_progress(5, 0), 0.0);
+    }
+
+    #[test]
+    fn a_stack_module_makes_the_miners_slots_hold_256() {
+        let none: Vec<Option<String>> = vec![None, Some("rustcraft:module_speed".into())];
+        assert_eq!(slot_max(&none, 64), 64);
+        let stack = vec![Some("rustcraft:module_stack_2".to_owned())];
+        assert_eq!(slot_max(&stack, 64), 256);
+        assert_eq!(slot_max(&stack, 16), 64);
+        assert_eq!(slot_max(&stack, 1), 1);
+    }
+
+    #[test]
+    fn a_survey_counts_the_ores_ahead_a_few_cells_at_a_time() {
+        let ores = [3u64, 7, 8, 40];
+        let mut s = Survey::new(5, 0, 50);
+        s.step(10, |i| ores.contains(&i));
+        assert_eq!((s.next, s.ores, s.done), (15, 2, false));
+        s.step(100, |i| ores.contains(&i));
+        assert_eq!((s.ores, s.done), (3, true));
+        s.dug();
+        assert_eq!(s.ores, 2);
+        assert!(s.fits(0, 50));
+        assert!(!s.fits(Ore::Coal.bit(), 50));
+        assert!(Survey::new(50, 0, 50).done);
+    }
+
+    #[test]
+    fn the_miner_puts_its_ore_in_the_guides_order() {
+        // MN1: chest beside it → magistral → load dock.
+        assert_eq!(Outlet::of(true, true, true), Outlet::Chest);
+        assert_eq!(Outlet::of(false, true, true), Outlet::Magistral);
+        assert_eq!(Outlet::of(false, false, true), Outlet::LoadDock);
+        assert_eq!(Outlet::of(false, false, false), Outlet::Nowhere);
+        assert!(holds_items("minecraft:chest"));
+        assert!(holds_items("minecraft:copper_chest"));
+        assert!(holds_items("minecraft:red_shulker_box"));
+        assert!(holds_items("minecraft:barrel"));
+        assert!(!holds_items("minecraft:stone"));
+        assert!(!holds_items("rustcraft:dock_load"));
     }
 
     #[test]
