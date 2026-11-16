@@ -175,11 +175,11 @@ Audit: scout_compass «Стрелка показывает на цель» MISSI
 
 Audit: zipline «Трос держится 5 минут» DIFFERS.
 
-**Files:** `rules/src/traversal.rs` (`Rope.tied: u64` game tick, `#[serde(default)]`; `pub const ROPE_TICKS: u64 = 6000`; `Ropes::expired(now) -> Vec<u64>`), `zipline.rs` (sweep unties expired ropes, a rope being ridden waits for the ride to end).
+**Files:** `rules/src/traversal.rs` (`Rope.tied_ms: u64` wall clock, `#[serde(default)]`; `ROPE_LIFE_MS` = 5 min; `Ropes::stamp(now)`, `Ropes::expired(now) -> Vec<u64>`), `zipline.rs` (sweep unties expired ropes, a rope being ridden waits for the ride to end).
 
-- [ ] Test: a rope tied at 100 is expired at 6100, not at 6099; old saved ropes (tied 0) expire at the first sweep after load + 6000.
-- [ ] Self-test `zipline_rope_comes_down_in_time` with a short time via the bench (`set_rope_age`).
-- [ ] Commit.
+- [x] Test `a_rope_comes_down_five_minutes_after_it_was_tied`: expired exactly at 5 min, older stores read with 0 and are stamped on load.
+- [x] Self-test `zipline_rope_comes_down_in_time` with the rope aged through the bench (`age_rope`).
+- [x] Commit.
 
 ### Task 13: Gear seen on the player; blade and shield go dark without charge
 

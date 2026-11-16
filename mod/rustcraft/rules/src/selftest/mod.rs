@@ -337,6 +337,10 @@ pub trait Bench {
     fn turret_aim(&self, _pos: Pos) -> Option<(f32, f32)> {
         None
     }
+    /// Rope `id` as if tied `ms` earlier.
+    fn age_rope(&mut self, _id: u64, _ms: u64) -> Result<(), String> {
+        Err("not on this bench".to_owned())
+    }
 }
 
 /// A mob as the self-test reads it.

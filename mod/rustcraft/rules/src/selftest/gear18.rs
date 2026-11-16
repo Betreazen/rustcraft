@@ -5,13 +5,20 @@
 //! - A turret turns its head to the mob it shoots (the aim clients draw it by).
 //! - Armour of the next tier is made from the piece below and the new alloy, keeping the piece's
 //!   number: its charge, modules and enchantments.
+//! - A zipline rope comes down by itself five minutes after it was tied, both anchors with it.
 
 use super::{Bench, Build, Scenario, at, plot_area};
 use crate::gear::{Held, Module};
 use crate::geom::Pos;
 use crate::tuning::Tuning;
 
-pub const ALL: [Build; 4] = [charger_fills_the_suit_capacity, charger_skips_the_zipline, turret_aims_at_its_target, armour_upgrade_keeps_the_piece];
+pub const ALL: [Build; 5] = [
+    charger_fills_the_suit_capacity,
+    charger_skips_the_zipline,
+    turret_aims_at_its_target,
+    armour_upgrade_keeps_the_piece,
+    rope_comes_down_in_time,
+];
 
 const STONE: &str = "minecraft:stone";
 const CHARGER: &str = "rustcraft:charger";
@@ -115,4 +122,25 @@ fn armour_upgrade_keeps_the_piece(o: Pos, _: &Tuning) -> Scenario {
             Ok(())
         },
     )
+}
+
+fn rope_comes_down_in_time(o: Pos, _: &Tuning) -> Scenario {
+    let (a, far) = (at(o, [1, 1, 0]), at(o, [10, 3, 0]));
+    Scenario::new("zipline_rope_comes_down_in_time", plot_area(o))
+        .then("a floor, a pillar and a rope tied five minutes ago", move |b, _| {
+            for x in 0..=12 {
+                for z in -2..=2 {
+                    b.place(at(o, [x, 0, z]), STONE, &[])?;
+                }
+            }
+            for y in 1..=2 {
+                b.place(at(o, [10, y, 0]), STONE, &[])?;
+            }
+            let id = b.tie_rope(OWNER, a, far)?;
+            b.age_rope(id, crate::traversal::ROPE_LIFE_MS)
+        })
+        .until("the rope is untied and both anchors are gone", 100, move |b, _| {
+            let saved = b.ropes().iter().any(|r| r.a == a && r.b == far);
+            Ok(!saved && b.block(a) == "minecraft:air" && b.block(far) == "minecraft:air")
+        })
 }

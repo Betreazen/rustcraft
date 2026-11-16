@@ -9,7 +9,8 @@
 // - Z2: a use ties a rope: an anchor block at the player's feet and one on the target
 //   (`native_set_block`), each with the other end in its block entity (rope id, other end, which
 //   one draws). The rope is saved in the world's `data/rustcraft_ropes.json`; a player keeps
-//   rules::MAX_ROPES, the oldest coming down for a new one. Breaking an anchor (`native_destroy_
+//   rules::MAX_ROPES, the oldest coming down for a new one; slice 18: a rope comes down by itself
+//   five minutes after it was tied (rules::ROPE_LIFE_MS, the wall clock, kept in the file). Breaking an anchor (`native_destroy_
 //   block`) unties the rope: the broken one drops by its loot table, the other goes. Each second a
 //   sweep unties a rope whose loaded end is no longer its anchor (an explosion, a piston, the
 //   self-test's clearing); the magistral's rescan removes an anchor of a rope that came down
@@ -101,8 +102,12 @@ fn loaded(game: &Game<'_>) -> MutexGuard<'static, State> {
     {
         let path = world.join("data").join("rustcraft_ropes.json");
         if let Ok(text) = std::fs::read_to_string(&path) {
-            match serde_json::from_str(&text) {
-                Ok(r) => s.ropes = r,
+            match serde_json::from_str::<Ropes>(&text) {
+                Ok(mut r) => {
+                    // Slice 18: ropes of an older store count their five minutes from now.
+                    r.stamp(now_ms());
+                    s.ropes = r;
+                }
                 Err(e) => log::warn!("rustcraft: {} does not read: {e}", path.display()),
             }
         }
@@ -213,6 +218,21 @@ fn set_anchor(game: &mut Game<'_>, dimension: &str, p: Pos, id: u64, to: Pos, ma
     written.is_some()
 }
 
+/// The wall clock, ms: a rope's five minutes.
+fn now_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX))
+}
+
+/// The self-test: rope `id` was tied `ms` earlier than it was.
+pub(super) fn age_rope_for_selftest(game: &Game<'_>, id: u64, ms: u64) -> Result<(), String> {
+    let mut s = loaded(game);
+    let r = s.ropes.ropes.iter_mut().find(|r| r.id == id).ok_or(format!("no rope {id}"))?;
+    r.tied_ms = r.tied_ms.saturating_sub(ms).max(1);
+    Ok(())
+}
+
 /// Takes the anchor of rope `id` at `p` away, if it stands there loaded (no drop).
 fn clear_anchor(game: &mut Game<'_>, dimension: &str, p: Pos, id: u64) {
     if !seen(game, p, id).anchor {
@@ -229,6 +249,7 @@ fn tie(game: &mut Game<'_>, owner: u128, dimension: &str, a: Pos, b: Pos) -> Opt
     let (id, untied) = {
         let mut s = loaded(game);
         let out = s.ropes.tie(owner, dimension, a, b);
+        s.ropes.stamp(now_ms());
         save(&s);
         out
     };
@@ -497,6 +518,19 @@ pub(super) fn tick(game: &mut Game<'_>, dimension: &str) {
     };
     if !n.is_multiple_of(SWEEP_EVERY) {
         return;
+    }
+    // Slice 18: a rope comes down by itself five minutes after it was tied.
+    let expired: Vec<u64> = {
+        let s = loaded(game);
+        s.ropes
+            .expired(now_ms())
+            .into_iter()
+            .filter(|id| s.ropes.get(*id).is_some_and(|r| r.dimension == dimension))
+            .collect()
+    };
+    for id in expired {
+        log::info!("rustcraft: rope {id} came down after its five minutes");
+        untie(game, id, None);
     }
     let ropes: Vec<Rope> = loaded(game).ropes.in_level(dimension).cloned().collect();
     for r in ropes {

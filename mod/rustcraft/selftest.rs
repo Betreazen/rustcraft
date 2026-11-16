@@ -862,6 +862,10 @@ impl Bench for GameBench<'_, '_> {
         crate::game::rustcraft_gear::held(&stack)
     }
 
+    fn age_rope(&mut self, id: u64, ms: u64) -> Result<(), String> {
+        crate::game::rustcraft_zipline::age_rope_for_selftest(self.game, id, ms)
+    }
+
     fn turret_aim(&self, pos: Pos) -> Option<(f32, f32)> {
         let e = self.game.native_mod_block_entity(pos)?;
         e.nbt
