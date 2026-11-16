@@ -1,0 +1,6 @@
+{
+  "textures": {"particle": "rustcraft:block/worker_parts", "p0": "rustcraft:block/worker_parts"},
+  "elements": [
+    {"from": [9, 10.75, 6], "to": [13, 11.5, 10], "faces": {"down": {"uv": [8.5, 0.5, 9.5, 1.5], "texture": "#p0"}, "up": {"uv": [8.5, 0.5, 9.5, 1.5], "texture": "#p0"}, "north": {"uv": [8.5, 0.5, 9.5, 1.5], "texture": "#p0"}, "south": {"uv": [8.5, 0.5, 9.5, 1.5], "texture": "#p0"}, "west": {"uv": [8.5, 0.5, 9.5, 1.5], "texture": "#p0"}, "east": {"uv": [8.5, 0.5, 9.5, 1.5], "texture": "#p0"}}}
+  ]
+}

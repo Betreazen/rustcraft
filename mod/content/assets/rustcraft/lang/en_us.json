@@ -301,7 +301,7 @@
   "item.rustcraft.module_haste": "Swiftness Module",
   "item.rustcraft.upgrade_battery": "Upgrade: Battery",
   "item.rustcraft.upgrade_speed": "Upgrade: Speed",
-  "rustcraft.worker.place_on_rail": "Place the chassis on a floor monorail",
+  "rustcraft.worker.place_on_rail": "Place the chassis on a monorail",
   "rustcraft.anchor.area": "Holds %s chunks",
   "rustcraft.anchor.area_hint": "A radius module: 3×3, two: 5×5",
   "rustcraft.anchor.holding": "Holding %s chunks",

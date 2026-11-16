@@ -807,6 +807,11 @@ impl Bench for GameBench<'_, '_> {
         Ok(said)
     }
 
+    // ---- Slice 18, stream 6 (rail and workers) ----
+    fn worker_as_item(&mut self, id: u64, cell: Pos) -> Result<u64, String> {
+        workers::as_item_for_selftest(self.game, DIMENSION, id, cell, server::tuning())
+    }
+
     fn anim(&self, pos: Pos) -> Option<rustcraft_rules::anim::Shown> {
         self.game
             .native_mod_block_entity(pos)

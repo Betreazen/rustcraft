@@ -299,6 +299,10 @@ impl Bench for Fake {
     ) -> Result<crate::utility::found::Lift, String> {
         Ok(crate::utility::found::Lift::Grown)
     }
+    // ---- Slice 18, stream 6 (rail and workers) ----
+    fn worker_as_item(&mut self, id: u64, _: Pos) -> Result<u64, String> {
+        Ok(id)
+    }
 }
 
 const PLOT: Area = Area {

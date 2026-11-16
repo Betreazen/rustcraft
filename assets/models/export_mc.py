@@ -773,26 +773,54 @@ def capsule(out, report):
 
 
 # The worker (rustcraft_rules::worker; slice 7): no block, a model the client draws round its seat
-# mob, its chassis, its floor bracket and each tool apart, so the tool can follow what it carries.
-WORKER_PARTS = {
-    'body': ['body'],
-    'below': ['below'],
-    'saw': ['saw', 'aim_yaw_saw', 'reach_saw', 'saw_disc'],
-    'reaper': ['reaper', 'reaper_reel'],
-}
+# mob: its chassis, each bracket (floor, ceiling, wall) and each part of each tool apart, so the
+# bracket follows the rail and the tool's parts move as the guide's poses move them (slice 18,
+# docs/showcase/js/poses.js `P.worker`). The pivots of the moving parts go to the rules crate
+# (rustcraft_rules::worker::pose::PIVOTS) in block units, Minecraft axes.
+WORKER_PARTS = [
+    'body', 'below', 'above', 'side',
+    'saw', 'aim_yaw_saw', 'reach_saw', 'saw_disc',
+    'reaper', 'reaper_reel',
+    'hold',
+    'grab', 'grab_left', 'grab_right',
+    'bore', 'bore_bit',
+    'gun', 'aim_yaw_gun', 'aim_pitch_gun',
+    'scoop', 'aim_yaw_scoop', 'reach_scoop', 'scoop_bucket',
+    'map', 'map_drum',
+]
 
 
 def worker_parts(out, report):
-    boxes = read(transport.worker)
+    boxes, pivots = read_full(transport.worker)
     skin = Skin('worker_parts')
     for b in boxes:
         skin.slot(b[1])
     stats = {}
-    for name, parts in WORKER_PARTS.items():
-        part_boxes = [b for b in boxes if b[0] in parts]
+    for name in WORKER_PARTS:
+        part_boxes = [b for b in boxes if b[0] == name and not (name == 'body' and b[1] == 'chassis')]
+        assert part_boxes, 'no boxes in worker part %s' % name
         out.text('models/block/worker_%s.json' % name, model_json(skin.textures(), elements(part_boxes, skin, stats)))
     out.skin(skin)
-    report.append(('worker', 'worker_body, worker_below, worker_saw, worker_reaper', stats))
+    # The chassis's shell, white and tinted: the client paints it in its tool's colour
+    # (models.js `TOOL`, rustcraft_rules::worker::pose::colour).
+    paint = [b for b in boxes if b[0] == 'body' and b[1] == 'chassis']
+    white = Skin('worker_paint', dict((b[1], '#ffffff') for b in paint))
+    out.text('models/block/worker_paint.json', model_json(white.textures(), elements(paint, white, stats, tint_index=True)))
+    out.skin(white)
+    rows = []
+    for name in WORKER_PARTS:
+        if name in pivots:
+            pv = [v / 16 for v in swap(pivots[name])]
+            rows.append('    (%s, [%s]),' % (json.dumps(name), ', '.join(rust_f(v) for v in pv)))
+    text = ('//! The pivots of the worker parts that move, written by assets/models/export_mc.py from\n'
+            '//! assets/models/transport.py: do not edit by hand, run the exporter.\n\n'
+            '/// (part, pivot in blocks, Minecraft axes, in the model frame).\n'
+            '#[rustfmt::skip]\npub const PIVOTS: &[(&str, [f64; 3])] = &[\n%s\n];\n' % '\n'.join(rows))
+    path = HERE.parent.parent / 'mod' / 'rustcraft' / 'rules' / 'src' / 'worker' / 'pivots.rs'
+    data = text.encode('utf-8')
+    if not path.exists() or path.read_bytes() != data:
+        path.write_bytes(data)
+    report.append(('worker', 'worker_' + ', worker_'.join(WORKER_PARTS), stats))
 
 
 # The slice-7 and slice-8 blocks: since slice 9 they copy the furnace for their own windows

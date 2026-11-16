@@ -36,6 +36,8 @@ pub mod transport;
 pub mod turret;
 pub mod windows;
 pub mod workers;
+// Slice 18, stream 6 (rail and workers).
+pub mod s18_rail;
 
 use std::collections::BTreeMap;
 
@@ -319,6 +321,11 @@ pub trait Bench {
         into: Pos,
         slot: usize,
     ) -> Result<crate::utility::found::Lift, String>;
+
+    // ---- Slice 18, stream 6 (rail and workers) ----
+    /// W3: worker `id` taken away as its one chassis item and that item placed on rail `cell`;
+    /// the new worker's id.
+    fn worker_as_item(&mut self, id: u64, cell: Pos) -> Result<u64, String>;
 }
 
 /// A mob as the self-test reads it.
@@ -496,6 +503,8 @@ pub fn catalog() -> Vec<Build> {
     all.extend(traversal::ALL);
     all.extend(handbook::ALL);
     all.extend(rest::ALL);
+    // Slice 18, stream 6 (rail and workers).
+    all.extend(s18_rail::ALL);
     all
 }
 

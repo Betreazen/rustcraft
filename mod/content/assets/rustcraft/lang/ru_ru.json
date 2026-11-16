@@ -301,7 +301,7 @@
   "item.rustcraft.module_haste": "Модуль быстроты",
   "item.rustcraft.upgrade_battery": "Улучшение: батарея",
   "item.rustcraft.upgrade_speed": "Улучшение: скорость",
-  "rustcraft.worker.place_on_rail": "Шасси ставится на монорельс на полу",
+  "rustcraft.worker.place_on_rail": "Шасси ставится на монорельс",
   "rustcraft.anchor.area": "Держит %s чанка",
   "rustcraft.anchor.area_hint": "Модуль радиуса: 3×3, два: 5×5",
   "rustcraft.anchor.holding": "Держит чанков: %s",

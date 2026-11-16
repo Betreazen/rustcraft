@@ -44,6 +44,7 @@ use rustcraft_rules::{
         window::{self as win, Part, Projection},
         wire::{self, CapsuleNote, Destination, Listing, Reach, Rename},
     },
+    worker::{pose as worker_pose, wire as worker_wire},
 };
 use std::{
     collections::HashMap,
@@ -97,12 +98,17 @@ static CAPSULES: LazyLock<Mutex<HashMap<u32, (f64, Vec<Point>)>>> = LazyLock::ne
 /// zipline's, whose rope its anchors draw.
 static ROPES: LazyLock<Mutex<HashMap<u32, Option<(f64, [f64; 3])>>>> = LazyLock::new(Mutex::default);
 /// The workers the server told of, by seat mob: their heading and tool (0 none, 1 saw, 2 reaper).
-static WORKER_SEATS: LazyLock<Mutex<HashMap<u32, (f32, u8)>>> = LazyLock::new(Mutex::default);
+static WORKER_SEATS: LazyLock<Mutex<HashMap<u32, worker_wire::Seat>>> = LazyLock::new(Mutex::default);
 /// The worker's parts as standalone models (assets/models/transport.py `worker`).
 const WORKER_BODY: &str = "rustcraft:block/worker_body";
-const WORKER_BELOW: &str = "rustcraft:block/worker_below";
-const WORKER_SAW: &str = "rustcraft:block/worker_saw";
-const WORKER_REAPER: &str = "rustcraft:block/worker_reaper";
+const WORKER_PAINT: &str = "rustcraft:block/worker_paint";
+/// Every part model of the worker (assets/models/export_mc.py `WORKER_PARTS`).
+const WORKER_PARTS: [&str; 26] = [
+    "body", "paint", "below", "above", "side", "saw", "aim_yaw_saw", "reach_saw", "saw_disc",
+    "reaper", "reaper_reel", "hold", "grab", "grab_left", "grab_right", "bore", "bore_bit", "gun",
+    "aim_yaw_gun", "aim_pitch_gun", "scoop", "aim_yaw_scoop", "reach_scoop", "scoop_bucket", "map",
+    "map_drum",
+];
 
 fn view_for(game: &Game<'_>) -> MutexGuard<'static, View> {
     let pos = game.native_screen_pos();
@@ -137,13 +143,13 @@ pub(super) fn on_net(channel: &str, data: &[u8]) {
             None => log::warn!("rustcraft: a station listing that does not read"),
         }
     } else if channel == WORKERS {
+        let Some(list) = worker_wire::decode(data) else {
+            log::warn!("rustcraft: a workers note that does not read");
+            return;
+        };
         let mut seats = WORKER_SEATS.lock().unwrap_or_else(PoisonError::into_inner);
         seats.clear();
-        for c in data.chunks_exact(9) {
-            let seat = u32::from_le_bytes([c[0], c[1], c[2], c[3]]);
-            let yaw = f32::from_le_bytes([c[4], c[5], c[6], c[7]]);
-            seats.insert(seat, (yaw, c[8]));
-        }
+        seats.extend(list.into_iter().map(|s| (s.seat, s)));
     } else if channel == CAPSULE {
         match wire::decode_capsule(data) {
             Some(CapsuleNote::Ride { seat, rise, points }) => {
@@ -678,12 +684,11 @@ pub(super) fn standalone_models(models: &mut Vec<String>) {
         SIDE,
         ROPE,
         HARPOON_TIP,
-        WORKER_BODY,
-        WORKER_BELOW,
-        WORKER_SAW,
-        WORKER_REAPER,
     ] {
         models.push(m.to_owned());
+    }
+    for part in WORKER_PARTS {
+        models.push(format!("rustcraft:block/worker_{part}"));
     }
 }
 
@@ -893,9 +898,10 @@ fn side_bracket(game: &Game<'_>, draw: &mut BlockEntityDraw, wall: Face, yaw: f3
 // ---- The worker ----
 
 /// `native_mob_submit`: a worker's seat drawn as the guide's worker (assets/models/transport.py
-/// `worker`): the chassis on its floor bracket and its tool in front, the size of a block, turned
-/// to its heading. The tools stand still: the guide's turning disc and reel need a renderer of
-/// their own.
+/// `worker`, docs/showcase/js/models.js `M.worker`, poses.js `P.worker`): the chassis painted in
+/// its tool's colour, the bracket of the rail it holds (below, above, or beside it turned to the
+/// wall) and its tool, whose parts turn to what it works on, slide out and spin while it works
+/// (rustcraft_rules::worker::pose), the size of a block, turned to its heading.
 pub(super) fn draw_worker(
     game: &Game<'_>,
     mob: &NativeMobRender<'_>,
@@ -905,7 +911,7 @@ pub(super) fn draw_worker(
     if *drawn {
         return;
     }
-    let Some((yaw, tool)) = WORKER_SEATS
+    let Some(seat) = WORKER_SEATS
         .lock()
         .unwrap_or_else(PoisonError::into_inner)
         .get(&mob.id)
@@ -914,20 +920,56 @@ pub(super) fn draw_worker(
         return;
     };
     *drawn = true;
+    let yaw = seat.yaw;
+    // What its tool works on, in the model's frame: from the seat's feet, turned to its heading.
+    let aim = seat.aim.and_then(|a| {
+        let m = game.mobs.iter().find(|m| m.id == mob.id)?;
+        let t = f64::from(mob.partial);
+        let feet = [
+            m.previous.x + (m.position.x - m.previous.x) * t,
+            m.previous.y + (m.position.y - m.previous.y) * t,
+            m.previous.z + (m.position.z - m.previous.z) * t,
+        ];
+        let rel = [
+            f64::from(a[0]) - feet[0],
+            f64::from(a[1]) - feet[1],
+            f64::from(a[2]) - feet[2],
+        ];
+        Some(worker_pose::point_in_model(rel, f64::from(yaw)))
+    });
+    let seconds = f64::from(mob.age) / 20.0;
     draw.push();
     draw.rotate_about([0.0, 1.0, 0.0], mob.body_yaw - yaw, [0.0; 3]);
     draw.rotate_about([0.0, 1.0, 0.0], -90.0, [0.0; 3]);
     draw.translate([-0.5, 0.0, -0.5]);
     game.native_draw_model(draw, WORKER_BODY, 0xFFFFFF);
-    game.native_draw_model(draw, WORKER_BELOW, 0xFFFFFF);
-    match tool {
-        1 => {
-            game.native_draw_model(draw, WORKER_SAW, 0xFFFFFF);
+    game.native_draw_model(draw, WORKER_PAINT, worker_pose::colour(seat.tool));
+    let bracket = worker_pose::bracket(seat.mount);
+    if matches!(seat.mount, Face::YNeg | Face::YPos) {
+        game.native_draw_model(draw, bracket, 0xFFFFFF);
+    } else {
+        let turn = worker_pose::bracket_turn(seat.mount, f64::from(yaw)) as f32;
+        draw.push();
+        draw.rotate_about([0.0, 1.0, 0.0], turn, [0.5, 0.5, 0.5]);
+        game.native_draw_model(draw, bracket, 0xFFFFFF);
+        draw.pop();
+    }
+    if let Some(tool) = seat.tool {
+        for part in worker_pose::tool_parts(tool, seat.busy, seconds, aim) {
+            draw.push();
+            for op in part.ops {
+                match op {
+                    worker_pose::Op::Turn { axis, deg, pivot } => {
+                        let mut a = [0.0f32; 3];
+                        a[usize::from(axis)] = 1.0;
+                        draw.rotate_about(a, deg as f32, pivot.map(|v| v as f32));
+                    }
+                    worker_pose::Op::Move(v) => draw.translate(v.map(|c| c as f32)),
+                }
+            }
+            game.native_draw_model(draw, part.model, 0xFFFFFF);
+            draw.pop();
         }
-        2 => {
-            game.native_draw_model(draw, WORKER_REAPER, 0xFFFFFF);
-        }
-        _ => {}
     }
     draw.pop();
 }
