@@ -387,7 +387,42 @@ fn shear(game: &mut Game<'_>, level: &LevelNet, pos: Pos, cost: f64, now: u64, t
 
 // ---- The apiary collector ----
 
+/// Slice 18: the hives and nests round a collector, and how many of them are full.
+fn hives(game: &Game<'_>, pos: Pos) -> (Vec<Pos>, usize) {
+    let r = radius(game, pos) as i32;
+    let mut all = Vec::new();
+    let mut full = 0;
+    for dx in -r..=r {
+        for dz in -r..=r {
+            for dy in -2..=3 {
+                let p = [pos[0] + dx, pos[1] + dy, pos[2] + dz];
+                let b = game.native_block(p);
+                if b == "minecraft:beehive" || b == "minecraft:bee_nest" {
+                    if game.native_block_property(p, "honey_level").as_deref() == Some("5") {
+                        full += 1;
+                    }
+                    all.push(p);
+                }
+            }
+        }
+    }
+    (all, full)
+}
+
+/// Slice 18 (guide `ui.js`, window `apiary`): its hives, one row.
+pub(super) fn apiary_row(game: &Game<'_>, pos: Pos) -> Text {
+    let (all, full) = hives(game, pos);
+    line(
+        "rustcraft.util.apiary.hives",
+        "Hives in reach: %s, full: %s",
+        &[Text::literal(all.len().to_string()), Text::literal(full.to_string())],
+    )
+}
+
 fn honey(game: &mut Game<'_>, pos: Pos, cost: f64) -> Shown {
+    // Slice 18: what it holds of honey and combs shows on its model.
+    let held: u32 = items(game, pos).iter().skip(1).flatten().map(|s| s.count).sum();
+    crate::game::rustcraft_anim::show_level_cached(game, pos, f64::from(held) / (9.0 * 16.0), 0);
     let r = radius(game, pos) as i32;
     let mut hive = None;
     'find: for dx in -r..=r {
@@ -408,7 +443,12 @@ fn honey(game: &mut Game<'_>, pos: Pos, cost: f64) -> Shown {
         return Shown::Idle("honey_none");
     };
     let bottle = items(game, pos).first().cloned().flatten().is_some_and(|s| s.count > 0);
-    let (item, count) = rules::harvest(bottle);
+    // Slice 18: honey or combs, as its window chooses.
+    let choice = util::toggles_at(game, pos, 2).iter().position(|t| *t).unwrap_or(0);
+    let Some((item, count)) = rules::harvest_of(choice, bottle) else {
+        return Shown::Blocked("honey_no_bottles");
+    };
+    let bottle = bottle && choice == 0;
     if !fits(game, pos, 1..10, &[ItemStack::new(item, count)]) {
         return Shown::Blocked("output_full");
     }

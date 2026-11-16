@@ -576,7 +576,7 @@
   "rustcraft.util.shearer.hint": "Клик включает или выключает",
   "block.rustcraft.apiary": "Пасечный сборщик",
   "rustcraft.util.apiary.what": "Забирает мёд и соты из полных ульев",
-  "rustcraft.util.apiary.hint": "Клик включает или выключает",
+  "rustcraft.util.apiary.hint": "Клик: что забирать",
   "block.rustcraft.brewer": "Варочный куб",
   "rustcraft.util.brewer.what": "Варит зелья: бутылки, ингредиент, огненный порошок",
   "rustcraft.util.brewer.hint": "Клик включает или выключает",
@@ -3708,5 +3708,9 @@
   "rustcraft.util.feed_herd_full": "Предел животных",
   "rustcraft.butcher.no_energy": "Нет энергии",
   "rustcraft.util.shearer.heads": "Овцы %s · коровы %s · козы %s",
-  "rustcraft.util.shear_no_tank": "Некуда сливать молоко"
+  "rustcraft.util.shear_no_tank": "Некуда сливать молоко",
+  "rustcraft.util.apiary.hives": "Ульев рядом: %s, полных: %s",
+  "rustcraft.util.honey_no_bottles": "Нет пустых бутылок",
+  "rustcraft.util.apiary.toggle.honey": "Забирать мёд",
+  "rustcraft.util.apiary.toggle.combs": "Забирать соты"
 }

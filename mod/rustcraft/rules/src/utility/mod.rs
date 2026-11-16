@@ -131,7 +131,8 @@ impl Util {
             Util::Fishery => s("rustcraft:fishery", 200.0, 8.0, 0, 2),
             Util::Feeder => s("rustcraft:feeder", 200.0, 8.0, 0, 2),
             Util::Shearer => s("rustcraft:shearer", 200.0, 8.0, 0, 2),
-            Util::Apiary => s("rustcraft:apiary", 200.0, 8.0, 0, 2),
+            // Slice 18 (guide `apiary`): «забирать: мёд / соты», a choice of two.
+            Util::Apiary => s("rustcraft:apiary", 200.0, 8.0, 2, 2),
             Util::Brewer => s("rustcraft:brewer", 400.0, 16.0, 0, 2),
             Util::XpTank => s("rustcraft:xp_tank", 100.0, 4.0, 4, 2),
             Util::Enchanter => s("rustcraft:enchanter", 600.0, 32.0, 3, 2),

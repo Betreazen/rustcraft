@@ -1343,6 +1343,10 @@ fn toggle_names(u: Util) -> Vec<(String, String)> {
             .iter()
             .map(|o| ((*o).to_owned(), (*o).to_owned()))
             .collect(),
+        Util::Apiary => [("honey", "minecraft:honey_bottle"), ("combs", "minecraft:honeycomb")]
+            .iter()
+            .map(|(k, i)| ((*k).to_owned(), (*i).to_owned()))
+            .collect(),
         Util::Projector => ["remember", "ghost", "clear"]
             .iter()
             .map(|k| ((*k).to_owned(), "minecraft:light_blue_stained_glass".to_owned()))
@@ -1393,7 +1397,7 @@ pub(super) fn sheet(game: &Game<'_>, dimension: &str, pos: Pos, u: Util, s: &mut
         .map(|(i, (key, icon))| Toggle {
             icon,
             name: base::v(&line(&format!("rustcraft.util.{short}.toggle.{}", key.replace([':', '/'], "_")), &key, &[])),
-            on: on.get(i).copied().unwrap_or(false) || (matches!(u, Util::Archeo | Util::Enchanter | Util::Vein) && i == 0 && !on.iter().any(|t| *t)),
+            on: on.get(i).copied().unwrap_or(false) || (matches!(u, Util::Archeo | Util::Enchanter | Util::Vein | Util::Apiary) && i == 0 && !on.iter().any(|t| *t)),
             hint: base::v(&line(&format!("rustcraft.util.{short}.hint"), "Click to turn on or off", &[])),
         })
         .collect();
@@ -1442,6 +1446,11 @@ fn craft_sheet(game: &Game<'_>, dimension: &str, pos: Pos, u: Util, s: &mut Shee
         Util::Feeder => {
             if let Some(r) = s.rows.first_mut() {
                 *r = base::v(&farm::feeder_row(game, pos));
+            }
+        }
+        Util::Apiary => {
+            if let Some(r) = s.rows.first_mut() {
+                *r = base::v(&farm::apiary_row(game, pos));
             }
         }
         Util::Shearer => {
@@ -1562,7 +1571,7 @@ pub(super) fn on_button(game: &mut Game<'_>, pos: Pos, entity: &mut ModBlockEnti
         Util::Projector => builder::projector_press(game, pos, entity, i),
         Util::Kitchen => kitchen_press(game, pos, entity, i),
         // A choice: this one on, the rest off.
-        Util::Archeo | Util::Enchanter | Util::Vein => {
+        Util::Archeo | Util::Enchanter | Util::Vein | Util::Apiary => {
             let mut t = vec![false; n];
             t[i] = true;
             write_toggles(&mut entity.nbt, &t);

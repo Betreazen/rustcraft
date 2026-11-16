@@ -151,6 +151,15 @@ pub fn open_sky(above: &[bool]) -> bool {
     above.iter().all(|filled| !filled)
 }
 
+/// Slice 18: what the collector takes, as its window chooses: honey (0, a glass bottle each) or
+/// combs (1, nothing needed). None when it takes honey and has no bottle («Нет пустых бутылок»).
+pub fn harvest_of(choice: usize, has_bottle: bool) -> Option<(&'static str, u32)> {
+    match choice {
+        1 => Some(harvest(false)),
+        _ => has_bottle.then(|| harvest(true)),
+    }
+}
+
 /// What a full hive gives: a honey bottle for a glass bottle, else its combs.
 pub fn harvest(has_bottle: bool) -> (&'static str, u32) {
     if has_bottle {
@@ -163,6 +172,13 @@ pub fn harvest(has_bottle: bool) -> (&'static str, u32) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_window_chooses_honey_or_combs() {
+        assert_eq!(harvest_of(0, true), Some(("minecraft:honey_bottle", 1)));
+        assert_eq!(harvest_of(0, false), None);
+        assert_eq!(harvest_of(1, true), Some(("minecraft:honeycomb", COMBS)));
+    }
 
     #[test]
     fn cows_mooshrooms_and_goats_are_milked() {

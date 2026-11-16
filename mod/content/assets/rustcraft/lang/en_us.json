@@ -576,7 +576,7 @@
   "rustcraft.util.shearer.hint": "Click to turn on or off",
   "block.rustcraft.apiary": "Apiary Collector",
   "rustcraft.util.apiary.what": "Takes honey and combs from full hives",
-  "rustcraft.util.apiary.hint": "Click to turn on or off",
+  "rustcraft.util.apiary.hint": "Click: what to take",
   "block.rustcraft.brewer": "Brewing Vat",
   "rustcraft.util.brewer.what": "Brews potions: bottles, an ingredient, blaze powder",
   "rustcraft.util.brewer.hint": "Click to turn on or off",
@@ -1060,5 +1060,9 @@
   "rustcraft.util.feed_herd_full": "The herd is at its limit",
   "rustcraft.butcher.no_energy": "No energy",
   "rustcraft.util.shearer.heads": "Sheep %s · cows %s · goats %s",
-  "rustcraft.util.shear_no_tank": "Nowhere to pour the milk"
+  "rustcraft.util.shear_no_tank": "Nowhere to pour the milk",
+  "rustcraft.util.apiary.hives": "Hives in reach: %s, full: %s",
+  "rustcraft.util.honey_no_bottles": "No empty bottles",
+  "rustcraft.util.apiary.toggle.honey": "Take honey",
+  "rustcraft.util.apiary.toggle.combs": "Take combs"
 }
