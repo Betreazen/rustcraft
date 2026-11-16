@@ -626,8 +626,16 @@ fn charge_slots(game: &mut Game<'_>, dimension: &str, pos: Pos, every: u64) -> S
     let t = crate::game::rustcraft_server::tuning();
     let secs = every as f64 / 20.0;
     let factors = modules::factors(&base::modules_at(game, pos), t);
-    let (mut offer, per) =
-        charging::charger_offer(Util::Charger.spec().draw, secs, factors, energy(game, pos));
+    // A8: the starsteel charger charges faster than the crystallite one.
+    let tier_speed = rustcraft_rules::tiers::family_of_block(Util::Charger.spec().block).map_or(1.0, |f| {
+        rustcraft_rules::tiers::speed(f, crate::game::rustcraft_tiers::tier_at(game, pos), t.tier_speed_step)
+    });
+    let (mut offer, per) = charging::charger_offer(
+        Util::Charger.spec().draw * tier_speed,
+        secs,
+        factors,
+        energy(game, pos),
+    );
     let mut given = 0.0;
     let mut needs = false;
     if !held.is_empty() {
