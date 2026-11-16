@@ -8,8 +8,8 @@ use crate::storage::Limit;
 /// Items a page of the window shows: three rows of nine.
 pub const PER_PAGE: usize = 27;
 
-/// The quick filter's tabs (TM1). «Своя» comes with the filter module, which is not in the mod
-/// yet.
+/// The quick filter's tabs (TM1). «Своя» (slice 18) shows what the filter module in the
+/// terminal's socket marks.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Tab {
     #[default]
@@ -17,10 +17,11 @@ pub enum Tab {
     Armor,
     Tools,
     Blocks,
+    Own,
 }
 
 impl Tab {
-    pub const ALL: [Tab; 4] = [Tab::All, Tab::Armor, Tab::Tools, Tab::Blocks];
+    pub const ALL: [Tab; 5] = [Tab::All, Tab::Armor, Tab::Tools, Tab::Blocks, Tab::Own];
 
     /// Whether the tab shows an item with these facts.
     pub fn shows(self, facts: Facts) -> bool {
@@ -29,6 +30,7 @@ impl Tab {
             Tab::Armor => facts.armor,
             Tab::Tools => facts.tool && !facts.armor,
             Tab::Blocks => facts.block,
+            Tab::Own => facts.own,
         }
     }
 }
@@ -40,6 +42,8 @@ pub struct Facts {
     pub armor: bool,
     pub tool: bool,
     pub block: bool,
+    /// Slice 18: the filter module in the terminal marks it.
+    pub own: bool,
 }
 
 impl Facts {
@@ -49,6 +53,7 @@ impl Facts {
             armor: matches!(equip_slot, Some("head" | "chest" | "legs" | "feet")),
             tool: max_damage > 0,
             block: places_block,
+            own: false,
         }
     }
 }
@@ -211,6 +216,12 @@ mod tests {
             ["stick"]
         );
         assert!(visible(&l, Tab::Blocks, "кирка", |k| facts_of(k), |k| names_of(k)).is_empty());
+        // Slice 18: «своя» shows only what the filter marks.
+        let own = |k: &String| Facts {
+            own: k == "stone",
+            ..facts_of(k)
+        };
+        assert_eq!(keys(visible(&l, Tab::Own, "", own, |k| names_of(k))), vec!["stone"]);
     }
 
     #[test]

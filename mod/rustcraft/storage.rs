@@ -52,7 +52,7 @@ use rustcraft_rules::{
     geom::Pos,
     net::{items::ItemKey, stock::NetStore},
     storage::{
-        self, Limit, Shape, Store, cells, keys,
+        self, Limit, Shape, Store, cells, keys, modules as sockets,
         terminal::{self as term, Press, Take},
         wire::{self, Line, Listing, State},
     },
@@ -420,7 +420,12 @@ pub(super) fn rescan(
         .collect();
     level.found = found;
     level.cell_of = cell_of;
+    let ids: Vec<u32> = level.found.keys().copied().collect();
     storages().levels.insert(dimension.to_owned(), level);
+    // S3: each storage's stack from its terminals' stack modules.
+    for id in ids {
+        refresh_stack_module(game, dimension, id, None);
+    }
     save(game, dimension);
 }
 
@@ -829,7 +834,27 @@ fn listing(game: &Game<'_>, dimension: &str, terminal: Pos, id: Option<u32>) -> 
         orders: view.as_ref().map_or_else(Vec::new, |v| v.orders.clone()),
         orderable: view.map_or_else(Vec::new, |v| v.orderable),
         variants,
+        sockets: socket_numbers(game, terminal),
+        own: own_items(game, terminal)
+            .iter()
+            .filter_map(|i| item_number(game, i).and_then(|n| u16::try_from(n).ok()))
+            .collect(),
     }
+}
+
+/// Slice 18: the items in the terminal's sockets, by number.
+fn socket_numbers(game: &Game<'_>, terminal: Pos) -> Vec<u16> {
+    let entity = crate::game::rustcraft_machines::entity(game, terminal);
+    (0..sockets::SOCKETS)
+        .map(|k| {
+            entity
+                .as_ref()
+                .and_then(|e| socket_stack(&e.nbt, k))
+                .and_then(|s| item_number(game, &s.item))
+                .and_then(|n| u16::try_from(n).ok())
+                .unwrap_or(wire::NO_ITEM)
+        })
+        .collect()
 }
 
 /// `native_player_container_open`: a player who opens a terminal is sent its list next.
@@ -882,10 +907,18 @@ pub(super) fn on_button(
     let Some(press) = term::decode(id) else {
         return;
     };
-    if press == Press::Book {
-        press_book(entity, carried);
+    if let Press::Socket(k) = press {
+        press_socket(entity, usize::from(k), carried);
         match game.native_acting_player() {
-            Some(player) => orders::touch(&player.dimension),
+            Some(player) => {
+                orders::touch(&player.dimension);
+                let id = with_level(&player.dimension, |l| l.terminals.get(&pos).copied().flatten());
+                if let Some(id) = id.flatten() {
+                    let own = socket_stack(&entity.nbt, sockets::SOCKET_STACK)
+                        .map_or(0, |s| sockets::stack_tier(&s.item));
+                    refresh_stack_module(game, &player.dimension, id, Some((pos, own)));
+                }
+            }
             None => orders::touch_all(),
         }
         return;
@@ -895,7 +928,7 @@ pub(super) fn on_button(
         return;
     };
     match press {
-        Press::Book => {}
+        Press::Socket(_) => {}
         Press::Order { item, count } => {
             let refused = if book {
                 // A fluid (O12) by its number past the item table, in buckets.
@@ -931,23 +964,130 @@ pub(super) fn on_button(
     }
 }
 
-/// O1: a press on the recipe book's socket, as a slot would take it: the book on the cursor goes
-/// in, an empty cursor takes it out.
-fn press_book(entity: &mut ModBlockEntity, carried: &mut Option<ItemStack>) {
-    let book = orders::book_item();
+// ---- Slice 18: the terminal's three sockets ----
+
+/// A terminal's compound keeps the stack module's id and the filter module's whole saved stack
+/// (its list is in it) under these keys; the recipe book is rustcraft_orders' `book` byte.
+const STACK_SOCKET_KEY: &str = "stack_module";
+const FILTER_SOCKET_KEY: &str = "filter_module";
+
+/// What socket `k` of a terminal's compound holds.
+pub(super) fn socket_stack(nbt: &Compound, k: usize) -> Option<ItemStack> {
+    match k {
+        sockets::SOCKET_STACK => as_string(field(nbt, STACK_SOCKET_KEY))
+            .filter(|s| !s.is_empty())
+            .map(|id| ItemStack::new(id.as_str(), 1)),
+        sockets::SOCKET_BOOK => orders::has_book(nbt).then(|| ItemStack::new(orders::book_item(), 1)),
+        sockets::SOCKET_FILTER => field(nbt, FILTER_SOCKET_KEY).and_then(save::item_from_nbt),
+        _ => None,
+    }
+}
+
+fn set_socket(nbt: &mut Compound, k: usize, stack: Option<ItemStack>) {
+    match k {
+        sockets::SOCKET_STACK => {
+            let id = stack.map_or_else(String::new, |s| s.item.to_string());
+            nbt.insert(JavaString::from(STACK_SOCKET_KEY), string(&id));
+        }
+        sockets::SOCKET_BOOK => orders::set_book(nbt, stack.is_some()),
+        sockets::SOCKET_FILTER => match stack {
+            Some(s) => {
+                nbt.insert(JavaString::from(FILTER_SOCKET_KEY), save::item_to_nbt(&s));
+            }
+            None => {
+                nbt.remove(&JavaString::from(FILTER_SOCKET_KEY));
+            }
+        },
+        _ => {}
+    }
+}
+
+/// A press on socket `k`, as a slot of one item takes it (storage::modules::socket_move).
+fn press_socket(entity: &mut ModBlockEntity, k: usize, carried: &mut Option<ItemStack>) {
+    let held = socket_stack(&entity.nbt, k);
     let cursor = carried.as_ref().map(|c| (&*c.item, c.count));
-    let Some((held, after)) = term::press_book(orders::has_book(&entity.nbt), cursor, book) else {
+    let Some(m) = sockets::socket_move(k, held.as_ref().map(|h| &*h.item), cursor) else {
         return;
     };
-    orders::set_book(&mut entity.nbt, held);
-    *carried = after.map(|(item, n)| {
-        let mut stack = carried
-            .clone()
-            .filter(|c| *c.item == *item)
-            .unwrap_or_else(|| ItemStack::new(item.as_str(), n));
-        stack.count = n;
-        stack
+    match m {
+        sockets::SocketMove::In => {
+            let Some(c) = carried.as_mut() else { return };
+            let mut one = c.clone();
+            one.count = 1;
+            c.count -= 1;
+            if c.count == 0 {
+                *carried = None;
+            }
+            set_socket(&mut entity.nbt, k, Some(one));
+        }
+        sockets::SocketMove::Out => {
+            set_socket(&mut entity.nbt, k, None);
+            *carried = held;
+        }
+        sockets::SocketMove::Swap => {
+            let into = carried.take();
+            set_socket(&mut entity.nbt, k, into);
+            *carried = held;
+        }
+    }
+}
+
+/// S3: the stack of the storage `id` from the best stack module of its terminals; `fresh` is a
+/// terminal whose block entity is out of the world now, with the tier it holds.
+fn refresh_stack_module(game: &Game<'_>, dimension: &str, id: u32, fresh: Option<(Pos, u8)>) {
+    let terminals: Vec<Pos> = with_level(dimension, |level| {
+        level
+            .terminals
+            .iter()
+            .filter(|(_, s)| **s == Some(id))
+            .map(|(t, _)| *t)
+            .collect()
+    })
+    .unwrap_or_default();
+    let tier = terminals
+        .iter()
+        .map(|&t| match fresh {
+            Some((p, tier)) if p == t => tier,
+            _ => crate::game::rustcraft_machines::entity(game, t)
+                .and_then(|e| socket_stack(&e.nbt, sockets::SOCKET_STACK))
+                .map_or(0, |s| sockets::stack_tier(&s.item)),
+        })
+        .max()
+        .unwrap_or(0);
+    with_level(dimension, |level| {
+        if let Some(store) = level.stores.get_mut(&id)
+            && store.stack_module != tier
+        {
+            store.stack_module = tier;
+            level.changed(id);
+        }
     });
+}
+
+/// The items the filter module in the terminal at `terminal` marks (the «своя» tab).
+fn own_items(game: &Game<'_>, terminal: Pos) -> Vec<String> {
+    crate::game::rustcraft_machines::entity(game, terminal)
+        .and_then(|e| socket_stack(&e.nbt, sockets::SOCKET_FILTER))
+        .map(|s| crate::game::rustcraft_filter::marked(&s))
+        .unwrap_or_default()
+}
+
+/// A terminal broken in survival gives back its stack and filter modules (the book is
+/// rustcraft_server's), into the inventory of `player` or onto the ground.
+pub(super) fn give_back_sockets(game: &mut Game<'_>, dimension: &str, pos: Pos, player: u128) {
+    let Some(entity) = crate::game::rustcraft_machines::entity(game, pos) else {
+        return;
+    };
+    for k in [sockets::SOCKET_STACK, sockets::SOCKET_FILTER] {
+        let Some(stack) = socket_stack(&entity.nbt, k) else { continue };
+        if let Some(rest) = game.native_give_stack(player, stack) {
+            let nbt = Compound::from([(JavaString::from("Item"), save::item_to_nbt(&rest))]);
+            let at = pos.map(|c| f64::from(c) + 0.5);
+            if game.native_summon(dimension, "minecraft:item", at, nbt).is_none() {
+                log::warn!("rustcraft: the terminal's {} at {pos:?} was lost", rest.item);
+            }
+        }
+    }
 }
 
 /// O14: a «держать» button on the storage `storage`: the N of `key` changed.
@@ -1179,12 +1319,24 @@ pub(super) fn on_quick_move(
     if slot < container_slots {
         return;
     }
-    // Slice 15: the recipe book goes into the empty socket, one of the stack.
-    if *stack.item == *orders::book_item() && stack.count > 0 && !orders::has_book(&entity.nbt) {
-        orders::set_book(&mut entity.nbt, true);
+    // Slice 15, 18: a module goes into its empty socket, one of the stack.
+    let free = (0..sockets::SOCKETS).find(|&k| {
+        stack.count > 0 && sockets::socket_takes(k, &stack.item) && socket_stack(&entity.nbt, k).is_none()
+    });
+    if let Some(k) = free {
+        let mut one = stack.clone();
+        one.count = 1;
+        set_socket(&mut entity.nbt, k, Some(one));
         stack.count -= 1;
         if let Some(player) = game.native_acting_player() {
             orders::touch(&player.dimension);
+            let id = with_level(&player.dimension, |l| l.terminals.get(&pos).copied().flatten());
+            if k == sockets::SOCKET_STACK
+                && let Some(id) = id.flatten()
+            {
+                let tier = sockets::stack_tier(&stack.item);
+                refresh_stack_module(game, &player.dimension, id, Some((pos, tier)));
+            }
         }
         return;
     }

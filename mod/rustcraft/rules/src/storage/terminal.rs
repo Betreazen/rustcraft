@@ -20,12 +20,13 @@ use crate::storage::{Limit, Store};
 
 pub const WIDTH: f32 = 214.0;
 pub const TITLE: [f32; 2] = [8.0, 6.0];
-/// The quick filter's tabs, in `Tab::ALL` order.
-pub const TABS: [Rect; 4] = [
-    [8.0, 16.0, 30.0, 12.0],
-    [40.0, 16.0, 44.0, 12.0],
-    [86.0, 16.0, 74.0, 12.0],
-    [162.0, 16.0, 44.0, 12.0],
+/// The quick filter's tabs, in `Tab::ALL` order (slice 18: «своя» last).
+pub const TABS: [Rect; 5] = [
+    [8.0, 16.0, 28.0, 12.0],
+    [38.0, 16.0, 36.0, 12.0],
+    [76.0, 16.0, 62.0, 12.0],
+    [140.0, 16.0, 36.0, 12.0],
+    [178.0, 16.0, 28.0, 12.0],
 ];
 pub const SEARCH: Rect = [8.0, 30.0, 64.0, 12.0];
 pub const ORDER_MODE: Rect = [74.0, 30.0, 36.0, 12.0];
@@ -36,8 +37,11 @@ pub const LIMIT_MODE: Rect = [170.0, 30.0, 36.0, 12.0];
 pub const COLUMNS: usize = 9;
 /// Where the first stored item's icon goes; the others follow in rows of COLUMNS.
 pub const GRID: [f32; 2] = [26.0, 45.0];
-/// O1: the recipe book's socket, left of the grid (the icon's corner).
-pub const BOOK: [f32; 2] = [6.0, 45.0];
+/// Slice 18: the three sockets left of the grid (the icons' corners), in
+/// `storage::modules::SOCKET_*` order: the stack module, the recipe book (O1), the filter.
+pub const SOCKETS: [[f32; 2]; 3] = [[6.0, 45.0], [6.0, 63.0], [6.0, 81.0]];
+/// The recipe book's socket.
+pub const BOOK: [f32; 2] = SOCKETS[1];
 pub const LIMIT_ICON: [f32; 2] = [8.0, 100.0];
 pub const LIMIT_TEXT: [f32; 2] = [24.0, 102.0];
 pub const LIMIT_MINUS: Rect = [96.0, 100.0, 13.0, 12.0];
@@ -84,7 +88,8 @@ pub enum Part {
     LimitMode,
     /// A place of the page, from 0.
     Cell(usize),
-    Book,
+    /// Slice 18: a socket, by its place in SOCKETS.
+    Socket(usize),
     LimitMinus,
     LimitPlus,
     LimitClear,
@@ -113,8 +118,8 @@ pub fn part_in(at: [f32; 2], orders: bool) -> Option<Part> {
     if let Some(i) = (0..PER_PAGE).find(|&i| inside(slot_frame(cell(i)), at)) {
         return Some(Part::Cell(i));
     }
-    if inside(slot_frame(BOOK), at) {
-        return Some(Part::Book);
+    if let Some(k) = SOCKETS.iter().position(|&p| inside(slot_frame(p), at)) {
+        return Some(Part::Socket(k));
     }
     let shared = [
         (SEARCH, Part::Search),
@@ -226,8 +231,9 @@ pub enum Press {
     Cancel {
         order: u16,
     },
-    /// O1: the recipe book's socket: the book on the cursor goes in, or the book comes out.
-    Book,
+    /// O1, slice 18: socket `k` (`storage::modules::SOCKET_*`): the module on the cursor goes
+    /// in, or the module comes out.
+    Socket(u8),
 }
 
 /// A press that does nothing on the server: a tab, the search, a page.
@@ -298,7 +304,9 @@ pub fn encode(press: Press) -> Option<i32> {
                 .flatten()
         }
         Press::Cancel { order } => pack(CANCEL_ORDER, 0, u32::from(order)),
-        Press::Book => pack(BOOK_SOCKET, 0, 0),
+        Press::Socket(k) => (usize::from(k) < SOCKETS.len())
+            .then(|| pack(BOOK_SOCKET, 0, u32::from(k)))
+            .flatten(),
         Press::Place { .. } | Press::Limit { .. } => encode_item_press(press),
     }
 }
@@ -377,7 +385,10 @@ fn decode_plain(id: u32) -> Option<Press> {
         CANCEL_ORDER => Some(Press::Cancel {
             order: number as u16,
         }),
-        BOOK_SOCKET => Some(Press::Book),
+        BOOK_SOCKET => u8::try_from(number)
+            .ok()
+            .filter(|k| usize::from(*k) < SOCKETS.len())
+            .map(Press::Socket),
         _ => {
             let bare = *ACTIONS.get((action as usize).checked_sub(1)?)?;
             let item = (number != NO_ITEM).then_some((number as u16, damage as u16));
@@ -532,7 +543,9 @@ mod tests {
             },
             Press::Cancel { order: 0xFFFF },
             Press::Cancel { order: 1 },
-            Press::Book,
+            Press::Socket(0),
+            Press::Socket(1),
+            Press::Socket(2),
         ];
         for p in presses {
             let id = encode(p).unwrap();
@@ -635,7 +648,11 @@ mod tests {
         );
         assert_eq!(part_at([150.0, 104.0]), Some(Part::LimitDestroy));
         assert_eq!(part_at([200.0, 200.0]), None);
-        assert_eq!(part_at([8.0, 50.0]), Some(Part::Book));
+        assert_eq!(part_at([8.0, 50.0]), Some(Part::Socket(0)));
+        assert_eq!(part_at([8.0, 68.0]), Some(Part::Socket(1)));
+        assert_eq!(part_at([8.0, 86.0]), Some(Part::Socket(2)));
+        assert_eq!(part_at([190.0, 20.0]), Some(Part::Tab(Tab::Own)));
+        assert_eq!(encode(Press::Socket(3)), None);
         assert_eq!(part_at([80.0, 34.0]), Some(Part::OrderMode));
         // The orders mode's row under the grid and line under the status.
         assert_eq!(part_in([30.0, 104.0], true), Some(Part::Order(0)));

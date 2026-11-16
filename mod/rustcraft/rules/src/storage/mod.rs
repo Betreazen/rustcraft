@@ -10,7 +10,9 @@ use crate::geom::Pos;
 use crate::net::items::ItemKey;
 
 pub mod cells;
+pub mod filter;
 pub mod keys;
+pub mod modules;
 pub mod tablet;
 pub mod terminal;
 pub mod view;

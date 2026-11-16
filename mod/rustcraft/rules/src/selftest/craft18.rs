@@ -1,14 +1,22 @@
 //! Slice 18, stream 5: the craft machines and the storage as the handbook says them.
 //!
 //! - The storage keeps stacks with components (an enchanted book, a named block) whole.
+//! - The stack module in the terminal's socket raises the stack of the whole storage (S3); the
+//!   filter module goes into its own socket and comes back out.
 
 use super::transport::{chest, item_line, joint};
 use super::{Bench, Build, Scenario, at, plot_area, same};
 use crate::geom::Pos;
 use crate::net::items::Mode;
+use crate::storage::modules::{FILTER, SOCKET_FILTER, SOCKET_STACK, STACK_MODULES};
+use crate::storage::terminal::{self, Press};
 use crate::tuning::Tuning;
 
-pub const ALL: [Build; 1] = [storage_keeps_component_stacks];
+pub const ALL: [Build; 3] = [
+    storage_keeps_component_stacks,
+    storage_stack_module_raises_the_stack,
+    storage_filter_socket,
+];
 
 const CELL: &str = "rustcraft:cell";
 const TERMINAL: &str = "rustcraft:terminal";
@@ -54,5 +62,52 @@ fn storage_keeps_component_stacks(o: Pos, _: &Tuning) -> Scenario {
         })
         .check("its record comes back the same from a save", move |b, _| {
             b.round_trip(t)
+        })
+}
+
+/// The press id of terminal socket `k`.
+fn socket(k: usize) -> Result<i32, String> {
+    terminal::encode(Press::Socket(k as u8)).ok_or_else(|| format!("socket {k} has no press"))
+}
+
+fn storage_stack_module_raises_the_stack(o: Pos, _: &Tuning) -> Scenario {
+    let t = at(o, [5, 0, 1]);
+    let module = STACK_MODULES[0].0;
+    Scenario::new("storage18_stack_module_raises_the_stack", plot_area(o))
+        .then("a storage of two cells", move |b, _| storage_on_a_net(b, o))
+        .then("the stack module into the terminal's socket", move |b, _| {
+            let after = b.press_cursor(t, socket(SOCKET_STACK)?, Some((module, 1)))?;
+            same("cursor after the module went in", after, None)
+        })
+        .wait(5)
+        .check("a slot holds 256, the storage 54 of them", move |b, _| {
+            let v = b.storage(t).ok_or("no storage")?;
+            same("stack tier", v.store.stack_module, 1)?;
+            same("room", v.store.room_for("minecraft:cobblestone", &|_| 64), 54 * 256)
+        })
+        .then("the module back out", move |b, _| {
+            let after = b.press_cursor(t, socket(SOCKET_STACK)?, None)?;
+            same("cursor", after, Some((module.to_owned(), 1)))
+        })
+        .wait(5)
+        .check("the stack is 64 again", move |b, _| {
+            let v = b.storage(t).ok_or("no storage")?;
+            same("stack tier", v.store.stack_module, 0)
+        })
+}
+
+fn storage_filter_socket(o: Pos, _: &Tuning) -> Scenario {
+    let t = at(o, [5, 0, 1]);
+    Scenario::new("storage18_filter_socket", plot_area(o))
+        .then("a storage", move |b, _| storage_on_a_net(b, o))
+        .then("a stone goes nowhere, the filter module goes in", move |b, _| {
+            let refused = b.press_cursor(t, socket(SOCKET_FILTER)?, Some(("minecraft:stone", 1)))?;
+            same("stone stays on the cursor", refused, Some(("minecraft:stone".to_owned(), 1)))?;
+            let after = b.press_cursor(t, socket(SOCKET_FILTER)?, Some((FILTER, 1)))?;
+            same("cursor after the module went in", after, None)
+        })
+        .check("it comes back out", move |b, _| {
+            let after = b.press_cursor(t, socket(SOCKET_FILTER)?, None)?;
+            same("cursor", after, Some((FILTER.to_owned(), 1)))
         })
 }

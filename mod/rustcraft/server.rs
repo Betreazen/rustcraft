@@ -375,6 +375,7 @@ pub(super) fn on_menu_clicked(
     workers::on_menu_clicked(uuid, window_id, slot, mode);
     base::on_menu_clicked(uuid, window_id, slot, mode);
     tablet::on_menu_clicked(uuid, window_id, slot, mode);
+    crate::game::rustcraft_filter::on_menu_clicked(uuid, window_id, slot, mode);
     window::on_menu_clicked(game, uuid, window_id, slot, button, mode);
 }
 
@@ -382,6 +383,7 @@ pub(super) fn on_menu_closed(uuid: u128, window_id: i32) {
     workers::on_menu_closed(uuid, window_id);
     base::on_menu_closed(uuid, window_id);
     tablet::on_menu_closed(uuid, window_id);
+    crate::game::rustcraft_filter::on_menu_closed(uuid, window_id);
     window::on_menu_closed(uuid, window_id);
 }
 
@@ -472,6 +474,8 @@ pub(super) fn on_destroy_block(game: &mut Game<'_>, pos: [i32; 3]) {
         if book && game.native_give_items(orders::book_item(), 1) == 0 {
             drop_item(game, &player.dimension, pos, orders::book_item());
         }
+        // Slice 18: and its stack and filter modules.
+        storage::give_back_sockets(game, &player.dimension, pos, player.uuid);
     }
     if block != content::HOUSING || player.game_mode == CREATIVE {
         return;

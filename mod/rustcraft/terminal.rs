@@ -45,6 +45,7 @@ use rustcraft_rules::{
     orders::{KINDS, fluid_of_number},
     storage::{
         Limit,
+        modules as sockets,
         terminal::{
             self as term, ItemRef, LimitChange, NO_PRESS, ORDER_COUNTS, Part, Press, Take, cell,
             part_in,
@@ -228,8 +229,8 @@ fn kind_name(code: u8) -> String {
         .map_or_else(|| KINDS[0].to_owned(), |b| item_name(b))
 }
 
-fn facts(game: &Game<'_>, key: &ItemRef) -> Facts {
-    id_of(game, key.0)
+fn facts(game: &Game<'_>, key: &ItemRef, own: &[u16]) -> Facts {
+    let mut f = id_of(game, key.0)
         .and_then(|id| game.items().get(id))
         .map_or_else(Facts::default, |info| {
             Facts::of(
@@ -237,7 +238,10 @@ fn facts(game: &Game<'_>, key: &ItemRef) -> Facts {
                 info.max_damage,
                 info.block.is_some(),
             )
-        })
+        });
+    // Slice 18: «своя» shows what the filter module marks.
+    f.own = own.contains(&key.0);
+    f
 }
 
 /// The lines the tab and the search let through, in the window's order. With the book and a
@@ -280,7 +284,7 @@ fn shown(game: &Game<'_>, listing: &Listing, v: &View) -> Vec<Entry<ItemRef>> {
             names
         })
     };
-    view::visible(&entries, v.tab, &v.search, |k| facts(game, k), names)
+    view::visible(&entries, v.tab, &v.search, |k| facts(game, k, &listing.own), names)
         .into_iter()
         .cloned()
         .collect()
@@ -382,7 +386,7 @@ pub(super) fn draw(game: &Game<'_>, batch: &mut HudBatch, o: [f32; 2]) {
         &tr("rustcraft.terminal.limits", "Limits"),
         v.limits,
     );
-    book_socket(game, batch, o, listing.as_ref());
+    sockets(game, batch, o, listing.as_ref());
     grid(game, batch, o, view::page(&list, v.page), v.selected);
     if v.orders {
         order_row(game, batch, o, &v, listing.as_ref());
@@ -423,6 +427,7 @@ fn tab_name(tab: Tab) -> String {
         Tab::Armor => tr("rustcraft.terminal.tab.armor", "Armour"),
         Tab::Tools => tr("rustcraft.terminal.tab.tools", "Tools"),
         Tab::Blocks => tr("rustcraft.terminal.tab.blocks", "Blocks"),
+        Tab::Own => tr("rustcraft.terminal.tab.own", "Own"),
     }
 }
 
@@ -452,14 +457,26 @@ fn search_field(game: &Game<'_>, batch: &mut HudBatch, o: [f32; 2], v: &View) {
     text(game, batch, &shown, o, [x, r[1] + 3.0], colour);
 }
 
-/// O1: the recipe book's socket, with the book in it or empty.
-fn book_socket(game: &Game<'_>, batch: &mut HudBatch, o: [f32; 2], listing: Option<&Listing>) {
-    let held = listing.is_some_and(|l| l.book);
-    kit::socket(game, batch, o, term::BOOK, !held);
-    if held {
-        let p = term::BOOK;
-        let stack = ItemStack::new(Module::Recipes.item(), 1);
-        game.native_gui_draw_item_with(batch, &stack, [o[0] + p[0], o[1] + p[1]], None);
+/// The module in socket `k` as the list names it; the book from the header when the list has no
+/// sockets section.
+fn socket_item(game: &Game<'_>, listing: Option<&Listing>, k: usize) -> Option<&'static str> {
+    let l = listing?;
+    match l.sockets.get(k) {
+        Some(&n) if n != wire::NO_ITEM => item_of_number(game, u32::from(n)),
+        Some(_) => None,
+        None => (k == sockets::SOCKET_BOOK && l.book).then(|| Module::Recipes.item()),
+    }
+}
+
+/// O1, slice 18: the stack module's, the recipe book's and the filter's sockets, full or empty.
+fn sockets(game: &Game<'_>, batch: &mut HudBatch, o: [f32; 2], listing: Option<&Listing>) {
+    for (k, p) in term::SOCKETS.into_iter().enumerate() {
+        let held = socket_item(game, listing, k);
+        kit::socket(game, batch, o, p, held.is_none());
+        if let Some(item) = held {
+            let stack = ItemStack::new(item, 1);
+            game.native_gui_draw_item_with(batch, &stack, [o[0] + p[0], o[1] + p[1]], None);
+        }
     }
 }
 
@@ -798,7 +815,12 @@ pub(super) fn on_click(game: &Game<'_>, at: [f32; 2], right: bool) -> Option<i32
             v.orders = !v.orders;
             v.limits &= !v.orders;
         }
-        Part::Book => return term::encode(Press::Book).or(Some(NO_PRESS)),
+        Part::Socket(k) => {
+            return u8::try_from(k)
+                .ok()
+                .and_then(|k| term::encode(Press::Socket(k)))
+                .or(Some(NO_PRESS));
+        }
         Part::Cell(i) => {
             let list = listing
                 .as_ref()
@@ -944,13 +966,28 @@ pub(super) fn tooltip(game: &Game<'_>, at: [f32; 2], lines: &mut Vec<String>) {
             "rustcraft.terminal.destroy_hint",
             "Destroy the surplus: what comes over the limit vanishes instead of staying in the line",
         ),
-        Part::Book => {
-            lines.push(item_name(Module::Recipes.item()));
-            hint(
-                lines,
-                "rustcraft.terminal.book_hint",
-                "The recipe book's socket: with it the storage takes orders",
-            );
+        Part::Socket(k) => {
+            let v = view_for(game);
+            let listing = listing_of(v.terminal);
+            drop(v);
+            if let Some(item) = socket_item(game, listing.as_ref(), k) {
+                lines.push(item_name(item));
+            }
+            let (key, fallback) = match k {
+                sockets::SOCKET_STACK => (
+                    "rustcraft.terminal.stack_hint",
+                    "The stack module's socket: a slot of the storage holds 256, 1024 or 4096",
+                ),
+                sockets::SOCKET_FILTER => (
+                    "rustcraft.terminal.filter_hint",
+                    "The filter module's socket: the «Own» tab shows what it marks",
+                ),
+                _ => (
+                    "rustcraft.terminal.book_hint",
+                    "The recipe book's socket: with it the storage takes orders",
+                ),
+            };
+            hint(lines, key, fallback);
         }
         Part::Order(k) => {
             let n = ORDER_COUNTS.get(k).copied().unwrap_or(1);

@@ -176,6 +176,8 @@ pub(super) fn tick(game: &mut Game<'_>, dimension: &str, level: &LevelNet) {
     if level.ticks.is_multiple_of(FOLLOW_EVERY) {
         follow(game, dimension, level);
     }
+    // Slice 18: the filter module's windows.
+    crate::game::rustcraft_filter::tick(game);
 }
 
 fn open(game: &mut Game<'_>, dimension: &str, level: &LevelNet, uuid: u128, at: [f64; 3]) {

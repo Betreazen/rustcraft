@@ -1015,5 +1015,12 @@
   "rustcraft.handbook.page.dusts.name": "Ore dust",
   "rustcraft.handbook.page.dusts.sum": "Iron, copper and gold dust from the crusher. Smelts into an ingot.",
   "rustcraft.handbook.page.fluids.name": "Solution and catalysts",
-  "rustcraft.handbook.page.fluids.sum": "Fluids from the mixer. Nutrient solution feeds crystal structures; catalysts boost machines."
+  "rustcraft.handbook.page.fluids.sum": "Fluids from the mixer. Nutrient solution feeds crystal structures; catalysts boost machines.",
+  "rustcraft.terminal.tab.own": "own",
+  "rustcraft.terminal.stack_hint": "The stack module's socket: a slot of the storage holds 256, 1024 or 4096",
+  "rustcraft.terminal.filter_hint": "The filter module's socket: the «own» tab shows what it marks",
+  "rustcraft.filter.title": "Filter module",
+  "rustcraft.filter.marked": "Marked: click to unmark",
+  "rustcraft.filter.empty": "Click an item of your inventory to mark it",
+  "rustcraft.filter.full": "The filter marks at most %s items"
 }

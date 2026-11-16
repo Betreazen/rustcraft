@@ -145,7 +145,15 @@ pub struct Listing {
     /// Slice 18: the component stacks among `lines` (a line's damage with `terminal::VARIANT`),
     /// each with its saved form so the window draws and names it.
     pub variants: Vec<Variant>,
+    /// Slice 18: the item in each of the terminal's sockets (`storage::modules::SOCKET_*`), by
+    /// number, NO_ITEM for an empty one; empty when unknown.
+    pub sockets: Vec<u16>,
+    /// Slice 18: the items the filter module in the terminal marks (the «своя» tab), by number.
+    pub own: Vec<u16>,
 }
+
+/// A socket without a module.
+pub const NO_ITEM: u16 = u16::MAX;
 
 /// Slice 18: a component stack of the list: its item, its place among the item's
 /// (`Store::variants_of`), and its saved stack in hex (`keys::payload`).
@@ -160,6 +168,8 @@ pub struct Variant {
 /// the tags it does not know, and a message without a tail (versions 2 and 3 before slice 18)
 /// has none of them.
 const TAIL_VARIANTS: u8 = 1;
+const TAIL_SOCKETS: u8 = 2;
+const TAIL_OWN: u8 = 3;
 
 /// How many lines fit in one message.
 pub const MAX_LINES: usize = (MAX_BYTES - HEADER - MAX_HOLES * HOLE - ORDERS - 2) / ENTRY;
@@ -221,9 +231,26 @@ pub fn encode(listing: &Listing) -> Vec<u8> {
     out
 }
 
-/// The tail sections, in at most `room` bytes: the variants that fit.
+/// A tail section of u16 numbers.
+fn numbers_section(out: &mut Vec<u8>, tag: u8, numbers: &[u16]) {
+    if numbers.is_empty() {
+        return;
+    }
+    out.push(tag);
+    out.extend(((numbers.len() * 2) as u16).to_le_bytes());
+    for n in numbers {
+        out.extend(n.to_le_bytes());
+    }
+}
+
+/// The tail sections, in at most `room` bytes: the sockets, the filter's items, then the
+/// variants that fit.
 fn encode_tail(listing: &Listing, room: usize) -> Vec<u8> {
     let mut out = Vec::new();
+    numbers_section(&mut out, TAIL_SOCKETS, &listing.sockets);
+    let own = &listing.own[..listing.own.len().min(64)];
+    numbers_section(&mut out, TAIL_OWN, own);
+    let room = room.saturating_sub(out.len());
     let mut body = Vec::new();
     let mut n: u16 = 0;
     for v in &listing.variants {
@@ -254,7 +281,14 @@ fn decode_tail(r: &mut Reader<'_>, listing: &mut Listing) {
         };
         r.0 = rest;
         let mut s = Reader(section);
-        if tag == TAIL_VARIANTS {
+        if tag == TAIL_SOCKETS || tag == TAIL_OWN {
+            let numbers: Vec<u16> = std::iter::from_fn(|| s.u16()).collect();
+            if tag == TAIL_SOCKETS {
+                listing.sockets = numbers;
+            } else {
+                listing.own = numbers;
+            }
+        } else if tag == TAIL_VARIANTS {
             let n = s.u16().unwrap_or(0);
             for _ in 0..n {
                 let (Some(item), Some(index), Some(len)) = (s.u16(), s.u16(), s.u16()) else {
@@ -425,6 +459,8 @@ pub fn decode(bytes: &[u8]) -> Option<Listing> {
         orders,
         orderable,
         variants: Vec::new(),
+        sockets: Vec::new(),
+        own: Vec::new(),
     };
     decode_tail(&mut r, &mut listing);
     Some(listing)
@@ -505,6 +541,8 @@ mod tests {
                 index: 1,
                 payload: "0a0b0c".to_owned(),
             }],
+            sockets: vec![NO_ITEM, 900, NO_ITEM],
+            own: vec![4, 5],
         }
     }
 
@@ -515,6 +553,7 @@ mod tests {
         assert_eq!(decode(&bytes).unwrap().variants, l.variants);
         let cut = decode(&bytes[..bytes.len() - 1]).unwrap();
         assert!(cut.variants.is_empty());
+        assert_eq!(cut.sockets, l.sockets, "the sections before the cut one stay");
     }
 
     #[test]
@@ -556,6 +595,8 @@ mod tests {
         let mut l = listing(3);
         l.orders.retain(|o| !matches!(o.wait, OrderWait::Energy(_)));
         l.variants.clear();
+        l.sockets.clear();
+        l.own.clear();
         let mut bytes = encode(&l);
         bytes[0] = 2;
         assert_eq!(decode(&bytes), Some(l));
@@ -567,6 +608,8 @@ mod tests {
     fn a_cut_message_reads_as_none() {
         let mut l = listing(3);
         l.variants.clear();
+        l.sockets.clear();
+        l.own.clear();
         let bytes = encode(&l);
         assert_eq!(decode(&bytes[..bytes.len() - 1]), None);
         assert_eq!(decode(&[9]), None);
