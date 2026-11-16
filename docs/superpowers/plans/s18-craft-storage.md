@@ -108,7 +108,7 @@
 **Files:** `rules/src/utility/mod.rs` (`has_modes(u)`, `step_ticks/step_energy` with a `WorkMode`), `rules/src/machines/sheet.rs` (`Kind::Util` shape `mode: u.has_modes()` — one changed line, stream 3's file, flagged), `utility.rs` (`paced` reads the mode `util_mode`; `on_button` handles `Press::Mode`; `sheet` sets `s.mode`).
 - rules test: boost halves ticks ×3 energy (via `WorkMode::factors`), eco ×2 ticks ×0.35.
 - self-test `util_modes_switch` (press Boost on a repair stand → `util_mode` = 2, step 2.5 s in its row).
-- [ ] done
+- [x] done 81b0781 (`utility::paced` in rules; sheet.rs one line, flagged; self-test `util18_work_mode_switch`; try pending)
 
 ### Task 10: Sockets 3/3/4/4 by tier; module effects capacity / stack / storage
 
