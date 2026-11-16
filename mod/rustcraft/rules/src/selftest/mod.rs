@@ -326,7 +326,10 @@ pub trait Bench {
     /// W3: worker `id` taken away as its one chassis item and that item placed on rail `cell`;
     /// the new worker's id.
     fn worker_as_item(&mut self, id: u64, cell: Pos) -> Result<u64, String>;
+    /// U4: chassis `item` clicked on worker `id`; the old chassis's item it gives back.
+    fn swap_chassis(&mut self, id: u64, item: &str) -> Result<String, String>;
 }
+
 
 /// A mob as the self-test reads it.
 #[derive(Clone, Debug, PartialEq)]

@@ -43,7 +43,9 @@ use rustcraft_rules::{
     reports::Report,
     tuning::Tuning,
     utility::grown,
-    worker::{BlockView, Errand, Fleet, Note, Step, Tool, Track, Worker, digging, plants, trees},
+    worker::{
+        BlockView, Errand, Fleet, Note, Step, Tool, Track, Worker, chassis, digging, plants, trees,
+    },
 };
 use std::{
     collections::{BTreeSet, HashMap},
@@ -66,12 +68,10 @@ const ROWS: u8 = 6;
 const CELLS: usize = 54;
 const MAIN_SLOTS: usize = 27;
 const INVENTORY_SLOTS: usize = 36;
-/// The window's first row: tool, upgrades, then the gauges.
+/// The window's first row: tool, the sockets (up to 7, U4), then its state with charge and hold.
 const TOOL_CELL: usize = 0;
-const UPGRADE_CELLS: std::ops::Range<usize> = 1..4;
-const CHARGE_CELL: usize = 5;
-const HOLD_CELL: usize = 6;
-const NOTE_CELL: usize = 7;
+const UPGRADE_CELLS: std::ops::Range<usize> = 1..1 + chassis::MAX_SOCKETS;
+const NOTE_CELL: usize = 8;
 const HOLD_FIRST: usize = 9;
 /// What the saw's loot is rolled for: an axe, as a player's would be.
 const SAW_TOOL: &str = "minecraft:iron_axe";
@@ -111,7 +111,7 @@ struct Workers {
     clicks: Vec<Click>,
     /// Chassis placed, to become workers once the level ticks: owner, dimension, rail, and the
     /// worker a picked-up chassis carries (W3).
-    placing: Vec<(u128, String, Pos, Option<String>)>,
+    placing: Vec<(u128, String, Pos, Option<String>, u8)>,
 }
 
 static STATE: LazyLock<Mutex<Workers>> = LazyLock::new(Mutex::default);
@@ -237,9 +237,12 @@ pub(super) fn on_use_item_on(
     pos: Pos,
     claimed: &mut bool,
 ) {
-    if *claimed || &*stack.item != content::CHASSIS {
+    if *claimed {
         return;
     }
+    let Some(tier) = chassis::tier_of(&stack.item) else {
+        return;
+    };
     let Some(player) = game.native_acting_player() else {
         return;
     };
@@ -261,12 +264,12 @@ pub(super) fn on_use_item_on(
         if packed.is_some() {
             take_exact(game, player.uuid, stack);
         } else {
-            game.native_take_items(content::CHASSIS, 1);
+            game.native_take_items(&stack.item, 1);
         }
     }
     state()
         .placing
-        .push((player.uuid, player.dimension.clone(), pos, packed));
+        .push((player.uuid, player.dimension.clone(), pos, packed, tier));
 }
 
 /// W3: custom data under which a chassis item carries the worker taken away with it.
@@ -282,7 +285,7 @@ fn packed_of(stack: &ItemStack) -> Option<String> {
 
 /// The chassis item carrying worker `w` with all it has (W3).
 fn worker_stack(w: &Worker) -> ItemStack {
-    let mut stack = ItemStack::new(content::CHASSIS, 1);
+    let mut stack = ItemStack::new(chassis::item(w.tier), 1);
     let mut data = Compound::new();
     data.insert(
         JavaString::from(PACKED),
@@ -346,10 +349,68 @@ pub(super) fn on_interact_entity(
         return;
     };
     let wrench = stack.is_some_and(|s| &*s.item == content::WRENCH);
+    let new_chassis =
+        stack.filter(|s| chassis::tier_of(&s.item).is_some() && packed_of(s).is_none());
     if wrench && player.sneaking {
         pick_up(game, player.uuid, &dimension, worker);
+    } else if let Some(new) = new_chassis {
+        swap_chassis(game, &player, &dimension, worker, new);
     } else {
         state().opening.push((player.uuid, dimension, worker));
+    }
+}
+
+/// U4: a higher chassis clicked on a worker takes its old chassis's place: tool, upgrades and
+/// hold stay, the old chassis goes to the player.
+fn swap_chassis(
+    game: &mut Game<'_>,
+    player: &horizon_client::mod_api::NativeServerPlayer,
+    dimension: &str,
+    id: u64,
+    new: &ItemStack,
+) {
+    let t = server::tuning();
+    let done = {
+        let mut s = state();
+        let Some(level) = s.levels.get_mut(dimension) else {
+            return;
+        };
+        let Some(w) = level.fleet.workers.iter_mut().find(|w| w.id == id) else {
+            return;
+        };
+        let done = chassis::swap(w, &new.item, t).map(|old| (old, chassis::sockets(w.tier)));
+        if done.is_ok() {
+            level.dirty = true;
+        }
+        done
+    };
+    match done {
+        Ok((old, sockets)) => {
+            if player.game_mode != 1 {
+                game.native_take_items(&new.item, 1);
+            }
+            if let Some(left) = game.native_give_stack(player.uuid, ItemStack::new(old, 1)) {
+                drop_item(game, dimension, player.position, &left);
+            }
+            tell(
+                game,
+                player.uuid,
+                line(
+                    "rustcraft.worker.swapped",
+                    "Chassis replaced: %s sockets, tool and load kept",
+                    &[Text::literal(sockets.to_string())],
+                ),
+            );
+        }
+        Err(_) => tell(
+            game,
+            player.uuid,
+            line(
+                "rustcraft.worker.not_higher",
+                "That chassis has no more sockets than this one",
+                &[],
+            ),
+        ),
     }
 }
 
@@ -472,18 +533,21 @@ pub(super) fn tick(game: &mut Game<'_>, dimension: &str, net_level: &LevelNet, t
     let mut level = take_level(dimension);
     load(game, &mut level);
     level.ticks += 1;
-    let placing: Vec<(u128, Pos, Option<String>)> = {
+    let placing: Vec<(u128, Pos, Option<String>, u8)> = {
         let mut s = state();
         let (here, later): (Vec<_>, Vec<_>) = std::mem::take(&mut s.placing)
             .into_iter()
             .partition(|p| p.1 == dimension);
         s.placing = later;
-        here.into_iter().map(|(o, _, p, k)| (o, p, k)).collect()
+        here.into_iter().map(|(o, _, p, k, tier)| (o, p, k, tier)).collect()
     };
-    for (owner, rail, packed) in placing {
+    for (owner, rail, packed, tier) in placing {
         let back = packed.and_then(|k| level.fleet.put_back(owner, rail, &k, tuning));
         if back.is_none() {
-            level.fleet.add(owner, rail, tuning);
+            let id = level.fleet.add(owner, rail, tuning);
+            if let Some(w) = level.fleet.workers.iter_mut().find(|w| w.id == id) {
+                w.set_tier(tier, tuning);
+            }
         }
         level.dirty = true;
     }
@@ -1347,11 +1411,7 @@ fn windows(game: &mut Game<'_>, dimension: &str, level: &mut LevelFleet, t: &Tun
             continue;
         };
         let items = cells(game, w, t);
-        let title = line(
-            "rustcraft.worker.window",
-            "Worker chassis · sparksteel",
-            &[],
-        );
+        let title = window_title(w.tier);
         if let Some(window) = game.native_open_menu(uuid, ROWS, title, items) {
             state().sessions.insert(
                 uuid,
@@ -1400,7 +1460,17 @@ fn windows(game: &mut Game<'_>, dimension: &str, level: &mut LevelFleet, t: &Tun
     }
 }
 
+/// The window's title by the chassis's tier (guide `chassis`: «Шасси работника · из искростали»).
+pub(super) fn window_title(tier: u8) -> Text {
+    match tier {
+        2 => line("rustcraft.worker.window_2", "Worker chassis · crystallite", &[]),
+        3 => line("rustcraft.worker.window_3", "Worker chassis · starsteel", &[]),
+        _ => line("rustcraft.worker.window", "Worker chassis · sparksteel", &[]),
+    }
+}
+
 /// Gives `count` of `item` (a hold's name) to the player; how many they took.
+
 fn give(game: &mut Game<'_>, uuid: u128, item: &str, count: u32) -> u32 {
     match game.native_give_stack(uuid, util::hold_stack(item, count)) {
         Some(left) => count - left.count.min(count),
@@ -1537,15 +1607,15 @@ fn cells(game: &Game<'_>, w: &Worker, t: &Tuning) -> Vec<Option<ItemStack>> {
         ),
     });
     for (k, cell) in UPGRADE_CELLS.enumerate() {
-        out[cell] = Some(match w.upgrades.get(k).copied().flatten() {
-            Some(m) => named(
+        out[cell] = Some(match w.upgrades.get(k) {
+            Some(Some(m)) => named(
                 m.item(),
                 1,
                 Text::translate(&format!("item.{}", m.item().replace(':', ".")), &[]),
                 &[hint("rustcraft.worker.upgrade_hint", "Click: take it back")],
                 false,
             ),
-            None => named(
+            Some(None) => named(
                 "minecraft:gray_stained_glass_pane",
                 1,
                 line("rustcraft.worker.upgrade_slot", "Upgrade slot", &[]),
@@ -1555,44 +1625,22 @@ fn cells(game: &Game<'_>, w: &Worker, t: &Tuning) -> Vec<Option<ItemStack>> {
                 )],
                 false,
             ),
+            // U4: a socket this chassis's tier does not have.
+            None => named(
+                "minecraft:black_stained_glass_pane",
+                1,
+                line(
+                    "rustcraft.worker.socket_locked",
+                    "A socket of a crystallite or starsteel chassis",
+                    &[],
+                ),
+                &[],
+                false,
+            ),
         });
     }
     let cap = w.capacity(t);
     let percent = (100.0 * w.charge / cap.max(1.0)).round();
-    out[CHARGE_CELL] = Some(named(
-        "minecraft:redstone",
-        1,
-        line(
-            "rustcraft.worker.charge",
-            "Charge: %s",
-            &[Text::literal(format!("{percent}%"))],
-        ),
-        &[
-            Text::literal(format!("{:.0} / {:.0} E", w.charge, cap)),
-            hint(
-                "rustcraft.worker.charge_hint",
-                "Under 20% it goes to the charge dock",
-            ),
-        ],
-        false,
-    ));
-    out[HOLD_CELL] = Some(named(
-        "minecraft:chest",
-        1,
-        line(
-            "rustcraft.worker.hold",
-            "Hold: %s of %s slots",
-            &[
-                Text::literal(w.hold.used().to_string()),
-                Text::literal(w.hold.slots.len().to_string()),
-            ],
-        ),
-        &[hint(
-            "rustcraft.worker.hold_hint",
-            "A full hold goes to the unload dock",
-        )],
-        false,
-    ));
     let bad = !matches!(
         w.note,
         Note::Working | Note::Unloading | Note::Charging | Note::ToUnload | Note::ToCharge
@@ -1605,7 +1653,32 @@ fn cells(game: &Game<'_>, w: &Worker, t: &Tuning) -> Vec<Option<ItemStack>> {
         },
         1,
         note_text(w.note),
-        &[],
+        &[
+            line(
+                "rustcraft.worker.charge",
+                "Charge: %s",
+                &[Text::literal(format!(
+                    "{percent}% · {:.0} / {:.0} E",
+                    w.charge, cap
+                ))],
+            ),
+            line(
+                "rustcraft.worker.hold",
+                "Hold: %s of %s slots",
+                &[
+                    Text::literal(w.hold.used().to_string()),
+                    Text::literal(w.hold.slots.len().to_string()),
+                ],
+            ),
+            hint(
+                "rustcraft.worker.charge_hint",
+                "Under 20% it goes to the charge dock",
+            ),
+            hint(
+                "rustcraft.worker.hold_hint",
+                "A full hold goes to the unload dock",
+            ),
+        ],
         false,
     ));
     for i in 0..(CELLS - HOLD_FIRST) {
@@ -1676,7 +1749,7 @@ pub(super) fn as_item_for_selftest(
     let w = worker_for_selftest(dimension, id).ok_or("no such worker")?;
     remove_for_selftest(game, dimension, id);
     let stack = worker_stack(&w);
-    if &*stack.item != content::CHASSIS {
+    if chassis::tier_of(&stack.item) != Some(w.tier) {
         return Err(format!("the item is {}", stack.item));
     }
     let packed = packed_of(&stack).ok_or("the chassis item carries no worker")?;
@@ -1687,7 +1760,23 @@ pub(super) fn as_item_for_selftest(
     back.ok_or_else(|| "the packed worker does not read".to_owned())
 }
 
+/// U4 for the self-test: chassis `item` set in worker `id`'s place; the old chassis's item.
+pub(super) fn swap_for_selftest(dimension: &str, id: u64, item: &str) -> Result<String, String> {
+    let mut s = state();
+    let level = s.levels.get_mut(dimension).ok_or("no workers in this level")?;
+    let w = level
+        .fleet
+        .workers
+        .iter_mut()
+        .find(|w| w.id == id)
+        .ok_or("no such worker")?;
+    let old = chassis::swap(w, item, server::tuning()).map_err(|e| format!("{e:?}"))?;
+    level.dirty = true;
+    Ok(old.to_owned())
+}
+
 /// A worker as the server holds it now.
+
 pub(super) fn worker_for_selftest(dimension: &str, id: u64) -> Option<Worker> {
     state()
         .levels

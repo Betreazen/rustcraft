@@ -11,6 +11,7 @@
 //! ceiling and the vertical, so a reaper climbs a jungle trunk, hangs over kelp or rides a lift
 //! between floors. Its tool's zone grows away from the block its rail hangs on (`zone_cells`).
 
+pub mod chassis;
 pub mod digging;
 pub mod bore;
 pub mod hold;
@@ -185,6 +186,9 @@ pub struct Worker {
     /// Slice 10: rail cells in a row its tool found nothing at (the scoop's diagnosis).
     #[serde(default)]
     pub idle: u32,
+    /// Slice 18: its chassis's tier, 1 to 3 (U4: 3 / 5 / 7 sockets).
+    #[serde(default = "first_tier")]
+    pub tier: u8,
     /// Slice 18: how much of a cell it rode past its last cell this tick (T4: a fast rail takes it
     /// more than a cell a tick); the bundle rides it on while this is left, each cell worked.
     #[serde(default)]
@@ -192,6 +196,10 @@ pub struct Worker {
     /// Slice 18: the block its tool works on now, for the client's pose (not saved).
     #[serde(skip)]
     pub aim: Option<Pos>,
+}
+
+fn first_tier() -> u8 {
+    1
 }
 
 /// What one tick of riding came to.
@@ -302,9 +310,17 @@ impl Worker {
             busy: 0.0,
             note: Note::NoTool,
             idle: 0,
+            tier: 1,
             carry: 0.0,
             aim: None,
         }
+    }
+
+    /// Its chassis becomes one of `tier`: as many sockets as that tier has, its upgrades kept in
+    /// their sockets (a lower tier's extra sockets are left out: `chassis::swap` never lowers).
+    pub fn set_tier(&mut self, tier: u8, _t: &Tuning) {
+        self.tier = tier.clamp(1, 3);
+        self.upgrades.resize(chassis::sockets(self.tier), None);
     }
 
     pub fn count(&self, kind: Module) -> u32 {
@@ -603,9 +619,10 @@ impl Worker {
         let old: Worker = serde_json::from_str(packed).ok()?;
         let mut w = Worker::new(id, owner, cell, t);
         w.tool = old.tool;
-        w.upgrades = old.upgrades;
         w.hold = old.hold;
         w.charge = old.charge;
+        w.set_tier(old.tier, t);
+        w.upgrades = old.upgrades;
         w.note = if w.tool.is_some() { Note::Working } else { Note::NoTool };
         // Its own upgrades size its hold as before it was packed: nothing is left over.
         let over = w.refit(t);

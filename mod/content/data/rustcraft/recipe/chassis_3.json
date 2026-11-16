@@ -1,0 +1,17 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    "b b",
+    "bsb",
+    "bbb"
+  ],
+  "key": {
+    "b": "rustcraft:starsteel",
+    "s": "minecraft:amethyst_shard"
+  },
+  "result": {
+    "id": "rustcraft:chassis_3",
+    "count": 1
+  }
+}

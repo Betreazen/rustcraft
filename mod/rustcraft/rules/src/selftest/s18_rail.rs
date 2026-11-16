@@ -8,7 +8,9 @@ use crate::monorail::shape;
 use crate::tuning::Tuning;
 use crate::worker::{Errand, Tool, Worker};
 
-pub const ALL: [Build; 5] = [
+pub const ALL: [Build; 6] = [
+    chassis_swaps_up,
+
     reaper_climbs_a_trunk,
     reaper_hangs_over_kelp,
     reaper_rides_up_bamboo,
@@ -221,5 +223,33 @@ fn picked_up_as_one_item(o: Pos, t: &Tuning) -> Scenario {
                 return Err("the first worker is still there".into());
             }
             Ok(())
+        })
+}
+
+fn chassis_swaps_up(o: Pos, _: &Tuning) -> Scenario {
+    // U4: a starsteel chassis clicked on a sparksteel worker: 7 sockets, its tool and hold kept,
+    // the old chassis back; a lower one afterwards is refused.
+    Scenario::new("worker_chassis_swaps_up", plot_area(o))
+        .then("a track and a lumberjack with saplings", move |b, m| {
+            floor(b, o, -1..=7, -2..=2)?;
+            for x in 0..=6 {
+                rail(b, at(o, [x, 1, 0]), Face::YNeg)?;
+            }
+            spawn(b, m, at(o, [0, 1, 0]), Tool::Saw, &[("minecraft:oak_sapling", 7)])
+        })
+        .check("a starsteel chassis takes its place", |b, m| {
+            let old = b.swap_chassis(m.get("worker") as u64, crate::worker::chassis::ITEMS[2])?;
+            same("old chassis back", old.as_str(), crate::worker::chassis::ITEMS[0])?;
+            let w = worker_of(b, m)?;
+            same("tier", w.tier, 3)?;
+            same("sockets", w.upgrades.len(), 7)?;
+            same("tool", w.tool, Some(Tool::Saw))?;
+            same("saplings", count_of(&w.hold.slots, "minecraft:oak_sapling"), 7)
+        })
+        .check("a crystallite one after it is refused", |b, m| {
+            match b.swap_chassis(m.get("worker") as u64, crate::worker::chassis::ITEMS[1]) {
+                Err(_) => same("tier", worker_of(b, m)?.tier, 3),
+                Ok(old) => Err(format!("it swapped down and gave back {old}")),
+            }
         })
 }

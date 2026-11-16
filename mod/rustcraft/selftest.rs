@@ -812,6 +812,11 @@ impl Bench for GameBench<'_, '_> {
         workers::as_item_for_selftest(self.game, DIMENSION, id, cell, server::tuning())
     }
 
+    fn swap_chassis(&mut self, id: u64, item: &str) -> Result<String, String> {
+        workers::swap_for_selftest(DIMENSION, id, item)
+    }
+
+
     fn anim(&self, pos: Pos) -> Option<rustcraft_rules::anim::Shown> {
         self.game
             .native_mod_block_entity(pos)

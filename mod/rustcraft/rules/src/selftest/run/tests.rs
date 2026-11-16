@@ -303,6 +303,10 @@ impl Bench for Fake {
     fn worker_as_item(&mut self, id: u64, _: Pos) -> Result<u64, String> {
         Ok(id)
     }
+    fn swap_chassis(&mut self, _: u64, _: &str) -> Result<String, String> {
+        Ok(String::new())
+    }
+
 }
 
 const PLOT: Area = Area {

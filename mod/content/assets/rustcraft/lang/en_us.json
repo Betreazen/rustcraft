@@ -363,7 +363,7 @@
   "rustcraft.worker.to_charge": "Going to charge",
   "rustcraft.worker.to_unload": "Going to unload",
   "rustcraft.worker.tool_hint": "Click: take the tool back",
-  "rustcraft.worker.tool_put": "Click a saw or a reaper in your inventory",
+  "rustcraft.worker.tool_put": "Click a tool in your inventory: saw, reaper, cargo hold, grab, scoop, bore, shooter or cartographer",
   "rustcraft.worker.tool_slot": "Tool",
   "rustcraft.worker.unloading": "Unloading",
   "rustcraft.worker.upgrade_hint": "Click: take it back",
@@ -1015,5 +1015,12 @@
   "rustcraft.handbook.page.dusts.name": "Ore dust",
   "rustcraft.handbook.page.dusts.sum": "Iron, copper and gold dust from the crusher. Smelts into an ingot.",
   "rustcraft.handbook.page.fluids.name": "Solution and catalysts",
-  "rustcraft.handbook.page.fluids.sum": "Fluids from the mixer. Nutrient solution feeds crystal structures; catalysts boost machines."
+  "rustcraft.handbook.page.fluids.sum": "Fluids from the mixer. Nutrient solution feeds crystal structures; catalysts boost machines.",
+  "item.rustcraft.chassis_2": "Crystallite Worker Chassis",
+  "item.rustcraft.chassis_3": "Starsteel Worker Chassis",
+  "rustcraft.worker.window_2": "Worker chassis · crystallite",
+  "rustcraft.worker.window_3": "Worker chassis · starsteel",
+  "rustcraft.worker.swapped": "Chassis replaced: %s sockets, tool and load kept",
+  "rustcraft.worker.not_higher": "That chassis has no more sockets than this one",
+  "rustcraft.worker.socket_locked": "A socket of a crystallite or starsteel chassis"
 }
