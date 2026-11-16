@@ -404,7 +404,12 @@ pub(super) fn on_use_item_on(game: &mut Game<'_>, player: u128, sneaking: bool, 
             give(game, player, &o);
         }
         game.native_set_block_property(pos, rustcraft_rules::housing::COVERED, "false");
-    } else if covered && game.items().get(item).is_some_and(|i| i.block.is_some()) && !crate::game::rustcraft_server::is_ours(item) {
+    } else if covered
+        && game.items().get(item).is_some_and(|i| i.block.is_some())
+        && !crate::game::rustcraft_server::is_ours(item)
+        // s18/pipe, F2: only a whole block gives the look.
+        && rustcraft_rules::housing::whole_block(item)
+    {
         let old = look(&entity.nbt);
         game.native_with_mod_block_entity(pos, |e| {
             e.nbt.insert(JavaString::from(LOOK_KEY), Tag::String(JavaString::from(item)));

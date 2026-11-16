@@ -115,7 +115,7 @@ Files: `window.rs` (rows «Гнездо / Канал / Направление / 
 - [ ] Catalysts in every machine where they make sense (machines.rs:652, rules machines/catalyst.rs: stream 3's files).
 - [ ] Orders: autocrafter asks the storage itself; O11 straight to the next machine; O12 water; all machines; items seen in the housings (M each, orders.rs is stream 5's).
 - [ ] Line boost on fluid and energy nets (fluids.rs stream 3, net/energy.rs stream 2): `node_window::net_boost` is ready.
-- [ ] Facade F2: only whole blocks give a look.
+- [x] Facade F2: only whole blocks give a look (by name: the engine gives no item shape before placing).
 - [ ] Workers lifted whole by the wrench (stream 6, workers.rs).
 
 ## Противоречия справочника (for the integrator / stream 8)

@@ -204,6 +204,30 @@ pub fn covered_shapes(thickness: f64) -> Vec<(String, Vec<Box6>)> {
     out
 }
 
+// ---- Slice 18: what gives a facade its look (F2) ----
+
+/// Parts of a block id that name a block that is not whole: a slab, stairs, a torch, a fence and
+/// the like. The engine gives a mod no item's shape before it is placed (only
+/// `native_block_collision` of a placed block, SRC native_hooks.rs:11143), so the name decides.
+const NOT_WHOLE: [&str; 40] = [
+    "slab", "stairs", "torch", "fence", "wall", "door", "pane", "carpet", "button",
+    "pressure_plate", "rail", "sign", "banner", "flower", "sapling", "ladder", "lever",
+    "lantern", "chain", "bars", "candle", "pot", "head", "skull", "bed", "cake",
+    "anvil", "bell", "trapdoor", "vine", "grass", "fern", "bush", "coral", "mushroom",
+    "amethyst_bud", "cluster", "snow", "dripleaf", "rod",
+];
+
+/// F2: whether a click with the block `block` gives a facade its look: a whole block only.
+pub fn whole_block(block: &str) -> bool {
+    let name = block.rsplit(':').next().unwrap_or(block);
+    let wall_block = name.ends_with("_wall") || name == "wall";
+    let exceptions = ["mushroom_block", "snow_block", "chain_command_block", "stem"];
+    if exceptions.iter().any(|e| name.ends_with(e)) {
+        return true;
+    }
+    !wall_block && !NOT_WHOLE.iter().any(|p| name.contains(p))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -400,6 +424,16 @@ mod tests {
             } else {
                 assert!(boxes.len() >= 1 && boxes[0][0] > 0.0);
             }
+        }
+    }
+
+    #[test]
+    fn only_a_whole_block_gives_a_facade_its_look() {
+        for b in ["minecraft:bricks", "minecraft:oak_planks", "minecraft:stone", "minecraft:red_mushroom_block", "minecraft:snow_block", "minecraft:mossy_stone_bricks"] {
+            assert!(whole_block(b), "{b}");
+        }
+        for b in ["minecraft:oak_slab", "minecraft:torch", "minecraft:stone_brick_stairs", "minecraft:cobblestone_wall", "minecraft:oak_fence", "minecraft:glass_pane"] {
+            assert!(!whole_block(b), "{b}");
         }
     }
 }
