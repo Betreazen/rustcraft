@@ -663,6 +663,7 @@ pub(super) fn tick(game: &mut Game<'_>, dimension: &str) {
         n
     };
     open_windows(game);
+    keys(game);
     if !now.is_multiple_of(EVERY) {
         return;
     }
@@ -690,6 +691,46 @@ pub(super) fn tick(game: &mut Game<'_>, dimension: &str) {
         save(&mut state());
         crate::game::rustcraft_explore::save(game);
         crate::game::rustcraft_utility::save_grown(game);
+    }
+}
+
+// ---- Slice 18: the gear's keys ----
+
+/// The keys pressed since the last tick (rustcraft_gear_keys): the magnet and night vision switch
+/// in the worn piece holding them, the backpack key opens the first backpack carried.
+fn keys(game: &mut Game<'_>) {
+    for (uuid, key) in crate::game::rustcraft_gear_keys::take() {
+        let Some(m) = key.module() else {
+            crate::game::rustcraft_backpack::open_by_key(game, uuid);
+            continue;
+        };
+        let slot = if m.piece() == Piece::Helmet { EquipmentSlot::Head } else { EquipmentSlot::Chest };
+        let on = game.native_player_equipment(uuid, slot).and_then(|st| {
+            let mut s = state();
+            load(&mut s, game);
+            let id = id_of(&st)?;
+            Gear::of(&st.item)?;
+            let h = s.store.held.get_mut(&id)?;
+            if !h.has(m) {
+                return None;
+            }
+            let on = rules::keys::toggle(h, m);
+            s.dirty = true;
+            Some(on)
+        });
+        let magnet = m == Module::Magnet;
+        let said = match (on, magnet) {
+            (Some(true), true) => line("rustcraft.gear.magnet_on", "Magnet on", &[]),
+            (Some(false), true) => line("rustcraft.gear.magnet_off", "Magnet off", &[]),
+            (Some(true), false) => line("rustcraft.gear.night_on", "Night vision on", &[]),
+            (Some(false), false) => line("rustcraft.gear.night_off", "Night vision off", &[]),
+            (None, true) => line("rustcraft.gear.no_magnet", "No magnet module in the chestplate", &[]),
+            (None, false) => line("rustcraft.gear.no_night", "No night vision module in the helmet", &[]),
+        };
+        if m == Module::Night && on == Some(false) {
+            game.native_remove_effect(uuid, "minecraft:night_vision");
+        }
+        game.native_action_bar(uuid, said);
     }
 }
 
@@ -726,6 +767,7 @@ fn player_tick(game: &mut Game<'_>, p: &horizon_client::mod_api::NativeServerPla
                 continue;
             }
             match m {
+                Module::Night | Module::Magnet if !rules::keys::works(&h, m) => {}
                 Module::Night => {
                     effect(game, p.uuid, "minecraft:night_vision", 0);
                     drain += need;

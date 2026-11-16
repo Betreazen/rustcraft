@@ -108,14 +108,14 @@ Audit: armor «Модули и чары при замене остаются» M
 
 Audit: pmodules «Ночное зрение … клавишей» DIFFERS, «Магнит … клавишей» DIFFERS; backpack «Открывается клавишей» DIFFERS.
 
-**Files:** new `keys.rs` module (client side: `native_mods`, `native_key`; net channel `rustcraft:gear_key`), hook files `hook_mods.rs`, `hook_key.rs`; `gear.rs` (server: toggles); `backpack.rs` (B opens the first backpack carried); rules `gear/mod.rs`.
+**Files:** new `gear_keys.rs` module (`rustcraft_gear_keys`) (client side: `native_mods`, `native_key`; net channel `rustcraft:gear_key`), hook files `hook_mods.rs`, `hook_key.rs`; `gear.rs` (server: toggles); `backpack.rs` (B opens the first backpack carried); rules `gear/keys.rs` (new).
 
 **Interfaces:** `Module::toggled(self) -> bool` (Night, Magnet); `Held.on: Vec<String>` (switched-on toggled modules); `pub fn works(h: &Held, m: Module) -> bool`; `pub fn toggle(h: &mut Held, m: Module) -> bool` (new state); `pub enum GearKey { Magnet, Backpack, Night }` with `name()`, `default()` (`key.keyboard.z`, `key.keyboard.b`, `key.keyboard.semicolon`), `from_byte`.
 
-- [ ] Tests: night vision does not work until toggled; toggle twice is off; non-toggled modules always work; key defaults and byte round trip.
-- [ ] GREEN, wiring; the action bar says «Магнит: включён» / «выключен».
-- [ ] Self-test `gear_night_vision_waits_for_its_key`: rules-level scenario on a bench player is not possible (no real player) → covered by unit tests; bots press `;`.
-- [ ] Commit.
+- [x] Tests: night vision does not work until toggled; toggle twice is off; non-toggled modules always work; key defaults and byte round trip.
+- [x] GREEN, wiring; the action bar says «Магнит: включён» / «выключен».
+- [x] Self-test `gear_night_vision_waits_for_its_key`: rules-level scenario on a bench player is not possible (no real player) → covered by unit tests; bots press `;`.
+- [x] Commit.
 
 ### Task 7: The magnet pulls, running +50 % for 5 s
 

@@ -1015,5 +1015,12 @@
   "rustcraft.handbook.page.dusts.name": "Ore dust",
   "rustcraft.handbook.page.dusts.sum": "Iron, copper and gold dust from the crusher. Smelts into an ingot.",
   "rustcraft.handbook.page.fluids.name": "Solution and catalysts",
-  "rustcraft.handbook.page.fluids.sum": "Fluids from the mixer. Nutrient solution feeds crystal structures; catalysts boost machines."
+  "rustcraft.handbook.page.fluids.sum": "Fluids from the mixer. Nutrient solution feeds crystal structures; catalysts boost machines.",
+  "rustcraft.backpack.none": "No backpack in the inventory",
+  "rustcraft.gear.magnet_on": "Magnet on",
+  "rustcraft.gear.magnet_off": "Magnet off",
+  "rustcraft.gear.night_on": "Night vision on",
+  "rustcraft.gear.night_off": "Night vision off",
+  "rustcraft.gear.no_magnet": "No magnet module in the chestplate",
+  "rustcraft.gear.no_night": "No night vision module in the helmet"
 }

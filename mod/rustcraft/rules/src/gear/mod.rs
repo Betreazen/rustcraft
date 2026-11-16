@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::geom::Pos;
 
+pub mod keys;
 pub mod shot;
 
 /// A piece of technical armour.
@@ -292,6 +293,9 @@ pub struct Held {
     /// (G6); the chargers fill it to that battery when it is off the player.
     #[serde(default)]
     pub suit: bool,
+    /// Slice 18: the keyed modules switched on (night vision, magnet), by item id.
+    #[serde(default)]
+    pub on: Vec<String>,
 }
 
 impl Held {

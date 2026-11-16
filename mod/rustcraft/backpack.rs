@@ -219,6 +219,19 @@ pub(super) fn on_use_item(game: &mut Game<'_>, stack: &ItemStack, claimed: &mut 
     state().opening.push((player.uuid, id, slots));
 }
 
+/// Slice 18: the backpack key (B, rustcraft_gear_keys): the first backpack in the player's
+/// inventory opens at the next tick.
+pub(super) fn open_by_key(game: &mut Game<'_>, uuid: u128) {
+    let t = crate::game::rustcraft_server::tuning();
+    let found = game.native_player_stacks(uuid).and_then(|stacks| {
+        stacks.into_iter().flatten().find_map(|st| Some((id_of(&st)?, rules::slots(&st.item, t)?)))
+    });
+    match found {
+        Some((id, slots)) => state().opening.push((uuid, id, slots)),
+        None => tell(game, uuid, line("rustcraft.backpack.none", "No backpack in the inventory", &[])),
+    }
+}
+
 /// Once a server tick: the windows asked for open.
 pub(super) fn tick(game: &mut Game<'_>) {
     let opening = std::mem::take(&mut state().opening);
