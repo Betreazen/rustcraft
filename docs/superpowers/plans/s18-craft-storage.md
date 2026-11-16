@@ -141,7 +141,7 @@
 - [x] done 01aaddd (rules `baby_fed`, `baby_to_feed`, `herd_full`, `heads`; food level on the model; no in-world self-test for babies: the bench spawns no baby mob — bots check; slice12 feeder test waits 2×LIMIT for the 20 s pace; try pending)
 
 ### Task 16: Butcher — recipe `bsb|bhb|brb`, energy blade accepted, 4 E/s and «Нет энергии», looting / fire aspect, kill XP into a condenser beside it, economy module effect
-- [ ] done
+- [x] done 8e38c52 (machines.rs: Butcher gets a buffer, flagged; looting as the tables add it (0..level a drop), fire aspect sets the animal alight and the bonus cooked; blade spends 25 E a strike; recipe key s lists the iron sword and the blades; slice11 butcher scenarios get a full buffer; self-test `butcher18_energy_and_kill_xp`; try pending)
 
 ### Task 17: Shearer — built-in shears, milking into a tank (cows, mooshrooms, goats), «Некуда сливать молоко», window rows and milk bar
 - [ ] done
