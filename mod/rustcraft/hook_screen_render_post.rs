@@ -4,4 +4,5 @@ fn rustcraft_screen_render_post(
     screen: &horizon_client::mod_api::NativeScreenView<'_>,
 ) {
     crate::game::rustcraft_handbook::draw(game, batch, screen);
+    crate::game::rustcraft_tablet::draw(game, batch, screen);
 }

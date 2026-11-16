@@ -57,7 +57,10 @@ use rustcraft_rules::{
 use horizon_client::save;
 use horizon_world::nbt;
 use std::collections::HashMap;
-use std::sync::{LazyLock, Mutex, MutexGuard, PoisonError};
+use std::sync::{
+    LazyLock, Mutex, MutexGuard, PoisonError,
+    atomic::{AtomicBool, Ordering},
+};
 
 /// The search keeps at most this many characters.
 const SEARCH_MAX: usize = 32;
@@ -98,17 +101,59 @@ static VIEW: LazyLock<Mutex<View>> = LazyLock::new(Mutex::default);
 /// The last list the server sent.
 static LISTING: Mutex<Option<Listing>> = Mutex::new(None);
 
+// ---- Slice 18: the tablet's window is this window in its tablet context ----
+
+/// Drawing, clicking or typing for the tablet's screen now (rustcraft_tablet): the view and the
+/// list are the tablet's, the sockets and the orders are not shown.
+static TABLET: AtomicBool = AtomicBool::new(false);
+static TABLET_VIEW: LazyLock<Mutex<View>> = LazyLock::new(Mutex::default);
+static TABLET_LISTING: Mutex<Option<Listing>> = Mutex::new(None);
+
+fn tablet() -> bool {
+    TABLET.load(Ordering::Relaxed)
+}
+
+/// Runs `f` in the tablet's context.
+pub(super) fn in_tablet<R>(f: impl FnOnce() -> R) -> R {
+    TABLET.store(true, Ordering::Relaxed);
+    let r = f();
+    TABLET.store(false, Ordering::Relaxed);
+    r
+}
+
+/// The list the server sent the tablet's window.
+pub(super) fn set_tablet_listing(l: Listing) {
+    remember_variants(&l.variants);
+    *TABLET_LISTING.lock().unwrap_or_else(PoisonError::into_inner) = Some(l);
+}
+
+/// A fresh view for a tablet's window that opens.
+pub(super) fn reset_tablet_view() {
+    *TABLET_VIEW.lock().unwrap_or_else(PoisonError::into_inner) = View::default();
+}
+
 fn view() -> MutexGuard<'static, View> {
+    if tablet() {
+        return TABLET_VIEW.lock().unwrap_or_else(PoisonError::into_inner);
+    }
     VIEW.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
 fn listing_of(terminal: Option<Pos>) -> Option<Listing> {
+    if tablet() {
+        return TABLET_LISTING.lock().unwrap_or_else(PoisonError::into_inner).clone();
+    }
     let l = LISTING.lock().unwrap_or_else(PoisonError::into_inner);
     l.as_ref().filter(|l| Some(l.terminal) == terminal).cloned()
 }
 
 /// The view of the terminal open now; a fresh one for a terminal it was not for.
 fn view_for(game: &Game<'_>) -> MutexGuard<'static, View> {
+    if tablet() {
+        let mut v = view();
+        v.orders = false;
+        return v;
+    }
     let pos = game.native_screen_pos();
     let mut v = view();
     if v.terminal != pos {
@@ -210,7 +255,7 @@ fn id_of(game: &Game<'_>, item: u16) -> Option<&'static str> {
 }
 
 /// An item's name in the player's language.
-fn item_name(id: &str) -> String {
+pub(super) fn item_name(id: &str) -> String {
     let key = id.replace(':', ".");
     tr(&format!("item.{key}"), &tr(&format!("block.{key}"), id))
 }
@@ -384,8 +429,10 @@ pub(super) fn draw(game: &Game<'_>, batch: &mut HudBatch, o: [f32; 2]) {
         [r[0] + (r[2] - w) / 2.0, r[1] + 3.0],
         VALUE,
     );
-    let orders_name = tr("rustcraft.terminal.orders", "Orders");
-    button(game, batch, o, term::ORDER_MODE, &orders_name, v.orders);
+    if !tablet() {
+        let orders_name = tr("rustcraft.terminal.orders", "Orders");
+        button(game, batch, o, term::ORDER_MODE, &orders_name, v.orders);
+    }
     button(
         game,
         batch,
@@ -394,7 +441,9 @@ pub(super) fn draw(game: &Game<'_>, batch: &mut HudBatch, o: [f32; 2]) {
         &tr("rustcraft.terminal.limits", "Limits"),
         v.limits,
     );
-    sockets(game, batch, o, listing.as_ref());
+    if !tablet() {
+        sockets(game, batch, o, listing.as_ref());
+    }
     if v.limits {
         limit_rows(game, batch, o, limit_page(&list, v.page), v.selected);
     } else {
@@ -926,6 +975,7 @@ pub(super) fn on_click(game: &Game<'_>, at: [f32; 2], right: bool) -> Option<i32
             v.limits = !v.limits;
             v.orders &= !v.limits;
         }
+        Part::OrderMode | Part::Socket(_) if tablet() => {}
         Part::OrderMode => {
             v.orders = !v.orders;
             v.limits &= !v.orders;
@@ -1006,6 +1056,9 @@ pub(super) fn on_click(game: &Game<'_>, at: [f32; 2], right: bool) -> Option<i32
 
 /// Whether the open screen is a terminal's.
 fn is_terminal(screen: &NativeScreenView<'_>) -> bool {
+    if tablet() {
+        return true;
+    }
     screen.menu == Some(content::TERMINAL)
 }
 

@@ -4,5 +4,6 @@ fn rustcraft_screen_mouse(
     button: i32,
     canceled: &mut bool,
 ) {
+    crate::game::rustcraft_tablet::on_mouse(game, screen, button, canceled);
     crate::game::rustcraft_handbook::on_mouse(game, screen, button, canceled);
 }

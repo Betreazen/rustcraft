@@ -1568,6 +1568,101 @@ pub(super) fn tablet_items(dimension: &str, id: u32) -> Vec<(ItemKey, u64)> {
     .unwrap_or_default()
 }
 
+// ---- Slice 18: the tablet's drawn window ----
+
+/// The storage `id`'s change count: its list is sent again when it moves on.
+pub(super) fn version(dimension: &str, id: u32) -> u64 {
+    with_level(dimension, |level| level.versions.get(&id).copied().unwrap_or(0)).unwrap_or(0)
+}
+
+/// What the tablet's window shows of the storage `id`: the list a terminal of it shows (its
+/// first terminal's sockets and filter count; the cells' anchor when it has none).
+pub(super) fn tablet_listing(game: &Game<'_>, dimension: &str, id: u32) -> Listing {
+    let at = with_level(dimension, |level| {
+        level
+            .terminals
+            .iter()
+            .find(|(_, s)| **s == Some(id))
+            .map(|(t, _)| *t)
+            .or_else(|| level.found.get(&id).map(|f| f.anchor))
+    })
+    .flatten()
+    .unwrap_or_default();
+    listing(game, dimension, at, Some(id))
+}
+
+/// A press on a stored item in the tablet's window: a stack (or one) into the inventory of
+/// `player`; what does not fit stays in the storage. How many went.
+pub(super) fn tablet_take(
+    game: &mut Game<'_>,
+    dimension: &str,
+    id: u32,
+    item: term::ItemRef,
+    one: bool,
+    player: u128,
+) -> u32 {
+    let Some(key) = key_of_ref(game, dimension, id, item) else {
+        return 0;
+    };
+    let want = if one { 1 } else { max_stack(game, keys::item_of(&key)) };
+    let took = take_from(dimension, id, &key, u64::from(want)) as u32;
+    if took == 0 {
+        return 0;
+    }
+    let rest = game
+        .native_give_stack(player, stack_of(&key, took))
+        .map_or(0, |r| r.count.min(took));
+    restore_into(dimension, id, &key, u64::from(rest));
+    took - rest
+}
+
+/// A limit button in the tablet's window (S5).
+pub(super) fn tablet_limit(game: &Game<'_>, dimension: &str, id: u32, item: term::ItemRef, change: term::LimitChange) {
+    if let Some(key) = key_of_ref(game, dimension, id, item) {
+        apply_limit(dimension, id, &key, change);
+    }
+}
+
+/// The tablet's deposit: the stack in inventory slot `slot` of `player` into the storage `id`,
+/// as far as it takes it; the rest goes back to the player. How many went in.
+pub(super) fn tablet_deposit(game: &mut Game<'_>, dimension: &str, id: u32, player: u128, slot: usize) -> u32 {
+    let Some(stack) = game.native_player_stacks(player).and_then(|s| s.get(slot).cloned().flatten()) else {
+        return 0;
+    };
+    let Some(key) = key_of(&stack) else {
+        return 0;
+    };
+    let room = room_in(game, dimension, id, &key).min(u64::from(stack.count)) as u32;
+    if room == 0 {
+        return 0;
+    }
+    let rest = (room < stack.count).then(|| {
+        let mut r = stack.clone();
+        r.count -= room;
+        r
+    });
+    let taken = game.native_set_inventory_slot(
+        player,
+        crate::game::native_inventories::NativeInventoryKind::Player,
+        slot,
+        Some(&stack),
+        rest,
+    );
+    if taken.is_err() {
+        return 0;
+    }
+    let took = put_into(game, dimension, id, &key, u64::from(room)) as u32;
+    if took < room {
+        // Never lost: what the storage did not take after all goes back.
+        let mut back = stack.clone();
+        back.count = room - took;
+        if let Some(r) = game.native_give_stack(player, back) {
+            restore_into(dimension, id, &key, u64::from(r.count));
+        }
+    }
+    took
+}
+
 /// The self-test's view: every stack the storage the cell or terminal at `pos` belongs to
 /// holds, made from its key (a component key's stack with its components).
 pub(super) fn stored_stacks_at(dimension: &str, pos: Pos) -> Vec<ItemStack> {

@@ -6,4 +6,5 @@ fn rustcraft_screen_char(
 ) {
     crate::game::rustcraft_terminal::on_char(game, screen, c, canceled);
     crate::game::rustcraft_station::on_char(game, screen, c, canceled);
+    crate::game::rustcraft_tablet::on_char(game, screen, c, canceled);
 }

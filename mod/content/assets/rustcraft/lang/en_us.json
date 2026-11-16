@@ -1033,5 +1033,7 @@
   "rustcraft.orders.wait.busy.alloy": "no free alloy smelter",
   "rustcraft.orders.wait.busy.mixer": "no free mixer",
   "rustcraft.orders.wait.busy.kitchen": "no free kitchen",
-  "rustcraft.storage.full_at": "The storage is full: %s of %s slots used"
+  "rustcraft.storage.full_at": "The storage is full: %s of %s slots used",
+  "rustcraft.tablet.no_room": "The storage takes none of it: no room or the limit is reached",
+  "rustcraft.tablet.deposit_hint": "Click: into the storage"
 }
