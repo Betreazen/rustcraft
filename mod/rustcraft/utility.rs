@@ -280,14 +280,13 @@ pub(super) fn spend(game: &mut Game<'_>, pos: Pos, cost: f64) -> bool {
     machines::set_buffer_energy(game, pos, e - cost)
 }
 
-/// (ticks between steps, energy a step) after the modules: speed halves the wait and costs
-/// ×2.5, economy ×0.6 (A7, A9).
+/// (ticks between steps, energy a step) after the modules: speed ×2 work for ×2.5 energy, economy
+/// ×0.85 work for ×0.6 energy, each in full (A7, A9; `rustcraft_rules::modules::factors`).
 pub(super) fn paced(game: &Game<'_>, pos: Pos, u: Util) -> (u64, f64) {
     let slots = base::modules_at(game, pos);
-    let speed = modules::count(&slots, Module::Speed);
-    let eco = modules::count(&slots, Module::Economy);
-    let ticks = (rules::step_ticks(u) >> speed.min(4)).max(1);
-    let cost = rules::step_energy(u) * 2.5f64.powi(speed as i32) * 0.6f64.powi(eco as i32);
+    let t = crate::game::rustcraft_server::tuning();
+    let ticks = modules::paced_ticks(rules::step_ticks(u), &slots, t);
+    let cost = rules::step_energy(u) * modules::factors(&slots, t).1;
     (ticks, cost)
 }
 
@@ -522,7 +521,7 @@ fn disintegrate(game: &mut Game<'_>, pos: Pos, cost: f64) -> Shown {
     } else {
         1.0
     };
-    let percent = disassembly::share_percent(modules::count(&base::modules_at(game, pos), Module::Output) as usize);
+    let percent = disassembly::share_percent(modules::count(&base::modules_at(game, pos), Module::Yield) as usize);
     let entity = game.native_mod_block_entity(pos);
     let mut kept: BTreeMap<String, u32> = entity.as_ref().map(|e| read_json(&e.nbt, KEPT_KEY)).unwrap_or_default();
     let out = disassembly::take_apart(&recipe, percent, durability, &mut kept);
