@@ -1,0 +1,18 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    "aaa",
+    "afa",
+    "ccc"
+  ],
+  "key": {
+    "a": "rustcraft:crystallite",
+    "f": "minecraft:furnace",
+    "c": "minecraft:copper_ingot"
+  },
+  "result": {
+    "id": "rustcraft:alloy_3",
+    "count": 1
+  }
+}

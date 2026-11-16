@@ -1,0 +1,18 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    "bbb",
+    "bxb",
+    "brb"
+  ],
+  "key": {
+    "b": "rustcraft:starsteel",
+    "x": "minecraft:iron_pickaxe",
+    "r": "minecraft:redstone"
+  },
+  "result": {
+    "id": "rustcraft:breaker_4",
+    "count": 1
+  }
+}

@@ -7,8 +7,52 @@
       },
       "entries": [
         {
-          "type": "minecraft:item",
-          "name": "rustcraft:pump"
+          "type": "minecraft:alternatives",
+          "children": [
+            {
+              "type": "minecraft:item",
+              "name": "rustcraft:pump_2",
+              "conditions": [
+                {
+                  "condition": "minecraft:block_state_property",
+                  "block": "rustcraft:pump",
+                  "properties": {
+                    "tier": "2"
+                  }
+                }
+              ]
+            },
+            {
+              "type": "minecraft:item",
+              "name": "rustcraft:pump_3",
+              "conditions": [
+                {
+                  "condition": "minecraft:block_state_property",
+                  "block": "rustcraft:pump",
+                  "properties": {
+                    "tier": "3"
+                  }
+                }
+              ]
+            },
+            {
+              "type": "minecraft:item",
+              "name": "rustcraft:pump_4",
+              "conditions": [
+                {
+                  "condition": "minecraft:block_state_property",
+                  "block": "rustcraft:pump",
+                  "properties": {
+                    "tier": "4"
+                  }
+                }
+              ]
+            },
+            {
+              "type": "minecraft:item",
+              "name": "rustcraft:pump"
+            }
+          ]
         }
       ],
       "rolls": 1

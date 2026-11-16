@@ -7,8 +7,39 @@
       },
       "entries": [
         {
-          "type": "minecraft:item",
-          "name": "rustcraft:crafter"
+          "type": "minecraft:alternatives",
+          "children": [
+            {
+              "type": "minecraft:item",
+              "name": "rustcraft:crafter_3",
+              "conditions": [
+                {
+                  "condition": "minecraft:block_state_property",
+                  "block": "rustcraft:crafter",
+                  "properties": {
+                    "tier": "3"
+                  }
+                }
+              ]
+            },
+            {
+              "type": "minecraft:item",
+              "name": "rustcraft:crafter_4",
+              "conditions": [
+                {
+                  "condition": "minecraft:block_state_property",
+                  "block": "rustcraft:crafter",
+                  "properties": {
+                    "tier": "4"
+                  }
+                }
+              ]
+            },
+            {
+              "type": "minecraft:item",
+              "name": "rustcraft:crafter"
+            }
+          ]
         }
       ],
       "rolls": 1

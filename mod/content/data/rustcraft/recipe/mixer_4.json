@@ -1,0 +1,18 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    "bgb",
+    "gkg",
+    "bbb"
+  ],
+  "key": {
+    "b": "rustcraft:starsteel",
+    "g": "minecraft:glass",
+    "k": "minecraft:bucket"
+  },
+  "result": {
+    "id": "rustcraft:mixer_4",
+    "count": 1
+  }
+}

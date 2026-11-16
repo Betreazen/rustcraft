@@ -7,8 +7,39 @@
       },
       "entries": [
         {
-          "type": "minecraft:item",
-          "name": "rustcraft:mixer"
+          "type": "minecraft:alternatives",
+          "children": [
+            {
+              "type": "minecraft:item",
+              "name": "rustcraft:mixer_3",
+              "conditions": [
+                {
+                  "condition": "minecraft:block_state_property",
+                  "block": "rustcraft:mixer",
+                  "properties": {
+                    "tier": "3"
+                  }
+                }
+              ]
+            },
+            {
+              "type": "minecraft:item",
+              "name": "rustcraft:mixer_4",
+              "conditions": [
+                {
+                  "condition": "minecraft:block_state_property",
+                  "block": "rustcraft:mixer",
+                  "properties": {
+                    "tier": "4"
+                  }
+                }
+              ]
+            },
+            {
+              "type": "minecraft:item",
+              "name": "rustcraft:mixer"
+            }
+          ]
         }
       ],
       "rolls": 1

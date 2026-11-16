@@ -190,16 +190,23 @@ pub(super) fn draw(
 
 /// The block's name and its tier («Электропечь · ступень 1»).
 pub(super) fn title(game: &Game<'_>, batch: &mut HudBatch, o: [f32; 2], machine: Machine) {
-    let tier = match machine {
-        Machine::Crafter => 2,
-        _ => 1,
-    };
     let name = tr(
         &format!("block.{}", machine.block().replace(':', ".")),
         fallback_name(machine),
     );
-    let tier = tr_with("rustcraft.window.tier", "tier %s", &[tier.to_string()]);
+    let tier = tier_label(game, machine.block())
+        .unwrap_or_else(|| tr_with("rustcraft.window.tier", "tier %s", &["1".to_owned()]));
     title_line(game, batch, o, &name, Some(&tier), panel::WIDTH);
+}
+
+/// Slice 18, stream 3: «ступень N» of the open window's block, from its state (rustcraft_tiers);
+/// none for a block made in one tier only.
+pub(super) fn tier_label(game: &Game<'_>, block: &str) -> Option<String> {
+    let family = rustcraft_rules::tiers::family_of_block(block)?;
+    let tier = game
+        .native_screen_pos()
+        .map_or(family.first, |pos| crate::game::rustcraft_tiers::tier_of(game, pos, block));
+    Some(tr_with("rustcraft.window.tier", "tier %s", &[tier.to_string()]))
 }
 
 /// The title line (style section 3, «Заголовок»): the name in the value colour, after it in the

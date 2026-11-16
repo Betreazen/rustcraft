@@ -220,7 +220,9 @@ pub(super) fn draw(game: &Game<'_>, block: &str, batch: &mut HudBatch, o: [f32; 
     };
     let l = layout_of(kind);
     kit::background(game, batch, o, [WIDTH, l.height]);
-    kit::title_line(game, batch, o, &block_name(block), None, WIDTH);
+    // Slice 18, stream 3: a tiered block's title says its tier, read from the block.
+    let tier = kit::tier_label(game, block);
+    kit::title_line(game, batch, o, &block_name(block), tier.as_deref(), WIDTH);
     let Some(s) = sheet_now(game) else {
         let waiting = tr("rustcraft.window.waiting", "Waiting for the server…");
         text(game, batch, &waiting, o, [8.0, 18.0], LABEL);

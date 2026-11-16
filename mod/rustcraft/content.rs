@@ -701,6 +701,7 @@ fn declare_slice7(blocks: &mut Vec<Block>) {
             item: true,
             ..Block::default()
         });
+        with_tier(blocks.last_mut());
     }
 }
 
@@ -741,6 +742,43 @@ fn declare_machines(blocks: &mut Vec<Block>) {
             item: true,
             ..Block::default()
         });
+        with_tier(blocks.last_mut());
+    }
+}
+
+/// Slice 18, stream 3: a tiered block (rustcraft_rules::tiers::FAMILIES) declares its tier, 1 to
+/// 4, its first tier by default (rustcraft_tiers). A world saved before keeps each machine as its
+/// first tier.
+fn with_tier(block: Option<&mut Block>) {
+    use rustcraft_rules::tiers;
+    let Some(block) = block else { return };
+    let Some(family) = tiers::family_of_block(&block.id) else {
+        return;
+    };
+    block.state_properties.insert(
+        tiers::PROPERTY.to_owned(),
+        StateProperty::Enum {
+            values: tiers::VALUES.map(str::to_owned).to_vec(),
+        },
+    );
+    block
+        .default_state
+        .insert(tiers::PROPERTY.to_owned(), family.first.to_string());
+}
+
+/// Slice 18, stream 3: the items of the tiers above each family's first; each places its
+/// family's block, and rustcraft_tiers sets the tier.
+fn declare_tier_items(items: &mut Vec<Item>) {
+    for family in rustcraft_rules::tiers::FAMILIES {
+        for tier in family.tiers().skip(1) {
+            let Some(id) = family.item(tier) else { continue };
+            items.push(Item {
+                id,
+                template: "minecraft:iron_ingot".into(),
+                place_block: Some(family.block.into()),
+                ..Item::default()
+            });
+        }
     }
 }
 
@@ -748,6 +786,8 @@ fn declare_machines(blocks: &mut Vec<Block>) {
 /// does is all `native_use_item_on`'s (rustcraft_server::on_use_item_on).
 pub fn declare_items(items: &mut Vec<Item>) {
     declare_gear(items);
+    // Slice 18, stream 3: the machines' higher tiers.
+    declare_tier_items(items);
     // Slice 12: the facade (spec 15); a click with it is rustcraft_builder's.
     items.push(Item {
         id: "rustcraft:facade".into(),
@@ -810,13 +850,12 @@ pub fn declare_items(items: &mut Vec<Item>) {
             ..Item::default()
         });
     }
-    // The alloys and the capacity module: plain items, as an iron ingot is.
+    // The alloys: plain items, as an iron ingot is (the capacity module is one of the modules' ITEMS since slice 18).
     for id in [
         COPPERSTEEL,
         SPARKSTEEL,
         CRYSTALLITE,
         STARSTEEL,
-        MODULE_CAPACITY,
     ] {
         items.push(Item {
             id: id.into(),

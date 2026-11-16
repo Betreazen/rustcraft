@@ -6,4 +6,6 @@ fn rustcraft_state_for_placement(
 ) {
     crate::game::rustcraft_monorail::state_for_placement(level, state, context, answer);
     crate::game::rustcraft_base::state_for_placement(level, state, context, answer);
+    // Slice 18, stream 3: a tiered block takes the tier of the item placing it.
+    crate::game::rustcraft_tiers::state_for_placement(level, state, context, answer);
 }
