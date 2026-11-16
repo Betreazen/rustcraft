@@ -1050,5 +1050,14 @@
   "rustcraft.tank.no_group": "The tank is not ready yet",
   "rustcraft.tank.bucket_no_room": "No room in the tank for a bucket of it",
   "rustcraft.tank.bucket_empty": "Less than a bucket in the tank",
-  "rustcraft.tank.bucket_no_bucket": "No bucket takes it: it lives in tanks and channels"
+  "rustcraft.tank.bucket_no_bucket": "No bucket takes it: it lives in tanks and channels",
+  "rustcraft.util.trash.rate": "Destroys up to %s items or buckets a second",
+  "rustcraft.util.trash.filter_none": "Filter: none (set it on the joint with the wrench)",
+  "rustcraft.util.trash.filter": "Filter: %s",
+  "rustcraft.util.trash.burnt": "Burnt in a minute: %s · joint priority %s",
+  "rustcraft.util.disintegrator.taking": "Taking apart: %s · durability %s",
+  "rustcraft.util.disintegrator.taking_none": "Taking apart: nothing",
+  "rustcraft.util.disintegrator.share": "Share %s · kept for the next: %s",
+  "rustcraft.util.charger.charge": "Charge: %s",
+  "rustcraft.util.charger.charge_none": "Charge: nothing in it"
 }

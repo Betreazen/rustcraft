@@ -3698,5 +3698,14 @@
   "rustcraft.tank.no_group": "Бак ещё не готов",
   "rustcraft.tank.bucket_no_room": "В баке нет места для ведра этой жидкости",
   "rustcraft.tank.bucket_empty": "В баке меньше ведра",
-  "rustcraft.tank.bucket_no_bucket": "Это в ведро не набрать: оно живёт только в баках и каналах"
+  "rustcraft.tank.bucket_no_bucket": "Это в ведро не набрать: оно живёт только в баках и каналах",
+  "rustcraft.util.trash.rate": "Уничтожает до %s предметов или вёдер в секунду",
+  "rustcraft.util.trash.filter_none": "Фильтр не задан: задай его ключом на стыке",
+  "rustcraft.util.trash.filter": "Фильтр: %s",
+  "rustcraft.util.trash.burnt": "Сгорело за минуту: %s · приоритет стыка %s",
+  "rustcraft.util.disintegrator.taking": "Разбирает: %s · прочность %s",
+  "rustcraft.util.disintegrator.taking_none": "Разбирает: ничего",
+  "rustcraft.util.disintegrator.share": "Доля %s · накоплено: %s",
+  "rustcraft.util.charger.charge": "Заряд: %s",
+  "rustcraft.util.charger.charge_none": "Заряд: в заряднике ничего нет"
 }

@@ -50,6 +50,15 @@ pub enum Kind {
     Util(crate::utility::Util),
 }
 
+/// Slice 18: the rows a slice-12 window adds to its spec's: the trash's filter and burnt count,
+/// the disintegrator's item, share and kept fractions.
+fn extra_rows(u: crate::utility::Util) -> usize {
+    match u {
+        crate::utility::Util::Trash | crate::utility::Util::Disintegrator => 2,
+        _ => 0,
+    }
+}
+
 /// Which parts a window has, and how many of each it has room for.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Shape {
@@ -219,8 +228,10 @@ impl Kind {
                     // Slice 18 (UT7): every machine that works in steps has the three modes;
                     // the ones whose pace is the animals' or the water's do not.
                     mode: crate::modules::Holder::Util(u).takes(crate::modules::Module::Speed),
-                    rows: spec.rows,
-                    bars: 1,
+                    // Slice 18: the guide's windows' rows and bars (`ui.js` trash, disintegrator,
+                    // charger).
+                    rows: spec.rows + extra_rows(u),
+                    bars: 1 + usize::from(u == crate::utility::Util::Charger),
                     toggles: spec.toggles,
                     slots: if count > 1 { count } else { 0 },
                     ..Shape::default()

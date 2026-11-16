@@ -612,6 +612,8 @@ pub(super) fn tick(game: &mut Game<'_>, level: &mut LevelNet, tuning: &Tuning) {
     // Slice 18: each trash pays 1 E a bucket it destroyed.
     let destroyed = std::mem::take(&mut inv.destroyed);
     for (pos, mb) in destroyed {
+        let dimension = game.native_dimension().to_owned();
+        crate::game::rustcraft_utility::note_burnt(&dimension, pos, (mb / BUCKET) as u32);
         let e = machines::buffer_energy(game, pos);
         machines::set_buffer_energy(game, pos, e - mb as f64 / BUCKET as f64);
     }
