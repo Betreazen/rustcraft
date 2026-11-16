@@ -6,7 +6,8 @@
 //! - Armour of the next tier is made from the piece below and the new alloy, keeping the piece's
 //!   number: its charge, modules and enchantments.
 //! - A zipline rope comes down by itself five minutes after it was tied, both anchors with it.
-//! - The anvil puts technical books on a piece: I, then II, then III, and no further.
+//! - The anvil puts technical books on a piece as the game's books go: two of I make II, a book of
+//!   III gives III, nothing goes past III.
 
 use super::{Bench, Build, Scenario, at, plot_area};
 use crate::gear::{Held, Module};
@@ -24,7 +25,8 @@ pub const ALL: [Build; 6] = [
 
 const STONE: &str = "minecraft:stone";
 const CHARGER: &str = "rustcraft:charger";
-const OWNER: u128 = 0x5e1f_7e57_0000_0000_0000_0000_0000_0a18;
+/// Its own owner: the zipline scenarios' owners count their ropes (traversal's KEEPS is 0a18).
+const OWNER: u128 = 0x5e1f_7e57_0000_0000_0000_0000_0000_0b18;
 
 fn floor(b: &mut dyn Bench, o: Pos) -> Result<(), String> {
     for x in -1..=8 {
@@ -148,12 +150,18 @@ fn rope_comes_down_in_time(o: Pos, _: &Tuning) -> Scenario {
 }
 
 fn anvil_puts_the_books_on(o: Pos, _: &Tuning) -> Scenario {
-    Scenario::new("gear_anvil_puts_the_books_on", plot_area(o)).check("Capacity I, II, III on a blade, a fourth book does nothing", |b, _| {
-        let got = b.anvil_capacity("rustcraft:blade_3", 1, 4);
-        if got == [Some(1), Some(2), Some(3), None] {
+    Scenario::new("gear_anvil_puts_the_books_on", plot_area(o)).check(
+        "books of I raise a blade to II and no further, as the game's books; a book of III gives III",
+        |b, _| {
+            let ones = b.anvil_capacity("rustcraft:blade_3", 1, 3);
+            if ones != [Some(1), Some(2), None] {
+                return Err(format!("books of I gave {ones:?}"));
+            }
+            let three = b.anvil_capacity("rustcraft:blade_3", 3, 2);
+            if three != [Some(3), None] {
+                return Err(format!("books of III gave {three:?}"));
+            }
             Ok(())
-        } else {
-            Err(format!("the anvil gave {got:?}"))
-        }
-    })
+        },
+    )
 }
