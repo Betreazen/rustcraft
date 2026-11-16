@@ -670,7 +670,8 @@ fn saved_stack(payload: &str, count: u32) -> Option<ItemStack> {
 /// The key a stack goes under on the nets and in the storage: its id and damage, or, with other
 /// components or worn further than a press names, its id and its whole saved form (one item).
 pub(super) fn net_key(stack: &ItemStack) -> ItemKey {
-    if stack.extra.is_none() && term::addressable(stack.damage) {
+    // An all-default component box is no component (`ItemStack::tidy`).
+    if stack.extra.as_ref().is_none_or(|d| d.is_empty()) && term::addressable(stack.damage) {
         return keys::key(&stack.item, stack.damage);
     }
     let mut one = stack.clone();
