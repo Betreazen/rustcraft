@@ -1038,5 +1038,7 @@
   "rustcraft.backpack.no_room": "No room in the inventory to take the backpack off",
   "rustcraft.enchant.capacity": "Capacity %s",
   "rustcraft.enchant.thrift": "Thrift %s",
-  "rustcraft.gear.no_window": "No sockets: put the technical books on at the anvil"
+  "rustcraft.gear.no_window": "No sockets: put the technical books on at the anvil",
+  "rustcraft.anchor.owner_on": "%s · on the server",
+  "rustcraft.anchor.gets": "gets %s of %s E/s"
 }

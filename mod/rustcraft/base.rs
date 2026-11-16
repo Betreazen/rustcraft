@@ -147,6 +147,11 @@ struct Base {
     held: HashMap<String, BTreeSet<[i32; 2]>>,
     anchors: HashMap<String, Vec<Anchor>>,
     anchors_loaded: BTreeSet<String>,
+    /// Slice 18: every level's anchors (the world's `data/rustcraft_anchor_levels.json`), so a
+    /// level nobody is in opens for its anchors after a restart.
+    index: Option<anchor::Index>,
+    /// Slice 18: the share of its draw each anchor got last second, for its window's bar.
+    anchor_shares: HashMap<(String, Pos), f64>,
     /// Blocks placed by a player, owners due.
     owners_due: Vec<(u128, String, Pos)>,
     broken: Vec<(String, Pos)>,
@@ -520,6 +525,7 @@ pub(super) fn tick(game: &mut Game<'_>, dimension: &str, level: &LevelNet, t: &T
     deaths(game, t);
     if now.is_multiple_of(ANCHOR_EVERY) {
         buffs(game, now);
+        wake_levels(game);
         anchors(game, dimension, level, t);
     }
     windows(game, dimension, level, t);
@@ -1168,16 +1174,82 @@ fn load_anchors(game: &mut Game<'_>, dimension: &str) {
     }
     let host: &mut dyn Host = game;
     let list = ANCHORS.get(host, Holder::Level).unwrap_or_default();
-    let mut s = state();
-    s.anchors.insert(dimension.to_owned(), list);
-    s.anchors_loaded.insert(dimension.to_owned());
+    {
+        let mut s = state();
+        s.anchors.insert(dimension.to_owned(), list.clone());
+        s.anchors_loaded.insert(dimension.to_owned());
+    }
+    index_level(game, dimension, &list);
 }
 
 fn save_anchors(game: &mut Game<'_>, dimension: &str) {
     let list = state().anchors.get(dimension).cloned().unwrap_or_default();
     let host: &mut dyn Host = game;
-    if let Err(e) = ANCHORS.set(host, Holder::Level, list) {
+    if let Err(e) = ANCHORS.set(host, Holder::Level, list.clone()) {
         log::warn!("rustcraft: the anchors not saved: {e:?}");
+    }
+    index_level(game, dimension, &list);
+}
+
+// ---- Slice 18: anchors in every level ----
+
+const INDEX_FILE: &str = "rustcraft_anchor_levels.json";
+
+fn index_path(game: &Game<'_>) -> Option<std::path::PathBuf> {
+    game.native_world_dir().map(|w| w.join("data").join(INDEX_FILE))
+}
+
+/// The index of every level's anchors, read from the world's file the first time.
+fn index(game: &Game<'_>) -> anchor::Index {
+    if let Some(i) = state().index.clone() {
+        return i;
+    }
+    let read = index_path(game)
+        .and_then(|p| std::fs::read_to_string(p).ok())
+        .and_then(|text| serde_json::from_str::<anchor::Index>(&text).ok())
+        .unwrap_or_default();
+    state().index = Some(read.clone());
+    read
+}
+
+/// The level's anchors go into the index, written when it changed.
+fn index_level(game: &Game<'_>, dimension: &str, list: &[Anchor]) {
+    let mut i = index(game);
+    let before = i.clone();
+    i.set(dimension, list);
+    if i == before {
+        return;
+    }
+    state().index = Some(i.clone());
+    let Some(path) = index_path(game) else { return };
+    let written = serde_json::to_string(&i)
+        .map_err(std::io::Error::other)
+        .and_then(|json| {
+            let fresh = path.with_extension("json.tmp");
+            path.parent().map_or(Ok(()), std::fs::create_dir_all)?;
+            std::fs::write(&fresh, json)?;
+            std::fs::rename(&fresh, &path)
+        });
+    if let Err(e) = written {
+        log::warn!("rustcraft: the anchors' index was not saved: {e}");
+    }
+}
+
+/// Each second: a level not read yet that holds an anchor of a player on the server is opened at
+/// that anchor's chunk (`native_force_chunk_in`, API 413); the ticket goes into the level's held
+/// chunks, so its own anchors' tick keeps or lets it go.
+fn wake_levels(game: &mut Game<'_>) {
+    let mut online: BTreeSet<u128> = game.native_server_players().into_iter().map(|p| p.uuid).collect();
+    online.extend(pretended());
+    let loaded = state().anchors_loaded.clone();
+    for (dimension, chunk) in index(game).to_wake(&loaded, &online) {
+        if state().held.get(&dimension).is_some_and(|h| h.contains(&chunk)) {
+            continue;
+        }
+        if game.native_force_chunk_in(TICKET, &dimension, chunk, true) {
+            log::info!("rustcraft: {dimension} opened for an anchor at chunk {chunk:?}");
+            state().held.entry(dimension).or_default().insert(chunk);
+        }
     }
 }
 
@@ -1297,7 +1369,14 @@ fn anchors(game: &mut Game<'_>, dimension: &str, level: &LevelNet, t: &Tuning) {
             want.extend(anchor::chunks(a.pos, &slots, t));
         }
     }
-    state().shares.clear();
+    {
+        let mut s = state();
+        let got: Vec<(Pos, f64)> = s.shares.iter().map(|(p, v)| (*p, *v)).collect();
+        for (p, share) in got {
+            s.anchor_shares.insert((dimension.to_owned(), p), share);
+        }
+        s.shares.clear();
+    }
     let held = state().held.remove(dimension).unwrap_or_default();
     for c in held.difference(&want) {
         game.native_force_chunk(TICKET, *c, false);
@@ -1724,7 +1803,7 @@ fn anchor_sheet(game: &Game<'_>, dimension: &str, pos: Pos, t: &Tuning, s: &mut 
                     &[],
                 )
             },
-            Text::literal,
+            |n| line("rustcraft.anchor.owner_on", "%s · on the server", &[Text::literal(n)]),
         );
     s.rows
         .push(v(&line("rustcraft.anchor.owner", "Owner: %s", &[name])));
@@ -1743,11 +1822,22 @@ fn anchor_sheet(game: &Game<'_>, dimension: &str, pos: Pos, t: &Tuning, s: &mut 
             &[],
         ))],
     ];
-    s.rows.push(v(&Text::literal(format!(
-        "{:.0} E/s",
-        anchor::draw(chunks.len(), &slots, t)
-    ))));
+    // Slice 18: the energy bar, «получает X из Y Е/с» (guide `anchor`).
+    let draw = anchor::draw(chunks.len(), &slots, t);
+    let share = state().anchor_shares.get(&(dimension.to_owned(), pos)).copied().unwrap_or(0.0).clamp(0.0, 1.0);
     let st = anchor_state(dimension, pos);
+    let share = if matches!(st, Some(AnchorState::Holding | AnchorState::NoEnergy)) { share } else { 0.0 };
+    s.bars.push(SheetBar {
+        label: v(&line("rustcraft.window.energy", "Energy", &[])),
+        value: v(&line(
+            "rustcraft.anchor.gets",
+            "gets %s of %s E/s",
+            &[Text::literal(format!("{:.0}", draw * share)), Text::literal(format!("{draw:.0}"))],
+        )),
+        share,
+        energy: true,
+        colour: None,
+    });
     let severity = match st {
         Some(AnchorState::Holding) => Severity::Ok,
         Some(AnchorState::NoEnergy | AnchorState::NoOwner) => Severity::Bad,

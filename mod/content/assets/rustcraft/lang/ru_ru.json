@@ -3686,5 +3686,7 @@
   "rustcraft.backpack.no_room": "Нет места в инвентаре, чтобы снять рюкзак",
   "rustcraft.enchant.capacity": "Ёмкость %s",
   "rustcraft.enchant.thrift": "Бережливость %s",
-  "rustcraft.gear.no_window": "Гнёзд нет: технические книги накладываются на наковальне"
+  "rustcraft.gear.no_window": "Гнёзд нет: технические книги накладываются на наковальне",
+  "rustcraft.anchor.owner_on": "%s · на сервере",
+  "rustcraft.anchor.gets": "получает %s из %s Е/с"
 }

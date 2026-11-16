@@ -214,9 +214,9 @@ Audit: enchants «Книга накладывается на наковальн�
 
 Audit: anchor «в любом мире» DIFFERS, «Окно: … полоса энергии, на сервере» DIFFERS.
 
-**Files:** `base.rs` (anchors of every dimension loaded at the first tick of any level: the level attachment is read through each level's handle; window bar «получает X из Y Е/с» and owner line «· на сервере / · вышел»).
-- [ ] Rules: `anchor::window_bar(share, draw)` test.
-- [ ] Commit.
+**Files:** rules `anchor.rs` (`Index` of every level's anchors, `to_wake`), `base.rs` (the index in the world's `data/rustcraft_anchor_levels.json`, written when a level's anchors are read or change; each second a level not read yet with an anchor of an online owner is opened at that chunk by `native_force_chunk_in` (API 413), the ticket put into the level's held chunks so its own tick keeps or releases it; the window's energy bar «получает X из Y Е/с» and the owner line «Steve · на сервере»).
+- [x] Rules: `Index::set`, `Index::to_wake` with a test. Self-test: none (a restart with a level nobody is in is the bots' check); the bar is drawn from the share the anchors' tick keeps.
+- [x] Commit.
 
 ### Task 17: Turret windows as the handbook draws them
 
