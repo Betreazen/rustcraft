@@ -73,14 +73,14 @@ Audit: turret «Сцена: поворачивает голову и дуло» 
 
 Audit: turret «Убитый турелью моб даёт владельцу добычу и опыт» DIFFERS.
 
-**Files:** `rules/src/turret.rs`, `base.rs` (`attack`, `deaths`).
+**Files:** `rules/src/turret_owner.rs` (new), `base.rs` (`attack`, `deaths`).
 
 **Interfaces:** `pub fn owner_blow(health: f32, damage: f32, owner_here: bool) -> bool` — the shot that kills is struck by the owner (attacker = owner's entity, damage type `minecraft:arrow`) when the owner is in the level, so the game drops the mob's own experience and player-only loot and Path-of-craft-tree counts the owner's ranged kill itself; then no fixed experience and no `kill` report. Otherwise as before.
 
-- [ ] Tests: lethal shot with owner here → true; non-lethal → false; owner away → false.
-- [ ] GREEN, wiring; the `Hit` remembers `by_owner`; `deaths` skips experience and report for it.
-- [ ] Self-test: covered by the existing `turret_shoots_a_hostile_mob_only` (owner away → old path); new `turret_owner_blow_rule` none (a real owner player is the bots' check).
-- [ ] Commit.
+- [x] Tests: lethal shot with owner here → true; non-lethal → false; owner away → false.
+- [x] GREEN, wiring; the `Hit` remembers `by_owner`; `deaths` skips experience and report for it.
+- [x] Self-test: covered by the existing `turret_shoots_a_hostile_mob_only` (owner away → old path); new `turret_owner_blow_rule` none (a real owner player is the bots' check).
+- [x] Commit.
 
 ### Task 4: The charge bar under every gear icon
 

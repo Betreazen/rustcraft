@@ -28,3 +28,4 @@ pub mod turret;
 pub mod worker;
 // Slice 18, base and gear (stream 7).
 pub mod aim;
+pub mod turret_owner;

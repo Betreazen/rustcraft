@@ -37,6 +37,7 @@ use horizon_world::nbt::{Compound, JavaString, Tag};
 use rustcraft_rules::{
     aim,
     anchor::{self, Anchor, State as AnchorState},
+    turret_owner,
     geom::Pos,
     machines::{
         sheet::{
@@ -105,6 +106,8 @@ struct Hit {
     owner: u128,
     tick: u64,
     by: Striker,
+    /// Slice 18: the owner struck the killing shot themselves (rustcraft_rules::turret_owner).
+    by_owner: bool,
 }
 
 /// The turret's own bleeding on a mob, without SoulsCraft.
@@ -717,6 +720,7 @@ fn attack(
                 owner,
                 tick: now,
                 by: Striker::Turret,
+                by_owner: false,
             },
         );
     }
@@ -752,8 +756,33 @@ fn attack(
     if let Some(to) = mob_at {
         aim_and_beam(game, pos, to, Some(SHOT_BEAM));
     }
-    game.native_hurt_entity(dimension, id, t.turret_damage as f32, SHOT_TYPE, None);
+    if !owner_shot(game, dimension, id, owner, t.turret_damage as f32) {
+        game.native_hurt_entity(dimension, id, t.turret_damage as f32, SHOT_TYPE, None);
+    }
     turret::shown(l, true, Shown::Shooting(kind))
+}
+
+/// Slice 18: the shot that kills is the owner's when they are in this level
+/// (rustcraft_rules::turret_owner); true when it was struck so.
+fn owner_shot(game: &mut Game<'_>, dimension: &str, id: u32, owner: Option<u128>, damage: f32) -> bool {
+    let Some(owner) = owner else { return false };
+    let health = game.mobs.iter().find(|m| m.id == id).map_or(0.0, |m| m.health);
+    let entity = game
+        .native_server_players()
+        .into_iter()
+        .find(|p| p.uuid == owner && p.dimension == dimension && p.health > 0.0)
+        .map(|p| p.entity_id);
+    let Some(entity) = entity.filter(|_| turret_owner::owner_blow(health, damage, true)) else {
+        return false;
+    };
+    let Ok(attacker) = u32::try_from(entity) else { return false };
+    if !game.native_hurt_entity(dimension, id, damage, turret_owner::OWNER_SHOT, Some(attacker)) {
+        return false;
+    }
+    if let Some(h) = state().hits.get_mut(&id) {
+        h.by_owner = true;
+    }
+    true
 }
 
 // ---- Slice 18: the head turns to its target, the shot and the heal are beams ----
@@ -863,6 +892,11 @@ fn deaths(game: &mut Game<'_>, t: &Tuning) {
             });
             continue;
         }
+        // Slice 18: the owner's own killing shot: the game gave its experience and loot, and
+        // Path-of-craft-tree counts the owner's ranged kill itself.
+        if hit.by_owner {
+            continue;
+        }
         game.native_give_experience(hit.owner, t.turret_kill_experience);
         // SoulsCraft's hunter book (spec 27.1), apart from Path-of-craft-tree's report.
         state().souls_kills.push(SoulsKill {
@@ -932,6 +966,7 @@ pub(super) fn strike(
             owner,
             tick: now,
             by,
+            by_owner: false,
         },
     );
     game.native_hurt_entity(dimension, id, amount, SHOT_TYPE, None)
