@@ -236,6 +236,10 @@ pub struct Tuning {
     pub butcher_keep_default: u32,
     pub butcher_keep_min: u32,
     pub butcher_keep_max: u32,
+    // ---- Slice 18, stream 3 (machines) ----
+    /// A8: how much faster each tier above a machine's first works (guide `swap`: «работает
+    /// быстрее»; the guide names no number for most machines). **Proposal.**
+    pub tier_speed_step: f64,
 }
 
 impl Default for Tuning {
@@ -387,6 +391,8 @@ impl Default for Tuning {
             butcher_keep_default: 2,
             butcher_keep_min: 2,
             butcher_keep_max: 16,
+            // Slice 18, stream 3 (machines).
+            tier_speed_step: 0.5,
         }
     }
 }
