@@ -9,7 +9,7 @@
   "key": {
     "a": "rustcraft:sparksteel",
     "c": "minecraft:copper_ingot",
-    "s": "minecraft:amethyst_shard"
+    "s": "rustcraft:node"
   },
   "result": {
     "id": "rustcraft:node_2",

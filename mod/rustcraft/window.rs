@@ -450,7 +450,7 @@ fn answer(game: &mut Game<'_>, dimension: &str, level: &mut LevelNet, c: Click) 
     let p = page(&ctx, session.face, session.armed, clip.is_some());
     let index = usize::try_from(c.slot).unwrap_or(usize::MAX);
     let action = match &c.picked {
-        Some(item) => joint_window::pick(&p, item),
+        Some(item) => joint_window::pick_for(&p, item),
         None => joint_window::click(&p, index, c.right),
     };
     let mut next = session.clone();
@@ -684,7 +684,13 @@ fn stack_of(game: &Game<'_>, ctx: &Context, cell: &Cell) -> Option<ItemStack> {
         Cell::Filter {
             item: Some(item), ..
         } => {
-            let mut stack = ItemStack::new(item, 1);
+            // s18/pipe: a fluid in a fluid row's filter shows as its bucket.
+            let shown = if game.items().get(item).is_some() {
+                item.clone()
+            } else {
+                format!("{item}_bucket")
+            };
+            let mut stack = ItemStack::new(&shown, 1);
             let lore = styled(
                 &tr(
                     "rustcraft.window.filter.remove",

@@ -40,9 +40,11 @@ const SHARD: &str = "minecraft:amethyst_shard";
 
 const NODE_KEYS: [[(char, &str); 3]; 4] = [
     [('a', A1), ('c', "minecraft:copper_ingot"), ('s', SHARD)],
-    [('a', A2), ('c', "minecraft:copper_ingot"), ('s', SHARD)],
-    [('a', A3), ('c', "minecraft:copper_ingot"), ('s', SHARD)],
-    [('a', A4), ('c', "minecraft:copper_ingot"), ('s', SHARD)],
+    // Tiers 2–4 take the node of the tier below in the middle, not a shard: sparksteel, copper
+    // and a shard is the handbook's recipe of the output module too (data.js `mod_output`).
+    [('a', A2), ('c', "minecraft:copper_ingot"), ('s', "rustcraft:node")],
+    [('a', A3), ('c', "minecraft:copper_ingot"), ('s', "rustcraft:node_2")],
+    [('a', A4), ('c', "minecraft:copper_ingot"), ('s', "rustcraft:node_3")],
 ];
 
 /// The node of tier `tier` (1–4): copper-steel's recipe with that tier's alloy.
