@@ -5,7 +5,7 @@ use super::{Build, Scenario, at, plot_area, same};
 use crate::grow::{self, DRUSE, SEED, SHARD, STAGE};
 use crate::tuning::Tuning;
 
-pub const ALL: [Build; 8] = [
+pub const ALL: [Build; 10] = [
     shard_recipes,
     druse_breaks_into_shards,
     seed_grows_on_solution,
@@ -14,6 +14,8 @@ pub const ALL: [Build; 8] = [
     structure_unfed_window_and_look,
     miner_fills_a_load_dock,
     vein_window,
+    structure_three_by_three,
+    structure_cube,
 ];
 
 const TANK: &str = "rustcraft:tank";
@@ -246,6 +248,48 @@ fn vein_window(o: crate::geom::Pos, _t: &Tuning) -> Scenario {
         .check("the window shows boost", move |b, _| {
             same("mode", b.sheet(vein).and_then(|s| s.mode), Some(WorkMode::Boost.code()))
         })
+}
+
+/// E7: a fed box of `size` crystals gives the spec's number (3×3: 108, 3×3×3: 561) and drinks
+/// 0.1 bucket a minute a crystal.
+fn structure_box(name: &'static str, o: crate::geom::Pos, t: &Tuning, height: i32) -> Scenario {
+    use crate::power::{self as rules, Form, Shown};
+    let mut cells = Vec::new();
+    for y in 0..height {
+        for x in 0..3 {
+            for z in 0..3 {
+                cells.push(at(o, [2 + x, y, 2 + z]));
+            }
+        }
+    }
+    let n = cells.len();
+    let form = if height == 3 { Form::Box([3, 3, 3]) } else { Form::Box([1, 3, 3]) };
+    let total = rules::structure_output(n, form, true, t);
+    let tank = at(o, [1, 0, 2]);
+    let first = cells[0];
+    Scenario::new(name, plot_area(o))
+        .then("the crystals in a box, a tank of solution and a furnace", move |b, _| {
+            for &c in &cells {
+                b.place(c, CRYSTAL, &[])?;
+            }
+            b.place(tank, TANK, &[])?;
+            b.set_tank(tank, grow::SOLUTION, 16000)?;
+            b.place(at(o, [5, 0, 2]), "rustcraft:furnace", &[])
+        })
+        .until("it gives the spec's output", LIMIT, move |b, _| {
+            Ok(b.power(first).is_some_and(|v| v.blocks == n && v.shown == Shown::Gives(total)))
+        })
+        .until("one crystal drawn over the whole box", LIMIT, move |b, _| {
+            Ok(b.crystal_drawn(first).map(|d| d.0) == Some(Some([3, height, 3])))
+        })
+}
+
+fn structure_three_by_three(o: crate::geom::Pos, t: &Tuning) -> Scenario {
+    structure_box("s18_structure_3x3", o, t, 1)
+}
+
+fn structure_cube(o: crate::geom::Pos, t: &Tuning) -> Scenario {
+    structure_box("s18_structure_3x3x3", o, t, 3)
 }
 
 /// CR2: on a tank of water the seed stands; broken, it gives its one shard back.
