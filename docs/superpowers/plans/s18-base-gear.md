@@ -157,10 +157,10 @@ Audit: eshield «Топор выключает на 5 / 3 / 1,5 с» DIFFERS, «
 
 Audit: rifle «Сцена: луч выстрела» MISSING, «приближение при прицеливании» MISSING.
 
-**Files:** `gear.rs::shoot` (particles from the muzzle to the hit or the wall), new `hook_fov.rs` (client: rifle in the main hand and `key.use` held → modifier × 0.5), rules `RIFLE_ZOOM`.
+**Files:** `gear.rs::shoot` (particles from the muzzle to the hit or the wall), new `hook_fov.rs` (client: rifle in the main hand (`native_held`) and `key.use` held (`native_mapping`, read in the client tick) → modifier × 0.5), rules `RIFLE_ZOOM`, `zoom`, `BEAM_STEP`. Right click still shoots at once; holding it aims.
 
-- [ ] Test: `beam` reused from turret; `zoom(base) == base * 0.5`.
-- [ ] Commit.
+- [x] Test: `beam` reused from turret; `zoom(base) == base * 0.5`.
+- [x] Commit.
 
 ### Task 11: The scout compass points and switches
 

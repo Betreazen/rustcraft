@@ -455,7 +455,21 @@ fn shoot(game: &mut Game<'_>, player: &horizon_client::mod_api::NativeServerPlay
             shot::Target { id: m.id, lo: [p.x - w, p.y, p.z - w], hi: [p.x + w, p.y + h, p.z + w] }
         })
         .collect();
-    if let Some(target) = shot::hit(eye, dir, &targets, wall, rules::RIFLE_RANGE) {
+    let hit = shot::hit(eye, dir, &targets, wall, rules::RIFLE_RANGE);
+    // Slice 18: the shot's beam, from the muzzle to the creature hit, or to the wall, or its range.
+    let end = hit
+        .and_then(|id| targets.iter().find(|t| t.id == id))
+        .map(|t| [(t.lo[0] + t.hi[0]) / 2.0, (t.lo[1] + t.hi[1]) / 2.0, (t.lo[2] + t.hi[2]) / 2.0])
+        .unwrap_or_else(|| {
+            let d = wall.min(rules::RIFLE_RANGE);
+            [eye[0] + dir[0] * d, eye[1] + dir[1] * d, eye[2] + dir[2] * d]
+        });
+    let muzzle = [eye[0] + dir[0] * 0.8, eye[1] - 0.15 + dir[1] * 0.8, eye[2] + dir[2] * 0.8];
+    let options = horizon_client::particles::ParticleOptions::named("minecraft:electric_spark".to_owned());
+    for p in rustcraft_rules::aim::beam(muzzle, end, rules::BEAM_STEP) {
+        game.with_level(|_, level, _| level.native_send_particles(&options, None, p, [0.0; 3], 0.0, 1));
+    }
+    if let Some(target) = hit {
         game.native_hurt_entity(&player.dimension, target, rules::RIFLE_DAMAGE, "minecraft:arrow", Some(me));
     }
 }
@@ -620,8 +634,21 @@ pub(super) fn draw_window(game: &Game<'_>, batch: &mut horizon_client::hud::HudB
     }
 }
 
-/// The window's tick: a dash waiting is pushed.
+/// Slice 18: whether this window's player aims the rifle (in the main hand, its use key held).
+static AIMING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// `native_compute_fov_modifier` on a client: aiming the rifle zooms twice.
+pub(super) fn fov(modifier: &mut f32) {
+    if AIMING.load(std::sync::atomic::Ordering::Relaxed) {
+        *modifier = rules::zoom(*modifier);
+    }
+}
+
+/// The window's tick: a dash waiting is pushed; whether the rifle is aimed.
 pub(super) fn client_tick(game: &mut Game<'_>) {
+    let rifle = game.native_held().is_some_and(|(item, _, _)| item == "rustcraft:rifle");
+    let aiming = rifle && game.native_playing() && game.native_mapping("key.use").is_some_and(|(down, _)| down);
+    AIMING.store(aiming, std::sync::atomic::Ordering::Relaxed);
     let push = PUSH.lock().unwrap_or_else(PoisonError::into_inner).take();
     if let Some(p) = push {
         game.native_push_player(p);

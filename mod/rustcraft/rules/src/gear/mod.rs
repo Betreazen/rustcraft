@@ -249,6 +249,16 @@ pub const RIFLE_DAMAGE: f32 = 16.0;
 pub const RIFLE_RANGE: f64 = 64.0;
 pub const RIFLE_COOLDOWN_TICKS: u64 = 25;
 pub const RIFLE_SHOT: f64 = 400.0;
+/// Slice 18: aiming the rifle (its use key held) halves the field of view (guide `rifle`:
+/// «при прицеливании правой кнопкой вид приближается вдвое»).
+pub const RIFLE_ZOOM: f32 = 0.5;
+/// Beam points along a rifle shot or a turret's, this far apart, blocks.
+pub const BEAM_STEP: f64 = 0.5;
+
+/// The field-of-view scale while aiming, from the game's own.
+pub fn zoom(modifier: f32) -> f32 {
+    modifier * RIFLE_ZOOM
+}
 
 /// 12.5: the zipline reaches 32 blocks, holds 16 charges (a string gives one back) and carries its
 /// rider at a cart's 8 blocks a second.
@@ -515,6 +525,12 @@ mod tests {
         assert_eq!(bar(1.0, 0.0), 0);
         assert_ne!(bar_rgb(2), bar_rgb(13));
         assert!(bar(1.0, 10_000.0) >= 1, "a little charge still shows");
+    }
+
+    #[test]
+    fn aiming_the_rifle_zooms_twice() {
+        assert_eq!(zoom(1.0), 0.5);
+        assert_eq!(zoom(1.1), 0.55);
     }
 
     #[test]

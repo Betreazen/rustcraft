@@ -1093,3 +1093,14 @@ bindings = [
   { name = "at", ty = "[f64; 3]", value = "at" },
   { name = "canceled", ty = "&mut bool", value = "&mut *canceled" },
 ]
+
+# Aiming the energy rifle zooms twice (client, API 362).
+[[injection]]
+id = "compute_fov_modifier"
+hook = "compute_fov_modifier"
+hook_version = 1
+kind = "HEAD"
+helper = "hook_fov.rs"
+bindings = [
+  { name = "modifier", ty = "&mut f32", value = "&mut *modifier" },
+]
