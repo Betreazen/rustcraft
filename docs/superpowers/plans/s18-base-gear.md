@@ -222,8 +222,9 @@ Audit: anchor «в любом мире» DIFFERS, «Окно: … полоса �
 
 Audit: turret «Цели чипами», «Окно поддержки: Игроков в радиусе, Лечит: Alex · 6 из 20», «Окно с ошибкой роли: Работают / Не работает».
 
-**Files:** `base.rs::turret_sheet`, rules `turret::window_rows`.
-- [ ] Tests for the rows; commit.
+**Files:** `base.rs::turret_sheet` (targets as the sheet's chips, fixed; support rows «Игроков в радиусе», «Лечит: Alex · 6 из 20»; one row «Работают … · не работает …» for effect modules in a support turret; the «N E/s» row gave way, the energy bar stays), `rules/src/machines/sheet.rs` (stream 3's file: the turret's and the anchor's `Shape` only — turret rows 5 + 4 toggles, anchor rows 2 + a bar).
+- [x] Test: the layout test `every_window_fits_the_screen_and_its_parts_do_not_overlap` holds the new shapes; the rows are the window self-tests' and the bots' screenshots.
+- [x] Commit.
 
 ### Task 18: Zipline anchor ghost (check) and the README checks
 

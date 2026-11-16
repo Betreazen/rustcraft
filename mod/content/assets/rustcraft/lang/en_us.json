@@ -1040,5 +1040,12 @@
   "rustcraft.enchant.thrift": "Thrift %s",
   "rustcraft.gear.no_window": "No sockets: put the technical books on at the anvil",
   "rustcraft.anchor.owner_on": "%s · on the server",
-  "rustcraft.anchor.gets": "gets %s of %s E/s"
+  "rustcraft.anchor.gets": "gets %s of %s E/s",
+  "rustcraft.turret.targets_fixed": "Fixed: a turret never shoots players, pets or peaceful mobs",
+  "rustcraft.turret.target_hostile": "hostile mobs",
+  "rustcraft.turret.target_players": "players",
+  "rustcraft.turret.target_pets": "pets",
+  "rustcraft.turret.target_peaceful": "peaceful mobs",
+  "rustcraft.turret.players": "Players in range: %s",
+  "rustcraft.turret.working": "Work: %s · do not work: %s"
 }

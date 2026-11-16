@@ -3688,5 +3688,12 @@
   "rustcraft.enchant.thrift": "Бережливость %s",
   "rustcraft.gear.no_window": "Гнёзд нет: технические книги накладываются на наковальне",
   "rustcraft.anchor.owner_on": "%s · на сервере",
-  "rustcraft.anchor.gets": "получает %s из %s Е/с"
+  "rustcraft.anchor.gets": "получает %s из %s Е/с",
+  "rustcraft.turret.targets_fixed": "Всегда так: турель не стреляет по игрокам, питомцам и мирным мобам",
+  "rustcraft.turret.target_hostile": "враждебные мобы",
+  "rustcraft.turret.target_players": "игроки",
+  "rustcraft.turret.target_pets": "питомцы",
+  "rustcraft.turret.target_peaceful": "мирные мобы",
+  "rustcraft.turret.players": "Игроков в радиусе: %s",
+  "rustcraft.turret.working": "Работают: %s · не работает: %s"
 }

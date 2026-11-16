@@ -1682,6 +1682,7 @@ fn turret_sheet(game: &Game<'_>, dimension: &str, pos: Pos, t: &Tuning, s: &mut 
             &[],
         )),
     ];
+    s.toggles = target_chips();
     let range = Text::literal(format!("{:.0}", l.range(t)));
     s.rows.push(v(&line(
         "rustcraft.turret.range",
@@ -1689,6 +1690,7 @@ fn turret_sheet(game: &Game<'_>, dimension: &str, pos: Pos, t: &Tuning, s: &mut 
         &[range],
     )));
     if support {
+        support_rows(game, dimension, pos, &slots, &l, t, s);
         let b = turret::buffs(&l, t);
         let pct = |f: f64| Text::literal(format!("{:.0}%", f * 100.0));
         let mut parts = Vec::new();
@@ -1726,8 +1728,7 @@ fn turret_sheet(game: &Game<'_>, dimension: &str, pos: Pos, t: &Tuning, s: &mut 
         if !parts.is_empty() {
             s.rows.push(v(&joined(parts)));
         }
-        s.rows
-            .push(v(&Text::literal(format!("{:.0} E/s", l.support_draw(t)))));
+        role_rows(&slots, s);
     } else {
         s.rows.push(v(&line(
             "rustcraft.turret.shot",
@@ -1784,6 +1785,70 @@ fn turret_sheet(game: &Game<'_>, dimension: &str, pos: Pos, t: &Tuning, s: &mut 
         |x| shown_text(&x),
     );
     s.status = status(severity, &text);
+}
+
+// ---- Slice 18: the turret's window as the handbook draws it ----
+
+/// The targets as chips (ui.js `turret`): hostile mobs on; players, pets and peaceful mobs off,
+/// always (they are not switches).
+fn target_chips() -> Vec<rustcraft_rules::machines::sheet::Toggle> {
+    let fixed = line("rustcraft.turret.targets_fixed", "Fixed: a turret never shoots players, pets or peaceful mobs", &[]);
+    [
+        ("minecraft:zombie_head", "rustcraft.turret.target_hostile", "hostile mobs", true),
+        ("minecraft:player_head", "rustcraft.turret.target_players", "players", false),
+        ("minecraft:bone", "rustcraft.turret.target_pets", "pets", false),
+        ("minecraft:wheat", "rustcraft.turret.target_peaceful", "peaceful mobs", false),
+    ]
+    .into_iter()
+    .map(|(icon, key, fallback, on)| rustcraft_rules::machines::sheet::Toggle {
+        icon: icon.to_owned(),
+        name: v(&line(key, fallback, &[])),
+        on,
+        hint: v(&fixed),
+    })
+    .collect()
+}
+
+/// The support window's players in range and the one healed, «Лечит: Alex · 6 из 20».
+#[allow(clippy::too_many_arguments)]
+fn support_rows(game: &Game<'_>, dimension: &str, pos: Pos, _slots: &[Option<Module>], l: &Loadout, t: &Tuning, s: &mut Sheet) {
+    let at = center(pos);
+    let range = l.range(t);
+    let players: Vec<_> = game
+        .native_server_players()
+        .into_iter()
+        .filter(|p| p.dimension == dimension && p.health > 0.0 && p.game_mode != 3 && distance(at, p.position) <= range)
+        .collect();
+    s.rows.push(v(&line(
+        "rustcraft.turret.players",
+        "Players in range: %s",
+        &[Text::literal(players.len().to_string())],
+    )));
+    if let Some(Shown::Healing(name)) = turret_shown(dimension, pos)
+        && let Some(p) = players.iter().find(|p| p.name == name)
+    {
+        s.rows.push(v(&line(
+            "rustcraft.turret.healing",
+            "Heals: %s · %s of 20 health",
+            &[Text::literal(name.clone()), Text::literal(format!("{:.0}", p.health))],
+        )));
+    }
+}
+
+/// A support turret holding effect modules: which modules work and which do not (ui.js).
+fn role_rows(slots: &[Option<Module>], s: &mut Sheet) {
+    let effect = |m: &Module| matches!(m, Module::Bleed | Module::Poison | Module::Slow);
+    let name = |m: &Module| Text::translate(&format!("item.{}", m.item().replace(':', ".")), &[]);
+    let idle: Vec<Text> = slots.iter().flatten().filter(|m| effect(m)).map(name).collect();
+    if idle.is_empty() {
+        return;
+    }
+    let working: Vec<Text> = slots.iter().flatten().filter(|m| !effect(m)).map(name).collect();
+    s.rows.push(v(&line(
+        "rustcraft.turret.working",
+        "Work: %s · do not work: %s",
+        &[joined(working), joined(idle)],
+    )));
 }
 
 fn anchor_sheet(game: &Game<'_>, dimension: &str, pos: Pos, t: &Tuning, s: &mut Sheet) {
