@@ -132,7 +132,7 @@
 
 ### Task 13: Kitchen — pages, milk from a tank, empty buckets back/none, 4 s, «Нет молока в баке», handbook dish list
 - Pages: page = chosen dish (toggle row picks the dish of the page in view; pages 1 + capacity modules); `KITCHEN_RECIPES` without the golden carrot / apple (not in the handbook); milk: a recipe with `milk_bucket` takes 1000 mB of `rustcraft:milk` from a tank it touches instead (helper `fluids::take_touching` / `put_touching`, added block in `fluids.rs`, flagged), no bucket item; step 80 ticks; window rows: page tabs, the dish, its ingredients, milk bar.
-- [ ] done
+- [x] done (rules `utility::kitchen`; fluids.rs block `touching_amount/take_touching/put_touching`, flagged; tank = the one it touches, as the mixer's water — a fluid-channel joint for the kitchen would need fluids.rs net code of stream 3; milk buckets as items still work and leave their buckets; self-test `kitchen18_cake_with_milk_from_a_tank`; try pending)
 
 ### Task 14: Fishery — sky over the water, Lure, rod kept at its last point («Удочка изношена»), storage module, no speed, window rows
 - [ ] done
