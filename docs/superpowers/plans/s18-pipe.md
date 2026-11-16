@@ -77,10 +77,10 @@ Files: `rules/src/net/node_window.rs` (rows of the window from topology: axis li
 
 ### Task 8: Wrench on machines — rotate; sneaking lifts with contents
 Files: `rules/src/net/wrench.rs` (`rotate(facing) -> facing`, what a click does), `transport.rs` right-click path.
-- [ ] RED/GREEN: rotation order N→E→S→W; up/down stay.
-- [ ] rotate: `facing` property set in place; lift: block entity saved into the item's custom data, restored on placing.
-- [ ] self-test `pipe_wrench_rotates`.
-- [ ] commit.
+- [x] RED/GREEN: rotation order N→E→S→W; up/down stay.
+- [x] rotate: `facing` property set in place; lift: block entity saved into the item's custom data, restored on placing.
+- [x] self-test `pipe_wrench_rotates`.
+- [x] commit.
 
 ### Task 9: Wrench in hand — bottlenecks and see-through facades (F5)
 Files: `rules/src/net/bottleneck.rs` (housings whose channel tier is the net's min and lower than another's on the net), client drawing in the facade draw path (skip facade while the local player holds a wrench; outline bottleneck housings).
@@ -116,4 +116,5 @@ Files: `window.rs` (rows «Гнездо / Канал / Направление / 
 - Task 5: 9f124a6 (mode names, slowed text, «Под фальш-панелью»)
 - Task 6: 0b98a41 (covered/F4, facade back on break, sneaking wrench takes the housing)
 - Task 7: bfa1030 (node window, own mod screen `rustcraft:node`; line boost on item nets)
+- Task 8: 05285c2 (wrench turns machines, lifts them with contents; workers stay stream 6)
 - try: not run yet (bench maintenance.txt of the pack session holds it)
