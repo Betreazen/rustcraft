@@ -27,6 +27,9 @@ pub use super::scenes::{LOOKS, SCENES};
 pub enum Look {
     /// An item's icon (`minecraft:stone`, `rustcraft:crusher`).
     Item(&'static str),
+    /// A block with its moving parts, as a still (assets/models/poses_mc.py): the item, drawn
+    /// with the item model (`rustcraft:hb/<block>_on` working, `_still` standing).
+    Model(&'static str, &'static str),
     /// A cube of one colour (ARGB): water, lava, the projector's ghost.
     Tint(u32),
     /// A dropped item, as the guide draws one: a little cube of one colour (ARGB), `DROP` of a

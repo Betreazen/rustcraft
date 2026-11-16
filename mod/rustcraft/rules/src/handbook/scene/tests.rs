@@ -90,6 +90,23 @@ fn every_look_is_an_item_the_mapping_knows() {
                 }
             }
             Look::Tint(argb) | Look::Drop(argb) => assert!(argb >> 24 > 0, "an invisible tint"),
+            Look::Model(item, model) => {
+                let name = item.strip_prefix("rustcraft:").expect(item);
+                let still = model.strip_prefix("rustcraft:hb/").expect(model);
+                assert!(
+                    still == format!("{name}_on") || still == format!("{name}_still"),
+                    "{model}"
+                );
+                if repo_file("mod/content/assets/rustcraft/lang/ru_ru.json").is_some() {
+                    for path in [
+                        format!("mod/content/assets/rustcraft/items/{name}.json"),
+                        format!("mod/content/assets/rustcraft/items/hb/{still}.json"),
+                        format!("mod/content/assets/rustcraft/models/item/hb/{still}.json"),
+                    ] {
+                        assert!(repo_file(&path).is_some(), "{model}: no {path}");
+                    }
+                }
+            }
         }
     }
     for s in SCENES {

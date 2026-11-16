@@ -39,6 +39,9 @@ ROOT = HERE.parent.parent
 GUIDE = ROOT / 'docs' / 'showcase' / 'js'
 ITEMS = ROOT / 'mod' / 'content' / 'assets' / 'rustcraft' / 'items'
 TABLE = ROOT / 'mod' / 'rustcraft' / 'rules' / 'src' / 'handbook' / 'scenes.rs'
+sys.path.insert(0, str(HERE))
+import poses_mc  # noqa: E402
+POSES = poses_mc.Poses()
 PREFIX = 'rustcraft.handbook.scene.'
 
 # The guide's scripts as its page loads them (index.html), with what models.js gives the others,
@@ -55,7 +58,7 @@ RC.TIER_COLOR = ['', '#c57f52', '#e2bd55', '#69d2d8', '#a184f2'];
 RC.CH_COLOR = { i: '#ffa53c', f: '#4c9bf5', e: '#ffe14a', '-': '#15171c' };
 for (const f of ['data.js', 'info.js', 'scenes.js']) run(f);
 const stepTime = (st) => Math.max(st.dur || 5, 3 + st.text.length / 14);
-const KEEP = ['tier', 'tool', 'color'];
+const KEEP = ['tier', 'tool', 'color', 'on'];
 const out = [];
 for (const [id, def] of Object.entries(RC.SCENES)) {
   const s = new RC.Scene();
@@ -169,7 +172,7 @@ def look_of(o, have):
     else:
         name = RENAME.get(t, t)
     if have(name):
-        return ('item', 'rustcraft:' + name)
+        return POSES.look(name, o.get('on')) or ('item', 'rustcraft:' + name)
     return None
 
 
@@ -348,9 +351,14 @@ def build(page_ids, have):
         scenes.append('    Scene { id: %s, steps: &[\n        %s,\n    ] },' % (
             rust_str(sc['id']), ',\n        '.join(steps)))
     looks = []
-    for kind, value in t.looks:
-        looks.append('Look::Item(%s)' % rust_str(value) if kind == 'item'
-                     else 'Look::%s(0x%08x)' % ('Drop' if kind == 'drop' else 'Tint', value))
+    for look in t.looks:
+        kind, value = look[0], look[1]
+        if kind == 'item':
+            looks.append('Look::Item(%s)' % rust_str(value))
+        elif kind == 'model':
+            looks.append('Look::Model(%s, %s)' % (rust_str(value), rust_str(look[2])))
+        else:
+            looks.append('Look::%s(0x%08x)' % ('Drop' if kind == 'drop' else 'Tint', value))
     lists = ['const B%d: &[Block] = &[%s];' % (i, ','.join(rows)) for i, rows in enumerate(t.lists)]
     paths = ['const P%d: &[[f32; 3]] = %s;' % (i, p) for i, p in enumerate(t.paths)]
     text = ('//! The handbook\'s scenes, written by assets/models/scenes_mc.py (through handbook_mc.py)\n'
@@ -364,7 +372,8 @@ def build(page_ids, have):
             % (',\n    '.join(looks), '\n'.join(scenes),
                '\n'.join('#[rustfmt::skip]\n' + line for line in lists),
                '\n'.join('#[rustfmt::skip]\n' + line for line in paths)))
-    summary = {'scenes': len(scenes), 'steps': steps_n, 'looks': len(t.looks), 'lists': len(t.lists),
+    stills = POSES.write()
+    summary = {'stills': stills, 'scenes': len(scenes), 'steps': steps_n, 'looks': len(t.looks), 'lists': len(t.lists),
                'dropped': dropped, 'badges': badges, 'numbers': numbers, 'most': most}
     return text, ru, {}, summary
 

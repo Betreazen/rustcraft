@@ -290,6 +290,7 @@ def main():
     print('%d pages in %d sections; %d Russian and %d English lines%s' % (
         len(rows), len(sections), len(ru), len(en), ('; rewrote ' + ', '.join(changed)) if changed else ''))
     dropped = ', '.join('%s x%d' % kv for kv in sorted(done['dropped'].items())) or 'nothing'
+    print('%d stills of blocks with their moving parts (poses_mc.py)' % done['stills'])
     print('%d scenes, %d steps, %d looks, %d block lists (at most %d blocks a step); dropped: %s; '
           '%d labels (badges and name tags); %d captions have digits (H4)' % (
               done['scenes'], done['steps'], done['looks'], done['lists'], done['most'], dropped,

@@ -40,7 +40,9 @@
 //   (`native_fill`, native_hooks.rs:10842-10846), everything cut to the panel
 //   (`HudBatch::clip_since`, hud.rs:1895). The guide's badges and name tags are small plates of
 //   text above their points (the text scaled down with `HudBatch::scale_since`), a dropped item a
-//   little cube of its colour. The scene moves by the window's own clock and goes on
+//   little cube of its colour. A block with moving parts is drawn with a still of its model and
+//   parts in the step's state (`native_item_model`, API 111, native_hooks.rs:10992-11016; the
+//   stills are item models of the content mod's, assets/models/poses_mc.py). The scene moves by the window's own clock and goes on
 //   to its next step by itself; the step buttons in the bottom row step it by hand. A block
 //   under the mouse names its item (`native_gui_tooltip`, native_client_services.rs:472-474).
 use crate::game::{
@@ -585,7 +587,9 @@ fn scene_part(game: &Game<'_>, batch: &mut HudBatch, o: [f32; 2], page: usize, s
     if kit::hovered(game, o, panel) {
         let cursor = game.native_cursor();
         let over = [cursor[0] - at[0], cursor[1] - at[1]];
-        if let Some(Look::Item(id)) = scene::pick(&drawn, &fit, over).map(|i| drawn[i].look) {
+        if let Some(Look::Item(id) | Look::Model(id, _)) =
+            scene::pick(&drawn, &fit, over).map(|i| drawn[i].look)
+        {
             game.native_gui_tooltip(batch, &[item_name(game, id)], cursor);
         }
     }
@@ -604,6 +608,17 @@ fn look(game: &Game<'_>, batch: &mut HudBatch, at: [f32; 2], d: &scene::Drawn, f
             for (corners, light) in scene::cube_faces(c, fit.scale) {
                 game.native_quad(batch, corners, scene::shaded(argb, light));
             }
+        }
+        Look::Model(id, model) => {
+            let side = fit.icon();
+            let corner = d.corner(side);
+            game.native_item_model(
+                batch,
+                id,
+                model,
+                [at[0] + corner[0], at[1] + corner[1]],
+                side,
+            );
         }
         Look::Drop(argb) => {
             for (corners, light) in scene::cube_faces(c, fit.scale * scene::DROP) {

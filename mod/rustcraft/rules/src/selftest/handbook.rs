@@ -102,7 +102,7 @@ fn scenes_show_known_items(o: Pos, _: &Tuning) -> Scenario {
             let unknown: Vec<&str> = scene::LOOKS
                 .iter()
                 .filter_map(|l| match *l {
-                    scene::Look::Item(id) => Some(id),
+                    scene::Look::Item(id) | scene::Look::Model(id, _) => Some(id),
                     scene::Look::Tint(_) | scene::Look::Drop(_) => None,
                 })
                 .filter(|i| !b.item_known(i))
