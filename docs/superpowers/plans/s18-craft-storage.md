@@ -44,30 +44,30 @@
 - `keys::parse` returns (item, damage); new `keys::payload(key) -> Option<&str>`.
 - Wire: `Line.damage` top bit `VARIANT = 0x8000` marks a component line whose low 11 bits are its index among the store's component keys of that item (sorted); `Listing.variants: Vec<(u16 item, u16 index, String payload)>` so the client builds the stack (`save::item_from_nbt`) to draw and name it.
 - Press: `ItemRef = (number, damage_or_variant)`; encode: a variant press sets bit 31 (negative i32) with the 11-bit index in the damage field.
-- [ ] rules tests: key round trip; two enchanted books with different payloads are two keys; wire round trip with variants; press round trip with a variant.
-- [ ] wiring + self-test `storage_keeps_enchanted_book` (a hopper-fed enchanted book and a named stone go into the storage and come back out whole).
-- [ ] commit
+- [x] rules tests: key round trip; two enchanted books with different payloads are two keys; wire round trip with variants; press round trip with a variant.
+- [x] wiring + self-test `storage18_keeps_component_stacks` (a hopper-fed enchanted book and a named stone go into the storage and come back out whole).
+- [x] commit 3424fe0 (in-world run: pending the first try)
 
 ### Task 2: Stack module S3 and the terminal's three sockets (stack, recipe book, filter)
 
 **Files:** `rules/src/storage/modules.rs` (new: ids above, `stack_tier(items) -> u8`), `rules/src/storage/terminal.rs` (sockets rects `SOCKETS: [[f32;2];3]`, `Press::Socket(k)` replacing `Press::Book`), `storage.rs` (sockets saved in the terminal's compound `sockets`; `Store::stack_module` set from the storage's terminals on rescan/press), `terminal.rs` (draw three sockets).
 - rules: `stack_tier(&[Some("rustcraft:module_stack_1024")]) == 2`; the best module of all the storage's terminals counts; `Store::stack_of(64)` = 1024 with tier 2.
 - self-test `storage_stack_module_raises_the_stack`: a 1-cell storage takes 27×256 stone with the module.
-- [ ] done
+- [x] done 7827b42 (with Task 3; self-tests `storage18_stack_module_raises_the_stack`, `storage18_filter_socket`; try pending)
 
 ### Task 3: Filter module and the «своя» tab (TM1)
 
 **Files:** `rules/src/storage/view.rs` (`Tab::Own`, `Facts.own`), `rules/src/storage/filter.rs` (new: the filter's list in custom data `rustcraft:filter`: item ids, at most 27), `storage.rs` (Listing `own: Vec<u16>` from the filter module in a socket), `terminal.rs` (fifth tab), filter window: right click with the filter module opens a three-row server menu (`native_open_menu`, the tablet's way) — a click with an item on the cursor marks it, a click on a marked item unmarks it (`filter_menu.rs`, new, own file).
 - rules tests: mark / unmark / limit 27; `Tab::Own.shows` only marked ids.
 - self-test `storage_filter_tab_lists_marked`: (rules-level view with a filter list; in world: filter module in a socket makes `Listing.own` non-empty).
-- [ ] done
+- [x] done 7827b42 (filter window = bundle `filter.rs`: a click on an inventory item marks it, since a server menu has no cursor; try pending)
 
 ### Task 4: Extra terminals anywhere on the magistral (S6)
 
 **Files:** `rules/src/storage/cells.rs` (`terminal_storage_on_net(terminal, cell_of, topology)`: a terminal touching no cell takes the storage that is a joint of an item net its touched housing is on), `storage.rs` (rescan uses it; needs the level topology → `rescan` gets `&Topology`; the caller in `server.rs` passes it — one added argument).
 - rules test: terminal two housings away on the same item net finds the storage; on another net — none.
 - self-test `storage_far_terminal_sees_the_storage`.
-- [ ] done
+- [x] done d6fb79c (`cells::terminal_on_net`, `storage::link_far_terminals` called after the topology in server.rs; self-test `storage18_far_terminal_on_the_net`; try pending)
 
 ### Task 5: Terminal window: any count, limits list, order chain, «Склад полон», «Нет свободного автокрафтера»
 
@@ -76,7 +76,10 @@
 - «Лимиты» mode: the grid shows only items with a limit, each cell's tooltip / overlay its limit; the row edits the chosen one (list of all limits).
 - Order queue: each order's steps (`OrderLine.steps: Vec<(kind, done, of)>`, current highlighted) drawn as a chain under the status.
 - State `Full` («Склад полон») when used == total; order wait `NoFreeCrafter` («Нет свободного автокрафтера») when a crafter exists but all are busy.
-- [ ] rules tests, self-test `storage_full_says_so`, commit
+- [x] rules: count row, limits rows, OrderStep chain in the wire tail (ecc342b)
+- [ ] orders: `Order.chain` filled by `Queue::round`, `orders.rs` sends it
+- [ ] client: count row, limits rows, chain line, «Склад полон», busy texts per kind; lang
+- [ ] self-test, commit
 
 ### Task 6: Tablet: drawn window (API 111), deposit, search, tabs, limits
 
