@@ -427,7 +427,8 @@ fn trash(game: &mut Game<'_>, pos: Pos, _t: &Tuning) -> Shown {
         return Shown::Blocked("trash_no_filter");
     }
     let speed = modules::count(&base::modules_at(game, pos), Module::Speed);
-    let mut batch = 8u32 << speed.min(3);
+    // A9: speed modules stack in full; a machine has at most four sockets.
+    let mut batch = 8u32 << speed.min(rustcraft_rules::modules::MAX_SOCKETS as u32);
     let per = paced(game, pos, Util::Trash).1;
     let filter: Vec<&str> = slots.iter().take(9).flatten().map(|s| &*s.item).collect();
     let mut burned = 0;
