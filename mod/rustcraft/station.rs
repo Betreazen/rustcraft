@@ -100,7 +100,10 @@ static ROPES: LazyLock<Mutex<HashMap<u32, Option<(f64, [f64; 3])>>>> = LazyLock:
 /// The workers the server told of, by seat mob: their heading and tool (0 none, 1 saw, 2 reaper).
 static WORKER_SEATS: LazyLock<Mutex<HashMap<u32, worker_wire::Seat>>> = LazyLock::new(Mutex::default);
 /// The worker's parts as standalone models (assets/models/transport.py `worker`).
+/// The open chassis window's panel, as its server sent it last.
+static CHASSIS_PANEL: Mutex<Option<worker_wire::Panel>> = Mutex::new(None);
 const WORKER_BODY: &str = "rustcraft:block/worker_body";
+
 const WORKER_PAINT: &str = "rustcraft:block/worker_paint";
 /// Every part model of the worker (assets/models/export_mc.py `WORKER_PARTS`).
 const WORKER_PARTS: [&str; 26] = [
@@ -150,6 +153,8 @@ pub(super) fn on_net(channel: &str, data: &[u8]) {
         let mut seats = WORKER_SEATS.lock().unwrap_or_else(PoisonError::into_inner);
         seats.clear();
         seats.extend(list.into_iter().map(|s| (s.seat, s)));
+    } else if channel == worker_wire::PANEL {
+        *CHASSIS_PANEL.lock().unwrap_or_else(PoisonError::into_inner) = worker_wire::Panel::decode(data);
     } else if channel == CAPSULE {
         match wire::decode_capsule(data) {
             Some(CapsuleNote::Ride { seat, rise, points }) => {
@@ -972,4 +977,121 @@ pub(super) fn draw_worker(
         }
     }
     draw.pop();
+}
+
+// ---- The chassis window ----
+
+/// The panel's size and the gap to the menu's slots.
+const PANEL_W: f32 = 128.0;
+const PANEL_H: f32 = 132.0;
+const PANEL_GAP: f32 = 4.0;
+
+/// `native_screen_render_post` (API 78): beside the chassis's server menu, whose slots hold its
+/// tool, sockets, state and hold, the rest of the guide's window (`ui.js` `chassis`): the tool's
+/// name, «Улучшения и модули» with the sockets in use, the bars «Заряд» and «Трюм», the filter
+/// and the status line. Told apart from other menus by its title, one of the chassis's three.
+pub(super) fn draw_chassis(game: &Game<'_>, batch: &mut HudBatch, screen: &NativeScreenView<'_>) {
+    let Some(title) = screen.title.map(|t| t.plain()) else {
+        return;
+    };
+    let ours = (1..=3u8).any(|tier| {
+        let (key, fallback) = worker_wire::window_key(tier);
+        tr(key, fallback) == title
+    });
+    if !ours {
+        return;
+    }
+    let Some(p) = CHASSIS_PANEL
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .clone()
+    else {
+        return;
+    };
+    let [x, y, w, _] = screen.rect;
+    let o = [(x + w + PANEL_GAP).round(), y.round()];
+    kit::background(game, batch, o, [PANEL_W, PANEL_H]);
+    let inner = PANEL_W - 12.0;
+    let mut row = 6.0;
+    let (tool_key, tool_fallback) = worker_wire::tool_key(p.tool);
+    kit::label(game, batch, &tr("rustcraft.worker.tool_slot", "Tool"), o, [6.0, row]);
+    row += 10.0;
+    text(game, batch, &fit(game, &tr(tool_key, tool_fallback), inner), o, [6.0, row], VALUE);
+    row += 13.0;
+    kit::label(
+        game,
+        batch,
+        &fit(game, &tr("rustcraft.worker.sockets_title", "Upgrades and modules"), inner),
+        o,
+        [6.0, row],
+    );
+    row += 10.0;
+    let sockets = tr_with(
+        "rustcraft.worker.sockets",
+        "%s of %s sockets",
+        &[p.sockets.0.to_string(), p.sockets.1.to_string()],
+    );
+    text(game, batch, &sockets, o, [6.0, row], VALUE);
+    row += 13.0;
+    let charge = format!("{:.0}%", 100.0 * p.charge);
+    gauge(game, batch, o, row, &tr("rustcraft.worker.charge_title", "Charge"), &charge, p.charge, ENERGY);
+    row += 22.0;
+    let hold_share = p.hold.0 as f64 / (p.hold.1.max(1)) as f64;
+    let hold = tr_with(
+        "rustcraft.worker.hold_slots",
+        "%s of %s slots",
+        &[p.hold.0.to_string(), p.hold.1.to_string()],
+    );
+    gauge(game, batch, o, row, &tr("rustcraft.worker.hold_title", "Hold"), &hold, hold_share, HOT);
+    row += 22.0;
+    let filter = if p.filter.is_empty() {
+        tr("rustcraft.worker.filter_all", "Filter: takes everything")
+    } else {
+        let names: Vec<String> = p.filter.iter().map(|f| item_name(f)).collect();
+        tr_with("rustcraft.worker.filter", "Filter: %s", &[names.join(", ")])
+    };
+    text(game, batch, &fit(game, &filter, inner), o, [6.0, row], TEXT);
+    row += 12.0;
+    let (key, fallback, mood) = worker_wire::note_key(p.note);
+    let severity = match mood {
+        worker_wire::Mood::Fine => Severity::Ok,
+        worker_wire::Mood::Waiting => Severity::Warn,
+        worker_wire::Mood::Stopped => Severity::Bad,
+    };
+    kit::status_line(game, batch, o, [4.0, row, PANEL_W - 8.0, 14.0], severity, &tr(key, fallback));
+}
+
+/// A labelled bar: the label left, the value right, the bar under them.
+#[allow(clippy::too_many_arguments)]
+fn gauge(
+    game: &Game<'_>,
+    batch: &mut HudBatch,
+    o: [f32; 2],
+    row: f32,
+    label: &str,
+    value: &str,
+    share: f64,
+    fill: u32,
+) {
+    kit::label(game, batch, label, o, [6.0, row]);
+    kit::text_right(game, batch, value, o, PANEL_W - 6.0, row, VALUE);
+    kit::bar(
+        game,
+        batch,
+        [o[0] + 6.0, o[1] + row + 10.0, PANEL_W - 12.0, 6.0],
+        share,
+        fill,
+    );
+}
+
+/// An item's or block's name in the player's language.
+fn item_name(id: &str) -> String {
+    let path = id.replace(':', ".");
+    let block = format!("block.{path}");
+    let named = tr(&block, "");
+    if named.is_empty() || named == block {
+        tr(&format!("item.{path}"), id.rsplit(':').next().unwrap_or(id))
+    } else {
+        named
+    }
 }

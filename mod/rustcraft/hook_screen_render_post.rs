@@ -4,4 +4,7 @@ fn rustcraft_screen_render_post(
     screen: &horizon_client::mod_api::NativeScreenView<'_>,
 ) {
     crate::game::rustcraft_handbook::draw(game, batch, screen);
+    // Slice 18, stream 6: the chassis window's panel beside its menu.
+    crate::game::rustcraft_station::draw_chassis(game, batch, screen);
+
 }

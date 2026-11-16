@@ -1360,51 +1360,12 @@ fn board(w: &Worker, t: &Tuning) -> Text {
 }
 
 fn tool_name(tool: Option<Tool>) -> Text {
-    match tool {
-        Some(Tool::Saw) => line("rustcraft.worker.saw", "Lumberjack", &[]),
-        Some(Tool::Reaper) => line("rustcraft.worker.reaper", "Reaper", &[]),
-        Some(Tool::Hold) => line("rustcraft.worker.cargo", "Cargo cart", &[]),
-        Some(Tool::Grab) => line("rustcraft.worker.grab", "Collector", &[]),
-        Some(Tool::Scoop) => line("rustcraft.worker.scoop", "Digger", &[]),
-        Some(Tool::Shooter) => line("rustcraft.worker.guard", "Guard", &[]),
-        Some(Tool::Map) => line("rustcraft.worker.map", "Cartographer", &[]),
-        Some(Tool::Bore) => line("rustcraft.worker.bore", "Tunneler", &[]),
-        None => line("rustcraft.worker.bare", "Chassis", &[]),
-    }
+    let (key, fallback) = rustcraft_rules::worker::wire::tool_key(tool);
+    line(key, fallback, &[])
 }
 
 pub(super) fn note_text(note: Note) -> Text {
-    let (key, fallback) = match note {
-        Note::Working => ("rustcraft.worker.working", "Working"),
-        Note::Unloading => ("rustcraft.worker.unloading", "Unloading"),
-        Note::Charging => ("rustcraft.worker.charging", "Charging"),
-        Note::ToUnload => ("rustcraft.worker.to_unload", "Going to unload"),
-        Note::ToCharge => ("rustcraft.worker.to_charge", "Going to charge"),
-        Note::NoTool => ("rustcraft.worker.no_tool", "No tool"),
-        Note::NoUnloadDock => ("rustcraft.worker.no_unload", "No unload dock on the way"),
-        Note::NoChargeDock => ("rustcraft.worker.no_charge", "No charge dock on the way"),
-        Note::Flat => ("rustcraft.worker.flat", "Battery empty"),
-        Note::NothingToSow => ("rustcraft.worker.nothing_to_sow", "Nothing to sow"),
-        Note::DockFull => (
-            "rustcraft.worker.dock_full",
-            "Waiting: the unload dock is full",
-        ),
-        Note::DockEmpty => (
-            "rustcraft.worker.dock_empty",
-            "Waiting: the charge dock has no energy",
-        ),
-        Note::NoWay => ("rustcraft.worker.no_way", "No rail to ride"),
-        Note::ToLoad => ("rustcraft.worker.to_load", "Going to load"),
-        Note::Loading => ("rustcraft.worker.loading", "Loading"),
-        Note::NoLoadDock => ("rustcraft.worker.no_load", "No load dock on the way"),
-        Note::NoCargo => ("rustcraft.worker.no_cargo", "Waiting for cargo"),
-        Note::NoRails => ("rustcraft.worker.no_rails", "Out of rails"),
-        Note::LavaAhead => ("rustcraft.worker.lava", "Lava ahead and no blocks"),
-        Note::NothingToDig => (
-            "rustcraft.worker.nothing_to_dig",
-            "Nothing to dig beside the way",
-        ),
-    };
+    let (key, fallback, _) = rustcraft_rules::worker::wire::note_key(note);
     line(key, fallback, &[])
 }
 
@@ -1488,6 +1449,7 @@ fn windows(game: &mut Game<'_>, dimension: &str, level: &mut LevelFleet, t: &Tun
         let items = cells(game, w, t);
         let title = window_title(w.tier);
         if let Some(window) = game.native_open_menu(uuid, ROWS, title, items) {
+            send_panel(game, uuid, w, t);
             state().sessions.insert(
                 uuid,
                 Session {
@@ -1515,6 +1477,7 @@ fn windows(game: &mut Game<'_>, dimension: &str, level: &mut LevelFleet, t: &Tun
         }
         let items = cells(game, w, t);
         game.native_set_menu_items(c.uuid, items);
+        send_panel(game, c.uuid, w, t);
     }
     // Open windows follow their worker each second.
     if level.ticks.is_multiple_of(BOARD_EVERY) {
@@ -1528,6 +1491,7 @@ fn windows(game: &mut Game<'_>, dimension: &str, level: &mut LevelFleet, t: &Tun
             if let Some(w) = level.fleet.workers.iter().find(|w| w.id == id) {
                 let items = cells(game, w, t);
                 game.native_set_menu_items(uuid, items);
+                send_panel(game, uuid, w, t);
             } else {
                 game.native_close_menu(uuid);
             }
@@ -1537,14 +1501,18 @@ fn windows(game: &mut Game<'_>, dimension: &str, level: &mut LevelFleet, t: &Tun
 
 /// The window's title by the chassis's tier (guide `chassis`: «Шасси работника · из искростали»).
 pub(super) fn window_title(tier: u8) -> Text {
-    match tier {
-        2 => line("rustcraft.worker.window_2", "Worker chassis · crystallite", &[]),
-        3 => line("rustcraft.worker.window_3", "Worker chassis · starsteel", &[]),
-        _ => line("rustcraft.worker.window", "Worker chassis · sparksteel", &[]),
-    }
+    let (key, fallback) = rustcraft_rules::worker::wire::window_key(tier);
+    line(key, fallback, &[])
+}
+
+/// The chassis window's panel to the player who has it open (rustcraft_station::draw_chassis).
+fn send_panel(game: &mut Game<'_>, uuid: u128, w: &Worker, t: &Tuning) {
+    use rustcraft_rules::worker::wire::{PANEL, Panel};
+    let _ = game.native_net_send_to_player(uuid, PANEL, &Panel::of(w, t).encode());
 }
 
 /// Gives `count` of `item` (a hold's name) to the player; how many they took.
+
 
 fn give(game: &mut Game<'_>, uuid: u128, item: &str, count: u32) -> u32 {
     match game.native_give_stack(uuid, util::hold_stack(item, count)) {

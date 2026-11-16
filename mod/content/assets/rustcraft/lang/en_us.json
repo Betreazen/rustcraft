@@ -1026,5 +1026,10 @@
   "rustcraft.worker.limit": "Worker limit reached: %s per player",
   "rustcraft.worker.filter_all": "Filter: takes everything",
   "rustcraft.worker.filter": "Filter: %s",
-  "rustcraft.worker.filter_hint": "Shift-click a plant or block in your inventory: into the filter; click here: clear it"
+  "rustcraft.worker.filter_hint": "Shift-click a plant or block in your inventory: into the filter; click here: clear it",
+  "rustcraft.worker.sockets_title": "Upgrades and modules",
+  "rustcraft.worker.sockets": "%s of %s sockets in use",
+  "rustcraft.worker.charge_title": "Charge",
+  "rustcraft.worker.hold_title": "Hold",
+  "rustcraft.worker.hold_slots": "%s of %s slots"
 }

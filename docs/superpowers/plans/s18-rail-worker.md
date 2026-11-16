@@ -95,9 +95,9 @@ Audit lines: chassis «Ставится на монорельс», «Ездит 
 
 ### Task 8: The chassis window as the handbook draws it
 
-- [ ] Engine check: API 78 (`native_screen_render_post`, drawing over a server menu by title) in SRC.
-- [ ] Panel drawn over the menu: «Инструмент», «Улучшения и модули» (3/5/7), bars «Заряд» and «Трюм», «Груз», «Фильтр», status line; title by chassis tier; tool hint lists all 8 tools.
-- [ ] Commit.
+- [x] Engine check: API 78 (`native_screen_render_post`, drawing over a server menu by title) in SRC.
+- [x] Panel drawn over the menu: «Инструмент», «Улучшения и модули» (3/5/7), bars «Заряд» and «Трюм», «Груз», «Фильтр», status line; title by chassis tier; tool hint lists all 8 tools.
+- [x] Commit.
 
 ### Task 9: Tool models and animations
 
