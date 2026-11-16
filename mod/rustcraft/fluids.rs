@@ -927,3 +927,80 @@ pub(super) fn bucket_text(mb: u64) -> String {
         format!("{},{}", tenths / 10, tenths % 10)
     }
 }
+
+// ---- Slice 18, stream 3: a bucket on a tank (guide `tank`) ----
+
+/// A bucket `held` used on the tank at `pos`: the tank group changes and the bucket the player
+/// holds after it; why not, else (a translation key's tail and its fallback).
+pub(super) fn bucket_on_tank(
+    game: &mut Game<'_>,
+    dimension: &str,
+    pos: Pos,
+    held: &str,
+) -> Result<&'static str, (&'static str, &'static str)> {
+    use rustcraft_rules::machines::bucket::{self, Use};
+    let tuning = crate::game::rustcraft_server::tuning();
+    let per_block = tuning.tank_buckets * BUCKET;
+    let group = crate::game::rustcraft_server::with_level(dimension, |level| {
+        group_at(game, level, pos, tuning)
+    })
+    .flatten()
+    .ok_or(("tank.no_group", "The tank is not ready yet"))?;
+    let mut after = group.clone();
+    let result = match bucket::use_on(held, &group) {
+        Use::Pour { fluid } => {
+            after.put(fluid, BUCKET);
+            bucket::EMPTY
+        }
+        Use::Fill { fluid, filled } => {
+            after.take(fluid, BUCKET);
+            filled
+        }
+        Use::NoRoom => return Err(("tank.bucket_no_room", "No room in the tank for a bucket of it")),
+        Use::Empty => return Err(("tank.bucket_empty", "Less than a bucket in the tank")),
+        Use::NoBucket(_) => {
+            return Err(("tank.bucket_no_bucket", "No bucket takes it: it lives in tanks and channels"));
+        }
+        Use::Other => return Err(("", "")),
+    };
+    write_back(game, &[group], &[after], per_block);
+    Ok(result)
+}
+
+/// `native_right_click_block`: a water, lava or empty bucket on a tank pours or fills, before
+/// the tank's window opens.
+pub(super) fn on_right_click_block(game: &mut Game<'_>, pos: Pos, canceled: &mut bool) {
+    if *canceled || game.native_block(pos) != content::TANK {
+        return;
+    }
+    let Some(player) = game.native_acting_player() else {
+        return;
+    };
+    let Some((held, _, true)) = game.native_held() else {
+        return;
+    };
+    if rustcraft_rules::machines::bucket::use_on(&held, &Default::default())
+        == rustcraft_rules::machines::bucket::Use::Other
+    {
+        return;
+    }
+    *canceled = true;
+    match bucket_on_tank(game, &player.dimension, pos, &held) {
+        Ok(result) => {
+            if player.game_mode != 1 {
+                game.native_take_items(&held, 1);
+                if game.native_give_items(result, 1) == 0 {
+                    log::warn!("rustcraft: no room for {result} from the tank at {pos:?}");
+                }
+            }
+        }
+        Err((key, fallback)) if !key.is_empty() => {
+            crate::game::rustcraft_server::tell(
+                game,
+                player.uuid,
+                line(&format!("rustcraft.{key}"), fallback, &[]),
+            );
+        }
+        Err(_) => {}
+    }
+}

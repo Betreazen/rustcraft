@@ -849,6 +849,12 @@ impl Bench for GameBench<'_, '_> {
             .map(|(old, _, _)| old)
             .map_err(str::to_owned)
     }
+
+    fn use_bucket(&mut self, pos: Pos, held: &str) -> Result<String, String> {
+        fluids::bucket_on_tank(self.game, DIMENSION, pos, held)
+            .map(str::to_owned)
+            .map_err(|(_, why)| why.to_owned())
+    }
 }
 
 /// The slice-7 half of the bench.

@@ -3694,5 +3694,9 @@
   "rustcraft.window.module_slot.fits": "Подходят: %s",
   "rustcraft.window.queue_cell": "Ячейка очереди",
   "rustcraft.window.reserve": "Ещё %s ждут за ячейкой",
-  "rustcraft.mixer.queue": "Очередь: %s предметов в %s ячейках"
+  "rustcraft.mixer.queue": "Очередь: %s предметов в %s ячейках",
+  "rustcraft.tank.no_group": "Бак ещё не готов",
+  "rustcraft.tank.bucket_no_room": "В баке нет места для ведра этой жидкости",
+  "rustcraft.tank.bucket_empty": "В баке меньше ведра",
+  "rustcraft.tank.bucket_no_bucket": "Это в ведро не набрать: оно живёт только в баках и каналах"
 }

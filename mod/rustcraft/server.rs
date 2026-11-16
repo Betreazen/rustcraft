@@ -364,6 +364,8 @@ pub(super) fn on_right_click_block(
     // Slice 18, stream 3: after the guards above, a higher tier's item on a lower tier machine
     // replaces it (U2).
     crate::game::rustcraft_tiers::on_right_click_block(game, pos, canceled);
+    // Slice 18, stream 3: a bucket on a tank pours or fills.
+    fluids::on_right_click_block(game, pos, canceled);
 }
 
 /// `native_menu_clicked` and `native_menu_closed`: the joint window (rustcraft_window).

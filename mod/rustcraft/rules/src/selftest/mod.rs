@@ -327,6 +327,11 @@ pub trait Bench {
         let _ = (pos, item);
         Err("no tiers on this bench".into())
     }
+    /// A bucket `held` used on the tank at `pos` (guide `tank`): the bucket it leaves in the hand.
+    fn use_bucket(&mut self, pos: Pos, held: &str) -> Result<String, String> {
+        let _ = (pos, held);
+        Err("no buckets on this bench".into())
+    }
 }
 
 /// A mob as the self-test reads it.

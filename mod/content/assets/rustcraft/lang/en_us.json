@@ -1046,5 +1046,9 @@
   "rustcraft.window.module_slot.fits": "Takes: %s",
   "rustcraft.window.queue_cell": "Queue cell",
   "rustcraft.window.reserve": "%s more wait behind the slot",
-  "rustcraft.mixer.queue": "Queue: %s items in %s cells"
+  "rustcraft.mixer.queue": "Queue: %s items in %s cells",
+  "rustcraft.tank.no_group": "The tank is not ready yet",
+  "rustcraft.tank.bucket_no_room": "No room in the tank for a bucket of it",
+  "rustcraft.tank.bucket_empty": "Less than a bucket in the tank",
+  "rustcraft.tank.bucket_no_bucket": "No bucket takes it: it lives in tanks and channels"
 }
