@@ -139,8 +139,8 @@ Audit lines: chassis «Ставится на монорельс», «Ездит 
 
 ### Task 15: Hand-off
 
-- [ ] `mod/README.md` «Что проверить в игре: срез 18» — this stream's part.
-- [ ] Last `try` green; final report.
+- [x] `mod/README.md` «Что проверить в игре: срез 18» — this stream's part.
+- [x] Last `try` green: 35ceb15, RustCraft 156 passed 0 failed, PCT 42/0, SoulsCraft 87/0 (exit 0).
 
 ## Commits
 
