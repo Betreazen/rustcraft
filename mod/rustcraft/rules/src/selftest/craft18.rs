@@ -14,6 +14,7 @@
 //!   water closes it.
 //! - The butcher stands without energy; with it, its kill's experience goes into the condenser
 //!   beside it (K6).
+//! - The brewing vat brews swiftness from water bottles through every step by itself.
 
 use super::transport::{chest, fill, item_line, joint};
 use super::{Bench, Build, Scenario, at, plot_area, same};
@@ -23,7 +24,8 @@ use crate::storage::modules::{FILTER, SOCKET_FILTER, SOCKET_STACK, STACK_MODULES
 use crate::storage::terminal::{self, Press};
 use crate::tuning::Tuning;
 
-pub const ALL: [Build; 12] = [
+pub const ALL: [Build; 13] = [
+    brewer_brews_through_the_chain,
     butcher_energy_and_kill_xp,
     fishery_keeps_the_rods_last_point,
     kitchen_cake_with_milk_from_a_tank,
@@ -342,4 +344,32 @@ fn butcher_energy_and_kill_xp(o: Pos, _: &Tuning) -> Scenario {
         .until("it says it has no energy", 400, move |b, _| Ok(b.butcher(p) == Some(ButcherShown::NoEnergy)))
         .then("energy into its buffer", move |b, _| b.set_buffer(p, butcher::BUFFER))
         .until("the kill's experience is in the condenser", 600, move |b, _| Ok(b.long(tank, "util_xp") > 0))
+}
+
+fn brewer_brews_through_the_chain(o: Pos, _: &Tuning) -> Scenario {
+    use crate::machines::sheet::Press as SheetPress;
+    let p = at(o, [3, 1, 0]);
+    const WATER: &str = r#"{id:"minecraft:potion",count:1,components:{"minecraft:potion_contents":{potion:"minecraft:water"}}}"#;
+    Scenario::new("brewer18_brews_through_the_chain", plot_area(o))
+        .then("a vat with three water bottles, wart, sugar and blaze powder", move |b, _| {
+            b.place(at(o, [3, 0, 0]), "minecraft:stone", &[])?;
+            b.place(p, "rustcraft:brewer", &[])?;
+            b.set_buffer(p, 400.0)?;
+            for _ in 0..3 {
+                same("bottle in", b.insert_snbt(p, WATER)?, 1)?;
+            }
+            same("wart in", b.insert(p, "minecraft:nether_wart", 1)?, 1)?;
+            same("sugar in", b.insert(p, "minecraft:sugar", 1)?, 1)?;
+            b.put(p, 7, "minecraft:blaze_powder", 1)
+        })
+        .then("the first page set to swiftness", move |b, _| {
+            b.press_cursor(p, SheetPress::Toggle(0).id(), None).map(|_| ())
+        })
+        .until("three potions in its output", 2000, move |b, _| {
+            Ok(super::count_of(&b.items(p).into_iter().skip(8).collect::<Vec<_>>(), "minecraft:potion") == 3)
+        })
+        .check("the wart and the sugar went into them", move |b, _| {
+            same("wart", super::count_of(&b.items(p), "minecraft:nether_wart"), 0)?;
+            same("sugar", super::count_of(&b.items(p), "minecraft:sugar"), 0)
+        })
 }

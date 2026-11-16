@@ -405,7 +405,7 @@ pub(super) fn tick(game: &mut Game<'_>, dimension: &str, level: &LevelNet, t: &T
             Util::ChargePlate => plate(game, dimension, pos),
             Util::Repair => repair_one(game, pos, cost),
             Util::Kitchen => cook(game, dimension, level, pos, cost, t),
-            Util::Brewer => brew(game, pos, cost),
+            Util::Brewer => brew(game, dimension, pos, cost),
             Util::XpTank => xp_tank_shown(game, pos),
             Util::Enchanter => enchant(game, pos, cost),
             Util::Archeo => brush(game, pos, cost),
@@ -855,53 +855,160 @@ fn cook(game: &mut Game<'_>, dimension: &str, level: &LevelNet, pos: Pos, cost: 
 
 // ---- The brewer ----
 
-fn brew(game: &mut Game<'_>, pos: Pos, cost: f64) -> Shown {
-    let slots = items(game, pos);
-    let Some(reagent) = slots.get(3).cloned().flatten() else {
-        return Shown::Idle("brew_no_reagent");
+// Slice 18 (guide `brewer`): pages of an effect and a kind; the vat brews each batch through its
+// page's whole chain by itself.
+const BREW_PAGES_KEY: &str = "brew_pages";
+/// The page the bottles in the vat are brewed for, and the next page to start.
+const BREW_PAGE_KEY: &str = "brew_page";
+const BREW_NEXT_KEY: &str = "brew_next";
+/// The page the kind buttons set.
+const BREW_SEL_KEY: &str = "brew_sel";
+
+fn brew_pages(nbt: &Compound) -> Vec<rustcraft_rules::utility::brew::Page> {
+    let mut p: Vec<rustcraft_rules::utility::brew::Page> = read_json(nbt, BREW_PAGES_KEY);
+    p.resize(rustcraft_rules::utility::brew::PAGES_MAX, Default::default());
+    p
+}
+
+/// A press in the vat's window: a page's button turns its effect to the next and chooses it; a
+/// kind button sets the chosen page's kind.
+fn brew_press(entity: &mut ModBlockEntity, i: usize) {
+    use rustcraft_rules::utility::brew::{self, Kind, PAGES_MAX};
+    let usable = brew::pages(capacity_of(entity));
+    let mut pages = brew_pages(&entity.nbt);
+    if i < PAGES_MAX {
+        if i >= usable {
+            return;
+        }
+        pages[i].effect = brew::cycle_effect(pages[i].effect);
+        write_i64(&mut entity.nbt, BREW_SEL_KEY, i as i64);
+    } else if let Some(kind) = Kind::ALL.get(i - PAGES_MAX) {
+        let sel = (read_i64(&entity.nbt, BREW_SEL_KEY).max(0) as usize).min(usable - 1);
+        pages[sel].kind = *kind;
+    }
+    write_json(&mut entity.nbt, BREW_PAGES_KEY, &pages);
+}
+
+fn brew(game: &mut Game<'_>, dimension: &str, pos: Pos, cost: f64) -> Shown {
+    use rustcraft_rules::utility::{
+        BREW_BOTTLES, BREW_FUEL, BREW_INGREDIENTS, BREW_OUT,
+        brew::{self, Step},
     };
-    let bottles: Vec<(usize, ItemStack)> = (0..3).filter_map(|i| slots.get(i).cloned().flatten().map(|s| (i, s))).collect();
+    let _ = dimension;
+    let slots = items(game, pos);
+    let bottles: Vec<(usize, ItemStack)> = BREW_BOTTLES
+        .clone()
+        .filter_map(|i| slots.get(i).cloned().flatten().map(|s| (i, s)))
+        .collect();
+    crate::game::rustcraft_anim::show_level_cached(game, pos, bottles.len() as f64 / 3.0, 0);
     if bottles.is_empty() {
         return Shown::Idle("brew_no_bottles");
     }
-    let made: Vec<(usize, ItemStack)> = bottles
-        .iter()
-        .filter_map(|(i, b)| game.stations().brewing.find(b, &reagent).map(|r| (*i, r.output.clone())))
-        .collect();
-    if made.is_empty() {
-        return Shown::Blocked("brew_no_recipe");
-    }
-    let fuel = game.native_mod_block_entity(pos).map_or(0, |e| read_i64(&e.nbt, FUEL_KEY));
-    let has_powder = slots.get(4).cloned().flatten().is_some_and(|s| s.count > 0);
-    if fuel <= 0 && !has_powder {
-        return Shown::Blocked("brew_no_fuel");
-    }
-    let outputs: Vec<ItemStack> = made.iter().map(|(_, s)| s.clone()).collect();
-    if !fits(game, pos, 5..8, &outputs) {
-        return Shown::Blocked("output_full");
-    }
-    if !spend(game, pos, cost) {
-        return Shown::NoEnergy;
-    }
-    game.native_with_mod_block_entity(pos, |e| {
-        let mut f = read_i64(&e.nbt, FUEL_KEY);
-        if f <= 0 {
-            take_one(&mut e.items, 4);
-            f = i64::from(BREWS_PER_POWDER);
+    let Some(entity) = game.native_mod_block_entity(pos) else {
+        return Shown::Idle("brew_no_bottles");
+    };
+    let pages = brew_pages(&entity.nbt);
+    let usable = brew::pages(capacity_of(&entity));
+    let page_now = read_i64(&entity.nbt, BREW_PAGE_KEY);
+    let next = read_i64(&entity.nbt, BREW_NEXT_KEY).max(0) as usize;
+    let fuel = read_i64(&entity.nbt, FUEL_KEY);
+    drop(entity);
+    // The batch's page, or the next page in turn with an effect.
+    let page_at = if page_now > 0 && (page_now as usize) <= usable && pages[page_now as usize - 1].effect.is_some() {
+        page_now as usize - 1
+    } else {
+        let Some(p) = (0..usable).map(|k| (next + k) % usable).find(|p| pages[*p].effect.is_some()) else {
+            return Shown::Idle("brew_none");
+        };
+        p
+    };
+    let chain = brew::chain(pages[page_at]);
+    let applies = |i: &str| {
+        let r = ItemStack::new(i, 1);
+        bottles.iter().any(|(_, b)| game.stations().brewing.find(b, &r).is_some())
+    };
+    let has = |i: &str| count_of(&slots, BREW_INGREDIENTS, i) > 0;
+    match brew::next_step(&chain, applies, has) {
+        Step::Done => {
+            let done: Vec<ItemStack> = bottles.iter().map(|(_, b)| b.clone()).collect();
+            if !fits(game, pos, BREW_OUT, &done) {
+                return Shown::Blocked("output_full");
+            }
+            game.native_with_mod_block_entity(pos, |e| {
+                for (i, _) in &bottles {
+                    e.items[*i] = None;
+                }
+                write_i64(&mut e.nbt, BREW_PAGE_KEY, 0);
+                write_i64(&mut e.nbt, BREW_NEXT_KEY, ((page_at + 1) % usable.max(1)) as i64);
+            });
+            for s in done {
+                put(game, pos, BREW_OUT, s);
+            }
+            Shown::Working
         }
-        write_i64(&mut e.nbt, FUEL_KEY, f - 1);
-        take_one(&mut e.items, 3);
-        for (i, _) in &made {
-            e.items[*i] = None;
+        Step::Missing(_) => Shown::Blocked("brew_no_reagent"),
+        Step::Brew(ingredient) => {
+            let has_powder = slots.get(BREW_FUEL).cloned().flatten().is_some_and(|s| s.count > 0);
+            if fuel <= 0 && !has_powder {
+                return Shown::Blocked("brew_no_fuel");
+            }
+            if !spend(game, pos, cost) {
+                return Shown::NoEnergy;
+            }
+            let r = ItemStack::new(ingredient, 1);
+            let made: Vec<(usize, ItemStack)> = bottles
+                .iter()
+                .filter_map(|(i, b)| game.stations().brewing.find(b, &r).map(|x| (*i, x.output.clone())))
+                .collect();
+            game.native_with_mod_block_entity(pos, |e| {
+                let mut f = read_i64(&e.nbt, FUEL_KEY);
+                if f <= 0 {
+                    take_one(&mut e.items, BREW_FUEL);
+                    f = i64::from(BREWS_PER_POWDER);
+                }
+                write_i64(&mut e.nbt, FUEL_KEY, f - 1);
+                take(&mut e.items, BREW_INGREDIENTS, ingredient, 1);
+                for (i, s) in &made {
+                    e.items[*i] = Some(s.clone());
+                }
+                write_i64(&mut e.nbt, BREW_PAGE_KEY, page_at as i64 + 1);
+            });
+            if let Some(o) = owner(game, pos) {
+                base::report(Report::Counted { kind: "brew", owner: o, count: 1 });
+            }
+            Shown::Working
         }
-    });
-    for s in outputs {
-        put(game, pos, 5..8, s);
     }
-    if let Some(o) = owner(game, pos) {
-        base::report(Report::Counted { kind: "brew", owner: o, count: 1 });
-    }
-    Shown::Working
+}
+
+/// The vat's window: its page's potion and kind, the step it is on; the fuel bar.
+fn brew_sheet(game: &Game<'_>, pos: Pos, s: &mut Sheet) {
+    use rustcraft_rules::utility::brew::{self, EFFECTS};
+    let Some(entity) = game.native_mod_block_entity(pos) else { return };
+    let pages = brew_pages(&entity.nbt);
+    let usable = brew::pages(capacity_of(&entity));
+    let sel = (read_i64(&entity.nbt, BREW_SEL_KEY).max(0) as usize).min(usable - 1);
+    let fuel = read_i64(&entity.nbt, FUEL_KEY).max(0);
+    drop(entity);
+    let page = pages[sel];
+    let row = match page.effect.and_then(|e| EFFECTS.get(e)) {
+        Some((name, _)) => line(
+            "rustcraft.util.brewer.page",
+            "Page %s: %s, %s",
+            &[
+                Text::literal((sel + 1).to_string()),
+                line(&format!("rustcraft.util.brewer.effect.{name}"), name, &[]),
+                line(&format!("rustcraft.util.brewer.kind.{}", page.kind.name()), page.kind.name(), &[]),
+            ],
+        ),
+        None => line("rustcraft.util.brewer.no_page", "Click a page to choose its potion", &[]),
+    };
+    let fuel_line = line(
+        "rustcraft.util.brewer.brews",
+        "Blaze powder: %s brews left",
+        &[Text::literal(fuel.to_string())],
+    );
+    s.rows = vec![base::v(&row), base::v(&fuel_line)];
 }
 
 // ---- The experience condenser and the enchanting machine ----
@@ -1354,6 +1461,18 @@ pub(super) fn diagnosis(dimension: &str, pos: Pos, u: Util) -> Text {
 
 fn toggle_names(u: Util) -> Vec<(String, String)> {
     match u {
+        Util::Brewer => {
+            let pages = (1..=rustcraft_rules::utility::brew::PAGES_MAX).map(|p| (format!("page{p}"), "minecraft:glass_bottle".to_owned()));
+            let kinds = [
+                ("normal", "minecraft:potion"),
+                ("long", "minecraft:redstone"),
+                ("strong", "minecraft:glowstone_dust"),
+                ("splash", "minecraft:gunpowder"),
+                ("lingering", "minecraft:dragon_breath"),
+            ]
+            .map(|(k, i)| (k.to_owned(), i.to_owned()));
+            pages.chain(kinds).collect()
+        }
         // Slice 18: a toggle a page (its icons are set by the sheet from the page's dish).
         Util::Kitchen => (1..=rustcraft_rules::utility::kitchen::PAGES_MAX)
             .map(|p| (format!("page{p}"), "minecraft:paper".to_owned()))
@@ -1470,6 +1589,7 @@ fn craft_sheet(game: &Game<'_>, dimension: &str, pos: Pos, u: Util, s: &mut Shee
             });
         }
         Util::Kitchen => kitchen_sheet(game, pos, s),
+        Util::Brewer => brew_sheet(game, pos, s),
         Util::Enchanter => {
             let level = enchant_level(game, pos);
             let need = xp::enchant_cost(level);
@@ -1612,6 +1732,10 @@ fn server_milk(pos: Pos) -> (u64, u64) {
 /// for it barred.
 fn craft_toggles(game: &Game<'_>, pos: Pos, u: Util, s: &mut Sheet) {
     use rustcraft_rules::utility::kitchen;
+    if u == Util::Brewer {
+        brew_toggles(game, pos, s);
+        return;
+    }
     if u != Util::Kitchen {
         return;
     }
@@ -1639,6 +1763,34 @@ fn craft_toggles(game: &Game<'_>, pos: Pos, u: Util, s: &mut Sheet) {
     }
 }
 
+/// The vat's page buttons show their effect's ingredient, the kind buttons the chosen page's kind.
+fn brew_toggles(game: &Game<'_>, pos: Pos, s: &mut Sheet) {
+    use rustcraft_rules::utility::brew::{self, EFFECTS, Kind, PAGES_MAX};
+    let Some(entity) = game.native_mod_block_entity(pos) else { return };
+    let pages = brew_pages(&entity.nbt);
+    let usable = brew::pages(capacity_of(&entity));
+    let sel = (read_i64(&entity.nbt, BREW_SEL_KEY).max(0) as usize).min(usable - 1);
+    drop(entity);
+    for (i, t) in s.toggles.iter_mut().enumerate() {
+        if i < PAGES_MAX {
+            let effect = pages[i].effect.and_then(|e| EFFECTS.get(e));
+            t.on = i == sel && i < usable;
+            t.icon = match (i < usable, effect) {
+                (false, _) => "minecraft:iron_bars".to_owned(),
+                (true, Some((_, ingredient))) => (*ingredient).to_owned(),
+                (true, None) => "minecraft:glass_bottle".to_owned(),
+            };
+            t.name = base::v(&match effect {
+                Some((name, _)) => line(&format!("rustcraft.util.brewer.effect.{name}"), name, &[]),
+                None => line("rustcraft.util.kitchen.empty_page", "Empty page", &[]),
+            });
+        } else if let Some(k) = Kind::ALL.get(i - PAGES_MAX) {
+            t.on = pages[sel].kind == *k;
+            t.name = base::v(&line(&format!("rustcraft.util.brewer.kind.{}", k.name()), k.name(), &[]));
+        }
+    }
+}
+
 /// The translation key of an item's name.
 pub(super) fn item_key(item: &str) -> String {
     format!("item.{}", item.replace(':', "."))
@@ -1661,6 +1813,7 @@ pub(super) fn on_button(game: &mut Game<'_>, pos: Pos, entity: &mut ModBlockEnti
         Util::XpTank => xp_press(game, entity, i),
         Util::Projector => builder::projector_press(game, pos, entity, i),
         Util::Kitchen => kitchen_press(game, pos, entity, i),
+        Util::Brewer => brew_press(entity, i),
         // A choice: this one on, the rest off.
         Util::Enchanter => {
             let now = read_i64(&entity.nbt, ENCHANT_LEVEL_KEY);

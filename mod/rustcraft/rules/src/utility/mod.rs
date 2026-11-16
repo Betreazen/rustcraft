@@ -5,6 +5,7 @@
 //!
 //! Numbers not in the spec are proposals for the playtest, like every number of the mod.
 
+pub mod brew;
 pub mod charge;
 pub mod disassembly;
 pub mod farm;
@@ -133,7 +134,8 @@ impl Util {
             Util::Shearer => s("rustcraft:shearer", 200.0, 8.0, 0, 2),
             // Slice 18 (guide `apiary`): «забирать: мёд / соты», a choice of two.
             Util::Apiary => s("rustcraft:apiary", 200.0, 8.0, 2, 2),
-            Util::Brewer => s("rustcraft:brewer", 400.0, 16.0, 0, 2),
+            // Slice 18: four page buttons and five kind buttons for the chosen page.
+            Util::Brewer => s("rustcraft:brewer", 400.0, 16.0, brew::PAGES_MAX + brew::Kind::ALL.len(), 2),
             // Slice 18: six buttons (give 1 / 10 / all, take 1 / 10 / all).
             Util::XpTank => s("rustcraft:xp_tank", 100.0, 4.0, xp::PRESSES.len(), 2),
             // Slice 18: the level buttons −10, −1, +1, +10.
@@ -173,8 +175,9 @@ impl Util {
             Util::Shearer => s(9, 0..0, 0..9),
             // 0 glass bottles, 1..10 honey and combs.
             Util::Apiary => s(10, 0..1, 1..10),
-            // 0..3 bottles, 3 the ingredient, 4 blaze powder, 5..8 the potions.
-            Util::Brewer => s(8, 0..5, 5..8),
+            // Slice 18: 0..3 the bottles it brews, 3..7 its ingredients, 7 blaze powder, 8..11 the
+            // finished potions.
+            Util::Brewer => s(BREW_OUT.end, 0..BREW_FUEL + 1, BREW_OUT),
             Util::XpTank => s(1, 0..0, 0..0),
             // 0 the item, 1 lapis, 2 the enchanted item.
             Util::Enchanter => s(3, 0..2, 2..3),
@@ -210,11 +213,12 @@ impl Util {
     }
 
     /// Slice 18 (guide `ui.js`): the bars of its window: energy, and the repair stand's
-    /// durability, the kitchen's and the shearer's milk, the brewer's fuel, the condenser's
-    /// experience, the building machine's progress.
+    /// durability, the shearer's milk, the condenser's experience, the building machine's
+    /// progress (the kitchen's milk and the brewer's fuel are lines: their windows have no room
+    /// for a bar in 240 pixels).
     pub fn bars(self) -> usize {
         match self {
-            Util::Repair | Util::Shearer | Util::Brewer | Util::XpTank | Util::Builder => 2,
+            Util::Repair | Util::Shearer | Util::XpTank | Util::Builder => 2,
             _ => 1,
         }
     }
@@ -237,10 +241,11 @@ impl Util {
             (Util::Trash, _) => filter.iter().any(|f| f == item),
             (Util::Fishery, 0) => item == "minecraft:fishing_rod",
             (Util::Apiary, 0) => item == "minecraft:glass_bottle",
-            (Util::Brewer, 0..=2) => {
+            (Util::Brewer, s) if BREW_BOTTLES.contains(&s) => {
                 matches!(item, "minecraft:potion" | "minecraft:splash_potion" | "minecraft:lingering_potion")
             }
-            (Util::Brewer, 4) => item == "minecraft:blaze_powder",
+            (Util::Brewer, BREW_FUEL) => item == "minecraft:blaze_powder",
+            (Util::Brewer, s) if BREW_INGREDIENTS.contains(&s) => brew::is_ingredient(item),
             (Util::Enchanter, 1) => item == "minecraft:lapis_lazuli",
             (Util::Archeo, 0) => matches!(item, "minecraft:suspicious_sand" | "minecraft:suspicious_gravel"),
             (Util::Archeo, 1) => item == "minecraft:brush",
@@ -255,6 +260,12 @@ impl Util {
         }
     }
 }
+
+/// Slice 18: the brewing vat's slots.
+pub const BREW_BOTTLES: Range<usize> = 0..3;
+pub const BREW_INGREDIENTS: Range<usize> = 3..7;
+pub const BREW_FUEL: usize = 7;
+pub const BREW_OUT: Range<usize> = 8..11;
 
 /// Slice 18: the repair stand's slots: what it repairs, its material (two cells and two more a
 /// capacity module, at most three), what it repaired.
