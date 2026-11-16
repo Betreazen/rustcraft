@@ -1057,5 +1057,6 @@
   "rustcraft.util.kitchen.milk_line": "Milk in the tank: %s of %s buckets",
   "rustcraft.util.feeder.none": "No animals round it",
   "rustcraft.util.feeder.heads": "Heads (at most %s a kind): %s",
-  "rustcraft.util.feed_herd_full": "The herd is at its limit"
+  "rustcraft.util.feed_herd_full": "The herd is at its limit",
+  "rustcraft.butcher.no_energy": "No energy"
 }

@@ -910,6 +910,14 @@ pub(super) fn xp_of(game: &Game<'_>, pos: Pos) -> u32 {
     game.native_mod_block_entity(pos).map_or(0, |e| read_i64(&e.nbt, XP_KEY).clamp(0, i64::from(xp::CAPACITY)) as u32)
 }
 
+/// Slice 18 (K6): `points` into the condenser at `tank`, as far as it has room.
+pub(super) fn add_xp(game: &mut Game<'_>, tank: Pos, points: u32) {
+    game.native_with_mod_block_entity(tank, |t| {
+        let now = read_i64(&t.nbt, XP_KEY).max(0) as u32;
+        set_xp(&mut t.nbt, now.saturating_add(points));
+    });
+}
+
 fn set_xp(nbt: &mut Compound, points: u32) {
     write_i64(nbt, XP_KEY, i64::from(points.min(xp::CAPACITY)));
 }

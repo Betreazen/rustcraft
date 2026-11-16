@@ -388,6 +388,8 @@ pub(super) fn buffer_spec(machine: Machine, tuning: &Tuning) -> (f64, f64) {
     match machine {
         Machine::Turret => (tuning.turret_buffer, tuning.turret_charge),
         Machine::Util(u) => (u.spec().buffer, u.spec().draw),
+        // Slice 18 (stream 5): the butcher's buffer, 4 E/s (guide `butcher`).
+        Machine::Butcher => (rustcraft_rules::butcher::BUFFER, rustcraft_rules::butcher::DRAW),
         _ => (tuning.dock_buffer, tuning.dock_draw),
     }
 }
@@ -455,7 +457,7 @@ pub(super) fn tick(game: &mut Game<'_>, level: &mut LevelNet, tuning: &Tuning) {
                 )?),
                 Kind::Pump => Unit::Pump(fluids::read_pump(game, pos, tuning)?),
                 Kind::Station => Unit::Station(monorail::read_station(game, pos, tuning)?),
-                Kind::Charger | Kind::Turret | Kind::Util => {
+                Kind::Charger | Kind::Turret | Kind::Util | Kind::Butcher => {
                     Unit::Buffer(read_buffer(game, pos, machine, tuning)?)
                 }
                 Kind::Anchor => Unit::Anchor(base::anchor_request(game, pos, tuning)),
@@ -468,7 +470,7 @@ pub(super) fn tick(game: &mut Game<'_>, level: &mut LevelNet, tuning: &Tuning) {
                 )?),
                 Kind::Mining => Unit::Mining(mining::read(game, pos, machine, tuning)?),
                 Kind::Mixer => Unit::Mixer(mixer::read(game, pos, &level.recipes, tuning)?),
-                Kind::Dock | Kind::Battery | Kind::LoadDock | Kind::Butcher => return None,
+                Kind::Dock | Kind::Battery | Kind::LoadDock => return None,
             };
             Some((pos, machine, unit))
         })

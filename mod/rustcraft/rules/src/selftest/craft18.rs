@@ -12,6 +12,8 @@
 //! - The kitchen bakes a cake with milk from the tank it touches and leaves no bucket.
 //! - The fishing station keeps a rod's last point and says the rod is worn; a block over the
 //!   water closes it.
+//! - The butcher stands without energy; with it, its kill's experience goes into the condenser
+//!   beside it (K6).
 
 use super::transport::{chest, fill, item_line, joint};
 use super::{Bench, Build, Scenario, at, plot_area, same};
@@ -21,7 +23,8 @@ use crate::storage::modules::{FILTER, SOCKET_FILTER, SOCKET_STACK, STACK_MODULES
 use crate::storage::terminal::{self, Press};
 use crate::tuning::Tuning;
 
-pub const ALL: [Build; 11] = [
+pub const ALL: [Build; 12] = [
+    butcher_energy_and_kill_xp,
     fishery_keeps_the_rods_last_point,
     kitchen_cake_with_milk_from_a_tank,
     repair_mends_a_rod_with_string,
@@ -313,4 +316,30 @@ fn fishery_keeps_the_rods_last_point(o: Pos, _: &Tuning) -> Scenario {
         .until("it says there is not enough open water", 100, move |b, _| {
             Ok(status_key(b, p) == "rustcraft.util.fish_no_water")
         })
+}
+
+fn butcher_energy_and_kill_xp(o: Pos, _: &Tuning) -> Scenario {
+    use crate::butcher::{self, Shown as ButcherShown};
+    let p = at(o, [3, 1, 0]);
+    let tank = at(o, [4, 1, 0]);
+    Scenario::new("butcher18_energy_and_kill_xp", plot_area(o))
+        .then("a butcher with a sword and no energy, a condenser beside it, three cows", move |b, _| {
+            for x in -1..=8 {
+                for z in -3..=3 {
+                    b.place(at(o, [x, 0, z]), "minecraft:stone", &[])?;
+                }
+            }
+            b.place(p, butcher::BLOCK, &[])?;
+            b.set_owner(p, 0x5e1f_7e57_0000_0000_0000_0000_0000_0b18, 1)?;
+            b.put(p, butcher::SWORD_SLOT, "minecraft:iron_sword", 1)?;
+            b.place(tank, "rustcraft:xp_tank", &[])?;
+            for i in 0..3 {
+                let at = [f64::from(o[0]) + 1.5 + f64::from(i), f64::from(o[1] + 1), f64::from(o[2]) + 2.5];
+                b.spawn_mob("minecraft:cow", at, None)?;
+            }
+            Ok(())
+        })
+        .until("it says it has no energy", 400, move |b, _| Ok(b.butcher(p) == Some(ButcherShown::NoEnergy)))
+        .then("energy into its buffer", move |b, _| b.set_buffer(p, butcher::BUFFER))
+        .until("the kill's experience is in the condenser", 600, move |b, _| Ok(b.long(tank, "util_xp") > 0))
 }

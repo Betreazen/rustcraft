@@ -857,6 +857,18 @@ impl Bench for GameBench<'_, '_> {
         Ok(count - left.min(count))
     }
 
+    fn long(&self, pos: Pos, key: &str) -> i64 {
+        match self
+            .game
+            .native_mod_block_entity(pos)
+            .and_then(|e| e.nbt.get(&horizon_world::nbt::JavaString::from(key)).cloned())
+        {
+            Some(Tag::Long(v)) => v,
+            Some(Tag::Int(v)) => i64::from(v),
+            _ => 0,
+        }
+    }
+
     fn int_array(&self, pos: Pos, key: &str) -> Vec<i32> {
         match self
             .game

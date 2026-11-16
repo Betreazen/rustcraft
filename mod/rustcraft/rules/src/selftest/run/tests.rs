@@ -312,6 +312,9 @@ impl Bench for Fake {
     fn int_array(&self, _: Pos, _: &str) -> Vec<i32> {
         Vec::new()
     }
+    fn long(&self, _: Pos, _: &str) -> i64 {
+        0
+    }
 }
 
 const PLOT: Area = Area {

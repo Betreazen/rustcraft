@@ -334,6 +334,8 @@ pub trait Bench {
     fn storage_diagnosis(&self, pos: Pos) -> Option<String>;
     /// The int array under `key` in the saved compound of the mod block entity at `pos`.
     fn int_array(&self, pos: Pos, key: &str) -> Vec<i32>;
+    /// The long (or int) under `key` in the saved compound of the mod block entity at `pos`.
+    fn long(&self, pos: Pos, key: &str) -> i64;
 }
 
 /// A mob as the self-test reads it.
