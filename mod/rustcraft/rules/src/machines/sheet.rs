@@ -181,11 +181,12 @@ impl Kind {
                 slots: 9,
                 ..Shape::default()
             },
-            // Energy, water and product bars, a line of progress, its three input slots.
+            // Energy, water and product bars, a line of progress (slice 18: and one of its queue
+            // cells), its three input slots.
             Kind::Mixer => Shape {
                 sockets,
                 mode: true,
-                rows: 1,
+                rows: 2,
                 bars: 3,
                 slots: 3,
                 ..Shape::default()

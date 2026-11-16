@@ -136,7 +136,11 @@ pub(super) fn tank_size(t: &Tuning) -> u64 {
 
 pub struct Held {
     mixer: Mixer,
+    /// Its real input slots, then its queue cells (slice 18).
     inputs: Vec<Slot>,
+    /// The real slots as the block entity holds them, and the queue as saved.
+    raw: Vec<Slot>,
+    queue_before: Vec<Slot>,
     spec: Spec,
     pub request: f64,
 }
@@ -144,12 +148,44 @@ pub struct Held {
 fn spec_of(game: &Game<'_>, pos: Pos, nbt: &Compound, t: &Tuning) -> Spec {
     let slots = base::modules_at(game, pos);
     let (work, energy_factor) = mining::factors(machines::read_work(nbt), &slots, t);
+    // Slice 18 (A8): a higher tier mixes faster for the same energy a bucket.
+    let tier = rustcraft_rules::tiers::family_of_block(content::MIXER).map_or(1.0, |f| {
+        rustcraft_rules::tiers::speed(f, crate::game::rustcraft_tiers::tier_of(game, pos, content::MIXER), t.tier_speed_step)
+    });
     Spec {
         tank: tank_size(t),
-        energy: t.mixer_energy,
-        work,
+        energy: t.mixer_energy * tier,
+        work: work * tier,
         energy_factor,
     }
+}
+
+/// Slice 18: the capacity and stack modules' queue cells behind the input slots
+/// (rustcraft_rules::machines::queue): the real slots move into them, the mixer counts both.
+fn queued(game: &Game<'_>, pos: Pos, raw: &[Slot], saved: &[Slot]) -> Vec<Slot> {
+    let slots = base::modules_at(game, pos);
+    let open = rustcraft_rules::machines::queue::open_cells(
+        rustcraft_rules::modules::capacity_slots(&slots),
+        rustcraft_rules::modules::stack_tier(&slots) > 0,
+    )
+    .min(rustcraft_rules::machines::extras::MAX_CELLS);
+    let mut visible = raw.to_vec();
+    let mut cells = saved.to_vec();
+    for slot in visible.iter_mut() {
+        if let Some((item, _)) = slot.clone() {
+            let size = rustcraft_rules::modules::machine_stack(&slots, machines::max_stack(game, &item));
+            rustcraft_rules::machines::queue::intake(slot, &mut cells, open, size);
+        }
+    }
+    let mut spare: Slot = None;
+    rustcraft_rules::machines::queue::spill(&mut spare, &mut cells, open, |i| machines::max_stack(game, i));
+    if let Some(back) = spare {
+        match visible.iter_mut().find(|s| s.is_none()) {
+            Some(free) => *free = Some(back),
+            None => cells.push(Some(back)),
+        }
+    }
+    visible.into_iter().chain(cells).collect()
 }
 
 pub(super) fn read(
@@ -165,14 +201,19 @@ pub(super) fn read(
         product: tanks.product,
         progress: read_f64(&entity.nbt, PROGRESS_KEY).clamp(0.0, 1.0),
     };
-    let inputs: Vec<Slot> = (0..content::MIXER_SLOTS)
+    let raw: Vec<Slot> = (0..content::MIXER_SLOTS)
         .map(|i| slot_of(&entity, i))
         .collect();
+    let queue_before: Vec<Slot> =
+        crate::game::rustcraft_utility::read_json(&entity.nbt, machines::QUEUE_KEY);
+    let inputs = queued(game, pos, &raw, &queue_before);
     let spec = spec_of(game, pos, &entity.nbt, t);
     let request = mixer.request(&recipes.mixing, &inputs, &spec);
     Some(Held {
         mixer,
         inputs,
+        raw,
+        queue_before,
         spec,
         request,
     })
@@ -190,6 +231,8 @@ pub(super) fn run(
     let Held {
         mut mixer,
         inputs,
+        raw,
+        queue_before,
         spec,
         request,
     } = held;
@@ -200,11 +243,16 @@ pub(super) fn run(
     state()
         .shown
         .insert((game.native_dimension().to_owned(), pos), (shown, got));
-    if mixer == before && after == inputs {
+    let mut after = after;
+    let cells = after.split_off(content::MIXER_SLOTS.min(after.len()));
+    if mixer == before && after == raw && cells == queue_before {
         return;
     }
     game.native_with_mod_block_entity(pos, |e| {
-        machines::write_slots(e, 0..content::MIXER_SLOTS, &inputs, &after, &[]);
+        machines::write_slots(e, 0..content::MIXER_SLOTS, &raw, &after, &[]);
+        if cells != queue_before {
+            crate::game::rustcraft_utility::write_json(&mut e.nbt, machines::QUEUE_KEY, &cells);
+        }
         if mixer.progress != before.progress {
             write_f64(&mut e.nbt, PROGRESS_KEY, mixer.progress);
         }
@@ -371,6 +419,16 @@ pub(super) fn sheet(game: &Game<'_>, dimension: &str, pos: Pos, t: &Tuning, s: &
         ),
     };
     s.bars.push(fluid_bar(label, amount, size, colour));
+    // Slice 18: the queue cells' items, when it has any.
+    let cells: Vec<Slot> = crate::game::rustcraft_utility::read_json(&entity.nbt, machines::QUEUE_KEY);
+    let queued: u32 = cells.iter().flatten().map(|(_, n)| n).sum();
+    if !cells.is_empty() {
+        s.rows.push(base::v(&line(
+            "rustcraft.mixer.queue",
+            "Queue: %s items in %s cells",
+            &[Text::literal(queued.to_string()), Text::literal(cells.len().to_string())],
+        )));
+    }
     let progress = read_f64(&entity.nbt, PROGRESS_KEY).clamp(0.0, 1.0);
     let secs = t.mixer_ticks / spec.work.max(1e-9) / t.ticks_per_second;
     s.rows.push(base::v(&line(

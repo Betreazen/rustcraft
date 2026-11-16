@@ -3693,5 +3693,6 @@
   "rustcraft.window.work": "Ход работы",
   "rustcraft.window.module_slot.fits": "Подходят: %s",
   "rustcraft.window.queue_cell": "Ячейка очереди",
-  "rustcraft.window.reserve": "Ещё %s ждут за ячейкой"
+  "rustcraft.window.reserve": "Ещё %s ждут за ячейкой",
+  "rustcraft.mixer.queue": "Очередь: %s предметов в %s ячейках"
 }

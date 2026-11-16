@@ -360,7 +360,8 @@ impl Default for Tuning {
             ],
             mixer_energy: 8.0,
             mixer_ticks: 100.0,
-            mixer_buckets: 4,
+            // Slice 18: 16 buckets a tank, as the guide's window shows (`ui.js` mixer).
+            mixer_buckets: 16,
             cargo_hold: 45,
             load_dock_slots: 9,
             load_items_per_second: 32.0,

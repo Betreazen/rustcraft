@@ -1045,5 +1045,6 @@
   "rustcraft.window.work": "Progress",
   "rustcraft.window.module_slot.fits": "Takes: %s",
   "rustcraft.window.queue_cell": "Queue cell",
-  "rustcraft.window.reserve": "%s more wait behind the slot"
+  "rustcraft.window.reserve": "%s more wait behind the slot",
+  "rustcraft.mixer.queue": "Queue: %s items in %s cells"
 }
