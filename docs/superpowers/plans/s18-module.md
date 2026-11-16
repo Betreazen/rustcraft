@@ -66,59 +66,41 @@
 
 ## Задачи
 
-### Task 1: наборы модулей, гнёзда, новые предметы (приоритет — их читают потоки 3 и 5)
+Статус на 2026-11-16 (коммиты ветки `s18/module`).
 
-**Files:** `mod/rustcraft/rules/src/modules.rs`; `mod/rustcraft/content.rs` (модуль ёмкости регистрируется через `ITEMS`, свой блок строк); `mod/content/assets/rustcraft/{models/item,items,textures/item}/module_{stack,stack_2,stack_3,yield,line}.*`; `assets/models/icons_mc.py`; рецепты `mod/content/data/rustcraft/recipe/module_{stack,stack_2,stack_3,yield,line}.json`; lang ru/en; `rules/src/machines/sheet.rs` только строка `Kind::holder` для новых держателей не трогается (поток 3).
+- [x] **Task 1. Наборы, гнёзда, новые предметы** — `modules.rs` по таблице контракта, тесты `each_holder_takes_exactly_the_handbook_set`, `economy_fits_every_machine_and_speed_all_but_animals_and_fishing`, `sockets_by_tier`, `tools_use_their_own_chassis_modules`, `speed_and_economy_stack_in_full_and_economy_slows_work`, `capacity_adds_two_slots_and_a_page_a_module`, `stack_tiers_and_slot_sizes`, `yield_is_15_percent_a_module`, `storage_doubles_line_adds_half_height_steps_toward_its_target`. Предметы стака (3), выхода, линии: иконки (`icons_mc.py` → `export_mc.py`), модели, имена ru/en, рецепты. Модуль ёмкости — в `ITEMS` (`content.rs` больше не регистрирует его отдельно). Коммит 47dc675.
+- [x] **Task 2. Рецепты пласта, высоты, лавы, застройки, книги** по `data.js`; тест `every_module_has_a_recipe_and_the_slice_18_ones_are_the_handbooks` читает JSON рецептов. Коммит 47dc675.
+- [x] **Task 3. Дезинтегратор — модуль выхода** (`utility.rs`), самотест `module_disintegrator_yield`. Коммит cd32cf1.
+- [x] **Task 4. Экономия ×0,85 работы в машинах среза 12** (`utility.rs::paced` через `modules::paced_ticks`/`factors`), самотест `module_economy_slows_a_step`. Коммит cd32cf1.
+- [x] **Task 5. Хранилище ×2** — правило `storage_factor`; `mining::slots_of` и `Worker::hold_size` считают ×2 за модуль. Пределы окон остаются (добытчик 27 = 3 ряда, трюм 45 = 5 рядов): **передано** — добытчик 36 и больше — поток 2 (окно и `MINER_SLOTS`), трюм — поток 6, буфер рыболовной станции 9 → 18 — поток 5. Коммит 7015498.
+- [x] **Task 6. Модуль высоты — правило** `height_step` (Task 1). Бур и поле высоты в окне шасси — **поток 6**.
+- [x] **Task 7. Жила**: редстоун — частая руда, выбор руды не дороже по энергии (тест `redstone_is_not_rare_and_the_pick_costs_no_more`), коммит 02a19ac; выбор руд в окне жилы виден только с модулем выбора руды, самотест `module_vein_choice_with_the_module`, коммит 9074709.
+- [x] **Task 8. Замедление турели 20/40/60%** — модификатор атрибута `movement_speed` моба (`horizon_client::mobs::finalize`, то же, что правит `/attribute`), `turret::slow_fraction`; самотесты турели читают модификатор (`MobView::slow`). Коммит bb20543.
+- [x] **Task 9. Луч лечения** — `turret::beam_points` (тест), розовая пыль `/particle minecraft:dust` от турели к лечимому игроку раз в 10 тиков (`execute in <измерение>`). Самотеста нет (частицы сервер не хранит) — пункт 4 в README «Что проверить в игре: срез 18, модули». Коммит b5a6fe0.
+- [x] **README** — раздел «Что проверить в игре: срез 18, модули». Коммит 464ebc8.
 
-- [ ] Тест RED: `each_holder_takes_exactly_the_handbook_set` (таблица выше, для каждого держателя полный список и «не берёт» остальное), `sockets_by_tier`, `stack_tiers_and_machine_stack`, `yield_chance_stacks`, `capacity_slots_and_pages`, `factors_with_economy_slow_work`, `tool_uses`.
-- [ ] GREEN: новые варианты `Module`, `Holder`, функции контракта.
-- [ ] Предметы: иконки из `icons.js` (`stack`, `yield`, `line`) в `icons_mc.py`, `py -I assets/models/export_mc.py`, модели и `items/*.json`, имена ru/en.
-- [ ] Рецепты по `data.js`: стак `b b/ c /b b` (сплав a2 / a3 / a4 + сундук), выход `axa/xsx/axa` (кристаллит, золото, осколок), линия (искросталь, воронка, осколок).
-- [ ] `cargo test`, коммит.
+### Task 10: строки таблицы, переданные владельцам блоков (правило готово здесь)
 
-### Task 2: рецепты пласта, высоты, лавы, застройки, книги рецептов по `data.js`
-
-- [ ] пласт `asa/bdb/asa` (a4, осколок, кисточка, алмаз); высота `aca/rsr/aca` (a3, компас, редстоун, осколок); лава `axa/xsx/axa` (a3, обсидиан); застройка (a3, выбрасыватель); книга `aba/tst/aba` (a3, книга, верстак, осколок).
-- [ ] Тест крейта правил: рецепт читается и совпадает с `data.js` (`recipes_match_the_handbook` — разбор JSON рецептов модулей из `mod/content`).
-- [ ] Коммит.
-
-### Task 3: дезинтегратор берёт модуль выхода
-
-- [ ] `Holder::Util(Disintegrator)` берёт `Yield`, не `Output` (Task 1). `utility.rs:525` считает `Module::Yield`.
-- [ ] Самотест `module_disintegrator_yield` (дезинтегратор с модулем выхода отдаёт 60%).
-- [ ] Коммит.
-
-### Task 4: экономия ×0,85 работы в машинах среза 12
-
-- [ ] `utility.rs::paced` берёт `modules::paced_ticks` и `factors` (экономия замедляет шаг).
-- [ ] Самотест: утилизатор с модулем экономии работает медленнее шага на 1/0,85.
-- [ ] Коммит.
-
-### Task 5: модуль хранилища ×2
-
-- [ ] Правило `storage_factor` (Task 1). Добытчик 9 → 18 → 36; трюм работника ×2; буфер рыболовной станции ×2 — подключают потоки 2, 6, 5 (окна больше 3 рядов — их файлы). Здесь: функции `mining::slots_of` и `Worker::hold_size` переходят на `storage_factor`, если окно и блок-энтити это держат; иначе — передать владельцу.
-
-### Task 6: модуль высоты — правило
-
-- [ ] `height_step` с тестами; бур и поле высоты в окне шасси подключает поток 6.
-
-### Task 7: живая жила — редстоун не редкий, цена выбора руды
-
-- [ ] `utility/vein.rs`: редстоун из «редких» убрать (справочник: золото, лазурит, кварц, изумруд, алмаз, древние обломки); `PICK_FACTOR` → 1 (справочник: цена блока не меняется, дорог сам модуль). Тесты в `vein.rs`.
-
-### Task 8: замедление турели ровно 20 / 40 / 60 %
-
-- [ ] Модификатор атрибута `minecraft:movement_speed` моба (`add_multiplied_total` −0,2 × n, не больше −0,6) на 3 с вместо эффекта игры с шагом 15%. Правило `turret::slow_fraction`; провод в `base.rs` в функции эффектов турели.
-- [ ] Самотест `turret_slowness_exact`.
-
-### Task 9: луч лечения турели
-
-- [ ] Частицы от турели к лечимому игроку при каждом лечении (`/particle` или API частиц). Правило `turret::beam_points(from, to, step)`.
-
-### Task 10: прочие строки таблицы — передать владельцам с готовым правилом
-
-Печь/дробилка/плавильня (гнёзда, ёмкость, стак, выход) — поток 3; смеситель/автокрафтер/комбайн/куб (ёмкость, стак) — 3/5; ремонтный стенд, рыболовная станция — 5; терминал (стак) — 5; рюкзак (стак) — 7; узел (линия) — 1; 4-е гнездо и ступени — 3; шасси 5/7 — 6; выбор руды/пласта в окне жилы — 5. Отметить здесь, чьё и что готово.
+| Строка таблицы | Что готово здесь | Кто подключает |
+|---|---|---|
+| 3 гнезда на ступенях 1–2, 4 на 3–4 (A5) | `sockets(tier)`, `MAX_SOCKETS` | поток 3 (ступени, `sheet::SOCKETS`, раскладка окон, `selftest.rs::set_modules` держит 3) |
+| Шасси 3/5/7 гнёзд, 4 коридора 9×9 | `chassis_sockets(tier)` | поток 6 |
+| Печь, дробилка, плавильня: ёмкость, стак, выход; скорость и экономия | `Holder::Processor`, `capacity_slots`, `machine_stack`, `yield_lucky`, `factors` | поток 3 |
+| Смеситель, автокрафтер: ёмкость, стак | `Holder::Mixer`/`Crafter`, `capacity_slots`, `capacity_pages`, `machine_stack` | поток 3 |
+| Насос: скорость, экономия | `Holder::Pump` | поток 3 |
+| Комбайн, варочный куб: ёмкость (+страница), стак; ремонтный стенд: ёмкость | `Holder::Util(..)`, те же функции | поток 5 |
+| Рыболовная станция: хранилище ×2 | `Holder::Util(Fishery)`, `storage_factor` | поток 5 |
+| Забойщик: экономия | `Holder::Butcher` берёт экономию; забойщик сейчас энергии не тратит | поток 5 |
+| Терминал: стак 256/1024/4096 | `Holder::Terminal`, `stack_tier` → `Store::stack_module` | поток 5 |
+| Рюкзак: стак до 1024 | `Holder::Backpack`, `backpack_stack` | поток 7 |
+| Добытчик: стак 256 | `Holder::Miner`, `machine_stack` | поток 2 |
+| Узел: ускорение линии +50% | предмет, `Holder::Node`, `line_factor` | поток 1 (окно узла, участок) |
+| Бур: высота, без радиуса | `height_step`, `tool_uses(Bore, Radius)` = false | поток 6 |
+| Пласт: выбор песок/гравий и таблица находок в окне жилы | — | поток 5 (окно жилы и цепочка находок «жила → захват → стол», `found::brush_table`) |
+| Окна без модулей (зарядная плита, конденсатор опыта, голопроектор, портальный док) рисуют пустые гнёзда | `Holder::has_sockets()` = false | поток 3 (`Kind::shape`: `sockets = holder().is_some_and(Holder::has_sockets)`) |
+| Страницы справочника в игре `mod_stack`, `mod_yield`, `mod_line`: `item: None` | предметы `module_stack`, `module_yield`, `module_line` есть | поток 8 (`handbook/pages.rs`) |
+| Осколок аметиста в рецептах модулей | — | интегратор после потока 2 |
 
 ## Пределы движка
 
-(пока нет)
+Нет. Всё, что нужно было потоку, движок даёт: модификаторы атрибутов моба (`horizon_client::mobs::finalize::add_modifier`, SRC `crates/horizon-client/src/mobs/finalize.rs:652`), `/particle` с опциями пыли (SRC `game/commands/world_cmds.rs:749`).
