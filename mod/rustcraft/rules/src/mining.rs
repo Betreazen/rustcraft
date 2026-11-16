@@ -184,8 +184,7 @@ pub fn scout(slots: &[Option<Module>]) -> f64 {
 
 /// The miner's slots: 9, ×2 a storage module (guide `mod_storage`), at most `miner_slots_max`.
 pub fn slots_of(slots: &[Option<Module>], t: &Tuning) -> usize {
-    let n = modules::count(slots, Module::Storage);
-    (t.miner_slots << n.min(8)).min(t.miner_slots_max)
+    (t.miner_slots * modules::storage_factor(slots)).min(t.miner_slots_max)
 }
 
 // ---- The miner ----
