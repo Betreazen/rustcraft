@@ -12,7 +12,7 @@ use crate::net::topology::ChannelKind;
 use crate::geom::Pos;
 use crate::tuning::Tuning;
 
-pub const ALL: [Build; 7] = [
+pub const ALL: [Build; 8] = [
     recipes_craft,
     node_tiers,
     chests_work_both_ways,
@@ -20,6 +20,7 @@ pub const ALL: [Build; 7] = [
     node_window_and_boost,
     wrench_turns_and_lifts,
     bottlenecks_marked,
+    lost_housing_drops_channels,
 ];
 
 /// A handbook recipe: its three rows, what each letter is, what it makes and how many.
@@ -308,6 +309,30 @@ fn bottlenecks_marked(o: Pos, _t: &Tuning) -> Scenario {
                 .map(|k| b.pipe("weak", at(o, [k, 0, 0])))
                 .collect::<Result<_, _>>()?;
             Ok(w == ["0", "1", "1", "0"])
+        })
+}
+
+/// Guide `housing`: a housing that goes without a player (an explosion, a command) drops its
+/// channels where it stood at the next rescan.
+fn lost_housing_drops_channels(o: Pos, _t: &Tuning) -> Scenario {
+    let h = at(o, [1, 0, 0]);
+    Scenario::new("pipe_lost_housing_drops_its_channels", plot_area(o))
+        .then("a housing with two channels", move |b, _| {
+            line(b, o, 1, 1, [channel(ChannelKind::Item, 2), channel(ChannelKind::Fluid, 1), None, None])?;
+            b.refresh();
+            Ok(())
+        })
+        .wait(40)
+        .then("the housing set to air, as a command does", move |b, _| {
+            b.place(h, "minecraft:air", &[])?;
+            b.refresh();
+            Ok(())
+        })
+        .until("its channels lie where it stood", 100, move |b, _| {
+            let c = h.map(f64::from);
+            let lying = b.lying([c[0] - 1.0, c[1] - 1.0, c[2] - 1.0], [c[0] + 2.0, c[1] + 2.0, c[2] + 2.0]);
+            let has = |item: &str| lying.iter().any(|(i, n)| i == item && *n >= 1);
+            Ok(has("rustcraft:item_channel_2") && has("rustcraft:fluid_channel"))
         })
 }
 

@@ -232,6 +232,8 @@ impl Bench for GameBench<'_, '_> {
 
     fn clear(&mut self, area: &Area) -> Result<(), String> {
         self.clear_slice7(area);
+        // s18/pipe: a cleared plot's housings drop no channels.
+        crate::game::rustcraft_pipe18::cleared(DIMENSION, area.min, area.max);
         let height = u32::try_from(area.max[1] - area.min[1] + 1).map_err(|e| e.to_string())?;
         let mut runs = Vec::new();
         for x in area.min[0]..=area.max[0] {

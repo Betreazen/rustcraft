@@ -15,6 +15,10 @@ use crate::game::{
 use horizon_client::{items::ItemStack, mod_api::NativeServerPlayer, save, text::Text};
 use horizon_world::nbt::{Compound, JavaString, Tag};
 use crate::game::rustcraft_utility::CUSTOM_DATA;
+use std::{
+    collections::{BTreeSet, HashMap},
+    sync::{LazyLock, Mutex, MutexGuard, PoisonError},
+};
 use rustcraft_rules::{
     geom::Pos,
     net::{node_tier, wrench},
@@ -180,6 +184,7 @@ fn take_housing(game: &mut Game<'_>, dimension: &str, pos: Pos) -> Option<Vec<St
             .flatten()
             .map(|c| content::channel_item(c.kind, c.tier).to_owned()),
     );
+    housing_handled(dimension, pos);
     // Flags 3: neighbours hear it and the players see it.
     game.native_set_block(dimension, pos, air, 3).then_some(items)
 }
@@ -478,5 +483,68 @@ pub(super) fn mark_weak(game: &mut Game<'_>, level: &server::LevelNet) {
             }
         });
         game.native_block_entity_sync(pos);
+    }
+}
+
+// ---- Channels of a housing lost without a player (explosion, /setblock) ----
+//
+// A housing a player breaks gives its channels back at once (rustcraft_server::on_destroy_block),
+// one the wrench lifts too; one that goes another way (an explosion, a command, another mod) is
+// found gone at the next rescan, and its channels drop where it stood. A housing in an unloaded
+// chunk is not gone.
+
+static HANDLED: LazyLock<Mutex<BTreeSet<(String, Pos)>>> = LazyLock::new(Mutex::default);
+
+fn handled() -> MutexGuard<'static, BTreeSet<(String, Pos)>> {
+    HANDLED.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+/// A housing at `pos` broken by a player or lifted: its channels are already dealt with.
+pub(super) fn housing_handled(dimension: &str, pos: Pos) {
+    handled().insert((dimension.to_owned(), pos));
+}
+
+/// The self-test clears its plots: their housings are no loss.
+pub(super) fn cleared(dimension: &str, min: Pos, max: Pos) {
+    let inside = |p: &Pos| (0..3).all(|i| p[i] >= min[i] && p[i] <= max[i]);
+    let gone: Vec<Pos> = server::with_level(dimension, |level| {
+        level.layout.housings.keys().copied().filter(inside).collect()
+    })
+    .unwrap_or_default();
+    let mut h = handled();
+    for p in gone {
+        h.insert((dimension.to_owned(), p));
+    }
+}
+
+/// After a rescan: the housings of `before` that are gone from a loaded chunk drop their channels.
+pub(super) fn drop_lost(
+    game: &mut Game<'_>,
+    dimension: &str,
+    before: &HashMap<Pos, rustcraft_rules::net::topology::Housing>,
+    now: &rustcraft_rules::net::topology::Layout,
+) {
+    let mut lost = Vec::new();
+    {
+        let mut h = handled();
+        for (pos, housing) in before {
+            if now.housings.contains_key(pos) {
+                continue;
+            }
+            if h.remove(&(dimension.to_owned(), *pos)) {
+                continue;
+            }
+            let chunk = (pos[0] >> 4, pos[2] >> 4);
+            if !game.world.chunks.contains_key(&chunk) || game.native_block(*pos) == content::HOUSING {
+                continue;
+            }
+            lost.push((*pos, *housing));
+        }
+        h.retain(|(d, _)| d != dimension);
+    }
+    for (pos, housing) in lost {
+        for c in housing.slots.into_iter().flatten() {
+            server::drop_one(game, dimension, pos, content::channel_item(c.kind, c.tier));
+        }
     }
 }

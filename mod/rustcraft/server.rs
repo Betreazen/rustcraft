@@ -487,6 +487,10 @@ pub(super) fn on_destroy_block(game: &mut Game<'_>, pos: [i32; 3]) {
             drop_item(game, &player.dimension, pos, orders::book_item());
         }
     }
+    if block == content::HOUSING {
+        // s18/pipe: its channels are dealt with here, not as a loss at the next rescan.
+        crate::game::rustcraft_pipe18::housing_handled(&player.dimension, pos);
+    }
     if block != content::HOUSING || player.game_mode == CREATIVE {
         return;
     }
@@ -533,7 +537,10 @@ fn mark_all_stale() {
 /// Reads the level's magistral, machines and recipes again and rebuilds its nets, circuits and
 /// joints.
 fn rescan(game: &mut Game<'_>, dimension: &str, level: &mut LevelNet) {
+    // s18/pipe: housings gone without a player drop their channels.
+    let before = std::mem::take(&mut level.layout.housings);
     let found = scan(game, dimension, level);
+    crate::game::rustcraft_pipe18::drop_lost(game, dimension, &before, &level.layout);
     storage::rescan(game, dimension, &found.cells, &found.terminals);
     let stations: Vec<Pos> = level
         .machines
