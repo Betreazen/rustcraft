@@ -234,6 +234,22 @@ pub fn buffs(l: &Loadout, t: &Tuning) -> Buffs {
     }
 }
 
+/// Guide `mod_heal`: the beam that shows whom a support turret heals, as points every `step`
+/// blocks from `from` (the turret) to `to` (the player's chest), both ends included.
+pub fn beam_points(from: [f64; 3], to: [f64; 3], step: f64) -> Vec<[f64; 3]> {
+    let d = [to[0] - from[0], to[1] - from[1], to[2] - from[2]];
+    let length = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt();
+    let n = (length / step.max(1e-3)).round() as usize;
+    if n == 0 {
+        return vec![from];
+    }
+    (0..=n)
+        .map(|i| {
+            let k = i as f64 / n as f64;
+            [from[0] + d[0] * k, from[1] + d[1] * k, from[2] + d[2] * k]
+        })
+        .collect()
+}
 /// The player a heal goes to: the most hurt below their maximum, by (id, health, maximum).
 pub fn most_hurt(players: &[(u128, f64, f64)]) -> Option<u128> {
     players
@@ -445,6 +461,19 @@ mod tests {
         assert_eq!(fast.shot_energy(&t), 40.0 * 2.5 / 2.0);
         let eco = load(&[Module::Economy]);
         assert!(eco.shot_energy(&t) < 40.0);
+    }
+
+    #[test]
+    fn the_heal_beam_runs_from_the_turret_to_the_player() {
+        // Guide `mod_heal`: «луч от неё показывает, кого» it heals.
+        let from = [0.5, 1.0, 0.5];
+        let to = [4.5, 1.0, 0.5];
+        let p = beam_points(from, to, 0.5);
+        assert_eq!(p.len(), 9, "every half block, both ends included");
+        assert_eq!(p[0], from);
+        assert_eq!(p[8], to);
+        assert!((p[4][0] - 2.5).abs() < 1e-9);
+        assert_eq!(beam_points(from, from, 0.5), vec![from]);
     }
 
     #[test]

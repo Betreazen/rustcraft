@@ -659,7 +659,7 @@ fn run_turret(game: &mut Game<'_>, dimension: &str, pos: Pos, now: u64, t: &Tuni
     let energy = machines::buffer_energy(game, pos);
     let doing = match l.role() {
         Role::Attack => attack(game, dimension, pos, &l, owner, energy, now, &mut ts, t),
-        Role::Support => support(game, pos, &l, energy, now, &mut ts, t),
+        Role::Support => support(game, dimension, pos, &l, energy, now, &mut ts, t),
     };
     ts.shown = Some(doing);
     state().turrets.insert(key, ts);
@@ -908,8 +908,10 @@ pub(super) fn strike(
     game.native_hurt_entity(dimension, id, amount, SHOT_TYPE, None)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn support(
     game: &mut Game<'_>,
+    dimension: &str,
     pos: Pos,
     l: &Loadout,
     energy: f64,
@@ -968,10 +970,31 @@ fn support(
                     .map_or(0.0, |p| p.health);
                 game.native_set_player_status(who, Some(health + b.heal as f32), None, None);
             }
+            // Slice 18, guide `mod_heal`: a beam from the turret shows whom it heals.
+            if now.is_multiple_of(BEAM_EVERY)
+                && let Some(p) = players.iter().find(|p| p.uuid == who)
+            {
+                heal_beam(game, dimension, at, p.position);
+            }
             doing = Shown::Healing(name);
         }
     }
     turret::shown(l, true, doing)
+}
+
+/// Ticks between two draws of the heal beam.
+const BEAM_EVERY: u64 = 10;
+
+/// The heal beam: pink dust every half block from the turret's top to the player's chest
+/// (`/particle minecraft:dust`, which Horizon sends to the players near each point).
+fn heal_beam(game: &mut Game<'_>, dimension: &str, turret: [f64; 3], feet: [f64; 3]) {
+    let from = [turret[0], turret[1] + 0.2, turret[2]];
+    let chest = [feet[0], feet[1] + 1.2, feet[2]];
+    for [x, y, z] in turret::beam_points(from, chest, 0.5) {
+        game.native_run_command(&format!(
+            "execute in {dimension} run particle minecraft:dust{{color:[1.0,0.42,0.54],scale:1.0}} {x:.2} {y:.2} {z:.2} 0 0 0 0 1 force"
+        ));
+    }
 }
 
 /// Each second: buffs past their time come off; power and haste follow as modifiers.
