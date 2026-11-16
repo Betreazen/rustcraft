@@ -1,5 +1,6 @@
 //! The magistral: housings with four channel slots, nodes, and the networks they form.
 
+pub mod bottleneck;
 pub mod energy;
 pub mod fluids;
 pub mod items;
