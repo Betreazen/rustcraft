@@ -1020,3 +1020,18 @@ bindings = [
   { name = "scroll", ty = "[f64; 2]", value = "scroll" },
   { name = "canceled", ty = "&mut bool", value = "&mut *canceled" },
 ]
+
+# ---- Slice 18, base and gear (stream 7) ----
+
+# The charge bar under a gear piece's icon (client, API 60): the width the server keeps in the
+# stack's custom data (rustcraft_gear, `rustcraft:bar`).
+[[injection]]
+id = "item_bar"
+hook = "item_bar"
+hook_version = 1
+kind = "HEAD"
+helper = "hook_item_bar.rs"
+bindings = [
+  { name = "stack", ty = "&horizon_client::items::ItemStack", value = "stack" },
+  { name = "bar", ty = "&mut Option<(i32, u32)>", value = "&mut *bar" },
+]

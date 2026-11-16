@@ -327,6 +327,31 @@ pub fn add_charge(h: &mut Held, cap: f64, to: f64) {
     h.charge = h.charge.max(to.min(cap));
 }
 
+/// Slice 18: the bar under a piece's icon (guide `armor`: its charge seen), as vanilla's
+/// durability bar: 0..=13 pixels wide.
+pub const BAR_WIDTH: u8 = 13;
+/// The custom-data key the server writes the bar's width under, for clients.
+pub const BAR_KEY: &str = "rustcraft:bar";
+
+/// The bar's width for `charge` of `cap`: any charge shows at least a pixel.
+pub fn bar(charge: f64, cap: f64) -> u8 {
+    if cap <= 0.0 || charge <= 0.0 || !charge.is_finite() {
+        return 0;
+    }
+    let w = (charge / cap).min(1.0) * f64::from(BAR_WIDTH);
+    (w.round() as u8).clamp(1, BAR_WIDTH)
+}
+
+/// The bar's colour (0xRRGGBB) at `width`: red when nearly empty, through amber, to the energy
+/// cyan when full.
+pub fn bar_rgb(width: u8) -> u32 {
+    match width {
+        0..=3 => 0xE0_3C_3C,
+        4..=8 => 0xF0_B4_3C,
+        _ => 0x4C_D8_F0,
+    }
+}
+
 /// A cost after Thrift: −10 % a level.
 pub fn cost(base: f64, h: &Held) -> f64 {
     base * (1.0 - 0.1 * f64::from(h.thrift.min(MAX_LEVEL)))
@@ -471,6 +496,18 @@ mod tests {
         h.charge = 100.0;
         add_charge(&mut h, 30_000.0, 40_000.0);
         assert_eq!(h.charge, 30_000.0);
+    }
+
+    #[test]
+    fn the_bar_under_the_icon_follows_the_charge() {
+        assert_eq!(bar(0.0, 10_000.0), 0);
+        assert_eq!(bar(10_000.0, 10_000.0), BAR_WIDTH);
+        assert_eq!(bar(5_000.0, 10_000.0), 7);
+        assert_eq!(bar(12_000.0, 10_000.0), BAR_WIDTH, "above the battery is full");
+        assert_eq!(bar(8.0, ZIP_CHARGES), 7);
+        assert_eq!(bar(1.0, 0.0), 0);
+        assert_ne!(bar_rgb(2), bar_rgb(13));
+        assert!(bar(1.0, 10_000.0) >= 1, "a little charge still shows");
     }
 
     #[test]

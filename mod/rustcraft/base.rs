@@ -7,6 +7,9 @@
 //   and Path-of-craft-tree do not take the kill for a player's own; the owner gets the kill's
 //   experience from RustCraft (`native_give_experience`, API 101) and Path-of-craft-tree the
 //   `kill` report (D5, X8), both from `native_living_death` of a mob a turret hit lately.
+//   Slice 18: the shot that kills is the owner's when they are in the turret's level (an arrow's
+//   damage from their entity), so the game drops the mob's own experience and player-only loot
+//   and Path-of-craft-tree counts their ranged kill itself; no fixed experience or report then.
 // - Effects: the base game's `MobEffectInstance` on the mob, as `/effect give` puts it on one
 //   (game/commands/effects.rs:74-90): poison, slowness, and SoulsCraft's `soulscraft:bleeding`
 //   when that effect is registered (`horizon_client::brewing::effect`); without SoulsCraft the

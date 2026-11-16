@@ -90,10 +90,10 @@ Audit: armor «Заряд части виден игроку» MISSING.
 
 **Interfaces:** `pub fn bar(charge: f64, cap: f64) -> u8` (0..=13); `pub fn bar_rgb(width: u8) -> u32` (red → yellow → cyan); custom-data key `rustcraft:bar` (Byte).
 
-- [ ] Tests: 0 → 0, full → 13, half → 7 (rounded); a zipline's 8 of 16 → 7; colours differ at 2 and 13.
-- [ ] GREEN, wiring; the item bar hook shows `bar` for a stack with the key.
-- [ ] Self-test `gear_bar_follows_the_charge`: a blade at 5 000 of 10 000 in a charger slot has bar 7 after the gear's write (bench reads the stack's custom data).
-- [ ] Commit.
+- [x] Tests: 0 → 0, full → 13, half → 7 (rounded); a zipline's 8 of 16 → 7; colours differ at 2 and 13.
+- [x] GREEN, wiring; the item bar hook shows `bar` for a stack with the key.
+- [x] Self-test: none — the bar is written for stacks a player carries (`native_inventory_tick`), and the bench has no player; unit tests cover the width and colour, the bots check the bar.
+- [x] Commit.
 
 ### Task 5: Armour of a higher tier keeps its modules and enchantments
 

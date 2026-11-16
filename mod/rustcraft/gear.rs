@@ -197,10 +197,13 @@ fn needs_full(game: &mut Game<'_>, slot: i32) -> f64 {
 
 /// `native_inventory_tick`: a gear piece without a number gets one.
 pub(super) fn on_inventory_tick(game: &mut Game<'_>, slot: i32) {
-    let needs = game
-        .native_carried_stack(slot)
-        .is_some_and(|s| Gear::of(&s.item).is_some() && id_of(s).is_none());
-    if !needs {
+    let (gear, numbered) = match game.native_carried_stack(slot) {
+        Some(s) => (Gear::of(&s.item), id_of(s).is_some()),
+        None => return,
+    };
+    let Some(g) = gear else { return };
+    if numbered {
+        show_bar(game, slot, g);
         return;
     }
     let id = {
@@ -216,6 +219,47 @@ pub(super) fn on_inventory_tick(game: &mut Game<'_>, slot: i32) {
     };
     if let Some(stack) = game.native_carried_stack(slot) {
         set_id(stack, id);
+    }
+}
+
+// ---- Slice 18: the charge bar under the icon ----
+
+/// The battery a piece's bar is measured against: its charger battery, the zipline's charges.
+fn shown_capacity(g: Gear, h: &Held) -> f64 {
+    rules::charger_capacity(g, h).unwrap_or_else(|| g.base_capacity())
+}
+
+fn bar_of(stack: &ItemStack) -> Option<u8> {
+    match stack.custom_data()?.get(&JavaString::from(rules::BAR_KEY))? {
+        Tag::Byte(v) => u8::try_from(*v).ok(),
+        _ => None,
+    }
+}
+
+/// A carried piece's bar width, written into its custom data when it changed.
+fn show_bar(game: &mut Game<'_>, slot: i32, g: Gear) {
+    let width = {
+        let s = state();
+        let Some(stack) = game.native_carried_stack(slot) else { return };
+        let Some(id) = id_of(stack) else { return };
+        let h = s.store.held.get(&id).cloned().unwrap_or_default();
+        let w = rules::bar(h.charge, shown_capacity(g, &h));
+        if bar_of(stack) == Some(w) {
+            return;
+        }
+        w
+    };
+    if let Some(stack) = game.native_carried_stack(slot) {
+        let mut data = stack.custom_data().cloned().unwrap_or_default();
+        data.insert(JavaString::from(rules::BAR_KEY), Tag::Byte(width as i8));
+        stack.data_mut().set_other(CUSTOM_DATA, Some(Tag::Compound(data)));
+    }
+}
+
+/// `native_item_bar` on a client: a gear piece's bar from its custom data.
+pub(super) fn item_bar(stack: &ItemStack, bar: &mut Option<(i32, u32)>) {
+    if let Some(w) = bar_of(stack) {
+        *bar = Some((i32::from(w), rules::bar_rgb(w)));
     }
 }
 
