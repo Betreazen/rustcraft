@@ -573,6 +573,8 @@ fn rescan(game: &mut Game<'_>, dimension: &str, level: &mut LevelNet) {
     );
     power::rescan(level);
     transport::rebuild(game, dimension, level, &TUNING);
+    // s18/pipe: the wrench's bottlenecks, told to clients.
+    crate::game::rustcraft_pipe18::mark_weak(game, level);
     fluids::rebuild(game, level, found.tanks, &TUNING);
 }
 

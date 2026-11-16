@@ -9,6 +9,11 @@ fn rustcraft_block_entity_submit(
     if crate::game::rustcraft_builder::draw_facade(game, entity, draw) {
         return;
     }
+    // s18/pipe: a housing's channel strips and, with the wrench, its bottleneck.
+    if block == "rustcraft:housing" {
+        crate::game::rustcraft_pipe18::draw_housing(game, entity, draw);
+        return;
+    }
     if block == rustcraft_rules::traversal::ANCHOR {
         crate::game::rustcraft_zipline::draw_anchor(game, pos, entity, draw);
         return;

@@ -227,6 +227,14 @@ pub(super) fn bench(game: &mut Game<'_>, action: &str, pos: Pos) -> Result<Strin
                 .ok_or_else(|| format!("no housing taken at {pos:?}"))
         }
         "facade_items" => Ok(facade_items(game, pos).join(",")),
+        "weak" => Ok(game
+            .native_mod_block_entity(pos)
+            .and_then(|e| match e.nbt.get(&JavaString::from(WEAK_KEY)) {
+                Some(Tag::Byte(b)) => Some(*b),
+                _ => None,
+            })
+            .unwrap_or(0)
+            .to_string()),
         "rotate" => rotate_machine(game, pos)
             .map(str::to_owned)
             .ok_or_else(|| format!("nothing turned at {pos:?}")),
@@ -370,4 +378,105 @@ fn lift_to_player(game: &mut Game<'_>, player: &NativeServerPlayer, pos: Pos) ->
     let text = server::line("rustcraft.wrench.lifted", "Lifted with its contents", &[]);
     server::tell(game, player.uuid, text);
     true
+}
+
+// ---- The housing on the client: channel strips, bottlenecks, see-through facades ----
+//
+// Guide `housing`: «сквозь окошки корпуса видно, какие каналы стоят». Clients get each housing's
+// slots and its bottleneck mask in its update tag; its block entity draws one tinted strip a
+// channel (standalone models, API 151) and, while the local player holds the wrench, a red frame
+// round a housing whose channel holds its net back (rustcraft_rules::net::bottleneck) and no
+// facade over any housing or node (F5: rustcraft_builder::draw_facade asks `wrench_in_hand`).
+// A housing with a bottleneck and every facade are drawn each frame, not kept, so the wrench
+// shows its change at once.
+
+/// The housing's saved compound keeps its bottleneck mask under this key.
+const WEAK_KEY: &str = "weak";
+const SLOTS_KEY: &str = "slots";
+const STRIPS: [&str; 4] = [
+    "rustcraft:block/housing_strip_0",
+    "rustcraft:block/housing_strip_1",
+    "rustcraft:block/housing_strip_2",
+    "rustcraft:block/housing_strip_3",
+];
+const WEAK_MODEL: &str = "rustcraft:block/housing_weak";
+const WEAK_TINT: u32 = 0xFF3030;
+
+/// `native_standalone_models`: the strips and the bottleneck frame.
+pub(super) fn standalone_models(models: &mut Vec<String>) {
+    for m in STRIPS.iter().chain(std::iter::once(&WEAK_MODEL)) {
+        if !models.iter().any(|x| x == m) {
+            models.push((*m).to_owned());
+        }
+    }
+}
+
+/// `native_block_entity_update_tag`: a housing's slots and bottleneck mask go to clients.
+pub(super) fn update_tag(entity: &horizon_client::containers::ModBlockEntity, tag: &mut Option<Compound>) {
+    if entity.id != content::HOUSING {
+        return;
+    }
+    for key in [SLOTS_KEY, WEAK_KEY] {
+        if let Some(v) = entity.nbt.get(&JavaString::from(key)) {
+            tag.get_or_insert_with(Compound::new)
+                .insert(JavaString::from(key), v.clone());
+        }
+    }
+}
+
+/// On a client: whether the local player holds the wrench.
+pub(super) fn wrench_in_hand(game: &Game<'_>) -> bool {
+    game.native_held().is_some_and(|(item, _, _)| item == content::WRENCH)
+}
+
+/// On a client: a housing's strips and, with the wrench in hand, its bottleneck frame.
+pub(super) fn draw_housing(
+    game: &Game<'_>,
+    entity: &horizon_client::containers::ModBlockEntity,
+    draw: &mut crate::game::native_block_entity_draw::BlockEntityDraw,
+) {
+    let held = server::read_slots(&entity.nbt);
+    for (i, slot) in held.slots.iter().enumerate() {
+        if let Some(c) = slot {
+            game.native_draw_model(draw, STRIPS[i], rustcraft_rules::net::bottleneck::strip_colour(c.kind));
+        }
+    }
+    let weak = match entity.nbt.get(&JavaString::from(WEAK_KEY)) {
+        Some(Tag::Byte(b)) => *b as u8,
+        _ => 0,
+    };
+    if weak == 0 {
+        draw.keep();
+        return;
+    }
+    if wrench_in_hand(game) {
+        game.native_draw_model(draw, WEAK_MODEL, WEAK_TINT);
+    }
+}
+
+/// After a rescan: each housing's bottleneck mask written where it changed, and sent to clients.
+pub(super) fn mark_weak(game: &mut Game<'_>, level: &server::LevelNet) {
+    let weak = rustcraft_rules::net::bottleneck::weak_slots(&level.topology, &level.layout);
+    let housings: Vec<Pos> = level.layout.housings.keys().copied().collect();
+    for pos in housings {
+        let want = weak.get(&pos).copied().unwrap_or(0);
+        let Some(entity) = game.native_mod_block_entity(pos) else {
+            continue;
+        };
+        let has = match entity.nbt.get(&JavaString::from(WEAK_KEY)) {
+            Some(Tag::Byte(b)) => *b as u8,
+            _ => 0,
+        };
+        if has == want {
+            continue;
+        }
+        game.native_with_mod_block_entity(pos, |e| {
+            if want == 0 {
+                e.nbt.remove(&JavaString::from(WEAK_KEY));
+            } else {
+                e.nbt.insert(JavaString::from(WEAK_KEY), Tag::Byte(want as i8));
+            }
+        });
+        game.native_block_entity_sync(pos);
+    }
 }

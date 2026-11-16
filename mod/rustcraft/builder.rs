@@ -426,13 +426,14 @@ fn give(game: &mut Game<'_>, _player: u128, item: &str) {
 
 /// On a client: the housing's look over it.
 pub(super) fn draw_facade(game: &Game<'_>, entity: &ModBlockEntity, draw: &mut BlockEntityDraw) -> bool {
-    if !has_facade(&entity.nbt) {
+    // s18/pipe, F5: with the wrench in hand every facade is see-through; drawn each frame (not
+    // kept) so that taking the wrench shows it at once.
+    if !has_facade(&entity.nbt) || crate::game::rustcraft_pipe18::wrench_in_hand(game) {
         return false;
     }
     let look = look(&entity.nbt).unwrap_or_else(|| FACADE_PLAIN.to_owned());
     if !game.native_draw_block(draw, &look, &[]) {
         game.native_draw_block(draw, FACADE_PLAIN, &[]);
     }
-    draw.keep();
     true
 }

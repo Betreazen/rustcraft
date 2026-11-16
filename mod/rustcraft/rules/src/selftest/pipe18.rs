@@ -12,13 +12,14 @@ use crate::net::topology::ChannelKind;
 use crate::geom::Pos;
 use crate::tuning::Tuning;
 
-pub const ALL: [Build; 6] = [
+pub const ALL: [Build; 7] = [
     recipes_craft,
     node_tiers,
     chests_work_both_ways,
     facade_and_lift,
     node_window_and_boost,
     wrench_turns_and_lifts,
+    bottlenecks_marked,
 ];
 
 /// A handbook recipe: its three rows, what each letter is, what it makes and how many.
@@ -285,6 +286,26 @@ fn wrench_turns_and_lifts(o: Pos, _t: &Tuning) -> Scenario {
         .check("it holds its 5 raw iron again", move |b, _| {
             let n = count_of(&b.items(f), "minecraft:raw_iron");
             if n == 5 { Ok(()) } else { Err(format!("{n} raw iron after the lift")) }
+        })
+}
+
+/// Guide `wrench`: on a line of tier-3, tier-1, tier-1, tier-3 item channels the two tier-1
+/// housings are its bottleneck; clients get the mark with the housing.
+fn bottlenecks_marked(o: Pos, _t: &Tuning) -> Scenario {
+    Scenario::new("pipe_bottlenecks_marked_for_the_wrench", plot_area(o))
+        .then("a line of tiers 3, 1, 1, 3", move |b, _| {
+            line(b, o, 1, 4, [channel(ChannelKind::Item, 3), None, None, None])?;
+            for k in [2, 3] {
+                b.set_channels(at(o, [k, 0, 0]), [channel(ChannelKind::Item, 1), None, None, None])?;
+            }
+            b.refresh();
+            Ok(())
+        })
+        .until("the tier-1 housings carry the bottleneck mark, the others none", 100, move |b, _| {
+            let w: Vec<String> = (1..=4)
+                .map(|k| b.pipe("weak", at(o, [k, 0, 0])))
+                .collect::<Result<_, _>>()?;
+            Ok(w == ["0", "1", "1", "0"])
         })
 }
 
