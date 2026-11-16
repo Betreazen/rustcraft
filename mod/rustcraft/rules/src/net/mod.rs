@@ -8,4 +8,5 @@ pub mod joints;
 pub mod settings;
 pub mod stock;
 pub mod tanks;
+pub mod node_tier;
 pub mod topology;

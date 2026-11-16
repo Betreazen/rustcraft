@@ -20,6 +20,8 @@ pub mod magistral;
 pub mod miners;
 pub mod monorail;
 pub mod orders2;
+// s18/pipe
+pub mod pipe18;
 pub mod rest;
 pub mod run;
 pub mod slice10;
@@ -222,6 +224,9 @@ pub trait Bench {
     fn role(&self, pos: Pos) -> Option<String>;
     /// The console's `rustcraft_testkit` with these words after it; its answer.
     fn testkit(&mut self, args: &str) -> String;
+    // s18/pipe
+    /// Stream 1's actions on the block at `pos` (rustcraft_pipe18::bench), its answer.
+    fn pipe(&mut self, action: &str, pos: Pos) -> Result<String, String>;
 
     // ---- Slice 9 ----
 
@@ -496,6 +501,8 @@ pub fn catalog() -> Vec<Build> {
     all.extend(traversal::ALL);
     all.extend(handbook::ALL);
     all.extend(rest::ALL);
+    // s18/pipe
+    all.extend(pipe18::ALL);
     all
 }
 

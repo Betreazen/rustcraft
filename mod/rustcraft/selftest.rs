@@ -641,6 +641,11 @@ impl Bench for GameBench<'_, '_> {
         base::role_at(self.game, pos)
     }
 
+    // s18/pipe
+    fn pipe(&mut self, action: &str, pos: Pos) -> Result<String, String> {
+        crate::game::rustcraft_pipe18::bench(self.game, action, pos)
+    }
+
     fn testkit(&mut self, args: &str) -> String {
         let mut ran = false;
         base::on_testkit_command(self.game, &format!("rustcraft_testkit {args}"), &mut ran);

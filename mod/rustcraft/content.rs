@@ -404,16 +404,19 @@ pub const ITEM_CHANNEL: &str = "rustcraft:item_channel";
 pub const FLUID_CHANNEL: &str = "rustcraft:fluid_channel";
 pub const ENERGY_CHANNEL: &str = "rustcraft:energy_channel";
 /// Slice 10: the channels by kind and tier, one item each (tiers 2 and 3 of plan slice 2).
-const CHANNEL_ITEMS: [(ChannelKind, u8, &str); 9] = [
+const CHANNEL_ITEMS: [(ChannelKind, u8, &str); 12] = [
     (ChannelKind::Item, 1, ITEM_CHANNEL),
     (ChannelKind::Item, 2, "rustcraft:item_channel_2"),
     (ChannelKind::Item, 3, "rustcraft:item_channel_3"),
+    (ChannelKind::Item, 4, "rustcraft:item_channel_4"),
     (ChannelKind::Fluid, 1, FLUID_CHANNEL),
     (ChannelKind::Fluid, 2, "rustcraft:fluid_channel_2"),
     (ChannelKind::Fluid, 3, "rustcraft:fluid_channel_3"),
+    (ChannelKind::Fluid, 4, "rustcraft:fluid_channel_4"),
     (ChannelKind::Energy, 1, ENERGY_CHANNEL),
     (ChannelKind::Energy, 2, "rustcraft:energy_channel_2"),
     (ChannelKind::Energy, 3, "rustcraft:energy_channel_3"),
+    (ChannelKind::Energy, 4, "rustcraft:energy_channel_4"),
 ];
 pub const WRENCH: &str = "rustcraft:wrench";
 
@@ -773,6 +776,15 @@ pub fn declare_items(items: &mut Vec<Item>) {
         items.push(Item {
             id: id.into(),
             template: "minecraft:sugar".into(),
+            ..Item::default()
+        });
+    }
+    // s18/pipe: the node's higher tiers place the node (rustcraft_pipe18 sets the tier).
+    for id in &rustcraft_rules::net::node_tier::ITEMS[1..] {
+        items.push(Item {
+            id: (*id).into(),
+            template: "minecraft:iron_ingot".into(),
+            place_block: Some(NODE.into()),
             ..Item::default()
         });
     }

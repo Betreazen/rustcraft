@@ -213,6 +213,10 @@ impl Bench for Fake {
     fn testkit(&mut self, _: &str) -> String {
         String::new()
     }
+    // s18/pipe
+    fn pipe(&mut self, _: &str, _: Pos) -> Result<String, String> {
+        Err(String::new())
+    }
     fn sheet(&self, _: Pos) -> Option<crate::machines::sheet::Sheet> {
         None
     }

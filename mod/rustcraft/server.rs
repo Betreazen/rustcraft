@@ -304,6 +304,8 @@ pub(super) fn on_use_item_on(
     pos: [i32; 3],
     claimed: &mut bool,
 ) {
+    // s18/pipe: a node of a higher tier takes a node's place (U2).
+    crate::game::rustcraft_pipe18::on_use_item_on(game, stack, pos, claimed);
     workers::on_use_item_on(game, stack, pos, claimed);
     let item: &str = &stack.item;
     // Spec 26: the wrench with sneaking lifts suspicious sand or gravel (rustcraft_utility).
@@ -695,6 +697,11 @@ fn take_channel(game: &mut Game<'_>, player: &NativeServerPlayer, pos: Pos) {
         &[kind_name(channel.kind), number(slot + 1)],
     );
     tell(game, player.uuid, text);
+}
+
+/// s18/pipe: `drop_item` for the other modules.
+pub(super) fn drop_one(game: &mut Game<'_>, dimension: &str, pos: Pos, item: &str) {
+    drop_item(game, dimension, pos, item);
 }
 
 /// An item entity of one `item` at the middle of the block at `pos` (`/summon`'s compound).

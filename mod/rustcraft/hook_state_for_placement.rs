@@ -6,4 +6,5 @@ fn rustcraft_state_for_placement(
 ) {
     crate::game::rustcraft_monorail::state_for_placement(level, state, context, answer);
     crate::game::rustcraft_base::state_for_placement(level, state, context, answer);
+    crate::game::rustcraft_pipe18::state_for_placement(level, state, context, answer);
 }

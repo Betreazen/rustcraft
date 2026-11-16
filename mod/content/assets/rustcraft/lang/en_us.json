@@ -1015,5 +1015,13 @@
   "rustcraft.handbook.page.dusts.name": "Ore dust",
   "rustcraft.handbook.page.dusts.sum": "Iron, copper and gold dust from the crusher. Smelts into an ingot.",
   "rustcraft.handbook.page.fluids.name": "Solution and catalysts",
-  "rustcraft.handbook.page.fluids.sum": "Fluids from the mixer. Nutrient solution feeds crystal structures; catalysts boost machines."
+  "rustcraft.handbook.page.fluids.sum": "Fluids from the mixer. Nutrient solution feeds crystal structures; catalysts boost machines.",
+  "item.rustcraft.node_2": "Magistral Node · tier 2",
+  "item.rustcraft.node_3": "Magistral Node · tier 3",
+  "item.rustcraft.node_4": "Magistral Node · tier 4",
+  "item.rustcraft.item_channel_4": "Item Channel, Tier 4",
+  "item.rustcraft.fluid_channel_4": "Fluid Channel, Tier 4",
+  "item.rustcraft.energy_channel_4": "Energy Channel, Tier 4",
+  "rustcraft.node.not_higher": "Only a node of a higher tier takes its place",
+  "rustcraft.node.swapped": "Node of tier %s took the place of tier %s"
 }
