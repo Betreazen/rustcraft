@@ -3670,5 +3670,15 @@
   "rustcraft.filter.title": "Модуль фильтра",
   "rustcraft.filter.marked": "Отмечен: клик снимает отметку",
   "rustcraft.filter.empty": "Кликни по предмету в инвентаре, чтобы отметить его",
-  "rustcraft.filter.full": "Фильтр отмечает не больше %s предметов"
+  "rustcraft.filter.full": "Фильтр отмечает не больше %s предметов",
+  "rustcraft.terminal.order_go": "Заказ",
+  "rustcraft.terminal.count_hint": "Левый клик: на 1 · правый: на 8 · с Shift: на 64",
+  "rustcraft.orders.to_storage": "на склад",
+  "rustcraft.storage.full": "Склад полон",
+  "rustcraft.orders.wait.busy.crafter": "нет свободного автокрафтера",
+  "rustcraft.orders.wait.busy.furnace": "нет свободной электропечи",
+  "rustcraft.orders.wait.busy.crusher": "нет свободной дробилки",
+  "rustcraft.orders.wait.busy.alloy": "нет свободной плавильни",
+  "rustcraft.orders.wait.busy.mixer": "нет свободного смесителя",
+  "rustcraft.orders.wait.busy.kitchen": "нет свободного кухонного комбайна"
 }

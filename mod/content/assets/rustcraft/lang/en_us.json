@@ -1022,5 +1022,15 @@
   "rustcraft.filter.title": "Filter module",
   "rustcraft.filter.marked": "Marked: click to unmark",
   "rustcraft.filter.empty": "Click an item of your inventory to mark it",
-  "rustcraft.filter.full": "The filter marks at most %s items"
+  "rustcraft.filter.full": "The filter marks at most %s items",
+  "rustcraft.terminal.order_go": "Order",
+  "rustcraft.terminal.count_hint": "Left click: by 1 · right click: by 8 · shift: by 64",
+  "rustcraft.orders.to_storage": "to the storage",
+  "rustcraft.storage.full": "The storage is full",
+  "rustcraft.orders.wait.busy.crafter": "no free autocrafter",
+  "rustcraft.orders.wait.busy.furnace": "no free electric furnace",
+  "rustcraft.orders.wait.busy.crusher": "no free crusher",
+  "rustcraft.orders.wait.busy.alloy": "no free alloy smelter",
+  "rustcraft.orders.wait.busy.mixer": "no free mixer",
+  "rustcraft.orders.wait.busy.kitchen": "no free kitchen"
 }

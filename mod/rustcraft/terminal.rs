@@ -47,7 +47,7 @@ use rustcraft_rules::{
         Limit,
         modules as sockets,
         terminal::{
-            self as term, ItemRef, LimitChange, NO_PRESS, ORDER_COUNTS, Part, Press, Take, cell,
+            self as term, ItemRef, LimitChange, NO_PRESS, Part, Press, Take, cell,
             part_in,
         },
         view::{self, Entry, Facts, PER_PAGE, Tab},
@@ -90,6 +90,8 @@ struct View {
     orders: bool,
     shown_order: usize,
     selected: Option<ItemRef>,
+    /// Slice 18: the count the orders row orders (0 reads as 1).
+    order_count: u16,
 }
 
 static VIEW: LazyLock<Mutex<View>> = LazyLock::new(Mutex::default);
@@ -361,7 +363,13 @@ pub(super) fn draw(game: &Game<'_>, batch: &mut HudBatch, o: [f32; 2]) {
         .as_ref()
         .map(|l| shown(game, l, &v))
         .unwrap_or_default();
-    let pages = view::pages(list.len());
+    // Slice 18: the «Лимиты» mode lists every item as a row, those with a limit first.
+    let list = if v.limits { view::limits_first(list) } else { list };
+    let pages = if v.limits {
+        list.len().div_ceil(term::LIMIT_ROWS).max(1)
+    } else {
+        view::pages(list.len())
+    };
     v.page = v.page.min(pages - 1);
     button(game, batch, o, term::PREV, "<", false);
     button(game, batch, o, term::NEXT, ">", false);
@@ -387,7 +395,11 @@ pub(super) fn draw(game: &Game<'_>, batch: &mut HudBatch, o: [f32; 2]) {
         v.limits,
     );
     sockets(game, batch, o, listing.as_ref());
-    grid(game, batch, o, view::page(&list, v.page), v.selected);
+    if v.limits {
+        limit_rows(game, batch, o, limit_page(&list, v.page), v.selected);
+    } else {
+        grid(game, batch, o, view::page(&list, v.page), v.selected);
+    }
     if v.orders {
         order_row(game, batch, o, &v, listing.as_ref());
         orders_status(game, batch, o, &mut v, listing.as_ref());
@@ -508,6 +520,53 @@ fn grid(
     }
 }
 
+/// Slice 18: the «Лимиты» mode's page `page` of rows.
+fn limit_page<T>(list: &[T], page: usize) -> &[T] {
+    let start = (page * term::LIMIT_ROWS).min(list.len());
+    &list[start..(start + term::LIMIT_ROWS).min(list.len())]
+}
+
+/// «лимит 512 · сверх лимита: не принимать», or «без лимита».
+fn limit_words(limit: Option<Limit>) -> String {
+    match limit {
+        Some(l) => {
+            let over = if l.destroy_surplus {
+                tr("rustcraft.terminal.over.destroy", "over the limit: destroyed")
+            } else {
+                tr("rustcraft.terminal.over.keep", "over the limit: not taken")
+            };
+            format!("{} · {over}", limit_text(Some(l)))
+        }
+        None => tr("rustcraft.terminal.limit.none", "Limit: none"),
+    }
+}
+
+/// Slice 18 (guide `terminal`: limits as a list): each item a row with its icon, its name and
+/// its limit; the chosen one framed.
+fn limit_rows(
+    game: &Game<'_>,
+    batch: &mut HudBatch,
+    o: [f32; 2],
+    page: &[Entry<ItemRef>],
+    selected: Option<ItemRef>,
+) {
+    for (i, e) in page.iter().enumerate() {
+        let r = term::limit_row(i);
+        kit::hover(game, batch, o, r);
+        if selected == Some(e.key) {
+            kit::fills(game, batch, o, &style::outline(r, HOT));
+        }
+        if let Some(stack) = stack_of(game, e.key, 1) {
+            game.native_item(batch, &stack.item, [o[0] + r[0] + 1.0, o[1] + r[1] + 1.0], 8.0);
+        }
+        let name = kit::fit(game, &name_of(game, e.key.0), 70.0);
+        text(game, batch, &name, o, [r[0] + 12.0, r[1] + 1.0], VALUE);
+        let words = kit::fit(game, &limit_words(e.limit), r[2] - 86.0);
+        let colour = if e.limit.is_some() { TEXT } else { LABEL };
+        text(game, batch, &words, o, [r[0] + 84.0, r[1] + 1.0], colour);
+    }
+}
+
 /// The row under the grid: the chosen item's limit and its buttons.
 fn limit_row(
     game: &Game<'_>,
@@ -587,9 +646,13 @@ fn order_row(
         let p = term::LIMIT_ICON;
         game.native_item(batch, id, [o[0] + p[0], o[1] + p[1]], 12.0);
     }
-    for (r, n) in term::ORDER_BUTTONS.into_iter().zip(ORDER_COUNTS) {
-        button(game, batch, o, r, &n.to_string(), false);
-    }
+    // Slice 18: «−», the count, «+», «Заказ».
+    button(game, batch, o, term::ORDER_BUTTONS[term::ORDER_MINUS], "-", false);
+    button(game, batch, o, term::ORDER_BUTTONS[term::ORDER_PLUS], "+", false);
+    let go = tr("rustcraft.terminal.order_go", "Order");
+    button(game, batch, o, term::ORDER_BUTTONS[term::ORDER_GO], &go, false);
+    let count = v.order_count.max(1).to_string();
+    kit::centred(game, batch, o, term::ORDER_COUNT, &count, VALUE);
     let colour = if v.selected.is_some() { VALUE } else { LABEL };
     text(game, batch, &keep_text(keep), o, term::KEEP_TEXT, colour);
     button(game, batch, o, term::KEEP_MINUS, "-", false);
@@ -631,11 +694,13 @@ fn wait_text(game: &Game<'_>, wait: &OrderWait) -> String {
                 &[named.join(", ")],
             )
         }
-        OrderWait::Busy(kind) => tr_with(
-            "rustcraft.orders.wait.busy",
-            "waits for a free %s",
-            &[kind_name(*kind)],
-        ),
+        // Slice 18: «нет свободного автокрафтера», in each kind's own words.
+        OrderWait::Busy(kind) => {
+            let generic = tr_with("rustcraft.orders.wait.busy", "waits for a free %s", &[kind_name(*kind)]);
+            KINDS
+                .get(usize::from(*kind))
+                .map_or(generic.clone(), |k| tr(&format!("rustcraft.orders.wait.busy.{k}"), &generic))
+        }
         OrderWait::Energy(kind) => tr_with(
             "rustcraft.orders.wait.energy",
             "waits for energy: %s",
@@ -656,6 +721,26 @@ fn order_text(game: &Game<'_>, order: &OrderLine) -> String {
         order.count,
         wait_text(game, &order.wait)
     )
+}
+
+/// Slice 18: a step of an order's chain in words, «печь: железный слиток».
+fn step_text(game: &Game<'_>, step: &wire::OrderStep) -> String {
+    format!("{}: {}", kind_name(step.kind), name_of(game, step.item))
+}
+
+/// Slice 18: an order's chain, «печь: слиток → [автокрафтер: поршень] → на склад», the running
+/// step in brackets.
+fn chain_text(game: &Game<'_>, order: &OrderLine) -> String {
+    let mut parts: Vec<String> = order
+        .steps
+        .iter()
+        .map(|s| {
+            let t = step_text(game, s);
+            if s.current { format!("[{t}]") } else { t }
+        })
+        .collect();
+    parts.push(tr("rustcraft.orders.to_storage", "to the storage"));
+    parts.join(" → ")
 }
 
 /// The orders mode's status line (M15, O1) and the line of one order of the queue (O8).
@@ -710,12 +795,19 @@ fn orders_status(
     }
     v.shown_order %= orders.len();
     let order = &orders[v.shown_order];
-    let line = format!(
-        "{}/{} {}",
-        v.shown_order + 1,
-        orders.len(),
+    // Slice 18: a running order shows its chain of steps, the running one in brackets.
+    let what = if order.steps.is_empty() || order.wait != OrderWait::Running {
         order_text(game, order)
-    );
+    } else {
+        format!(
+            "{} {}/{}: {}",
+            name_of(game, order.item),
+            order.done,
+            order.count,
+            chain_text(game, order)
+        )
+    };
+    let line = format!("{}/{} {what}", v.shown_order + 1, orders.len());
     let r = term::QUEUE;
     kit::hover(game, batch, o, r);
     let shown = kit::fit(game, &line, r[2] - 2.0);
@@ -732,6 +824,16 @@ fn status(game: &Game<'_>, batch: &mut HudBatch, o: [f32; 2], listing: Option<&L
             String::new(),
         ),
         Some(l) => match l.state {
+            // Slice 18: «Склад полон».
+            State::Works if l.total > 0 && l.used >= l.total => (
+                Severity::Bad,
+                tr("rustcraft.storage.full", "The storage is full"),
+                tr_with(
+                    "rustcraft.terminal.used",
+                    "%s of %s slots used",
+                    &[l.used.to_string(), l.total.to_string()],
+                ),
+            ),
             State::Works => (
                 Severity::Ok,
                 tr("rustcraft.machine.working", "Working"),
@@ -799,6 +901,19 @@ pub(super) fn on_click(game: &Game<'_>, at: [f32; 2], right: bool) -> Option<i32
     let mut v = view_for(game);
     v.focused = part == Part::Search;
     let step = if right { 1 } else { 64 };
+    // Slice 18: the «Лимиты» mode's rows stand where the grid does.
+    if v.limits
+        && let Some(row) = term::limit_row_at(at)
+    {
+        let list = listing
+            .as_ref()
+            .map(|l| view::limits_first(shown(game, l, &v)))
+            .unwrap_or_default();
+        if let Some(e) = limit_page(&list, v.page).get(row) {
+            v.selected = Some(e.key);
+        }
+        return Some(NO_PRESS);
+    }
     match part {
         Part::Tab(tab) => {
             v.tab = tab;
@@ -853,9 +968,22 @@ pub(super) fn on_click(game: &Game<'_>, at: [f32; 2], right: bool) -> Option<i32
             return term::encode(Press::Limit { item, change }).or(Some(NO_PRESS));
         }
         Part::Order(k) => {
-            let (item, _) = v.selected?;
-            let count = *ORDER_COUNTS.get(k)?;
-            return term::encode(Press::Order { item, count }).or(Some(NO_PRESS));
+            let by = if game.native_has_shift_down() {
+                64
+            } else if right {
+                8
+            } else {
+                1
+            };
+            let count = v.order_count.max(1);
+            match k {
+                term::ORDER_MINUS => v.order_count = term::step_count(count, -by),
+                term::ORDER_PLUS => v.order_count = term::step_count(count, by),
+                _ => {
+                    let (item, _) = v.selected?;
+                    return term::encode(Press::Order { item, count }).or(Some(NO_PRESS));
+                }
+            }
         }
         Part::KeepMinus | Part::KeepPlus | Part::KeepClear => {
             let (item, _) = v.selected?;
@@ -990,12 +1118,16 @@ pub(super) fn tooltip(game: &Game<'_>, at: [f32; 2], lines: &mut Vec<String>) {
             hint(lines, key, fallback);
         }
         Part::Order(k) => {
-            let n = ORDER_COUNTS.get(k).copied().unwrap_or(1);
-            lines.push(tr_with(
-                "rustcraft.terminal.order_hint",
-                "Order %s",
-                &[n.to_string()],
-            ));
+            if k == term::ORDER_GO {
+                let n = view_for(game).order_count.max(1);
+                lines.push(tr_with("rustcraft.terminal.order_hint", "Order %s", &[n.to_string()]));
+            } else {
+                hint(
+                    lines,
+                    "rustcraft.terminal.count_hint",
+                    "Left click: by 1 · right click: by 8 · shift: by 64",
+                );
+            }
         }
         Part::KeepMinus | Part::KeepPlus | Part::KeepClear => {
             hint(
@@ -1093,6 +1225,9 @@ fn queue_tooltip(game: &Game<'_>, lines: &mut Vec<String>) {
     drop(v);
     for (i, order) in listing.orders.iter().enumerate() {
         lines.push(format!("{}. {}", i + 1, order_text(game, order)));
+        if !order.steps.is_empty() {
+            lines.push(format!("   {}", chain_text(game, order)));
+        }
     }
     hint(
         lines,
