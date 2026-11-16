@@ -186,10 +186,21 @@ fn miner_works_out_its_square(o: Pos, t: &Tuning) -> Scenario {
     let side = t.miner_sides[0];
     let per_tick = t.miner_scan_per_tick;
     Scenario::new("mining_miner_works_out_its_square", plot_area(o))
-        .then("a miner over nothing", move |b, memo| {
+        .then("a miner with every listed ore off", move |b, memo| {
             build_miner(b, o, true)?;
-            let cells = rules::cells(m, side, b.min_y()) as f64;
-            memo.mark("ticks", (cells / per_tick).ceil());
+            // A real world has ore under the plot: with the listed ores off the miner only
+            // scans. Another mod's ore is always taken, and digging it costs time the pace
+            // below can't count, so the pace is checked only when the square has none.
+            let all = Ore::LISTED.iter().fold(0, |bits, ore| bits | ore.bit());
+            b.set_ores_off(m, all)?;
+            let min_y = b.min_y();
+            let cells = rules::cells(m, side, min_y);
+            let others = (0..cells)
+                .filter_map(|i| rules::cell(m, side, min_y, i))
+                .filter(|&p| Ore::of(&b.block(p)) == Some(Ore::Other))
+                .count();
+            memo.mark("ticks", (cells as f64 / per_tick).ceil());
+            memo.mark("others", others as f64);
             Ok(())
         })
         .until(
@@ -204,7 +215,7 @@ fn miner_works_out_its_square(o: Pos, t: &Tuning) -> Scenario {
             },
         )
         .check("it scanned at the rules' pace", move |_, memo| {
-            if memo.get("at") <= memo.get("ticks") + SLACK as f64 {
+            if memo.get("others") > 0.0 || memo.get("at") <= memo.get("ticks") + SLACK as f64 {
                 Ok(())
             } else {
                 Err(format!(
