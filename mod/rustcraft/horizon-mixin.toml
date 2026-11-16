@@ -1104,3 +1104,27 @@ helper = "hook_fov.rs"
 bindings = [
   { name = "modifier", ty = "&mut f32", value = "&mut *modifier" },
 ]
+
+# Gear seen on players: the jetpack, the starsteel backpack, the zipline's handle (client, API 149).
+[[injection]]
+id = "player_render_listened"
+hook = "player_render_listened"
+hook_version = 1
+kind = "HEAD"
+helper = "hook_player_render_listened.rs"
+bindings = [
+  { name = "listened", ty = "&mut bool", value = "&mut *listened" },
+]
+
+[[injection]]
+id = "mob_layer"
+hook = "mob_layer"
+hook_version = 1
+kind = "HEAD"
+helper = "hook_mob_layer.rs"
+bindings = [
+  { name = "game", ty = "&crate::game::Game<'_>", value = "&*self" },
+  { name = "mob", ty = "&crate::game::native_mob_draw::NativeMobRender<'_>", value = "mob" },
+  { name = "who", ty = "Option<&crate::game::native_mob_draw::NativePlayerRender<'_>>", value = "who" },
+  { name = "draw", ty = "&mut crate::game::native_block_entity_draw::BlockEntityDraw", value = "&mut *draw" },
+]

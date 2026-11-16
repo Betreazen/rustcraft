@@ -108,6 +108,10 @@ struct State {
     /// Slice 18: each player's scout compass mode and the place its needle points at.
     compass_mode: HashMap<u128, rules::compass::Mode>,
     needles: HashMap<u128, (String, [i32; 3])>,
+    /// Slice 18: players riding a zipline rope (seen with its handle), and the looks each level's
+    /// players were last sent.
+    zip_riders: HashSet<u128>,
+    looks_sent: HashMap<String, Vec<u8>>,
 }
 
 /// The client's side of the dash: a push the server asked for, applied at the window's next tick.
@@ -656,6 +660,10 @@ pub(super) fn on_player_input(game: &mut Game<'_>, player: u128, flags: i32) {
 
 /// `native_net_from_server` on a client: the server's dash, a gear window's view.
 pub(super) fn on_net(channel: &str, data: &[u8]) {
+    if channel == rules::looks::CHANNEL {
+        *LOOKS.lock().unwrap_or_else(PoisonError::into_inner) = rules::looks::decode(data).into_iter().collect();
+        return;
+    }
     if channel == rules::window::CHANNEL {
         *WINDOW.lock().unwrap_or_else(PoisonError::into_inner) = serde_json::from_slice(data).ok();
         return;
@@ -927,6 +935,7 @@ pub(super) fn tick(game: &mut Game<'_>, dimension: &str) {
         };
         player_tick(game, &p, &worn);
     }
+    send_looks(game, dimension, now);
     if now.is_multiple_of(200) {
         save(&mut state());
         crate::game::rustcraft_explore::save(game);
@@ -976,6 +985,123 @@ fn pull(game: &mut Game<'_>, dimension: &str) {
         let to = [p.position[0], p.position[1] + 0.5, p.position[2]];
         game.native_run_command(&rules::moves::pull_command(dimension, to, rules::MAGNET_REACH));
     }
+}
+
+// ---- Slice 18: gear seen on players ----
+
+/// Looks are sent again this often even unchanged, for players who came into the level, ticks.
+const LOOKS_AGAIN: u64 = 100;
+const JETPACK_MODEL: &str = "rustcraft:block/worn_jetpack";
+const FLAME_MODEL: &str = "rustcraft:block/worn_flame";
+const BACKPACK_MODEL: &str = "rustcraft:block/worn_backpack";
+const HANDLE_MODEL: &str = "rustcraft:block/worn_handle";
+pub(super) const WORN_MODELS: [&str; 4] = [JETPACK_MODEL, FLAME_MODEL, BACKPACK_MODEL, HANDLE_MODEL];
+
+/// A player began a zipline ride (rustcraft_zipline): seen with the handle while it lasts.
+pub(super) fn note_zip_ride(player: u128) {
+    state().zip_riders.insert(player);
+}
+
+/// What `p` is seen wearing.
+fn look_of(game: &mut Game<'_>, p: &horizon_client::mod_api::NativeServerPlayer) -> rules::looks::Look {
+    let jetpack = game.native_player_equipment(p.uuid, EquipmentSlot::Chest).is_some_and(|st| {
+        let s = state();
+        held_of(&s, &st).is_some_and(|(_, _, h)| h.has(Module::Jetpack))
+    });
+    let riding = crate::game::rustcraft_monorail::riding(p.uuid);
+    let handle = {
+        let mut s = state();
+        if !riding {
+            s.zip_riders.remove(&p.uuid);
+        }
+        s.zip_riders.contains(&p.uuid)
+    };
+    rules::looks::Look {
+        jetpack,
+        flying: jetpack && p.flying,
+        handle,
+        backpack: crate::game::rustcraft_backpack::wears_star(p.uuid),
+    }
+}
+
+/// Every tick of the gear: each player of the level is told what the level's players wear, when
+/// it changed (and every few seconds for newcomers).
+fn send_looks(game: &mut Game<'_>, dimension: &str, now: u64) {
+    let players: Vec<_> = game.native_server_players().into_iter().filter(|p| p.dimension == dimension).collect();
+    let looks: Vec<(i32, rules::looks::Look)> = players
+        .iter()
+        .map(|p| (p.entity_id, look_of(game, p)))
+        .filter(|(_, l)| l.shows())
+        .collect();
+    let bytes = rules::looks::encode(&looks);
+    let changed = state().looks_sent.get(dimension) != Some(&bytes);
+    if !changed && (bytes.is_empty() || !now.is_multiple_of(LOOKS_AGAIN)) {
+        return;
+    }
+    state().looks_sent.insert(dimension.to_owned(), bytes.clone());
+    for p in &players {
+        if let Err(e) = game.native_net_send_to_player(p.uuid, rules::looks::CHANNEL, &bytes) {
+            log::debug!("rustcraft: looks not sent to {}: {e}", p.name);
+        }
+    }
+}
+
+/// On a client: what the players in view wear, by entity id.
+static LOOKS: LazyLock<Mutex<HashMap<i32, rules::looks::Look>>> = LazyLock::new(Mutex::default);
+
+/// `native_player_render_listened`: the player layers are asked for.
+pub(super) fn player_render_listened(listened: &mut bool) {
+    *listened = true;
+}
+
+/// `native_mob_layer` on a client: a player's jetpack (its flames in flight), starsteel backpack
+/// and zipline handle, after their model.
+pub(super) fn draw_looks(
+    game: &Game<'_>,
+    mob: &crate::game::native_mob_draw::NativeMobRender<'_>,
+    who: Option<&crate::game::native_mob_draw::NativePlayerRender<'_>>,
+    draw: &mut crate::game::native_block_entity_draw::BlockEntityDraw,
+) {
+    if who.is_none() {
+        return;
+    }
+    let Some(look) = i32::try_from(mob.id)
+        .ok()
+        .and_then(|id| LOOKS.lock().unwrap_or_else(PoisonError::into_inner).get(&id).copied())
+    else {
+        return;
+    };
+    draw.push();
+    draw.translate([-0.5, 0.0, -0.5]);
+    if look.jetpack {
+        game.native_draw_model(draw, JETPACK_MODEL, 0xFF_FFFF);
+        if look.flying {
+            // The flame flickers: its length follows the player's age.
+            let k = 0.75 + 0.25 * (mob.age * 1.7).sin();
+            draw.push();
+            draw.translate([0.0, 0.75, 0.0]);
+            draw.scale([1.0, k, 1.0]);
+            draw.translate([0.0, -0.75, 0.0]);
+            game.native_draw_model(draw, FLAME_MODEL, 0xFF_FFFF);
+            draw.pop();
+        }
+    }
+    if look.backpack {
+        draw.push();
+        // Behind the jetpack when both are worn: the backpack has its own slot on the back.
+        if look.jetpack {
+            draw.translate([0.0, 0.0, -0.2]);
+        }
+        game.native_draw_model(draw, BACKPACK_MODEL, 0xFF_FFFF);
+        draw.pop();
+    }
+    if look.handle {
+        draw.push();
+        draw.translate([0.0, 1.0, 0.0]);
+        game.native_draw_model(draw, HANDLE_MODEL, 0xFF_FFFF);
+        draw.pop();
+    }
+    draw.pop();
 }
 
 // ---- Slice 18: the gear's keys ----

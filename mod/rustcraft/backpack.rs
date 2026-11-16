@@ -232,6 +232,11 @@ pub(super) fn open_by_key(game: &mut Game<'_>, uuid: u128) {
     }
 }
 
+/// Slice 18: whether the player wears the starsteel backpack on their back (task 14 fills it in).
+pub(super) fn wears_star(_player: u128) -> bool {
+    false
+}
+
 /// Once a server tick: the windows asked for open.
 pub(super) fn tick(game: &mut Game<'_>) {
     let opening = std::mem::take(&mut state().opening);

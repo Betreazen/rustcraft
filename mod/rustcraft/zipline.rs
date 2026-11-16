@@ -311,7 +311,7 @@ fn ride(
 ) -> bool {
     let end = rope.at(to);
     let points = [player.position, start, rules::feet(end)];
-    monorail::zipline(
+    let rides = monorail::zipline(
         game,
         player.uuid,
         player.entity_id as u32,
@@ -320,7 +320,12 @@ fn ride(
         end,
         gear_rules::ZIP_SPEED,
         false,
-    )
+    );
+    // Slice 18: the rider is seen holding the handle with its rollers.
+    if rides {
+        crate::game::rustcraft_gear::note_zip_ride(player.uuid);
+    }
+    rides
 }
 
 fn ride_from_end(game: &mut Game<'_>, player: &NativeServerPlayer, rope: &Rope, from: End) -> bool {
