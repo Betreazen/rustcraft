@@ -2,12 +2,13 @@
 //!
 //! - U2: a higher tier's item on a placed machine replaces it in place; its items stay, the old
 //!   tier's item comes back, and a tier that is not higher replaces nothing.
+//! - The crusher takes the ore blocks too, two dusts each (guide `crusher`).
 
 use super::{Bench, Build, Scenario, at, count_of, plot_area, same};
 use crate::geom::Pos;
 use crate::tuning::Tuning;
 
-pub const ALL: [Build; 1] = [tier_swap_keeps_contents];
+pub const ALL: [Build; 2] = [tier_swap_keeps_contents, crusher_takes_ore_blocks];
 
 const STONE: &str = "minecraft:stone";
 const FURNACE: &str = "rustcraft:furnace";
@@ -49,4 +50,24 @@ fn tier_swap_keeps_contents(o: Pos, _: &Tuning) -> Scenario {
                 Ok(back) => Err(format!("a lower tier replaced it and gave back {back}")),
             }
         })
+}
+
+fn crusher_takes_ore_blocks(o: Pos, _: &Tuning) -> Scenario {
+    Scenario::new("crusher_takes_ore_blocks", plot_area(o)).check(
+        "every iron, copper and gold ore block crushes into two dusts",
+        move |b, _| {
+            for (ore, dust) in [
+                ("minecraft:iron_ore", "rustcraft:dust_iron"),
+                ("minecraft:deepslate_iron_ore", "rustcraft:dust_iron"),
+                ("minecraft:copper_ore", "rustcraft:dust_copper"),
+                ("minecraft:deepslate_copper_ore", "rustcraft:dust_copper"),
+                ("minecraft:gold_ore", "rustcraft:dust_gold"),
+                ("minecraft:deepslate_gold_ore", "rustcraft:dust_gold"),
+            ] {
+                let (got, count, _) = b.crush(ore).ok_or(format!("no crushing recipe for {ore}"))?;
+                same(ore, (got.as_str(), count), (dust, 2))?;
+            }
+            Ok(())
+        },
+    )
 }
