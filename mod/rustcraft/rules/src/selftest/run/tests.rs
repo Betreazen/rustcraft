@@ -308,6 +308,9 @@ impl Bench for Fake {
     fn set_seed(&mut self, _: Pos, _: f64) -> Result<(), String> {
         Ok(())
     }
+    fn crystal_drawn(&self, _: Pos) -> Option<(Option<[i32; 3]>, bool, bool)> {
+        None
+    }
 }
 
 const PLOT: Area = Area {

@@ -642,6 +642,15 @@ pub(super) fn draw(
     true
 }
 
+/// What a crystal's entity tells clients, for the self-test: its box, hidden, fed.
+pub(super) fn drawn_of(nbt: &horizon_world::nbt::Compound) -> (Option<[i32; 3]>, bool, bool) {
+    (
+        nbt_size(nbt),
+        nbt_byte(nbt, HIDE_KEY) != 0,
+        nbt_byte(nbt, FED_KEY) != 0,
+    )
+}
+
 /// `native_block_entity_render_bounding_box`: a merged structure's anchor draws over its box.
 pub(super) fn bounds(entity: &horizon_client::containers::ModBlockEntity, bounds: &mut [f32; 6]) {
     if let Some(size) = nbt_size(&entity.nbt) {

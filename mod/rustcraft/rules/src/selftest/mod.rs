@@ -330,6 +330,9 @@ pub trait Bench {
     fn seed(&self, pos: Pos) -> Option<crate::grow::Seed>;
     /// Sets how far the seed at `pos` has grown.
     fn set_seed(&mut self, pos: Pos, progress: f64) -> Result<(), String>;
+    /// How clients are told to draw the crystal at `pos`: a merged structure's box (its anchor),
+    /// hidden (another block of it), and lit with solution.
+    fn crystal_drawn(&self, pos: Pos) -> Option<(Option<[i32; 3]>, bool, bool)>;
 }
 
 /// A mob as the self-test reads it.

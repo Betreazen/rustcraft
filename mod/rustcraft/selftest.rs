@@ -826,6 +826,12 @@ impl Bench for GameBench<'_, '_> {
         self.change_entity(pos, |e| machines::write_f64(&mut e.nbt, "grow", progress))
     }
 
+    fn crystal_drawn(&self, pos: Pos) -> Option<(Option<[i32; 3]>, bool, bool)> {
+        self.game
+            .native_mod_block_entity(pos)
+            .map(|e| power::drawn_of(&e.nbt))
+    }
+
     fn anim(&self, pos: Pos) -> Option<rustcraft_rules::anim::Shown> {
         self.game
             .native_mod_block_entity(pos)
