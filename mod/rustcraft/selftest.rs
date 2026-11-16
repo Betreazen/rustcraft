@@ -842,6 +842,13 @@ impl Bench for GameBench<'_, '_> {
             .map(|e| (e.stack.item.to_string(), e.stack.count))
             .collect()
     }
+
+    // Slice 18, stream 3 (machines).
+    fn swap_tier(&mut self, pos: Pos, item: &str) -> Result<String, String> {
+        crate::game::rustcraft_tiers::swap_in_place(self.game, pos, item)
+            .map(|(old, _, _)| old)
+            .map_err(str::to_owned)
+    }
 }
 
 /// The slice-7 half of the bench.

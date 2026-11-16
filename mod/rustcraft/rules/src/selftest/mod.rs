@@ -28,6 +28,7 @@ pub mod slice12;
 pub mod slice13;
 pub mod slice14;
 pub mod slice15;
+pub mod slice18_machine;
 pub mod explore2;
 pub mod sources;
 pub mod storage;
@@ -319,6 +320,13 @@ pub trait Bench {
         into: Pos,
         slot: usize,
     ) -> Result<crate::utility::found::Lift, String>;
+    // ---- Slice 18, stream 3 (machines) ----
+    /// A right click with `item` on the tiered block at `pos` (U2, rustcraft_tiers): the old
+    /// tier's item it gives back, or why nothing was replaced.
+    fn swap_tier(&mut self, pos: Pos, item: &str) -> Result<String, String> {
+        let _ = (pos, item);
+        Err("no tiers on this bench".into())
+    }
 }
 
 /// A mob as the self-test reads it.
@@ -496,6 +504,8 @@ pub fn catalog() -> Vec<Build> {
     all.extend(traversal::ALL);
     all.extend(handbook::ALL);
     all.extend(rest::ALL);
+    // Slice 18, stream 3.
+    all.extend(slice18_machine::ALL);
     all
 }
 
