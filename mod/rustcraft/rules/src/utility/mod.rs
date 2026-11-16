@@ -164,8 +164,9 @@ impl Util {
             Util::Fishery => s(1 + 2 * farm::FISH_BUFFER, 0..1, 1..1 + 2 * farm::FISH_BUFFER),
             // Slice 18 (guide `feeder`): 3 food cells.
             Util::Feeder => s(3, 0..3, 0..0),
-            // 0 shears, 1 empty buckets, 2..11 wool and milk.
-            Util::Shearer => s(11, 0..2, 2..11),
+            // Slice 18 (guide `shearer`): its shears are built in and its milk goes to the tank
+            // it touches; 0..9 the wool.
+            Util::Shearer => s(9, 0..0, 0..9),
             // 0 glass bottles, 1..10 honey and combs.
             Util::Apiary => s(10, 0..1, 1..10),
             // 0..3 bottles, 3 the ingredient, 4 blaze powder, 5..8 the potions.
@@ -231,8 +232,6 @@ impl Util {
             (Util::Trash, 0..=8) => true,
             (Util::Trash, _) => filter.iter().any(|f| f == item),
             (Util::Fishery, 0) => item == "minecraft:fishing_rod",
-            (Util::Shearer, 0) => item == "minecraft:shears",
-            (Util::Shearer, 1) => item == "minecraft:bucket",
             (Util::Apiary, 0) => item == "minecraft:glass_bottle",
             (Util::Brewer, 0..=2) => {
                 matches!(item, "minecraft:potion" | "minecraft:splash_potion" | "minecraft:lingering_potion")

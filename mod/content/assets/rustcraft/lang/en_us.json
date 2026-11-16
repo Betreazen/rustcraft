@@ -517,7 +517,7 @@
   "rustcraft.util.feed_empty": "No feed",
   "rustcraft.util.feed_nobody": "No pair to feed",
   "rustcraft.util.shear_no_tools": "No shears or bucket",
-  "rustcraft.util.shear_nobody": "Nobody to shear or milk",
+  "rustcraft.util.shear_nobody": "No animals in its radius",
   "rustcraft.util.honey_none": "No full hive near",
   "rustcraft.util.brew_no_reagent": "No ingredient",
   "rustcraft.util.brew_no_bottles": "No bottles",
@@ -1058,5 +1058,7 @@
   "rustcraft.util.feeder.none": "No animals round it",
   "rustcraft.util.feeder.heads": "Heads (at most %s a kind): %s",
   "rustcraft.util.feed_herd_full": "The herd is at its limit",
-  "rustcraft.butcher.no_energy": "No energy"
+  "rustcraft.butcher.no_energy": "No energy",
+  "rustcraft.util.shearer.heads": "Sheep %s · cows %s · goats %s",
+  "rustcraft.util.shear_no_tank": "Nowhere to pour the milk"
 }

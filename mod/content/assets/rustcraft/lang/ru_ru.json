@@ -517,7 +517,7 @@
   "rustcraft.util.feed_empty": "Нет корма",
   "rustcraft.util.feed_nobody": "Некого кормить парой",
   "rustcraft.util.shear_no_tools": "Нет ножниц или ведра",
-  "rustcraft.util.shear_nobody": "Некого стричь или доить",
+  "rustcraft.util.shear_nobody": "Нет животных в радиусе",
   "rustcraft.util.honey_none": "Рядом нет полного улья",
   "rustcraft.util.brew_no_reagent": "Нет ингредиента",
   "rustcraft.util.brew_no_bottles": "Нет бутылок",
@@ -3706,5 +3706,7 @@
   "rustcraft.util.feeder.none": "Рядом нет животных",
   "rustcraft.util.feeder.heads": "Голов (не больше %s каждого вида): %s",
   "rustcraft.util.feed_herd_full": "Предел животных",
-  "rustcraft.butcher.no_energy": "Нет энергии"
+  "rustcraft.butcher.no_energy": "Нет энергии",
+  "rustcraft.util.shearer.heads": "Овцы %s · коровы %s · козы %s",
+  "rustcraft.util.shear_no_tank": "Некуда сливать молоко"
 }

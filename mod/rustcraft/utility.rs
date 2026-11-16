@@ -410,7 +410,7 @@ pub(super) fn tick(game: &mut Game<'_>, dimension: &str, level: &LevelNet, t: &T
             Util::Enchanter => enchant(game, pos, cost),
             Util::Archeo => brush(game, pos, cost),
             Util::Fishery | Util::Feeder | Util::Shearer | Util::Apiary => {
-                farm::step(game, dimension, pos, u, cost, now, t)
+                farm::step(game, dimension, level, pos, u, cost, now, t)
             }
             Util::Projector | Util::Builder | Util::PortalDock => {
                 builder::step(game, dimension, pos, u, cost, now)
@@ -1443,6 +1443,20 @@ fn craft_sheet(game: &Game<'_>, dimension: &str, pos: Pos, u: Util, s: &mut Shee
             if let Some(r) = s.rows.first_mut() {
                 *r = base::v(&farm::feeder_row(game, pos));
             }
+        }
+        Util::Shearer => {
+            if let Some(r) = s.rows.first_mut() {
+                *r = base::v(&farm::shearer_row(game, pos));
+            }
+            let (held, room) = farm::milk_of(pos);
+            let b = rustcraft_rules::utility::kitchen::BUCKET_MB;
+            s.bars.push(Bar {
+                label: base::v(&line("rustcraft.util.kitchen.milk", "Milk in the tank", &[])),
+                value: base::v(&Text::literal(format!("{} / {}", held / b, (held + room) / b))),
+                share: if held + room > 0 { held as f64 / (held + room) as f64 } else { 0.0 },
+                energy: false,
+                colour: Some(0xFFF2_F2F2),
+            });
         }
         Util::Fishery => {
             let now = state().ticks.get(dimension).copied().unwrap_or(0);

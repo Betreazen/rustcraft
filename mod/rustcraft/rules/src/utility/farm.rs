@@ -11,6 +11,11 @@ pub const LOVE_TICKS: i32 = 600;
 /// Ticks a milked cow rests before the shearer milks it again (its 5 minutes, shared with the
 /// player in Path-of-craft-tree).
 pub const MILK_REST_TICKS: u64 = 6000;
+/// Slice 18 (guide `shearer`): the animals it milks, a bucket each into its tank.
+pub fn milked(kind: &str) -> bool {
+    matches!(kind, "minecraft:cow" | "minecraft:mooshroom" | "minecraft:goat")
+}
+
 /// The full honey level of a hive or nest.
 pub const HONEY_FULL: u8 = 5;
 /// The honeycombs a full hive gives without a bottle, as shears give them.
@@ -158,6 +163,12 @@ pub fn harvest(has_bottle: bool) -> (&'static str, u32) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cows_mooshrooms_and_goats_are_milked() {
+        assert!(milked("minecraft:goat") && milked("minecraft:cow") && milked("minecraft:mooshroom"));
+        assert!(!milked("minecraft:sheep"));
+    }
 
     #[test]
     fn babies_are_fed_heads_counted_and_a_full_herd_named() {

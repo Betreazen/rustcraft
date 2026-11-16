@@ -178,15 +178,14 @@ fn feeder_feeds_a_pair(o: Pos, _: &Tuning) -> Scenario {
 fn shearer_shears_a_sheep(o: Pos, _: &Tuning) -> Scenario {
     let p = at(o, [3, 1, 0]);
     Scenario::new("util_shearer_shears", plot_area(o))
-        .then("a shearer with shears and a sheep by it", move |b, _| {
+        .then("a shearer (its shears built in) and a sheep by it", move |b, _| {
             floor(b, o)?;
             machine(b, p, "rustcraft:shearer")?;
-            b.put(p, 0, "minecraft:shears", 1)?;
             b.spawn_mob("minecraft:sheep", [f64::from(o[0]) + 3.5, f64::from(o[1] + 1), f64::from(o[2]) + 2.5], None)
                 .map(|_| ())
         })
         .until("wool in its output", LIMIT, move |b, _| {
-            Ok(b.items(p).iter().skip(2).flatten().any(|s| s.0.ends_with("_wool")))
+            Ok(b.items(p).iter().flatten().any(|s| s.0.ends_with("_wool")))
         })
         .check("Path-of-craft-tree heard shear", move |b, _| {
             if reported(b, "shear") { Ok(()) } else { Err(format!("no shear in {:?}", b.reports())) }
@@ -196,15 +195,15 @@ fn shearer_shears_a_sheep(o: Pos, _: &Tuning) -> Scenario {
 fn shearer_milks_a_cow(o: Pos, _: &Tuning) -> Scenario {
     let p = at(o, [3, 1, 0]);
     Scenario::new("util_shearer_milks", plot_area(o))
-        .then("a shearer with a bucket and a cow by it", move |b, _| {
+        .then("a shearer beside a tank, and a cow by it", move |b, _| {
             floor(b, o)?;
             machine(b, p, "rustcraft:shearer")?;
-            b.put(p, 1, "minecraft:bucket", 1)?;
+            b.place(at(o, [4, 1, 0]), "rustcraft:tank", &[])?;
             b.spawn_mob("minecraft:cow", [f64::from(o[0]) + 3.5, f64::from(o[1] + 1), f64::from(o[2]) + 2.5], None)
                 .map(|_| ())
         })
-        .until("a milk bucket in its output", LIMIT, move |b, _| {
-            Ok(count_from(b, p, 2, "minecraft:milk_bucket") == 1)
+        .until("a bucket of milk in the tank (slice 18)", LIMIT, move |b, _| {
+            Ok(b.tank(at(o, [4, 1, 0])).is_some_and(|g| g.amount == 1000))
         })
 }
 

@@ -15,7 +15,7 @@
 //   bottle for a glass bottle, else its combs: `honey`.
 use crate::game::{
     Game, rustcraft_base as base,
-    rustcraft_server::line,
+    rustcraft_server::{LevelNet, line},
     rustcraft_utility::{self as util, fits, items, put, spend, take_one, with_items},
 };
 use horizon_client::{items::ItemStack, text::Text};
@@ -38,6 +38,8 @@ struct State {
     fish_due: HashMap<(String, Pos), u64>,
     /// The tick each cow was last milked.
     milked: HashMap<u32, u64>,
+    /// Slice 18: the milk (held, room) of the tank each shearer touched last step.
+    milk: HashMap<Pos, (u64, u64)>,
 }
 
 static STATE: LazyLock<Mutex<State>> = LazyLock::new(Mutex::default);
@@ -56,11 +58,11 @@ fn near(pos: Pos, r: f64, at: [f64; 3]) -> bool {
     (at[0] - c[0]).abs() <= r && (at[2] - c[2]).abs() <= r && (at[1] - c[1]).abs() <= 3.0
 }
 
-pub(super) fn step(game: &mut Game<'_>, dimension: &str, pos: Pos, u: Util, cost: f64, now: u64, _t: &Tuning) -> Shown {
+pub(super) fn step(game: &mut Game<'_>, dimension: &str, level: &LevelNet, pos: Pos, u: Util, cost: f64, now: u64, t: &Tuning) -> Shown {
     match u {
         Util::Fishery => fish(game, dimension, pos, cost, now),
         Util::Feeder => feed(game, pos, cost),
-        Util::Shearer => shear(game, pos, cost, now),
+        Util::Shearer => shear(game, level, pos, cost, now, t),
         _ => honey(game, pos, cost),
     }
 }
@@ -220,6 +222,27 @@ fn fed_round(game: &Game<'_>, pos: Pos) -> Vec<rules::Fed> {
         .collect()
 }
 
+/// Slice 18 (guide `ui.js`, window `shearer`): sheep, cows and goats round it, one row.
+pub(super) fn shearer_row(game: &Game<'_>, pos: Pos) -> Text {
+    let r = radius(game, pos);
+    let count = |kinds: &[&str]| {
+        game.mobs
+            .iter()
+            .filter(|m| !m.removed && m.alive() && kinds.contains(&&*m.kind.id))
+            .filter(|m| near(pos, r, [m.position.x, m.position.y, m.position.z]))
+            .count()
+    };
+    line(
+        "rustcraft.util.shearer.heads",
+        "Sheep %s · cows %s · goats %s",
+        &[
+            Text::literal(count(&["minecraft:sheep"]).to_string()),
+            Text::literal(count(&["minecraft:cow", "minecraft:mooshroom"]).to_string()),
+            Text::literal(count(&["minecraft:goat"]).to_string()),
+        ],
+    )
+}
+
 /// Slice 18 (guide `ui.js`, window `feeder`): heads of each kind round it, one row.
 pub(super) fn feeder_row(game: &Game<'_>, pos: Pos) -> Text {
     let animals = fed_round(game, pos);
@@ -292,13 +315,21 @@ fn feed(game: &mut Game<'_>, pos: Pos, cost: f64) -> Shown {
 
 // ---- The shearer-milker ----
 
-fn shear(game: &mut Game<'_>, pos: Pos, cost: f64, now: u64) -> Shown {
-    let slots = items(game, pos);
-    let shears = slots.first().cloned().flatten();
-    let has_bucket = slots.get(1).cloned().flatten().is_some_and(|s| s.count > 0);
-    if shears.is_none() && !has_bucket {
-        return Shown::Blocked("shear_no_tools");
-    }
+/// Slice 18: the milk (held, room) of the tank a shearer touches, read each step for its window
+/// and its model.
+pub(super) fn milk_of(pos: Pos) -> (u64, u64) {
+    state().milk.get(&pos).copied().unwrap_or((0, 0))
+}
+
+fn shear(game: &mut Game<'_>, level: &LevelNet, pos: Pos, cost: f64, now: u64, t: &Tuning) -> Shown {
+    use rustcraft_rules::utility::kitchen::{BUCKET_MB, MILK};
+    // Slice 18: its shears are built in; the milk goes into the tank it touches.
+    let shears = Some(ItemStack::new("minecraft:shears", 1));
+    let tank = crate::game::rustcraft_fluids::touching_amount(game, level, pos, MILK, t);
+    state().milk.insert(pos, tank);
+    let total = tank.0 + tank.1;
+    crate::game::rustcraft_anim::show_level_cached(game, pos, if total > 0 { tank.0 as f64 / total as f64 } else { 0.0 }, 0xFFF2_F2F2);
+    let has_bucket = tank.1 >= BUCKET_MB;
     let r = radius(game, pos);
     let in_reach = |m: &horizon_client::mobs::Mob| {
         !m.removed && m.alive() && !m.is_baby() && near(pos, r, [m.position.x, m.position.y, m.position.z])
@@ -314,15 +345,18 @@ fn shear(game: &mut Game<'_>, pos: Pos, cost: f64, now: u64) -> Shown {
             let milked = &state().milked;
             game.mobs.iter().position(|m| {
                 in_reach(m)
-                    && matches!(&*m.kind.id, "minecraft:cow" | "minecraft:mooshroom")
+                    && rules::milked(&m.kind.id)
                     && milked.get(&m.id).is_none_or(|t| now >= t + rest)
             })
         })
         .flatten();
     if sheep.is_none() && cow.is_none() {
-        return Shown::Idle("shear_nobody");
+        // «Некуда сливать молоко»: an animal to milk, and no tank with room.
+        let waiting = !has_bucket
+            && game.mobs.iter().any(|m| in_reach(m) && rules::milked(&m.kind.id));
+        return if waiting { Shown::Blocked("shear_no_tank") } else { Shown::Idle("shear_nobody") };
     }
-    if !fits(game, pos, 2..11, &[ItemStack::new("minecraft:white_wool", 3), ItemStack::new("minecraft:milk_bucket", 1)]) {
+    if sheep.is_some() && !fits(game, pos, 0..9, &[ItemStack::new("minecraft:white_wool", 3)]) {
         return Shown::Blocked("output_full");
     }
     if !spend(game, pos, cost) {
@@ -333,17 +367,8 @@ fn shear(game: &mut Game<'_>, pos: Pos, cost: f64, now: u64) -> Shown {
         let color = horizon_client::mobs::render::DYE_NAMES[game.mobs[i].extra.color as usize & 15];
         let wool = game.sequence_loot("minecraft:shearing/sheep", &format!("minecraft:shearing/sheep/{color}"), Some(&tool));
         game.mobs[i].extra.sheared = true;
-        let max = game.items().get(&tool.item).map_or(0, |i| i.max_damage);
-        with_items(game, pos, |items| {
-            if let Some(Some(s)) = items.get_mut(0) {
-                s.damage += 1;
-                if max > 0 && s.damage >= max {
-                    items[0] = None;
-                }
-            }
-        });
         for w in wool {
-            put(game, pos, 2..11, w);
+            put(game, pos, 0..9, w);
         }
         if let Some(o) = who {
             base::report(Report::Counted { kind: "shear", owner: o, count: 1 });
@@ -352,8 +377,7 @@ fn shear(game: &mut Game<'_>, pos: Pos, cost: f64, now: u64) -> Shown {
     if let Some(i) = cow {
         let id = game.mobs[i].id;
         state().milked.insert(id, now);
-        with_items(game, pos, |items| take_one(items, 1));
-        put(game, pos, 2..11, ItemStack::new("minecraft:milk_bucket", 1));
+        crate::game::rustcraft_fluids::put_touching(game, level, pos, MILK, BUCKET_MB, t);
         if let Some(o) = who {
             base::report(Report::Milk { owner: o, entity: id });
         }
