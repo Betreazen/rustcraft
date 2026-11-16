@@ -104,13 +104,13 @@ Audit lines: chassis «Ставится на монорельс», «Ездит 
 - [x] Export every tool part (`worker_<tool>` static, moving parts `worker_<part>` with pivots) from `transport.py`.
 - [x] Note carries busy + aim; `draw_worker` turns `aim_yaw_*` to the target, slides `reach_*`, spins `saw_disc`, `reaper_reel`, `bore_bit`, `map_drum`, opens the grab, curls the bucket, recoils the gun — `poses.js:150-175`. Body colour by tool.
 - [x] Rules test for the pose math (`wire::pose_of`).
-- [ ] Commit.
+- [x] Commit.
 
 ### Task 10: The cartographer on the station scheme, «Вокруг пути всё нанесено»
 
-- [ ] Test `Note::AllMapped` after `idle` cells with nothing new; `window::atlas_marks` projection test.
-- [ ] Listing carries the atlas sites (biomes, structures, chunk count) of the network's span; the scheme draws them. Self-test `worker_map_says_all_mapped`.
-- [ ] Commit.
+- [x] Test `Note::AllMapped` after `idle` cells with nothing new; `window::atlas_marks` projection test.
+- [x] Listing carries the atlas sites (biomes, structures, chunk count) of the network's span; the scheme draws them. Self-test `worker_map_says_all_mapped`.
+- [x] Commit.
 
 ### Task 11: Portal dock as a worker's dock (PD2), fluids, «Буфер дока полон», chest beside, buffer 27
 

@@ -168,6 +168,9 @@ pub enum Note {
     /// Slice 14, the bore: no rails in its hold, and lava ahead with nothing to close it with.
     NoRails,
     LavaAhead,
+    /// Slice 18, the cartographer: nothing new along its whole way (guide «Вокруг пути всё
+    /// нанесено»).
+    AllMapped,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -602,16 +605,22 @@ impl Worker {
     /// Its tool came into a cell and found `done` things to do there: after `idle_after` cells in
     /// a row with nothing, the scoop says so (guide `tool_scoop`).
     pub fn found(&mut self, done: usize, idle_after: u32) {
+        self.found_as(done, idle_after, Note::NothingToDig);
+    }
+
+    /// `found` with the state it says after `idle_after` empty cells: the scoop's «нечего
+    /// копать», the cartographer's «всё нанесено».
+    pub fn found_as(&mut self, done: usize, idle_after: u32, idle_note: Note) {
         if done > 0 {
             self.idle = 0;
-            if self.note == Note::NothingToDig {
+            if self.note == idle_note {
                 self.note = Note::Working;
             }
             return;
         }
         self.idle = self.idle.saturating_add(1);
         if self.idle >= idle_after {
-            self.note = Note::NothingToDig;
+            self.note = idle_note;
         }
     }
 
@@ -975,7 +984,24 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn the_cartographer_says_when_all_is_mapped() {
+        let t = Tuning::default();
+        let mut w = Worker::new(1, 7, [0, 0, 0], &t);
+        w.tool = Some(Tool::Map);
+        w.note = Note::Working;
+        for _ in 0..5 {
+            w.found_as(0, 6, Note::AllMapped);
+        }
+        assert_eq!(w.note, Note::Working);
+        w.found_as(0, 6, Note::AllMapped);
+        assert_eq!(w.note, Note::AllMapped);
+        w.found_as(3, 6, Note::AllMapped);
+        assert_eq!(w.note, Note::Working);
+    }
+
+    #[test]
     fn a_fleet_survives_its_json() {
+
         let t = Tuning::default();
         let mut f = Fleet::default();
         let id = f.add(0xabc, [1, 2, 3], &t);

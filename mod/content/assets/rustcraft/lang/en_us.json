@@ -1031,5 +1031,7 @@
   "rustcraft.worker.sockets": "%s of %s sockets in use",
   "rustcraft.worker.charge_title": "Charge",
   "rustcraft.worker.hold_title": "Hold",
-  "rustcraft.worker.hold_slots": "%s of %s slots"
+  "rustcraft.worker.hold_slots": "%s of %s slots",
+  "rustcraft.worker.all_mapped": "Everything round the way is mapped",
+  "rustcraft.station.charted": "Charted: %s chunks"
 }

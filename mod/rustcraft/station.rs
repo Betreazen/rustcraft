@@ -62,6 +62,10 @@ const DOT: u32 = colour::PAPER;
 const DOT_HERE: u32 = colour::PAPER_INK;
 const DOT_CHOSEN: u32 = colour::PAPER_CHOSEN;
 const MAP_TEXT: u32 = colour::PAPER_TEXT;
+/// Slice 18: the cartographers' finds on the scheme: a structure brown, a biome green.
+const MARK_STRUCTURE: u32 = 0xFF8A_5A2B;
+const MARK_BIOME: u32 = 0xFF4F_8A3A;
+
 const BROKEN_TEXT: u32 = colour::BAD_TEXT;
 /// The capsule's parts as standalone models.
 const BODY: &str = "rustcraft:block/capsule_body";
@@ -467,6 +471,7 @@ fn scheme(
             MAP_LINE,
         );
     }
+    marks(game, batch, o, r, &p, listing);
     let mut dots: Vec<(Pos, &str, u32)> = vec![(listing.station, &listing.name, DOT_HERE)];
     dots.extend(reachable.iter().map(|d| {
         let fill = if Some(d.station) == chosen {
@@ -490,6 +495,50 @@ fn scheme(
         let x = (at[0] - w / 2.0).clamp(r[0] + 2.0, r[0] + r[2] - w - 2.0);
         let y = (at[1] - 12.0).max(r[1] + 2.0);
         game.native_text(batch, &label, [x, y], MAP_TEXT, false);
+    }
+}
+
+/// Slice 18 (guide `tool_map`): the cartographers' finds near the network, a square for a
+/// structure and a smaller one for a biome, each with its name, and the chunks charted.
+fn marks(
+    game: &Game<'_>,
+    batch: &mut HudBatch,
+    o: [f32; 2],
+    r: [f32; 4],
+    p: &Projection,
+    listing: &Listing,
+) {
+    for m in &listing.marks {
+        let c = p.at(m.at);
+        let at = [o[0] + c[0], o[1] + c[1]];
+        if !win::inside(r, at) {
+            continue;
+        }
+        let (size, fill) = if m.structure { (5.0, MARK_STRUCTURE) } else { (3.0, MARK_BIOME) };
+        let h = (size / 2.0f32).floor();
+        game.native_fill(batch, [at[0] - h - 1.0, at[1] - h - 1.0, size + 2.0, size + 2.0], DOT_EDGE);
+        game.native_fill(batch, [at[0] - h, at[1] - h, size, size], fill);
+        let key = if m.structure {
+            format!("rustcraft.structure.{}", m.id.replace(':', "."))
+        } else {
+            format!("biome.{}", m.id.replace(':', "."))
+        };
+        let name: String = tr(&key, m.id.rsplit(':').next().unwrap_or(&m.id))
+            .chars()
+            .take(MAP_LABEL)
+            .collect();
+        let w = game.native_text_width(&name);
+        let x = (at[0] - w / 2.0).clamp(r[0] + 2.0, r[0] + r[2] - w - 2.0);
+        let y = (at[1] + 4.0).min(r[1] + r[3] - 10.0);
+        game.native_text(batch, &name, [x, y], MAP_TEXT, false);
+    }
+    if listing.charted > 0 {
+        let s = tr_with(
+            "rustcraft.station.charted",
+            "Charted: %s chunks",
+            &[listing.charted.to_string()],
+        );
+        game.native_text(batch, &s, [r[0] + 3.0, r[1] + r[3] - 10.0], MAP_TEXT, false);
     }
 }
 

@@ -69,6 +69,56 @@ pub struct Listing {
     pub destinations: Vec<Destination>,
     /// The rails seen from above, as lines from (x, z) to (x, z).
     pub segments: Vec<[i32; 4]>,
+    /// Slice 18 (guide `tool_map`): biomes and structures the cartographers found near the
+    /// network, and the chunks they charted in all.
+    pub marks: Vec<Mark>,
+    pub charted: u32,
+}
+
+/// A found biome or structure on the scheme, at (x, z).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Mark {
+    pub structure: bool,
+    /// The biome's or the structure's id.
+    pub id: String,
+    pub at: [i32; 2],
+}
+
+/// The most marks a listing carries.
+pub const MAX_MARKS: usize = 24;
+
+/// The found places (biomes, then structures, each `(id, block)`) within `margin` blocks of the
+/// scheme's lines, nearest first, at most MAX_MARKS.
+pub fn marks_near(
+    biomes: &[(String, Pos)],
+    structures: &[(String, Pos)],
+    segments: &[[i32; 4]],
+    margin: i32,
+) -> Vec<Mark> {
+    let distance = |p: [i32; 2]| -> i32 {
+        segments
+            .iter()
+            .map(|s| {
+                let dx = (s[0].min(s[2]) - p[0]).max(p[0] - s[0].max(s[2])).max(0);
+                let dz = (s[1].min(s[3]) - p[1]).max(p[1] - s[1].max(s[3])).max(0);
+                dx.max(dz)
+            })
+            .min()
+            .unwrap_or(i32::MAX)
+    };
+    let mut out: Vec<(i32, Mark)> = biomes
+        .iter()
+        .map(|b| (false, b))
+        .chain(structures.iter().map(|s| (true, s)))
+        .map(|(structure, (id, p))| {
+            let at = [p[0], p[2]];
+            (distance(at), Mark { structure, id: id.clone(), at })
+        })
+        .filter(|(d, _)| *d <= margin)
+        .collect();
+    out.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.id.cmp(&b.1.id)));
+    out.truncate(MAX_MARKS);
+    out.into_iter().map(|(_, m)| m).collect()
 }
 
 struct Writer(Vec<u8>);
@@ -188,7 +238,7 @@ pub fn encode_listing(l: &Listing) -> Vec<u8> {
         w.u32(d.ticks);
         w.f32(d.cost);
     }
-    let room = MAX_BYTES.saturating_sub(w.0.len() + 2) / SEGMENT;
+    let room = MAX_BYTES.saturating_sub(w.0.len() + 2 + MARKS_ROOM) / SEGMENT;
     let segments = &l.segments[..l.segments.len().min(room)];
     w.u16(segments.len() as u16);
     for s in segments {
@@ -196,8 +246,21 @@ pub fn encode_listing(l: &Listing) -> Vec<u8> {
             w.i32(*c);
         }
     }
+    // Slice 18: the marks after the lines; a listing without them still reads.
+    let marks = &l.marks[..l.marks.len().min(MAX_MARKS)];
+    w.u16(marks.len() as u16);
+    for m in marks {
+        w.u8(u8::from(m.structure));
+        w.text(&m.id);
+        w.i32(m.at[0]);
+        w.i32(m.at[1]);
+    }
+    w.u32(l.charted);
     w.0
 }
+
+/// Room kept for the marks at the message's end.
+const MARKS_ROOM: usize = 2 + MAX_MARKS * (1 + 2 + 64 + 8) + 4;
 
 pub fn decode_listing(bytes: &[u8]) -> Option<Listing> {
     let mut r = Reader(bytes);
@@ -237,7 +300,24 @@ pub fn decode_listing(bytes: &[u8]) -> Option<Listing> {
     let segments = (0..count)
         .map(|_| Some([r.i32()?, r.i32()?, r.i32()?, r.i32()?]))
         .collect::<Option<Vec<_>>>()?;
+    let (marks, charted) = if r.0.is_empty() {
+        (Vec::new(), 0)
+    } else {
+        let count = usize::from(r.u16()?);
+        let marks = (0..count)
+            .map(|_| {
+                Some(Mark {
+                    structure: r.u8()? != 0,
+                    id: r.text()?,
+                    at: [r.i32()?, r.i32()?],
+                })
+            })
+            .collect::<Option<Vec<_>>>()?;
+        (marks, r.u32()?)
+    };
     Some(Listing {
+        marks,
+        charted,
         station,
         name,
         energy,
@@ -449,13 +529,32 @@ mod tests {
                 },
             ],
             segments: vec![[0, 0, 10, 0], [5, 0, 5, 7]],
+            marks: vec![Mark {
+                structure: true,
+                id: "minecraft:village_plains".into(),
+                at: [40, -8],
+            }],
+            charted: 12,
         };
         assert_eq!(decode_listing(&encode_listing(&l)), Some(l));
         assert_eq!(decode_listing(&[9]), None);
     }
 
     #[test]
+    fn found_places_near_the_lines_go_on_the_scheme() {
+        let segments = [[0, 0, 100, 0]];
+        let biomes = vec![("minecraft:plains".to_owned(), [50, 64, 10]), ("minecraft:desert".to_owned(), [50, 64, 500])];
+        let sites = vec![("minecraft:village_plains".to_owned(), [-20, 70, 0])];
+        let marks = marks_near(&biomes, &sites, &segments, 48);
+        assert_eq!(marks.len(), 2, "the far desert stays off");
+        assert_eq!(marks[0].id, "minecraft:plains");
+        assert!(marks[1].structure && marks[1].at == [-20, 0]);
+        assert!(marks_near(&biomes, &sites, &[], 48).is_empty());
+    }
+
+    #[test]
     fn a_huge_scheme_is_cut_to_one_message() {
+
         let l = Listing {
             segments: (0..5000).map(|i| [i, 0, i, 1]).collect(),
             ..Listing::default()

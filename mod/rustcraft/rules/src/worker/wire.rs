@@ -160,7 +160,9 @@ pub fn note_key(note: super::Note) -> (&'static str, &'static str, Mood) {
         N::NoCargo => ("rustcraft.worker.no_cargo", "Waiting for cargo", Waiting),
         N::NoRails => ("rustcraft.worker.no_rails", "Out of rails", Stopped),
         N::LavaAhead => ("rustcraft.worker.lava", "Lava ahead and no blocks", Stopped),
+        N::AllMapped => ("rustcraft.worker.all_mapped", "Everything round the way is mapped", Waiting),
         N::NothingToDig => (
+
             "rustcraft.worker.nothing_to_dig",
             "Nothing to dig beside the way",
             Waiting,

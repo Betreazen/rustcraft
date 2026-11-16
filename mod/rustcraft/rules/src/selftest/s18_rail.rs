@@ -8,7 +8,9 @@ use crate::monorail::shape;
 use crate::tuning::Tuning;
 use crate::worker::{Errand, Tool, Worker};
 
-pub const ALL: [Build; 9] = [
+pub const ALL: [Build; 10] = [
+    map_says_all_mapped,
+
     reaper_filter_pumpkins,
     scoop_filter_sand,
 
@@ -349,4 +351,20 @@ fn scoop_filter_sand(o: Pos, _: &Tuning) -> Scenario {
         same("dirt", b.block(dirt), "minecraft:dirt".to_owned())?;
         same("dirt taken", count_of(&worker_of(b, m)?.hold.slots, "minecraft:dirt"), 0)
     })
+}
+
+fn map_says_all_mapped(o: Pos, _: &Tuning) -> Scenario {
+    // Guide `tool_map`: a cartographer shuttling on a short track charts its band once, then,
+    // with nothing new round its way, says «Вокруг пути всё нанесено».
+    Scenario::new("worker_map_says_all_mapped", plot_area(o))
+        .then("a track and a cartographer", move |b, m| {
+            floor(b, o, -1..=7, -2..=2)?;
+            for x in 0..=6 {
+                rail(b, at(o, [x, 1, 0]), Face::YNeg)?;
+            }
+            spawn(b, m, at(o, [0, 1, 0]), Tool::Map, &[])
+        })
+        .until("it says all round its way is mapped", 1200, |b, m| {
+            Ok(worker_of(b, m)?.note == crate::worker::Note::AllMapped)
+        })
 }
