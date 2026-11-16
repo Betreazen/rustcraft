@@ -409,8 +409,10 @@ fn load_dock_takes_from_a_chest(o: Pos, _: &Tuning) -> Scenario {
             }
             b.place(dock, "rustcraft:dock_load", &[])?;
             b.place(chest, "minecraft:chest", &[])?;
-            b.put(chest, 0, "minecraft:cobblestone", 32)
+            let n = b.insert(chest, "minecraft:cobblestone", 32)?;
+            if n == 32 { Ok(()) } else { Err(format!("{n} went into the chest")) }
         })
+
         .then("a cargo worker", move |b, m| {
             spawn(b, m, at(o, [3, 1, 0]), Tool::Hold, &[])
         })

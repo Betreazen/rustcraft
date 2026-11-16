@@ -2068,8 +2068,14 @@ pub(super) fn round_trip(dimension: &str) -> Result<(), String> {
     let back = encode_saved(&text)
         .and_then(|c| decode_saved(&c))
         .map_err(|e| format!("{e:?}"))?;
+    // The tools' aim is the client's pose only and is not saved.
+    let mut live = level.fleet.clone();
+    for w in &mut live.workers {
+        w.aim = None;
+    }
     match Fleet::decode(&back) {
-        Some(f) if f == level.fleet => Ok(()),
+        Some(f) if f == live => Ok(()),
+
         other => Err(format!("the fleet came back as {other:?}")),
     }
 }
