@@ -8,7 +8,9 @@ use crate::monorail::shape;
 use crate::tuning::Tuning;
 use crate::worker::{Errand, Tool, Worker};
 
-pub const ALL: [Build; 12] = [
+pub const ALL: [Build; 13] = [
+    bore_follows_the_ground_with_its_best_rail,
+
     load_dock_takes_from_a_chest,
 
     unloads_into_a_portal_dock,
@@ -415,5 +417,31 @@ fn load_dock_takes_from_a_chest(o: Pos, _: &Tuning) -> Scenario {
         .until("the chest's cobblestone reaches its hold", RIDE, |b, m| {
             // It rides off with what the dock had; the dock takes 8 at a time from the chest.
             Ok(count_of(&worker_of(b, m)?.hold.slots, "minecraft:cobblestone") >= 1)
+        })
+}
+
+fn bore_follows_the_ground_with_its_best_rail(o: Pos, _: &Tuning) -> Scenario {
+    // Guide `tool_bore`: it lays the rails of its hold, here tier 3; without the height module
+    // the way follows the ground a step down where it falls away.
+    let low = at(o, [4, 0, 0]);
+    Scenario::new("worker_bore_follows_the_ground", plot_area(o))
+        .then("rails to where the ground steps down, a bore with tier-3 rails", move |b, m| {
+            floor(b, o, -1..=3, -2..=2)?;
+            for x in 4..=7 {
+                b.place(at(o, [x, -1, 0]), STONE, &[])?;
+            }
+            for x in 0..=3 {
+                rail(b, at(o, [x, 1, 0]), Face::YNeg)?;
+            }
+            spawn(
+                b,
+                m,
+                at(o, [0, 1, 0]),
+                Tool::Bore,
+                &[("rustcraft:monorail_3", 4), ("minecraft:cobblestone", 8)],
+            )
+        })
+        .until("a tier-3 rail lies a step down", 1200, move |b, _| {
+            Ok(b.block(low) == MONORAIL && b.property(low, "tier").as_deref() == Some("3"))
         })
 }

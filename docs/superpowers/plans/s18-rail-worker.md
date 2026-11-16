@@ -127,9 +127,9 @@ Audit lines: chassis «Ставится на монорельс», «Ездит 
 
 ### Task 13: The bore: height module, tier 2–4 rails; the guard shoots while it stands; shooter recipe
 
-- [ ] Tests `the_bore_lays_the_best_rail_it_carries`, `the_height_module_keeps_the_level`, `a_guard_aims_while_standing`.
-- [ ] Recipe `tool_shooter`: ` x /xbx/ r `, x = bow, b = crystallite.
-- [ ] Commit.
+- [x] Tests `the_bore_lays_the_best_rail_it_carries`, `the_height_module_keeps_the_level`, `a_guard_aims_while_standing`.
+- [x] Recipe `tool_shooter`: ` x /xbx/ r `, x = bow, b = crystallite.
+- [x] Commit.
 
 ### Task 14: Monorail shape, cabin room, scheme labels and lift floors
 

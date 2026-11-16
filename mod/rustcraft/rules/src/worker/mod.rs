@@ -118,7 +118,7 @@ impl Tool {
             Tool::Reaper => plants::is_seed(item),
             Tool::Hold | Tool::Grab | Tool::Scoop | Tool::Shooter | Tool::Map => false,
             // The bore keeps its rails and the blocks it fills lava and gaps with.
-            Tool::Bore => item == bore::RAIL || bore::is_filler(item),
+            Tool::Bore => bore::is_rail(item) || bore::is_filler(item),
         }
     }
 }
@@ -570,6 +570,16 @@ impl Worker {
     /// Whether it rode past a cell this tick and rides on in the same tick.
     pub fn rides_on(&self) -> bool {
         self.carry > 1e-9 && self.busy <= 0.0
+    }
+
+    /// Slice 18: whether a guard looks for a target where it stands after a tick that came to
+    /// `step`: on its patrol it shoots in each cell it comes into (`Arrived`); standing at a dock,
+    /// waiting or stopped it keeps shooting between shots (guide `tool_gun`: «патрулирует свой
+    /// участок и атакует»).
+    pub fn guards_standing(&self, step: Step) -> bool {
+        self.tool == Some(Tool::Shooter)
+            && self.busy <= 0.0
+            && matches!(step, Step::AtDock(_) | Step::Stopped)
     }
 
     /// Spends a tool job: `ticks` of work and `energy` E.
@@ -1107,7 +1117,23 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn a_guard_aims_while_standing() {
+        let t = Tuning::default();
+        let mut w = Worker::new(1, 7, [0, 0, 0], &t);
+        w.tool = Some(Tool::Shooter);
+        assert!(w.guards_standing(Step::AtDock([0, 0, 1])));
+        assert!(w.guards_standing(Step::Stopped));
+        assert!(!w.guards_standing(Step::Arrived([1, 0, 0])), "it shoots there anyway");
+        w.busy = 3.0;
+        assert!(!w.guards_standing(Step::Stopped), "between shots");
+        w.busy = 0.0;
+        w.tool = Some(Tool::Saw);
+        assert!(!w.guards_standing(Step::Stopped));
+    }
+
+    #[test]
     fn the_limit_refuses_one_more() {
+
         let t = Tuning::default();
         let mut f = Fleet::default();
         let limit = config::ServerConfig {

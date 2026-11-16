@@ -704,7 +704,13 @@ fn ride(
     };
     // T4: a fast rail takes it past more than a cell a tick; it rides on, each cell worked.
     let mut step = w.tick(&track, t);
+    // Slice 18: a guard standing at a dock or stopped still shoots (P2).
+    if w.guards_standing(step) {
+        let cell = w.cell;
+        guard(game, dimension, w, cell, t);
+    }
     for _ in 0..RIDE_ON_MAX {
+
         match step {
             Step::Arrived(cell) => work(game, dimension, net, w, cell, t),
             Step::AtDock(dock) => serve(game, w, dock, t),
@@ -886,17 +892,24 @@ fn scoop(
 /// the next rail filled, the rail laid; the monorail rescans it and the worker rides on.
 fn bore(game: &mut Game<'_>, dimension: &str, net: &Network, w: &mut Worker, cell: Pos, t: &Tuning) {
     use rustcraft_rules::worker::bore;
-    let Some(ahead) = w.from.and_then(|f| bore::ahead(f, cell)) else { return };
-    if net.rails.contains_key(&ahead) {
+    let Some(level_ahead) = w.from.and_then(|f| bore::ahead(f, cell)) else { return };
+    if net.rails.contains_key(&level_ahead) || net.rails.contains_key(&[level_ahead[0], level_ahead[1] - 1, level_ahead[2]]) {
         return;
     }
-    if w.hold.count(bore::RAIL) == 0 {
+    // Slice 18: the best rail of its hold, tiers 1 to 4.
+    let Some((rail, tier)) = bore::best_rail(|i| w.hold.count(i)) else {
         w.note = Note::NoRails;
         return;
-    }
+    };
     use rustcraft_rules::modules::Module as M;
-    let heading = [ahead[0] - cell[0], ahead[2] - cell[2]];
     let has = |m: M| w.upgrades.iter().flatten().filter(|x| **x == m).count() as u32;
+    // The height module keeps the way level; without it the way follows the ground down a step.
+    let open = |p: Pos| {
+        let b = game.native_block(p);
+        matches!(b.as_str(), "minecraft:air" | "minecraft:cave_air" | "minecraft:water") || b.contains("lava")
+    };
+    let (ahead, _) = bore::next_cell(level_ahead, open, has(M::Height) > 0);
+    let heading = [ahead[0] - cell[0], ahead[2] - cell[2]];
     let (side, height) = bore::size(has(M::Tunnel), has(M::Radius) > 0);
     let (lava_module, build_module) = (has(M::Lava) > 0, has(M::Build) > 0);
     let cells = bore::cells(ahead, heading, side, height);
@@ -962,10 +975,14 @@ fn bore(game: &mut Game<'_>, dimension: &str, net: &Network, w: &mut Worker, cel
     }
     if let Some(state) = game.native_default_state(bore::RAIL) {
         game.native_set_block(dimension, ahead, state, 3);
-        w.hold.take(bore::RAIL, 1);
+        if tier > 1 {
+            game.native_set_block_property(ahead, content::TIER, &tier.to_string());
+        }
+        w.hold.take(rail, 1);
         crate::game::rustcraft_monorail::touched(dimension, ahead);
         done += 1;
     }
+
     w.spend(t.grab_ticks * done as f64, t.grab_energy * done as f64, t);
 }
 

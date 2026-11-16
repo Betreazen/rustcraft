@@ -7,6 +7,42 @@ use crate::geom::Pos;
 
 /// The rail it lays (tier 1).
 pub const RAIL: &str = "rustcraft:monorail";
+/// Slice 18: every rail it may carry, by tier (guide «кладёт монорельс из трюма»).
+pub const RAILS: [&str; 4] = [
+    "rustcraft:monorail",
+    "rustcraft:monorail_2",
+    "rustcraft:monorail_3",
+    "rustcraft:monorail_4",
+];
+
+/// Whether `item` is a rail it lays.
+pub fn is_rail(item: &str) -> bool {
+    RAILS.contains(&item)
+}
+
+/// The best rail its hold has (`count` says how many of an item it has): the item and its tier.
+pub fn best_rail(count: impl Fn(&str) -> u32) -> Option<(&'static str, u8)> {
+    (0..RAILS.len())
+        .rev()
+        .find(|&i| count(RAILS[i]) > 0)
+        .map(|i| (RAILS[i], i as u8 + 1))
+}
+
+/// Where the next rail goes, ahead of it at `ahead`: on the level, the gap under it filled, while
+/// it has the height module (guide: «Высота держит путь на одном уровне»); without it the way
+/// follows the ground down a step where the cell under `ahead` is open and the one under that
+/// holds. The cell and whether the cell under it needs filling.
+pub fn next_cell(ahead: Pos, open: impl Fn(Pos) -> bool, height_module: bool) -> (Pos, bool) {
+    let under = [ahead[0], ahead[1] - 1, ahead[2]];
+    if !open(under) {
+        return (ahead, false);
+    }
+    let deeper = [ahead[0], ahead[1] - 2, ahead[2]];
+    if !height_module && !open(deeper) {
+        return (under, false);
+    }
+    (ahead, true)
+}
 /// A tunnel is this tall.
 pub const HEIGHT: i32 = 2;
 
@@ -18,10 +54,11 @@ pub fn is_filler(item: &str) -> bool {
     )
 }
 
-/// The cell ahead of `cell` coming from `from`, on the level: none for no heading or a climb.
+/// The cell ahead of `cell` coming from `from`, on `cell`'s level, along its heading across (a
+/// step down it took keeps its heading): none for no heading or a ride straight up or down.
 pub fn ahead(from: Pos, cell: Pos) -> Option<Pos> {
     let d = [cell[0] - from[0], cell[2] - from[2]];
-    if from[1] != cell[1] || d[0].abs() + d[1].abs() != 1 {
+    if d[0].abs() + d[1].abs() != 1 {
         return None;
     }
     Some([cell[0] + d[0], cell[1], cell[2] + d[1]])
@@ -63,6 +100,7 @@ mod tests {
     fn it_bores_ahead_on_the_level_and_across_its_heading() {
         assert_eq!(ahead([0, 5, 0], [1, 5, 0]), Some([2, 5, 0]));
         assert_eq!(ahead([0, 5, 0], [0, 6, 0]), None);
+        assert_eq!(ahead([0, 5, 0], [1, 4, 0]), Some([2, 4, 0]), "after a step down");
         let c = cells([2, 5, 0], [1, 0], 1, 2);
         assert_eq!(c.len(), 6);
         assert_eq!(size(0, false), (0, 2));
@@ -72,4 +110,24 @@ mod tests {
         assert!(c.contains(&[2, 6, 1]) && c.contains(&[2, 5, -1]));
         assert!(is_filler("minecraft:cobblestone") && !is_filler(RAIL));
     }
+
+    #[test]
+    fn the_bore_lays_the_best_rail_it_carries() {
+        let hold = |i: &str| u32::from(i == RAILS[0] || i == RAILS[2]);
+        assert_eq!(best_rail(hold), Some((RAILS[2], 3)));
+        assert_eq!(best_rail(|_| 0), None);
+        assert!(is_rail(RAILS[3]) && !is_rail("minecraft:rail"));
+    }
+
+    #[test]
+    fn the_height_module_keeps_the_level() {
+        // Ground one block lower ahead: open at y 4, solid at y 3.
+        let open = |p: Pos| p[1] == 4;
+        assert_eq!(next_cell([2, 5, 0], open, true), ([2, 5, 0], true), "level, the gap filled");
+        assert_eq!(next_cell([2, 5, 0], open, false), ([2, 4, 0], false), "down a step");
+        // A deep gap: it stays level and fills even without the module.
+        assert_eq!(next_cell([2, 5, 0], |p| p[1] < 5, false), ([2, 5, 0], true));
+        assert_eq!(next_cell([2, 5, 0], |_| false, false), ([2, 5, 0], false));
+    }
+
 }
