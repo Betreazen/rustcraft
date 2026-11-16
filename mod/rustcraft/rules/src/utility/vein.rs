@@ -58,6 +58,15 @@ pub fn stratum(rock: &str) -> Option<&'static str> {
     }
 }
 
+/// Slice 18 (guide `mod_stratum`): with the stratum module the vein's window offers sand or gravel;
+/// the vein takes the chosen one and grows its suspicious block.
+pub const STRATUM_ROCKS: [&str; 2] = ["minecraft:sand", "minecraft:gravel"];
+
+/// The rock the stratum takes for window choice `choice` (0 sand, 1 gravel; sand for any other).
+pub fn stratum_rock(choice: usize) -> &'static str {
+    STRATUM_ROCKS.get(choice).copied().unwrap_or(STRATUM_ROCKS[0])
+}
+
 /// Whether `rock` feeds ore (not the stratum).
 pub fn is_stone(rock: &str) -> bool {
     is_rock(rock) && stratum(rock).is_none()
@@ -104,6 +113,16 @@ mod tests {
         assert!(is_rock("minecraft:cobblestone") && !is_rock("minecraft:dirt"));
         assert_eq!(stratum("minecraft:gravel"), Some("minecraft:suspicious_gravel"));
         assert!(is_stone("minecraft:stone") && !is_stone("minecraft:sand"));
+    }
+
+    #[test]
+    fn the_stratum_takes_the_rock_its_window_chose() {
+        assert_eq!(stratum_rock(0), "minecraft:sand");
+        assert_eq!(stratum_rock(1), "minecraft:gravel");
+        assert_eq!(stratum_rock(7), "minecraft:sand");
+        for r in STRATUM_ROCKS {
+            assert!(stratum(r).is_some());
+        }
     }
 
     #[test]

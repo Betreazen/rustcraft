@@ -1136,7 +1136,9 @@ fn grow(game: &mut Game<'_>, dimension: &str, pos: Pos, cost: f64) -> Shown {
     let slots = items(game, pos);
     let mods = base::modules_at(game, pos);
     let stratum = modules::count(&mods, Module::Stratum) > 0;
-    let wanted = |item: &str| if stratum { vein::stratum(item).is_some() } else { vein::is_stone(item) };
+    // Slice 18: the stratum takes the rock its window chose (sand or gravel).
+    let chosen_rock = vein::stratum_rock(choice(game, pos, vein::STRATUM_ROCKS.len()));
+    let wanted = |item: &str| if stratum { item == chosen_rock } else { vein::is_stone(item) };
     let Some(slot) = slots.iter().position(|s| s.as_ref().is_some_and(|s| s.count > 0 && wanted(&s.item))) else {
         return Shown::Idle("vein_no_rock");
     };
@@ -1263,17 +1265,29 @@ pub(super) fn sheet(game: &Game<'_>, dimension: &str, pos: Pos, u: Util, s: &mut
         colour: None,
     });
     let on = toggles_at(game, pos, spec.toggles);
-    // Slice 18, guide `mod_pick`: the vein's ore choice appears with the ore choice module only.
-    let choice_shown = u != Util::Vein || modules::count(&base::modules_at(game, pos), Module::Pick) > 0;
-    s.toggles = toggle_names(u)
+    // Slice 18: the vein's window offers sand or gravel with the stratum module (guide
+    // `mod_stratum`), the ores with the ore choice module (`mod_pick`), nothing without either.
+    let names = if u == Util::Vein {
+        let mods = base::modules_at(game, pos);
+        if modules::count(&mods, Module::Stratum) > 0 {
+            rustcraft_rules::utility::vein::STRATUM_ROCKS.iter().map(|r| ((*r).to_owned(), (*r).to_owned())).collect()
+        } else if modules::count(&mods, Module::Pick) > 0 {
+            toggle_names(u)
+        } else {
+            Vec::new()
+        }
+    } else {
+        toggle_names(u)
+    };
+    let shown_n = names.len();
+    s.toggles = names
         .into_iter()
-        .filter(|_| choice_shown)
         .into_iter()
         .enumerate()
         .map(|(i, (key, icon))| Toggle {
             icon,
             name: base::v(&line(&format!("rustcraft.util.{short}.toggle.{}", key.replace([':', '/'], "_")), &key, &[])),
-            on: on.get(i).copied().unwrap_or(false) || (matches!(u, Util::Archeo | Util::Enchanter | Util::Vein) && i == 0 && !on.iter().any(|t| *t)),
+            on: on.get(i).copied().unwrap_or(false) || (matches!(u, Util::Archeo | Util::Enchanter | Util::Vein) && i == 0 && !on.iter().take(shown_n).any(|t| *t)),
             hint: base::v(&line(&format!("rustcraft.util.{short}.hint"), "Click to turn on or off", &[])),
         })
         .collect();

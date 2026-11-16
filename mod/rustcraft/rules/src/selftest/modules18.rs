@@ -5,6 +5,8 @@
 //! - Economy slows a slice-12 machine's step by ×0.85 (guide `mod_eco`): the trash's window shows a
 //!   step of 1.2 s instead of 1.0 s.
 //! - The vein's ore choice appears in its window with the ore choice module only (guide `mod_pick`).
+//! - With the stratum module the vein's window offers sand or gravel, and the vein grows from the
+//!   chosen one: gravel chosen, sand and gravel given, suspicious gravel grows (guide `mod_stratum`).
 
 use super::{Bench, Build, Scenario, at, count_of, plot_area, same};
 use crate::geom::Pos;
@@ -12,7 +14,7 @@ use crate::modules::{self, Module};
 use crate::tuning::Tuning;
 use crate::utility::{self, Util};
 
-pub const ALL: [Build; 3] = [disintegrator_yield, economy_slows_a_step, vein_choice_with_the_module];
+pub const ALL: [Build; 4] = [disintegrator_yield, economy_slows_a_step, vein_choice_with_the_module, stratum_grows_the_chosen_rock];
 
 const OWNER: u128 = 0x5e1f_7e57_0000_0000_0000_0000_0000_0a18;
 const LIMIT: u64 = 400;
@@ -98,4 +100,24 @@ fn vein_choice_with_the_module(o: Pos, _: &Tuning) -> Scenario {
             let toggles = |p| b.sheet(p).map(|s| s.toggles.len());
             Ok(toggles(bare) == Some(0) && toggles(pick) == Some(choices))
         })
+}
+
+fn stratum_grows_the_chosen_rock(o: Pos, _: &Tuning) -> Scenario {
+    let p = at(o, [3, 2, 0]);
+    let grew = move |b: &dyn Bench, block: &str| crate::utility::vein::cells().into_iter().any(|c| b.block(at(p, c)) == block);
+    Scenario::new("module_stratum_grows_the_chosen_rock", plot_area(o))
+        .then("a vein with the stratum module, sand and gravel, gravel chosen", move |b, _| {
+            floor(b, o)?;
+            machine(b, p, "rustcraft:vein")?;
+            b.set_buffer(p, 8000.0)?;
+            b.set_modules(p, &[Module::Stratum.item()])?;
+            b.put(p, 0, "minecraft:sand", 8)?;
+            b.put(p, 1, "minecraft:gravel", 8)?;
+            b.press_cursor(p, crate::machines::sheet::Press::Toggle(1).id(), None).map(|_| ())
+        })
+        .check("its window offers sand and gravel", move |b, _| {
+            same("choices", b.sheet(p).map(|s| s.toggles.len()), Some(crate::utility::vein::STRATUM_ROCKS.len()))
+        })
+        .until("suspicious gravel grew beside it", 2700, move |b, _| Ok(grew(b, "minecraft:suspicious_gravel")))
+        .check("and no suspicious sand", move |b, _| same("suspicious sand", grew(b, "minecraft:suspicious_sand"), false))
 }

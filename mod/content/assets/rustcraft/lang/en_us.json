@@ -1020,5 +1020,7 @@
   "item.rustcraft.module_stack_2": "Stack Module (Crystallite)",
   "item.rustcraft.module_stack_3": "Stack Module (Starsteel)",
   "item.rustcraft.module_yield": "Yield Module",
-  "item.rustcraft.module_line": "Line Boost Module"
+  "item.rustcraft.module_line": "Line Boost Module",
+  "rustcraft.util.vein.toggle.minecraft_sand": "Sand",
+  "rustcraft.util.vein.toggle.minecraft_gravel": "Gravel"
 }

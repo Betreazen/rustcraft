@@ -3668,5 +3668,7 @@
   "item.rustcraft.module_stack_2": "Модуль стака (кристаллит)",
   "item.rustcraft.module_stack_3": "Модуль стака (звёздная сталь)",
   "item.rustcraft.module_yield": "Модуль выхода",
-  "item.rustcraft.module_line": "Модуль ускорения линии"
+  "item.rustcraft.module_line": "Модуль ускорения линии",
+  "rustcraft.util.vein.toggle.minecraft_sand": "Песок",
+  "rustcraft.util.vein.toggle.minecraft_gravel": "Гравий"
 }
