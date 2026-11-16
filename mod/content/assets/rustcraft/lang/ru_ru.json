@@ -3683,5 +3683,8 @@
   "rustcraft.orders.wait.busy.kitchen": "нет свободного кухонного комбайна",
   "rustcraft.storage.full_at": "Склад полон: занято %s из %s слотов",
   "rustcraft.tablet.no_room": "Склад этого не принимает: нет места или достигнут лимит",
-  "rustcraft.tablet.deposit_hint": "Клик: положить на склад"
+  "rustcraft.tablet.deposit_hint": "Клик: положить на склад",
+  "rustcraft.util.repair.durability": "%s · %s из %s",
+  "rustcraft.util.repair.nothing": "Нечего чинить",
+  "rustcraft.util.repair.bar": "Прочность"
 }

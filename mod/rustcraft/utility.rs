@@ -73,6 +73,7 @@ const TOGGLES_KEY: &str = "util_toggles";
 const KEPT_KEY: &str = "util_kept";
 const XP_KEY: &str = "util_xp";
 const FUEL_KEY: &str = "util_fuel";
+use rustcraft_rules::storage::modules::CAPACITY;
 /// The brewer's brews a blaze powder gives, as the brewing stand's.
 const BREWS_PER_POWDER: i32 = 20;
 
@@ -419,6 +420,27 @@ pub(super) fn tick(game: &mut Game<'_>, dimension: &str, level: &LevelNet, t: &T
     builder::save_transit(game);
 }
 
+/// Slice 18: the module items in a machine's sockets (`modules` in its compound), the ones the
+/// mod's module list does not know yet among them (the capacity module).
+pub(super) fn module_items(entity: &ModBlockEntity) -> Vec<String> {
+    match entity.nbt.get(&JavaString::from("modules")) {
+        Some(Tag::List(list)) => list
+            .iter()
+            .filter_map(|t| match t {
+                Tag::String(s) => Some(s.to_string_lossy()).filter(|s| !s.is_empty()),
+                _ => None,
+            })
+            .collect(),
+        _ => Vec::new(),
+    }
+}
+
+/// How many modules `id` the machine at `pos` holds.
+pub(super) fn module_count(game: &Game<'_>, pos: Pos, id: &str) -> u32 {
+    game.native_mod_block_entity(pos)
+        .map_or(0, |e| module_items(&e).iter().filter(|i| i.as_str() == id).count() as u32)
+}
+
 fn owner(game: &Game<'_>, pos: Pos) -> Option<u128> {
     base::owner_at(game, pos)
 }
@@ -627,15 +649,20 @@ fn plate(game: &mut Game<'_>, dimension: &str, pos: Pos) -> Shown {
 // ---- The repair stand ----
 
 fn repair_one(game: &mut Game<'_>, pos: Pos, cost: f64) -> Shown {
+    use rustcraft_rules::utility::{REPAIR_MATERIAL, REPAIR_OUT, REPAIR_TOOLS, repair_material_end};
     let slots = items(game, pos);
-    let Some(tool) = slots.first().cloned().flatten() else {
+    // Slice 18: three cells to repair, worked in turn.
+    let Some((at, tool)) = REPAIR_TOOLS
+        .clone()
+        .find_map(|i| slots.get(i).cloned().flatten().map(|s| (i, s)))
+    else {
         return Shown::Idle("repair_empty");
     };
     let max = game.items().get(&tool.item).map_or(0, |i| i.max_damage);
     if max == 0 || tool.damage == 0 {
-        // Whole: to the output slot.
-        if put(game, pos, 5..6, tool).is_none() {
-            with_items(game, pos, |items| items[0] = None);
+        // Whole: to the output slots.
+        if put(game, pos, REPAIR_OUT, tool).is_none() {
+            with_items(game, pos, |items| items[at] = None);
             return Shown::Working;
         }
         return Shown::Blocked("output_full");
@@ -643,7 +670,10 @@ fn repair_one(game: &mut Game<'_>, pos: Pos, cost: f64) -> Shown {
     let Some(material) = repair::material_of(&tool.item) else {
         return Shown::Blocked("repair_no_material");
     };
-    let Some(slot) = (1..5).find(|i| slots.get(*i).cloned().flatten().is_some_and(|s| material.contains(&&*s.item))) else {
+    let end = repair_material_end(module_count(game, pos, CAPACITY));
+    let Some(slot) = (REPAIR_MATERIAL.start..end)
+        .find(|i| slots.get(*i).cloned().flatten().is_some_and(|s| material.contains(&&*s.item)))
+    else {
         return Shown::Blocked("repair_no_material");
     };
     if !spend(game, pos, cost) {
@@ -652,7 +682,7 @@ fn repair_one(game: &mut Game<'_>, pos: Pos, cost: f64) -> Shown {
     let damage = repair::repaired(tool.damage, max);
     with_items(game, pos, |items| {
         take_one(items, slot);
-        if let Some(Some(t)) = items.get_mut(0) {
+        if let Some(Some(t)) = items.get_mut(at) {
             t.damage = damage;
         }
     });
@@ -1278,6 +1308,7 @@ pub(super) fn sheet(game: &Game<'_>, dimension: &str, pos: Pos, u: Util, s: &mut
         energy: true,
         colour: None,
     });
+    craft_sheet(game, dimension, pos, u, s);
     let on = toggles_at(game, pos, spec.toggles);
     s.toggles = toggle_names(u)
         .into_iter()
@@ -1294,6 +1325,48 @@ pub(super) fn sheet(game: &Game<'_>, dimension: &str, pos: Pos, u: Util, s: &mut
         severity: severity_code(severity(&shown)),
         text: base::v(&shown_text(u, &shown)),
     });
+}
+
+/// Slice 18 (guide `ui.js`): each craft machine's own parts of its window, after the energy bar.
+fn craft_sheet(game: &Game<'_>, dimension: &str, pos: Pos, u: Util, s: &mut Sheet) {
+    let _ = dimension;
+    match u {
+        Util::Repair => {
+            // «алмазная кирка · 970 из 1561».
+            let tool = items(game, pos)
+                .into_iter()
+                .take(rustcraft_rules::utility::REPAIR_TOOLS.end)
+                .flatten()
+                .next();
+            let (value, share) = match tool {
+                Some(t) => {
+                    let max = game.items().get(&t.item).map_or(0, |i| i.max_damage);
+                    let left = max.saturating_sub(t.damage);
+                    let name = line(&item_key(&t.item), &t.item, &[]);
+                    let text = line(
+                        "rustcraft.util.repair.durability",
+                        "%s · %s of %s",
+                        &[name, Text::literal(left.to_string()), Text::literal(max.to_string())],
+                    );
+                    (text, if max > 0 { f64::from(left) / f64::from(max) } else { 1.0 })
+                }
+                None => (line("rustcraft.util.repair.nothing", "Nothing to repair", &[]), 0.0),
+            };
+            s.bars.push(Bar {
+                label: base::v(&line("rustcraft.util.repair.bar", "Durability", &[])),
+                value: base::v(&value),
+                share,
+                energy: false,
+                colour: None,
+            });
+        }
+        _ => {}
+    }
+}
+
+/// The translation key of an item's name.
+pub(super) fn item_key(item: &str) -> String {
+    format!("item.{}", item.replace(':', "."))
 }
 
 /// A press in a slice-12 machine's window (`native_menu_button_v2`); the block entity is out of

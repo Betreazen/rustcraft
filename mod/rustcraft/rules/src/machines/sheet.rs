@@ -216,7 +216,8 @@ impl Kind {
                     // Slice 18 (stream 5): the work mode switch of the machines that have one.
                     mode: u.has_modes(),
                     rows: spec.rows,
-                    bars: 1,
+                    // Slice 18 (stream 5): each machine's own bars.
+                    bars: u.bars(),
                     toggles: spec.toggles,
                     slots: if count > 1 { count } else { 0 },
                     ..Shape::default()

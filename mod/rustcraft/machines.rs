@@ -940,11 +940,16 @@ pub(super) fn slot_takes(
         // Slice 12: each slot as its machine says; the trash by its filter slots (UT2).
         Machine::Util(u) => {
             drop(a);
-            let filter: Vec<String> = (0..9)
-                .filter_map(|i| entity.items.get(i).cloned().flatten())
-                .filter(|s| s.count > 0)
-                .map(|s| s.item.to_string())
-                .collect();
+            // Slice 18 (stream 5): a capacity machine's rule reads its module items instead.
+            let filter: Vec<String> = if rustcraft_rules::utility::has_capacity(u) {
+                crate::game::rustcraft_utility::module_items(entity)
+            } else {
+                (0..9)
+                    .filter_map(|i| entity.items.get(i).cloned().flatten())
+                    .filter(|s| s.count > 0)
+                    .map(|s| s.item.to_string())
+                    .collect()
+            };
             u.takes(slot, item, &filter)
         }
         Machine::Mixer => {

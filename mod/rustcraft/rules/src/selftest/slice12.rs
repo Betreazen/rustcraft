@@ -133,7 +133,7 @@ fn repair_passes_a_whole_tool(o: Pos, _: &Tuning) -> Scenario {
             b.put(p, 0, "minecraft:iron_pickaxe", 1)
         })
         .until("the pickaxe is in its output slot", LIMIT, move |b, _| {
-            Ok(b.items(p).get(5).cloned().flatten().is_some_and(|s| s.0 == "minecraft:iron_pickaxe"))
+            Ok(b.items(p).get(11).cloned().flatten().is_some_and(|s| s.0 == "minecraft:iron_pickaxe"))
         })
 }
 

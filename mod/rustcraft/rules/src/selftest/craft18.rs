@@ -8,6 +8,7 @@
 //! - A storage with a missing cell has its terminal keep the cell for clients to draw (S8).
 //! - An order for bread runs through a kitchen on the storage's line (guide `kitchen`).
 //! - The repair stand's window switches its work mode; the feeder's has none (guide MODES).
+//! - The repair stand mends a fishing rod with string (guide `repair`).
 
 use super::transport::{chest, fill, item_line, joint};
 use super::{Bench, Build, Scenario, at, plot_area, same};
@@ -17,7 +18,8 @@ use crate::storage::modules::{FILTER, SOCKET_FILTER, SOCKET_STACK, STACK_MODULES
 use crate::storage::terminal::{self, Press};
 use crate::tuning::Tuning;
 
-pub const ALL: [Build; 8] = [
+pub const ALL: [Build; 9] = [
+    repair_mends_a_rod_with_string,
     util_work_mode_switch,
     order_bread_through_the_kitchen,
     storage_terminal_keeps_its_holes,
@@ -210,5 +212,24 @@ fn util_work_mode_switch(o: Pos, _: &Tuning) -> Scenario {
         .then("boost pressed", move |b, _| b.press(p, SheetPress::Mode(WorkMode::Boost).id(), None))
         .check("the stand boosts", move |b, _| {
             same("stand", b.sheet(p).and_then(|s| s.mode), Some(WorkMode::Boost.code()))
+        })
+}
+
+fn repair_mends_a_rod_with_string(o: Pos, _: &Tuning) -> Scenario {
+    let p = at(o, [3, 1, 0]);
+    const ROD: &str = r#"{id:"minecraft:fishing_rod",count:1,components:{"minecraft:damage":30}}"#;
+    Scenario::new("repair18_mends_a_rod_with_string", plot_area(o))
+        .then("a repair stand with energy, a worn rod and two string", move |b, _| {
+            b.place(at(o, [3, 0, 0]), "minecraft:stone", &[])?;
+            b.place(p, "rustcraft:repair", &[])?;
+            b.set_buffer(p, 400.0)?;
+            same("rod in", b.insert_snbt(p, ROD)?, 1)?;
+            same("string in", b.insert(p, "minecraft:string", 2)?, 2)
+        })
+        .until("the mended rod is in an output cell", 600, move |b, _| {
+            Ok(b.items(p).iter().skip(11).flatten().any(|s| s.0 == "minecraft:fishing_rod"))
+        })
+        .check("both string went into it", move |b, _| {
+            same("string", super::count_of(&b.items(p), "minecraft:string"), 0)
         })
 }

@@ -151,8 +151,9 @@ impl Util {
             Util::Disintegrator => s(10, 0..1, 1..10),
             Util::Charger => s(8, 0..4, 4..8),
             Util::ChargePlate => s(1, 0..0, 0..0),
-            // 0 the tool, 1..5 material, 5 the repaired tool.
-            Util::Repair => s(6, 0..5, 5..6),
+            // Slice 18 (guide `repair`): 0..3 to repair, 3..5 material and two more for each
+            // capacity module (3..11), 11..14 the repaired tools.
+            Util::Repair => s(REPAIR_OUT.end, 0..REPAIR_MATERIAL.end, REPAIR_OUT),
             Util::Kitchen => s(13, 0..9, 9..13),
             // 0 the rod, 1..10 the catch.
             Util::Fishery => s(10, 0..1, 1..10),
@@ -197,6 +198,16 @@ impl Util {
         }
     }
 
+    /// Slice 18 (guide `ui.js`): the bars of its window: energy, and the repair stand's
+    /// durability, the kitchen's and the shearer's milk, the brewer's fuel, the condenser's
+    /// experience, the building machine's progress.
+    pub fn bars(self) -> usize {
+        match self {
+            Util::Repair | Util::Kitchen | Util::Shearer | Util::Brewer | Util::XpTank | Util::Builder => 2,
+            _ => 1,
+        }
+    }
+
     /// A machine that works on the animals or the world round it (radius module, K1-style).
     pub fn has_radius(self) -> bool {
         matches!(self, Util::Feeder | Util::Shearer | Util::Apiary)
@@ -218,12 +229,38 @@ impl Util {
             (Util::Enchanter, 1) => item == "minecraft:lapis_lazuli",
             (Util::Archeo, 0) => matches!(item, "minecraft:suspicious_sand" | "minecraft:suspicious_gravel"),
             (Util::Archeo, 1) => item == "minecraft:brush",
-            (Util::Repair, 1..5) => repair::is_material(item),
+            // What is repaired is no material (so a hopper's string goes to the material).
+            (Util::Repair, s) if REPAIR_TOOLS.contains(&s) => !repair::is_material(item),
+            (Util::Repair, s) if REPAIR_MATERIAL.contains(&s) => {
+                s < repair_material_end(capacity_in(filter)) && repair::is_material(item)
+            }
             (Util::Feeder, _) => farm::is_feed(item),
             (Util::Vein, _) => vein::is_rock(item),
             _ => true,
         }
     }
+}
+
+/// Slice 18: the repair stand's slots: what it repairs, its material (two cells and two more a
+/// capacity module, at most three), what it repaired.
+pub const REPAIR_TOOLS: Range<usize> = 0..3;
+pub const REPAIR_MATERIAL: Range<usize> = 3..11;
+pub const REPAIR_OUT: Range<usize> = 11..14;
+
+/// The end of the material cells a stand with `capacity` capacity modules uses.
+pub fn repair_material_end(capacity: u32) -> usize {
+    (REPAIR_MATERIAL.start + 2 + 2 * capacity as usize).min(REPAIR_MATERIAL.end)
+}
+
+/// The capacity modules among a machine's module items, which its slot rule gets in `filter`
+/// (the bundle passes a capacity machine's module items there, the trash's filter otherwise).
+pub fn capacity_in(items: &[String]) -> u32 {
+    items.iter().filter(|i| i.as_str() == crate::storage::modules::CAPACITY).count() as u32
+}
+
+/// A machine whose slot rule reads its capacity modules.
+pub fn has_capacity(u: Util) -> bool {
+    matches!(u, Util::Repair | Util::Kitchen | Util::Brewer)
 }
 
 /// The kitchen's recipes (spec 22: stews, soups, bread, pies and cakes), by result: each needs a
@@ -343,6 +380,19 @@ mod tests {
             assert_eq!(Util::of(u.spec().block), Some(u));
             assert!(u.spec().buffer > 0.0 && u.spec().draw > 0.0);
         }
+    }
+
+    #[test]
+    fn the_repair_stand_takes_material_in_two_cells_and_two_more_a_capacity_module() {
+        let none: Vec<String> = Vec::new();
+        assert!(Util::Repair.takes(3, "minecraft:iron_ingot", &none));
+        assert!(Util::Repair.takes(4, "minecraft:string", &none));
+        assert!(!Util::Repair.takes(5, "minecraft:iron_ingot", &none));
+        let one = vec![crate::storage::modules::CAPACITY.to_owned()];
+        assert!(Util::Repair.takes(6, "minecraft:iron_ingot", &one));
+        assert!(!Util::Repair.takes(7, "minecraft:iron_ingot", &one));
+        assert!(!Util::Repair.takes(3, "minecraft:dirt", &none));
+        assert_eq!(Util::Repair.slots().count, 14);
     }
 
     #[test]
