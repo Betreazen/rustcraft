@@ -34,6 +34,9 @@ pub const CHASSIS: &str = "rustcraft:chassis";
 pub const UNLOAD_DOCK: &str = "rustcraft:dock_unload";
 pub const CHARGE_DOCK: &str = "rustcraft:dock_charge";
 pub const LOAD_DOCK: &str = "rustcraft:dock_load";
+/// H6: how many items or blocks a worker's filter names at most.
+pub const FILTER_MAX: usize = 9;
+
 
 /// The world as the tools read it.
 pub trait BlockView {
@@ -187,6 +190,9 @@ pub struct Worker {
     /// Slice 10: rail cells in a row its tool found nothing at (the scoop's diagnosis).
     #[serde(default)]
     pub idle: u32,
+    /// Slice 18 (H6): what its reaper or scoop takes, items or blocks; empty takes all.
+    #[serde(default)]
+    pub filter: Vec<String>,
     /// Slice 18: its chassis's tier, 1 to 3 (U4: 3 / 5 / 7 sockets).
     #[serde(default = "first_tier")]
     pub tier: u8,
@@ -311,6 +317,7 @@ impl Worker {
             busy: 0.0,
             note: Note::NoTool,
             idle: 0,
+            filter: Vec::new(),
             tier: 1,
             carry: 0.0,
             aim: None,
@@ -622,6 +629,7 @@ impl Worker {
         w.tool = old.tool;
         w.hold = old.hold;
         w.charge = old.charge;
+        w.filter = old.filter;
         w.set_tier(old.tier, t);
         w.upgrades = old.upgrades;
         w.note = if w.tool.is_some() { Note::Working } else { Note::NoTool };
@@ -629,6 +637,15 @@ impl Worker {
         let over = w.refit(t);
         debug_assert!(over.is_empty());
         Some(w)
+    }
+
+    /// H6: `item` goes into its filter (at most `FILTER_MAX` entries, each once); whether it did.
+    pub fn filter_add(&mut self, item: &str) -> bool {
+        if self.filter.len() >= FILTER_MAX || self.filter.iter().any(|f| f == item) {
+            return false;
+        }
+        self.filter.push(item.to_owned());
+        true
     }
 
     /// Back to work once the errand is done.

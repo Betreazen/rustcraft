@@ -48,44 +48,44 @@ Audit lines: chassis «Ставится на монорельс», «Ездит 
 - `Worker::zone_span(&self, cell, mount, t) -> (i32, i32)`: lowest and highest y of the zone.
 - `plants::plan(view, pos, bottom, top)`: a column is planned from its top cell (or from the zone's top when it goes higher), cut down to `max(base + 1, bottom)`.
 
-- [ ] Step 1: failing tests in `worker/mod.rs`: `a_worker_rides_up_a_wall_rail_and_onto_the_ceiling`, `the_zone_grows_away_from_the_mount`, `docks_beside_a_wall_rail_serve`; in `plants.rs`: `a_column_is_cut_from_its_top_inside_the_zone`, `kelp_under_a_ceiling_rail_is_reached`.
-- [ ] Step 2: `cargo test` RED.
-- [ ] Step 3: implement (drop `floor()`, 3-D straight-on, zone by mount, column plan by top).
-- [ ] Step 4: GREEN.
-- [ ] Step 5: wiring: chassis placed on any monorail; `reap` and `saw`/`grab` take the zone by mount; self-tests `worker_reaper_climbs_a_trunk` (cocoa, vertical wall rail), `worker_reaper_hangs_over_kelp` (ceiling rail), `worker_reaper_rides_up_bamboo`, `worker_floors_share_a_dock_by_a_lift`.
-- [ ] Step 6: commit.
+- [x] Step 1: failing tests in `worker/mod.rs`: `a_worker_rides_up_a_wall_rail_and_onto_the_ceiling`, `the_zone_grows_away_from_the_mount`, `docks_beside_a_wall_rail_serve`; in `plants.rs`: `a_column_is_cut_from_its_top_inside_the_zone`, `kelp_under_a_ceiling_rail_is_reached`.
+- [x] Step 2: `cargo test` RED.
+- [x] Step 3: implement (drop `floor()`, 3-D straight-on, zone by mount, column plan by top).
+- [x] Step 4: GREEN.
+- [x] Step 5: wiring: chassis placed on any monorail; `reap` and `saw`/`grab` take the zone by mount; self-tests `worker_reaper_climbs_a_trunk` (cocoa, vertical wall rail), `worker_reaper_hangs_over_kelp` (ceiling rail), `worker_reaper_rides_up_bamboo`, `worker_floors_share_a_dock_by_a_lift`.
+- [x] Step 6: commit.
 
 ### Task 2: Worker models on every mount (T3 for the worker)
 
 **Files:** `assets/models/export_mc.py` (`WORKER_PARTS` + `above`, `side`), models `worker_above.json`, `worker_side.json`, `rules/src/worker/wire.rs`, `workers.rs::notes`, `station.rs::draw_worker`.
 
-- [ ] Step 1: test `wire.rs::a_note_reads_back` (seat, yaw, tool, mount, busy, aim).
-- [ ] Step 2–4: RED → GREEN.
-- [ ] Step 5: the bracket drawn by mount (side bracket turned to the wall, as the capsule's); commit.
+- [x] Step 1: test `wire.rs::a_note_reads_back` (seat, yaw, tool, mount, busy, aim).
+- [x] Step 2–4: RED → GREEN.
+- [x] Step 5: the bracket drawn by mount (side bracket turned to the wall, as the capsule's); commit.
 
 ### Task 3: Worker speed by rail tier (T4)
 
-- [ ] Test `a_worker_rides_as_fast_as_its_rail_tier` (8 / 14 / 22 / 32 bl/s, every cell still worked: overflow carried, the bundle rides again in the same tick while `carry > 0`).
-- [ ] Implement `Worker::speed(net, to, t)` from `RailSpec::speed_of`; `#[serde(default)] carry`.
-- [ ] Commit.
+- [x] Test `a_worker_rides_as_fast_as_its_rail_tier` (8 / 14 / 22 / 32 bl/s, every cell still worked: overflow carried, the bundle rides again in the same tick while `carry > 0`).
+- [x] Implement `Worker::speed(net, to, t)` from `RailSpec::speed_of`; `#[serde(default)] carry`.
+- [x] Commit.
 
 ### Task 4: The worker as one item (W3)
 
-- [ ] Tests: `a_worker_packs_into_its_chassis_and_back` (tool, upgrades, hold, charge, filter, tier survive the JSON in `custom_data` `rustcraft:worker`).
-- [ ] Wiring: the wrench with sneaking gives one chassis stack (its tier) carrying the worker; placing it restores; the hand item shows a tooltip line count. Self-test `worker_picked_up_as_one_item` (Bench `worker_as_item(id, cell)`).
-- [ ] Commit.
+- [x] Tests: `a_worker_packs_into_its_chassis_and_back` (tool, upgrades, hold, charge, filter, tier survive the JSON in `custom_data` `rustcraft:worker`).
+- [x] Wiring: the wrench with sneaking gives one chassis stack (its tier) carrying the worker; placing it restores; the hand item shows a tooltip line count. Self-test `worker_picked_up_as_one_item` (Bench `worker_as_item(id, cell)`).
+- [x] Commit.
 
 ### Task 5: Chassis tiers 3 / 5 / 7 and the swap (U4)
 
-- [ ] Tests in `worker/chassis.rs`: `each_tier_has_its_sockets`, `a_higher_chassis_swaps_keeping_tool_and_hold`, `a_lower_or_same_chassis_does_not_swap`.
-- [ ] Items `rustcraft:chassis_2` (crystallite), `rustcraft:chassis_3` (starsteel) in `content.rs` (own block), recipes `b b/bsb/bbb`, lang, item models; window cells for up to 7 sockets; right click on a worker with a higher chassis swaps, the old chassis back to the player. Self-test `worker_chassis_swaps_up`.
-- [ ] Commit.
+- [x] Tests in `worker/chassis.rs`: `each_tier_has_its_sockets`, `a_higher_chassis_swaps_keeping_tool_and_hold`, `a_lower_or_same_chassis_does_not_swap`.
+- [x] Items `rustcraft:chassis_2` (crystallite), `rustcraft:chassis_3` (starsteel) in `content.rs` (own block), recipes `b b/bsb/bbb`, lang, item models; window cells for up to 7 sockets; right click on a worker with a higher chassis swaps, the old chassis back to the player. Self-test `worker_chassis_swaps_up`.
+- [x] Commit.
 
 ### Task 6: Worker limit per player and the server settings file (W8)
 
-- [ ] Tests: `config::reads_the_limit`, `config::a_bad_file_keeps_the_default`, `Fleet::owned_by`, `the_limit_refuses_one_more`.
-- [ ] Hooks `register_configs`, `config_loading`, `config_reloading` (API 397) in `horizon-mixin.toml` (own block) → `rustcraft-server.toml` `workers_per_player = 16`; refusal «Достигнут предел работников: %s» . Self-test `worker_limit_per_player`.
-- [ ] Commit.
+- [x] Tests: `config::reads_the_limit`, `config::a_bad_file_keeps_the_default`, `Fleet::owned_by`, `the_limit_refuses_one_more`.
+- [x] Hooks `register_configs`, `config_loading`, `config_reloading` (API 397) in `horizon-mixin.toml` (own block) → `rustcraft-server.toml` `workers_per_player = 16`; refusal «Достигнут предел работников: %s» . Self-test `worker_limit_per_player`.
+- [x] Commit.
 
 ### Task 7: Harvest filter H6 and the scoop's filter
 
@@ -101,9 +101,9 @@ Audit lines: chassis «Ставится на монорельс», «Ездит 
 
 ### Task 9: Tool models and animations
 
-- [ ] Export every tool part (`worker_<tool>` static, moving parts `worker_<part>` with pivots) from `transport.py`.
-- [ ] Note carries busy + aim; `draw_worker` turns `aim_yaw_*` to the target, slides `reach_*`, spins `saw_disc`, `reaper_reel`, `bore_bit`, `map_drum`, opens the grab, curls the bucket, recoils the gun — `poses.js:150-175`. Body colour by tool.
-- [ ] Rules test for the pose math (`wire::pose_of`).
+- [x] Export every tool part (`worker_<tool>` static, moving parts `worker_<part>` with pivots) from `transport.py`.
+- [x] Note carries busy + aim; `draw_worker` turns `aim_yaw_*` to the target, slides `reach_*`, spins `saw_disc`, `reaper_reel`, `bore_bit`, `map_drum`, opens the grab, curls the bucket, recoils the gun — `poses.js:150-175`. Body colour by tool.
+- [x] Rules test for the pose math (`wire::pose_of`).
 - [ ] Commit.
 
 ### Task 10: The cartographer on the station scheme, «Вокруг пути всё нанесено»
@@ -139,6 +139,10 @@ Audit lines: chassis «Ставится на монорельс», «Ездит 
 
 - [ ] `mod/README.md` «Что проверить в игре: срез 18» — this stream's part.
 - [ ] Last `try` green; final report.
+
+## Commits
+
+- Tasks 1–4 and Task 9's models and poses: db932ff. Task 5: 3259831. Task 6: 2528e24.
 
 ## Пределы движка
 

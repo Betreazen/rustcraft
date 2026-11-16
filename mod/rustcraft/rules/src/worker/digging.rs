@@ -34,6 +34,21 @@ pub fn is_scooped(block: &str) -> bool {
     SCOOPED.contains(&block)
 }
 
+/// Whether the scoop's filter (guide `tool_scoop`: «Фильтр в окне шасси оставляет только нужные
+/// блоки, например один песок») lets it dig `block`: an empty filter takes all; otherwise the block
+/// or what it gives (grass and the other earths give dirt, clay gives clay balls) is in it.
+pub fn wanted(block: &str, filter: &[String]) -> bool {
+    if filter.is_empty() {
+        return true;
+    }
+    let gives = match block {
+        "minecraft:grass_block" | "minecraft:mycelium" | "minecraft:podzol" => "minecraft:dirt",
+        "minecraft:clay" => "minecraft:clay_ball",
+        b => b,
+    };
+    filter.iter().any(|f| f == block || f == gives)
+}
+
 /// The cells beyond rail cell `cell` the scoop looks at, nearest first: `side` cells aside and
 /// `depth` blocks on toward the block its rail hangs on (`mount`): down under a floor rail, into
 /// the wall beside a wall rail, up over a ceiling rail. `under_rail(p)` says whether `p` holds a
@@ -111,7 +126,18 @@ mod tests {
     }
 
     #[test]
+    fn a_filtered_scoop_digs_only_sand() {
+        let sand = vec!["minecraft:sand".to_owned()];
+        assert!(wanted("minecraft:sand", &sand));
+        assert!(!wanted("minecraft:dirt", &sand) && !wanted("minecraft:gravel", &sand));
+        assert!(wanted("minecraft:gravel", &[]), "no filter: all");
+        let dirt = vec!["minecraft:dirt".to_owned(), "minecraft:clay_ball".to_owned()];
+        assert!(wanted("minecraft:grass_block", &dirt) && wanted("minecraft:clay", &dirt));
+    }
+
+    #[test]
     fn the_grab_picks_up_round_its_zone() {
+
         let (lo, hi) = pickup_box([9, 64, -6], [11, 66, -4]);
         assert_eq!(lo, [9.0, 64.0, -6.0]);
         assert_eq!(hi, [12.0, 67.0, -3.0]);

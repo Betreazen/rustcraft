@@ -134,6 +134,30 @@ pub fn is_seed(item: &str) -> bool {
         || item == "minecraft:cocoa_beans"
 }
 
+/// Whether the reaper's filter (H6, guide `tool_reaper`: «Фильтр в окне шасси оставляет только
+/// нужные растения, например одни тыквы») lets it take the plant `block`: an empty filter takes
+/// all; otherwise the plant's block, its crop or its seed is in it.
+pub fn wanted(block: &str, filter: &[String]) -> bool {
+    if filter.is_empty() {
+        return true;
+    }
+    let crop = match block {
+        "minecraft:carrots" => "minecraft:carrot",
+        "minecraft:potatoes" => "minecraft:potato",
+        "minecraft:beetroots" => "minecraft:beetroot",
+        "minecraft:cocoa" => "minecraft:cocoa_beans",
+        SWEET_BERRY_BUSH => "minecraft:sweet_berries",
+        "minecraft:cave_vines" | "minecraft:cave_vines_plant" => "minecraft:glow_berries",
+        "minecraft:kelp_plant" => "minecraft:kelp",
+        "minecraft:pitcher_crop" => "minecraft:pitcher_plant",
+        b => b,
+    };
+    let seed = AGED.iter().find(|a| a.block == block).map(|a| a.seed);
+    filter
+        .iter()
+        .any(|f| f == block || f == crop || Some(f.as_str()) == seed)
+}
+
 /// Whether two cells of a column are the same plant (kelp's two blocks are one plant).
 fn same_column(a: &str, b: &str) -> bool {
     let kelp = |s: &str| s == "minecraft:kelp" || s == "minecraft:kelp_plant";
@@ -410,7 +434,21 @@ mod tests {
     }
 
     #[test]
+    fn a_filtered_reaper_takes_only_pumpkins() {
+        let pumpkins = vec!["minecraft:pumpkin".to_owned()];
+        assert!(wanted("minecraft:pumpkin", &pumpkins));
+        for other in ["minecraft:wheat", "minecraft:melon", "minecraft:cocoa"] {
+            assert!(!wanted(other, &pumpkins), "{other}");
+        }
+        assert!(wanted("minecraft:wheat", &[]), "no filter: all");
+        let crops = vec!["minecraft:carrot".to_owned(), "minecraft:wheat_seeds".to_owned()];
+        assert!(wanted("minecraft:carrots", &crops) && wanted("minecraft:wheat", &crops));
+        assert!(wanted("minecraft:kelp_plant", &["minecraft:kelp".to_owned()]));
+    }
+
+    #[test]
     fn chorus_and_mushrooms_are_never_touched() {
+
         let mut w = World::default();
         for (i, b) in [
             "minecraft:chorus_flower",
