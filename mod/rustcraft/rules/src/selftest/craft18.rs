@@ -15,6 +15,8 @@
 //! - The butcher stands without energy; with it, its kill's experience goes into the condenser
 //!   beside it (K6).
 //! - The brewing vat brews swiftness from water bottles through every step by itself.
+//! - A projector's plan turned a quarter is built by the building machine from the storage on its
+//!   magistral.
 
 use super::transport::{chest, fill, item_line, joint};
 use super::{Bench, Build, Scenario, at, plot_area, same};
@@ -24,7 +26,8 @@ use crate::storage::modules::{FILTER, SOCKET_FILTER, SOCKET_STACK, STACK_MODULES
 use crate::storage::terminal::{self, Press};
 use crate::tuning::Tuning;
 
-pub const ALL: [Build; 13] = [
+pub const ALL: [Build; 14] = [
+    builder_builds_the_turned_plan_from_storage,
     brewer_brews_through_the_chain,
     butcher_energy_and_kill_xp,
     fishery_keeps_the_rods_last_point,
@@ -371,5 +374,39 @@ fn brewer_brews_through_the_chain(o: Pos, _: &Tuning) -> Scenario {
         .check("the wart and the sugar went into them", move |b, _| {
             same("wart", super::count_of(&b.items(p), "minecraft:nether_wart"), 0)?;
             same("sugar", super::count_of(&b.items(p), "minecraft:sugar"), 0)
+        })
+}
+
+fn builder_builds_the_turned_plan_from_storage(o: Pos, _: &Tuning) -> Scenario {
+    use crate::machines::sheet::Press as SheetPress;
+    let proj = at(o, [2, 1, -1]);
+    let builder = at(o, [2, 1, 0]);
+    let remembered = at(proj, [1, 1, 0]);
+    let turned = at(proj, [0, 1, 1]);
+    let t = at(o, [5, 0, 1]);
+    const STONE: &str = "minecraft:stone";
+    Scenario::new("builder18_turned_plan_from_storage", plot_area(o))
+        .then("a storage on a net with three stone", move |b, _| {
+            storage_on_a_net(b, o)?;
+            same("stone in", b.insert(chest(o, 1), STONE, 3)?, 3)
+        })
+        .until("the storage holds them", SETTLE, move |b, _| {
+            Ok(b.storage(t).is_some_and(|v| v.store.count(STONE) == 3))
+        })
+        .then("a projector remembers a stone, then turns its plan a quarter", move |b, _| {
+            b.place(proj, "rustcraft:projector", &[])?;
+            b.place(remembered, STONE, &[])?;
+            b.press_cursor(proj, SheetPress::Toggle(0).id(), None)?;
+            b.place(remembered, "minecraft:air", &[])?;
+            b.press_cursor(proj, SheetPress::Toggle(3).id(), None).map(|_| ())
+        })
+        .then("a building machine beside it on the storage's magistral", move |b, _| {
+            b.place(builder, "rustcraft:builder", &[])?;
+            b.set_buffer(builder, 400.0)
+        })
+        .until("the stone stands where the turned plan has it", 400, move |b, _| Ok(b.block(turned) == STONE))
+        .check("it came from the storage, and not where the plan was before its turn", move |b, _| {
+            same("left in storage", b.storage(t).map(|v| v.store.count(STONE)), Some(2))?;
+            same("old cell", b.block(remembered), "minecraft:air".to_owned())
         })
 }
