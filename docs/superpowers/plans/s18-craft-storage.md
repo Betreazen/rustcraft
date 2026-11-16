@@ -147,7 +147,7 @@
 - [x] done (slots: 9 wool; milk 1000 mB a milking into the touching tank, fluid `rustcraft:milk`; slice12 `util_shearer_shears`/`util_shearer_milks` updated; try pending)
 
 ### Task 18: Apiary — choice honey / combs in the window, «Нет пустых бутылок», hive rows
-- [ ] done
+- [x] done (choice toggles, `farm::harvest_of`; levels on the model for the feeder, shearer and apiary (task 11 except the brewer: task 19); try pending)
 
 ### Task 19: Brewer — pages: potion + kind; automatic steps (nether wart → effect ingredient → redstone / glowstone / gunpowder / dragon breath); capacity pages; steps and fuel bar in the window
 - [ ] done
