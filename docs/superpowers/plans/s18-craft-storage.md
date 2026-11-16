@@ -99,7 +99,7 @@
 **Files:** `rules/src/orders/mod.rs` (`KINDS` + kitchen kind, steps for food recipes), `orders.rs` (dispatch to the kitchen: put ingredients into its slots 0..9, take the dish from 9..13), `terminal.rs` `KIND_BLOCKS`.
 - rules test: an order for bread plans a kitchen step.
 - self-test `orders_bread_through_kitchen`.
-- [ ] done
+- [x] done (KINDS + kitchen, `orders::kitchen_copy`, kitchen cooks the job's dish first; self-test `orders18_bread_through_the_kitchen`; brewer and other slice-12 machines not order kinds: their outputs are potions/enchanted items from player-chosen settings, recorded as a remaining gap; try pending)
 
 ## Part B — the craft machines, common
 
