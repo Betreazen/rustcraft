@@ -351,6 +351,10 @@ fn build_book(game: &Game<'_>, recipes: &machines::MachineRecipes) -> Book {
             continue;
         }
         if let Some(r) = PlanRecipe::crafting(width, &cells, (item.to_owned(), result.count)) {
+            // Slice 18: a food recipe runs on the kitchen too.
+            if let Some(k) = rustcraft_rules::orders::kitchen_copy(&r, &rustcraft_rules::utility::KITCHEN_RECIPES) {
+                book.push(k);
+            }
             book.push(r);
         }
     }
@@ -610,8 +614,20 @@ fn kind_of(machine: Machine) -> Option<&'static str> {
         Machine::Crusher => Some(KINDS[2]),
         Machine::Alloy => Some(KINDS[3]),
         Machine::Mixer => Some(KINDS[4]),
+        Machine::Util(rustcraft_rules::utility::Util::Kitchen) => Some(KINDS[5]),
         _ => None,
     }
+}
+
+/// Slice 18: what the order job on the machine at `pos` makes (the kitchen cooks it whatever its
+/// pages say).
+pub(super) fn job_output_at(dimension: &str, pos: Pos) -> Option<ItemKey> {
+    orders()
+        .jobs
+        .get(dimension)?
+        .iter()
+        .find(|r| r.job.machine == pos)
+        .map(|r| r.job.step.output.0.clone())
 }
 
 /// The slots an order's items go into, and those its products come out of (none for the mixer,
@@ -621,6 +637,11 @@ fn slots_of(machine: Machine) -> (Range<usize>, Range<usize>) {
         Machine::Crafter => (content::CRAFTER_BUFFER, content::CRAFTER_OUTPUTS),
         Machine::Alloy => (content::ALLOY_INPUTS, content::ALLOY_OUTPUTS),
         Machine::Mixer => (0..content::MIXER_SLOTS, 0..0),
+        // Slice 18: the kitchen's ingredients and dishes.
+        Machine::Util(rustcraft_rules::utility::Util::Kitchen) => {
+            let s = rustcraft_rules::utility::Util::Kitchen.slots();
+            (s.inputs, s.outputs)
+        }
         _ => (
             content::MACHINE_INPUT..content::MACHINE_INPUT + 1,
             content::MACHINE_OUTPUT..content::MACHINE_OUTPUT + 1,

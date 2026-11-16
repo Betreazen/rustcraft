@@ -27,7 +27,18 @@ pub mod saved;
 pub mod ship;
 
 /// The machine kinds a step can name, in the order the terminal's list codes them.
-pub const KINDS: [&str; 5] = ["crafter", "furnace", "crusher", "alloy", "mixer"];
+/// Slice 18 adds the kitchen (guide `kitchen`: «заказ из терминала склада тоже проходит через
+/// комбайн»): it runs the food recipes of the crafting table as the autocrafter does.
+pub const KINDS: [&str; 6] = ["crafter", "furnace", "crusher", "alloy", "mixer", "kitchen"];
+
+/// Slice 18: the kitchen's copy of a crafting recipe whose result it cooks (the autocrafter keeps
+/// its own): an order runs on whichever of the two the line has.
+pub fn kitchen_copy(r: &PlanRecipe, kitchen_dishes: &[&str]) -> Option<PlanRecipe> {
+    (r.machine == KINDS[0] && kitchen_dishes.contains(&r.output.0.as_str())).then(|| PlanRecipe {
+        machine: KINDS[5].into(),
+        ..r.clone()
+    })
+}
 
 /// O12: a fluid's key starts with this, so no item id (`namespace:path`) is one.
 pub const FLUID_PREFIX: &str = "fluid:";
@@ -414,6 +425,23 @@ impl Planner<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn bread_is_ordered_through_the_kitchen_when_the_line_has_one() {
+        // Slice 18: the kitchen's copy of the crafting recipe.
+        let crafted = r("crafter", &[("minecraft:wheat", 3)], ("minecraft:bread", 1));
+        let k = kitchen_copy(&crafted, &["minecraft:bread"]).unwrap();
+        assert_eq!(k.machine, "kitchen");
+        assert!(kitchen_copy(&crafted, &["minecraft:cake"]).is_none());
+        let stock = BTreeMap::from([("minecraft:wheat".to_owned(), 9)]);
+        let book = vec![k, crafted];
+        let p = plan("minecraft:bread", 2, &stock, &book, &["kitchen"]);
+        assert!(p.ready());
+        assert_eq!(p.steps[0].machine, "kitchen");
+        let p = plan("minecraft:bread", 2, &stock, &book, &["crafter"]);
+        assert!(p.ready(), "no kitchen: the autocrafter makes it");
+        assert_eq!(p.steps[0].machine, "crafter");
+    }
 
     fn r(machine: &str, inputs: &[(&str, u32)], output: (&str, u32)) -> PlanRecipe {
         PlanRecipe::simple(machine, inputs, output)

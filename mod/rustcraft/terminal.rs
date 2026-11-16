@@ -72,12 +72,13 @@ const ESCAPE: &str = "key.keyboard.escape";
 const ENTER: [&str; 2] = ["key.keyboard.enter", "key.keyboard.keypad.enter"];
 const BACKSPACE: &str = "key.keyboard.backspace";
 /// The block of each machine kind an order step names (rustcraft_rules::orders::KINDS).
-const KIND_BLOCKS: [&str; 5] = [
+const KIND_BLOCKS: [&str; 6] = [
     content::CRAFTER,
     content::FURNACE,
     content::CRUSHER,
     content::ALLOY,
     content::MIXER,
+    "rustcraft:kitchen",
 ];
 
 /// What the window shows of the terminal it is open on: its own state, apart from the server.

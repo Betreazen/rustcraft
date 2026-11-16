@@ -398,7 +398,7 @@ pub(super) fn tick(game: &mut Game<'_>, dimension: &str, level: &LevelNet, t: &T
             Util::Charger => charge_slots(game, pos, every),
             Util::ChargePlate => plate(game, dimension, pos),
             Util::Repair => repair_one(game, pos, cost),
-            Util::Kitchen => cook(game, pos, cost),
+            Util::Kitchen => cook(game, dimension, pos, cost),
             Util::Brewer => brew(game, pos, cost),
             Util::XpTank => xp_tank_shown(game, pos),
             Util::Enchanter => enchant(game, pos, cost),
@@ -715,16 +715,20 @@ fn take(slots: &mut [Option<ItemStack>], range: std::ops::Range<usize>, item: &s
     }
 }
 
-fn cook(game: &mut Game<'_>, pos: Pos, cost: f64) -> Shown {
+fn cook(game: &mut Game<'_>, dimension: &str, pos: Pos, cost: f64) -> Shown {
     let on = toggles_at(game, pos, KITCHEN_RECIPES.len());
-    if !on.iter().any(|t| *t) {
+    // Slice 18: an order's dish first, whatever the pages say.
+    let ordered = crate::game::rustcraft_orders::job_output_at(dimension, pos);
+    let wanted: Vec<&str> = ordered
+        .iter()
+        .map(String::as_str)
+        .chain(KITCHEN_RECIPES.iter().enumerate().filter(|(i, _)| on[*i]).map(|(_, r)| *r))
+        .collect();
+    if wanted.is_empty() {
         return Shown::Idle("kitchen_none");
     }
     let slots = items(game, pos);
-    for (i, result) in KITCHEN_RECIPES.iter().enumerate() {
-        if !on[i] {
-            continue;
-        }
+    for result in wanted {
         let Some((id, need, made)) = food_recipe(game, result) else { continue };
         if !need.iter().all(|(item, n)| count_of(&slots, 0..9, item) >= *n) {
             continue;

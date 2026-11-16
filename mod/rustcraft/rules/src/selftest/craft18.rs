@@ -6,6 +6,7 @@
 //! - An extra terminal anywhere on the storage's magistral shows the storage (S6).
 //! - A full storage says «Склад полон».
 //! - A storage with a missing cell has its terminal keep the cell for clients to draw (S8).
+//! - An order for bread runs through a kitchen on the storage's line (guide `kitchen`).
 
 use super::transport::{chest, fill, item_line, joint};
 use super::{Bench, Build, Scenario, at, plot_area, same};
@@ -15,7 +16,8 @@ use crate::storage::modules::{FILTER, SOCKET_FILTER, SOCKET_STACK, STACK_MODULES
 use crate::storage::terminal::{self, Press};
 use crate::tuning::Tuning;
 
-pub const ALL: [Build; 6] = [
+pub const ALL: [Build; 7] = [
+    order_bread_through_the_kitchen,
     storage_terminal_keeps_its_holes,
     storage_full_says_so,
     storage_far_terminal,
@@ -162,5 +164,27 @@ fn storage_terminal_keeps_its_holes(o: Pos, _: &Tuning) -> Scenario {
         .then("a corner cell taken away", move |b, _| b.place(gone, "minecraft:air", &[]))
         .until("the terminal keeps the hole, as an offset from it", 60, move |b, _| {
             Ok(b.int_array(t, "holes") == vec![gone[0] - t[0], gone[1] - t[1], gone[2] - t[2]])
+        })
+}
+
+fn order_bread_through_the_kitchen(o: Pos, _: &Tuning) -> Scenario {
+    use super::slice15::{build, crafter_at, held, put_book, terminal_at};
+    const WHEAT: &str = "minecraft:wheat";
+    const BREAD: &str = "minecraft:bread";
+    Scenario::new("orders18_bread_through_the_kitchen", plot_area(o))
+        .then("a storage on a tier 3 line with wheat", move |b, _| build(b, o, &[(WHEAT, 3)]))
+        .until("the storage holds the wheat", 200, move |b, _| Ok(held(b, o, WHEAT)? == 3))
+        .then("a kitchen on the line with energy, and the book", move |b, _| {
+            b.place(crafter_at(o), "rustcraft:kitchen", &[])?;
+            b.set_buffer(crafter_at(o), 400.0)?;
+            put_book(b, o)
+        })
+        .until("the storage takes an order for bread", 200, move |b, _| {
+            Ok(b.order(terminal_at(o), BREAD, 1).is_ok())
+        })
+        .until("the bread is back in the storage", 1200, move |b, _| Ok(held(b, o, BREAD)? == 1))
+        .check("the wheat went into it and the order is done", move |b, _| {
+            same("wheat", held(b, o, WHEAT)?, 0)?;
+            same("orders", b.orders(terminal_at(o)).len(), 0)
         })
 }
