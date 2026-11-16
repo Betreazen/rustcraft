@@ -330,6 +330,8 @@ pub trait Bench {
     /// its key makes: `item xCOUNT`, then its own name in quotes and its (stored) enchantments
     /// `id level`, space-separated.
     fn stored_stacks(&self, pos: Pos) -> Vec<String>;
+    /// The translation key of what a player looking at the cell or terminal at `pos` reads.
+    fn storage_diagnosis(&self, pos: Pos) -> Option<String>;
 }
 
 /// A mob as the self-test reads it.

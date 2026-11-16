@@ -3680,5 +3680,6 @@
   "rustcraft.orders.wait.busy.crusher": "нет свободной дробилки",
   "rustcraft.orders.wait.busy.alloy": "нет свободной плавильни",
   "rustcraft.orders.wait.busy.mixer": "нет свободного смесителя",
-  "rustcraft.orders.wait.busy.kitchen": "нет свободного кухонного комбайна"
+  "rustcraft.orders.wait.busy.kitchen": "нет свободного кухонного комбайна",
+  "rustcraft.storage.full_at": "Склад полон: занято %s из %s слотов"
 }

@@ -4,8 +4,9 @@
 //! - The stack module in the terminal's socket raises the stack of the whole storage (S3); the
 //!   filter module goes into its own socket and comes back out.
 //! - An extra terminal anywhere on the storage's magistral shows the storage (S6).
+//! - A full storage says «Склад полон».
 
-use super::transport::{chest, item_line, joint};
+use super::transport::{chest, fill, item_line, joint};
 use super::{Bench, Build, Scenario, at, plot_area, same};
 use crate::geom::Pos;
 use crate::net::items::Mode;
@@ -13,7 +14,8 @@ use crate::storage::modules::{FILTER, SOCKET_FILTER, SOCKET_STACK, STACK_MODULES
 use crate::storage::terminal::{self, Press};
 use crate::tuning::Tuning;
 
-pub const ALL: [Build; 4] = [
+pub const ALL: [Build; 5] = [
+    storage_full_says_so,
     storage_far_terminal,
     storage_keeps_component_stacks,
     storage_stack_module_raises_the_stack,
@@ -123,5 +125,23 @@ fn storage_far_terminal(o: Pos, _: &Tuning) -> Scenario {
         })
         .until("the far terminal shows the storage", 40, move |b, _| {
             Ok(b.storage(far).is_some_and(|v| v.cells == 2))
+        })
+}
+
+fn storage_full_says_so(o: Pos, _: &Tuning) -> Scenario {
+    let a = chest(o, 1);
+    let cell = at(o, [3, 0, 1]);
+    Scenario::new("storage18_full_says_so", plot_area(o))
+        .then("a storage of one cell on a net", move |b, _| {
+            item_line(b, o, 2, 4, &[1])?;
+            joint(b, o, 1, Mode::From, 0)?;
+            b.place(cell, CELL, &[])?;
+            b.place(at(o, [3, 0, 2]), TERMINAL, &[])
+        })
+        .then("27 swords (one a slot) in the source", move |b, _| {
+            fill(b, a, "minecraft:iron_sword", 27)
+        })
+        .until("the storage says it is full", 200, move |b, _| {
+            Ok(b.storage_diagnosis(cell).as_deref() == Some("rustcraft.storage.full_at"))
         })
 }

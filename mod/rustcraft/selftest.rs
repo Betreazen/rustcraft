@@ -857,6 +857,15 @@ impl Bench for GameBench<'_, '_> {
         Ok(count - left.min(count))
     }
 
+    fn storage_diagnosis(&self, pos: Pos) -> Option<String> {
+        let block = self.game.native_block(pos);
+        let text = storage::diagnosis(self.game, DIMENSION, pos, &block)?;
+        text.component()
+            .get("translate")
+            .and_then(|t| t.as_str())
+            .map(str::to_owned)
+    }
+
     fn stored_stacks(&self, pos: Pos) -> Vec<String> {
         storage::stored_stacks_at(DIMENSION, pos)
             .into_iter()

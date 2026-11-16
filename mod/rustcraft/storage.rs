@@ -1488,6 +1488,15 @@ pub(super) fn diagnosis(game: &Game<'_>, dimension: &str, pos: Pos, block: &str)
         let found = level.found.get(&id)?;
         let store = level.stores.get(&id)?;
         Some(match &found.shape {
+            // Slice 18: «Склад полон».
+            Shape::Solid if store.total_slots() > 0 && store.used_slots(&stack) >= store.total_slots() => line(
+                "rustcraft.storage.full_at",
+                "The storage is full: %s of %s slots used",
+                &[
+                    Text::literal(store.used_slots(&stack).to_string()),
+                    Text::literal(store.total_slots().to_string()),
+                ],
+            ),
             Shape::Solid => line(
                 "rustcraft.storage.works",
                 "Storage: %s cells, %s of %s slots used",

@@ -306,6 +306,9 @@ impl Bench for Fake {
     fn stored_stacks(&self, _: Pos) -> Vec<String> {
         Vec::new()
     }
+    fn storage_diagnosis(&self, _: Pos) -> Option<String> {
+        None
+    }
 }
 
 const PLOT: Area = Area {

@@ -1032,5 +1032,6 @@
   "rustcraft.orders.wait.busy.crusher": "no free crusher",
   "rustcraft.orders.wait.busy.alloy": "no free alloy smelter",
   "rustcraft.orders.wait.busy.mixer": "no free mixer",
-  "rustcraft.orders.wait.busy.kitchen": "no free kitchen"
+  "rustcraft.orders.wait.busy.kitchen": "no free kitchen",
+  "rustcraft.storage.full_at": "The storage is full: %s of %s slots used"
 }
