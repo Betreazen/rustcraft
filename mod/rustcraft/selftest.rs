@@ -842,6 +842,36 @@ impl Bench for GameBench<'_, '_> {
             .map(|e| (e.stack.item.to_string(), e.stack.count))
             .collect()
     }
+
+    // ---- Slice 18, stream 5 (craft and storage) ----
+
+    fn insert_snbt(&mut self, pos: Pos, snbt: &str) -> Result<u32, String> {
+        let (tag, _) = horizon_world::nbt::parse_snbt(snbt)?;
+        let stack = horizon_client::save::item_from_nbt(&tag)
+            .ok_or_else(|| format!("no item in {snbt}"))?;
+        let count = stack.count;
+        let left = self
+            .game
+            .native_insert_item(pos, Direction::Up, stack)
+            .map_or(0, |s| s.count);
+        Ok(count - left.min(count))
+    }
+
+    fn stored_stacks(&self, pos: Pos) -> Vec<String> {
+        storage::stored_stacks_at(DIMENSION, pos)
+            .into_iter()
+            .map(|s| {
+                let mut out = format!("{} x{}", s.item, s.count);
+                if let Some(name) = s.custom_name() {
+                    out.push_str(&format!(" {name:?}"));
+                }
+                for (id, level) in s.enchantments().iter().chain(s.stored_enchantments()) {
+                    out.push_str(&format!(" {id} {level}"));
+                }
+                out
+            })
+            .collect()
+    }
 }
 
 /// The slice-7 half of the bench.

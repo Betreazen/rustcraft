@@ -299,6 +299,13 @@ impl Bench for Fake {
     ) -> Result<crate::utility::found::Lift, String> {
         Ok(crate::utility::found::Lift::Grown)
     }
+    // Slice 18, stream 5.
+    fn insert_snbt(&mut self, _: Pos, _: &str) -> Result<u32, String> {
+        Ok(0)
+    }
+    fn stored_stacks(&self, _: Pos) -> Vec<String> {
+        Vec::new()
+    }
 }
 
 const PLOT: Area = Area {

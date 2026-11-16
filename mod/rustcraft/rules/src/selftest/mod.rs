@@ -12,6 +12,7 @@
 //! `{"mod","done","passed","failed","timings"}`.
 
 pub mod anchor;
+pub mod craft18;
 pub mod energy;
 pub mod expect;
 pub mod fluids;
@@ -319,6 +320,16 @@ pub trait Bench {
         into: Pos,
         slot: usize,
     ) -> Result<crate::utility::found::Lift, String>;
+
+    // ---- Slice 18, stream 5 (craft and storage) ----
+
+    /// An item written as SNBT (`{id:..,count:..,components:{..}}`) put into the container at
+    /// `pos` as a hopper would: how many went in.
+    fn insert_snbt(&mut self, pos: Pos, snbt: &str) -> Result<u32, String>;
+    /// The stacks the storage the cell or terminal at `pos` belongs to holds, each as the stack
+    /// its key makes: `item xCOUNT`, then its own name in quotes and its (stored) enchantments
+    /// `id level`, space-separated.
+    fn stored_stacks(&self, pos: Pos) -> Vec<String>;
 }
 
 /// A mob as the self-test reads it.
@@ -496,6 +507,7 @@ pub fn catalog() -> Vec<Build> {
     all.extend(traversal::ALL);
     all.extend(handbook::ALL);
     all.extend(rest::ALL);
+    all.extend(craft18::ALL);
     all
 }
 

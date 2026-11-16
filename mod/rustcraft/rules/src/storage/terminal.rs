@@ -149,8 +149,14 @@ pub fn part_in(at: [f32; 2], orders: bool) -> Option<Part> {
 
 // ---- Presses the server answers ----
 
-/// An item as a press names it: its number in the item table and its damage.
+/// An item as a press names it: its number in the item table and its damage; or, with VARIANT in
+/// the second, the place of a component stack among its item's (`Store::variants_of`).
 pub type ItemRef = (u16, u16);
+
+/// Slice 18: the mark of a component stack's place in an ItemRef's second number (and a wire
+/// line's damage). A press with it has the top bit of its id set.
+pub const VARIANT: u16 = 0x8000;
+const VARIANT_BIT: u32 = 1 << 31;
 
 /// The largest damage a press can name. A stack worn further has no place in the storage.
 pub const MAX_DAMAGE: u32 = (1 << DAMAGE_BITS) - 1;
@@ -313,19 +319,49 @@ fn encode_item_press(press: Press) -> Option<i32> {
         Press::Limit { item, .. } => Some(item),
         _ => None,
     };
-    let (number, damage) = match item {
-        Some((n, d)) if addressable(u32::from(d)) && u32::from(n) != NO_ITEM => {
-            (u32::from(n), u32::from(d))
+    let (number, damage, variant) = match item {
+        Some((n, d))
+            if addressable(u32::from(d & !VARIANT)) && u32::from(n) != NO_ITEM =>
+        {
+            (u32::from(n), u32::from(d & !VARIANT), d & VARIANT != 0)
         }
         Some(_) => return None,
-        None => (NO_ITEM, 0),
+        None => (NO_ITEM, 0, false),
     };
-    pack(action, damage, number)
+    let id = pack(action, damage, number)?;
+    // A component stack's press: the top bit, so the id is below zero.
+    Some(if variant {
+        (id as u32 | VARIANT_BIT) as i32
+    } else {
+        id
+    })
 }
 
 /// The press a menu button id names; none for NO_PRESS or an id it does not know.
 pub fn decode(id: i32) -> Option<Press> {
-    let id = u32::try_from(id).ok()?;
+    let raw = id as u32;
+    let variant = raw & VARIANT_BIT != 0;
+    let id = raw & !VARIANT_BIT;
+    if variant {
+        return match decode_plain(id)? {
+            Press::Place {
+                item: Some((n, d)),
+                take,
+            } => Some(Press::Place {
+                item: Some((n, d | VARIANT)),
+                take,
+            }),
+            Press::Limit { item: (n, d), change } => Some(Press::Limit {
+                item: (n, d | VARIANT),
+                change,
+            }),
+            _ => None,
+        };
+    }
+    decode_plain(id)
+}
+
+fn decode_plain(id: u32) -> Option<Press> {
     let action = id >> ACTION_SHIFT;
     let number = id & ((1 << ITEM_BITS) - 1);
     let damage = (id >> ITEM_BITS) & MAX_DAMAGE;
@@ -434,6 +470,30 @@ pub fn press_book(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_component_stacks_press_names_its_place() {
+        // Slice 18: a press on the third enchanted book of the list.
+        for p in [
+            Press::Place {
+                item: Some((812, VARIANT | 2)),
+                take: Take::One,
+            },
+            Press::Limit {
+                item: (812, VARIANT | 2047),
+                change: LimitChange::Clear,
+            },
+        ] {
+            let id = encode(p).unwrap();
+            assert!(id < 0, "the top bit marks it");
+            assert_eq!(decode(id), Some(p));
+        }
+        let plain = Press::Place {
+            item: Some((812, 2)),
+            take: Take::One,
+        };
+        assert_eq!(decode(encode(plain).unwrap()), Some(plain));
+    }
 
     #[test]
     fn every_press_comes_back_from_its_id() {

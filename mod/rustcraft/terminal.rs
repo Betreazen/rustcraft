@@ -53,6 +53,9 @@ use rustcraft_rules::{
         wire::{self, Line, Listing, OrderLine, OrderWait, Smart, State},
     },
 };
+use horizon_client::save;
+use horizon_world::nbt;
+use std::collections::HashMap;
 use std::sync::{LazyLock, Mutex, MutexGuard, PoisonError};
 
 /// The search keeps at most this many characters.
@@ -120,9 +123,62 @@ pub(super) fn on_net(channel: &str, data: &[u8]) {
         return;
     }
     match wire::decode(data) {
-        Some(l) => *LISTING.lock().unwrap_or_else(PoisonError::into_inner) = Some(l),
+        Some(l) => {
+            remember_variants(&l.variants);
+            *LISTING.lock().unwrap_or_else(PoisonError::into_inner) = Some(l);
+        }
         None => log::warn!("rustcraft: a terminal list that does not read"),
     }
+}
+
+/// Slice 18: the component stacks of the last list, by the place a line names them with.
+static VARIANTS: LazyLock<Mutex<HashMap<ItemRef, ItemStack>>> = LazyLock::new(Mutex::default);
+
+/// Reads the saved stacks of a list's component lines (the tablet's window shares them).
+pub(super) fn remember_variants(variants: &[wire::Variant]) {
+    let stacks: HashMap<ItemRef, ItemStack> = variants
+        .iter()
+        .filter_map(|v| {
+            let bytes = rustcraft_rules::storage::keys::unhex(&v.payload)?;
+            let (tag, _) = nbt::read_network(&bytes, nbt::Limits::saved()).ok()?;
+            Some(((v.item, term::VARIANT | v.index), save::item_from_nbt(&tag)?))
+        })
+        .collect();
+    *VARIANTS.lock().unwrap_or_else(PoisonError::into_inner) = stacks;
+}
+
+/// The component stack a line names; none for a plain line.
+fn variant(key: ItemRef) -> Option<ItemStack> {
+    (key.1 & term::VARIANT != 0)
+        .then(|| VARIANTS.lock().unwrap_or_else(PoisonError::into_inner).get(&key).cloned())
+        .flatten()
+}
+
+/// A level as the game writes it in a tooltip: I to X, past it the number.
+fn roman(level: u32) -> String {
+    const R: [&str; 10] = ["I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X"];
+    R.get(level.wrapping_sub(1) as usize)
+        .map_or_else(|| level.to_string(), |r| (*r).to_owned())
+}
+
+/// What a component stack's tooltip says beyond its item's name: its own name, its
+/// enchantments and a potion's contents.
+pub(super) fn variant_lines(stack: &ItemStack) -> Vec<String> {
+    let mut out = Vec::new();
+    if let Some(name) = stack.custom_name() {
+        out.push(name);
+    }
+    for (id, level) in stack.enchantments().iter().chain(stack.stored_enchantments()) {
+        let key = format!("enchantment.{}", id.replace(':', "."));
+        out.push(format!("{} {}", tr(&key, id), roman(*level)));
+    }
+    if let Some(potion) = stack.potion() {
+        let name = potion.rsplit(':').next().unwrap_or(potion);
+        let item = stack.item.rsplit(':').next().unwrap_or("potion");
+        let key = format!("item.minecraft.{item}.effect.{name}");
+        out.push(tr(&key, potion));
+    }
+    out
 }
 
 pub(super) fn layout() -> NativeScreen {
@@ -218,7 +274,10 @@ fn shown(game: &Game<'_>, listing: &Listing, v: &View) -> Vec<Entry<ItemRef>> {
     let names = |k: &ItemRef| {
         id_of(game, k.0).map_or_else(Vec::new, |id| {
             let own = fluid_of_number(k.0).unwrap_or(id);
-            vec![name_of(game, k.0), own.to_owned()]
+            let mut names = vec![name_of(game, k.0), own.to_owned()];
+            // Slice 18: a component stack is found by its name, enchantments and potion too.
+            names.extend(variant(*k).map(|s| variant_lines(&s)).unwrap_or_default());
+            names
         })
     };
     view::visible(&entries, v.tab, &v.search, |k| facts(game, k), names)
@@ -249,6 +308,10 @@ fn short(n: u64) -> String {
 }
 
 fn stack_of(game: &Game<'_>, key: ItemRef, count: u64) -> Option<ItemStack> {
+    if let Some(mut stack) = variant(key) {
+        stack.count = count.clamp(1, u64::from(u32::MAX)) as u32;
+        return Some(stack);
+    }
     let id = id_of(game, key.0)?;
     let mut stack = ItemStack::new(id, count.clamp(1, u64::from(u32::MAX)) as u32);
     stack.damage = u32::from(key.1);
@@ -937,6 +1000,9 @@ fn cell_tooltip(game: &Game<'_>, i: usize, orders_mode: bool, lines: &mut Vec<St
     if id_of(game, e.key.0).is_some() {
         lines.push(name_of(game, e.key.0));
     }
+    if let Some(stack) = variant(e.key) {
+        lines.extend(variant_lines(&stack));
+    }
     lines.push(tr_with(
         "rustcraft.terminal.count",
         "In storage: %s",
@@ -948,7 +1014,7 @@ fn cell_tooltip(game: &Game<'_>, i: usize, orders_mode: bool, lines: &mut Vec<St
     if e.count == 0 && orderable {
         hint(lines, "rustcraft.terminal.orderable", "Can be ordered");
     }
-    if e.key.1 > 0 {
+    if e.key.1 > 0 && e.key.1 & term::VARIANT == 0 {
         lines.push(tr_with(
             "rustcraft.terminal.worn",
             "Worn: %s",

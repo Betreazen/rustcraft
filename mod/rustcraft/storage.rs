@@ -46,7 +46,8 @@ use horizon_client::{
     text::Text,
 };
 use horizon_core::geometry::Direction;
-use horizon_world::nbt::{Compound, JavaString, Tag};
+use horizon_client::save;
+use horizon_world::nbt::{self, Compound, JavaString, Tag};
 use rustcraft_rules::{
     geom::Pos,
     net::{items::ItemKey, stock::NetStore},
@@ -494,19 +495,46 @@ pub(super) fn stock(
 
 // ---- Items in and out ----
 
-/// The stack a key and a count make.
+/// The stack a key and a count make: a component key's saved stack with every component back.
 fn stack_of(key: &str, count: u32) -> ItemStack {
+    if let Some(stack) = keys::payload(key).and_then(|p| saved_stack(p, count)) {
+        return stack;
+    }
     let (item, damage) = keys::parse(key);
     let mut stack = ItemStack::new(item, count);
     stack.damage = damage;
     stack
 }
 
-/// The key a stack goes under; none for a stack the storage cannot keep: one with components
-/// besides its damage, or worn further than a press can name.
+/// Slice 18: the stack a component key's payload saved, `count` of it.
+fn saved_stack(payload: &str, count: u32) -> Option<ItemStack> {
+    let bytes = keys::unhex(payload)?;
+    let (tag, _) = nbt::read_network(&bytes, nbt::Limits::saved()).ok()?;
+    let mut stack = save::item_from_nbt(&tag)?;
+    stack.count = count;
+    Some(stack)
+}
+
+/// The key a stack goes under on the nets and in the storage: its id and damage, or, with other
+/// components or worn further than a press names, its id and its whole saved form (one item).
+pub(super) fn net_key(stack: &ItemStack) -> ItemKey {
+    if stack.extra.is_none() && term::addressable(stack.damage) {
+        return keys::key(&stack.item, stack.damage);
+    }
+    let mut one = stack.clone();
+    one.count = 1;
+    let payload = nbt::write_network(&save::item_to_nbt(&one), nbt::Limits::saved())
+        .map(|b| keys::hex(&b))
+        .unwrap_or_default();
+    keys::component_key(&stack.item, &payload)
+}
+
+/// The key a stack goes under; none for a stack the storage cannot keep (its saved form too long).
 fn key_of(stack: &ItemStack) -> Option<ItemKey> {
-    (stack.extra.is_none() && term::addressable(stack.damage) && stack.count > 0)
-        .then(|| keys::key(&stack.item, stack.damage))
+    if stack.count == 0 {
+        return None;
+    }
+    Some(net_key(stack)).filter(|k| keys::storable(k))
 }
 
 /// The storage behind `anchor`: what it takes of `key` now.
@@ -739,6 +767,7 @@ fn listing(game: &Game<'_>, dimension: &str, terminal: Pos, id: Option<u32>) -> 
         };
     };
     let mut lines: Vec<(u64, Line)> = Vec::new();
+    let mut variants: Vec<wire::Variant> = Vec::new();
     let mut keys: BTreeSet<&ItemKey> = store.items.keys().collect();
     keys.extend(store.limits.keys());
     keys.extend(store.keep.keys());
@@ -747,8 +776,25 @@ fn listing(game: &Game<'_>, dimension: &str, terminal: Pos, id: Option<u32>) -> 
         let Some(number) = item_number(game, item).and_then(|n| u16::try_from(n).ok()) else {
             continue;
         };
-        let Ok(damage) = u16::try_from(damage) else {
-            continue;
+        // Slice 18: a component stack goes by its place among its item's, with its saved form.
+        let damage = match keys::payload(key) {
+            Some(payload) => {
+                let Some(index) = store.variant_index(key).filter(|i| u32::from(*i) <= term::MAX_DAMAGE) else {
+                    continue;
+                };
+                variants.push(wire::Variant {
+                    item: number,
+                    index,
+                    payload: payload.to_owned(),
+                });
+                term::VARIANT | index
+            }
+            None => {
+                let Ok(damage) = u16::try_from(damage) else {
+                    continue;
+                };
+                damage
+            }
         };
         let count = store.count(key);
         lines.push((
@@ -782,6 +828,7 @@ fn listing(game: &Game<'_>, dimension: &str, terminal: Pos, id: Option<u32>) -> 
         smart: view.as_ref().map_or_else(Default::default, |v| v.smart),
         orders: view.as_ref().map_or_else(Vec::new, |v| v.orders.clone()),
         orderable: view.map_or_else(Vec::new, |v| v.orderable),
+        variants,
     }
 }
 
@@ -863,7 +910,7 @@ pub(super) fn on_button(
             }
         }
         Press::Keep { item, change } => {
-            if let Some(key) = key_of_ref(game, (item, 0)).filter(|_| book) {
+            if let Some(key) = key_of_ref(game, &dimension, storage, (item, 0)).filter(|_| book) {
                 apply_keep(&dimension, storage, &key, change);
             }
         }
@@ -877,7 +924,7 @@ pub(super) fn on_button(
         } => take_out(game, &dimension, storage, item, take, carried),
         Press::Place { item: None, .. } => {}
         Press::Limit { item, change } => {
-            if let Some(key) = key_of_ref(game, item) {
+            if let Some(key) = key_of_ref(game, &dimension, storage, item) {
                 apply_limit(&dimension, storage, &key, change);
             }
         }
@@ -1046,9 +1093,21 @@ pub(super) fn restart_orders(
     Ok(())
 }
 
-/// The key a press names.
-fn key_of_ref(game: &Game<'_>, (number, damage): term::ItemRef) -> Option<ItemKey> {
+/// The key a press names; a component stack's by its place in the storage `storage`.
+fn key_of_ref(
+    game: &Game<'_>,
+    dimension: &str,
+    storage: u32,
+    (number, damage): term::ItemRef,
+) -> Option<ItemKey> {
     let item = item_of_number(game, u32::from(number))?;
+    if damage & term::VARIANT != 0 {
+        let index = damage & !term::VARIANT;
+        return with_level(dimension, |level| {
+            level.stores.get(&storage)?.variant(item, index)
+        })
+        .flatten();
+    }
     Some(keys::key(item, u32::from(damage)))
 }
 
@@ -1083,7 +1142,7 @@ fn take_out(
     take: Take,
     carried: &mut Option<ItemStack>,
 ) {
-    let Some(key) = key_of_ref(game, item) else {
+    let Some(key) = key_of_ref(game, dimension, storage, item) else {
         return;
     };
     let stack_size = max_stack(game, keys::item_of(&key));
@@ -1302,6 +1361,24 @@ pub(super) fn tablet_items(dimension: &str, id: u32) -> Vec<(ItemKey, u64)> {
             .stores
             .get(&id)
             .map(|s| storage::tablet::entries(&s.items))
+    })
+    .flatten()
+    .unwrap_or_default()
+}
+
+/// The self-test's view: every stack the storage the cell or terminal at `pos` belongs to
+/// holds, made from its key (a component key's stack with its components).
+pub(super) fn stored_stacks_at(dimension: &str, pos: Pos) -> Vec<ItemStack> {
+    let Some(id) = storage_id(dimension, pos) else {
+        return Vec::new();
+    };
+    with_level(dimension, |level| {
+        level.stores.get(&id).map(|s| {
+            s.items
+                .iter()
+                .map(|(k, n)| stack_of(k, u32::try_from(*n).unwrap_or(u32::MAX)))
+                .collect()
+        })
     })
     .flatten()
     .unwrap_or_default()
