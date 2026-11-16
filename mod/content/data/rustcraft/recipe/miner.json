@@ -9,7 +9,7 @@
   "key": {
     "b": "rustcraft:sparksteel",
     "r": "minecraft:redstone",
-    "s": "minecraft:amethyst_shard",
+    "s": "rustcraft:crystal_shard",
     "x": "minecraft:iron_pickaxe"
   },
   "result": {

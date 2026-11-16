@@ -8,6 +8,7 @@ pub mod butcher;
 pub mod explore;
 pub mod gear;
 pub mod geom;
+pub mod grow;
 pub mod handbook;
 pub mod housing;
 pub mod machines;

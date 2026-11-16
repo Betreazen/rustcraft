@@ -117,8 +117,13 @@ def turned(p, q, about=8):
 
 
 # Models scaled about the middle of their floor to fit the game's limit of two blocks above the
-# block (LOW..HIGH): the windmill, three blocks tall in the guide, stands two thirds as big.
-SCALED = {'windmill': 0.68}
+# block (LOW..HIGH). Slice 18: none; the windmill keeps the guide's three blocks (LIFTED below).
+SCALED = {}
+# Slice 18: models taller than the game's limit (an element reaches at most 32 pixels up). The
+# boxes that reach above `top` pixels become part 'top' (unless they belong to a moving part), and
+# the parts named here are lowered by `by` pixels in their own models; anim_mc moves them back up
+# (still_move), so the windmill stands three blocks tall as in the guide.
+LIFTED = {'windmill': {'top': 32, 'by': 16, 'parts': ('top', 'rotor')}}
 
 
 def scaled(p, k):
@@ -138,7 +143,14 @@ def read_full(draw, name=None, rest_turn=True):
     turns = REST_TURN.get(name, {}) if rest_turn else {}
     k = SCALED.get(name)
     boxes = []
+    lift = LIFTED.get(name)
     for part, mat, lo, hi, rot in rec.boxes:
+        if lift and part == 'body' and hi[2] > lift['top']:
+            part = 'top'
+        if lift and part in lift['parts']:
+            lo, hi = (lo[0], lo[1], lo[2] - lift['by']), (hi[0], hi[1], hi[2] - lift['by'])
+            if rot:
+                rot = (rot[0], rot[1], (rot[2][0], rot[2][1], rot[2][2] - lift['by']))
         if k:
             lo, hi = scaled(lo, k), scaled(hi, k)
             if rot:
@@ -149,6 +161,8 @@ def read_full(draw, name=None, rest_turn=True):
             rot = ({'X': (1, 0, 0), 'Y': (0, 1, 0), 'Z': (0, 0, 1)}[axis], degrees, rec.pivots[part])
         boxes.append((part, mat, lo, hi, rot))
     pivots = {part: (scaled(p, k) if k else p) for part, p in rec.pivots.items()}
+    if lift:
+        pivots = {part: ((p[0], p[1], p[2] - lift['by']) if part in lift['parts'] else p) for part, p in pivots.items()}
     return boxes, pivots
 
 
@@ -548,6 +562,7 @@ def staged(out, report, skipped):
             els = elements(boxes, skin, stats)
             if moving:
                 anim_parts(out, name, draw, skin, stats)
+            energy_parts(out, name, every, skin, stats)
             if stats.get('outside_limit'):
                 skipped.append(name)
                 continue
@@ -853,6 +868,32 @@ def zip_parts(out):
 def items(out):
     for name in icons_mc.ICONS:
         out.image('textures/item/%s.png' % name, icons_mc.icon(name))
+
+
+# ---------------------------------------------------------------- slice 18, energy stream
+
+# The model's sides (energy.py's link_<side>, z up, y south) as the game's faces.
+LINK_FACES = {'x-': 'west', 'x+': 'east', 'y-': 'north', 'y+': 'south', 'z-': 'down', 'z+': 'up'}
+LINKED = ('crystal', 'windmill', 'solar')
+# The seed's stages, one model each (P.seed shows stage<n> and hides the others).
+STAGED = {'seed': 3}
+
+
+def energy_parts(out, name, every, skin, stats):
+    """Slice 18: the housing connectors link_<side> of the crystal, the windmill and the solar
+    panel, each a standalone model `<name>__link_<face>` the client draws on the sides a housing
+    touches; and the seed's stages `seed_<n>`, its blockstate's models by `stage`."""
+    if name in LINKED:
+        for side, face in LINK_FACES.items():
+            boxes = [b for b in every if b[0] == 'link_' + side]
+            if boxes:
+                model = '%s__link_%s' % (name, face)
+                out.text('models/block/%s.json' % model, model_json(skin.textures(), elements(boxes, skin, stats)))
+    if name in STAGED:
+        for n in range(STAGED[name]):
+            hidden = ['stage%d' % i for i in range(STAGED[name]) if i != n]
+            boxes = [b for b in every if b[0] not in hidden and not any(fnmatch.fnmatchcase(b[0], p) for p in ALWAYS_HIDDEN)]
+            out.text('models/block/%s_%d.json' % (name, n), model_json(skin.textures(), elements(boxes, skin, stats), BLOCK))
 
 
 def main():

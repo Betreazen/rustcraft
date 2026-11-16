@@ -1015,5 +1015,11 @@
   "rustcraft.handbook.page.dusts.name": "Ore dust",
   "rustcraft.handbook.page.dusts.sum": "Iron, copper and gold dust from the crusher. Smelts into an ingot.",
   "rustcraft.handbook.page.fluids.name": "Solution and catalysts",
-  "rustcraft.handbook.page.fluids.sum": "Fluids from the mixer. Nutrient solution feeds crystal structures; catalysts boost machines."
+  "rustcraft.handbook.page.fluids.sum": "Fluids from the mixer. Nutrient solution feeds crystal structures; catalysts boost machines.",
+  "item.rustcraft.crystal_shard": "Crystal Shard",
+  "block.rustcraft.druse": "Crystal Druse",
+  "block.rustcraft.seed": "Crystal Seed",
+  "rustcraft.grow.growing": "Growing: %s",
+  "rustcraft.grow.no_solution": "No solution in the tank",
+  "rustcraft.grow.grown": "The druse has grown: break it for 2–4 shards"
 }

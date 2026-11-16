@@ -361,6 +361,7 @@ pub(super) fn on_right_click_block(
     zipline::on_right_click_block(game, pos, canceled);
     base::on_right_click_block(game, pos, canceled);
     transport::on_right_click_block(game, pos, face, canceled);
+    crate::game::rustcraft_crystals::on_right_click_block(game, pos, face, canceled);
 }
 
 /// `native_menu_clicked` and `native_menu_closed`: the joint window (rustcraft_window).
@@ -578,6 +579,7 @@ fn scan(game: &Game<'_>, dimension: &str, level: &mut LevelNet) -> Found {
     };
     let mut layout = Layout::default();
     level.crystals.clear();
+    level.sources.seeds.clear();
     level.machines.clear();
     // A mod block's entry is named after its block (native_diagnostics.rs:76-88, 207-218).
     for (pos, kind) in game.native_level_block_entities(dimension) {
@@ -594,6 +596,8 @@ fn scan(game: &Game<'_>, dimension: &str, level: &mut LevelNet) -> Found {
             layout.nodes.insert(pos, Node { tier });
         } else if kind == content::CRYSTAL {
             level.crystals.insert(pos);
+        } else if kind == rustcraft_rules::grow::SEED {
+            level.sources.seeds.insert(pos);
         } else if let Some(machine) = Machine::of(&kind) {
             level.machines.insert(pos, machine);
         } else if kind == content::CELL {

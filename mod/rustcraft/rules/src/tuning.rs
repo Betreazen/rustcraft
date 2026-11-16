@@ -236,6 +236,12 @@ pub struct Tuning {
     pub butcher_keep_default: u32,
     pub butcher_keep_min: u32,
     pub butcher_keep_max: u32,
+    // ---- Slice 18, energy stream ----
+    /// CR2 (guide `grow`): a seed on a tank of solution grows into a druse in this many minutes,
+    /// drinking this many buckets over its growth; it keeps at most `seed_buffer` buckets.
+    pub grow_minutes: f64,
+    pub grow_buckets: f64,
+    pub seed_buffer: f64,
 }
 
 impl Default for Tuning {
@@ -387,6 +393,9 @@ impl Default for Tuning {
             butcher_keep_default: 2,
             butcher_keep_min: 2,
             butcher_keep_max: 16,
+            grow_minutes: 10.0,
+            grow_buckets: 4.0,
+            seed_buffer: 1.0,
         }
     }
 }

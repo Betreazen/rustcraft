@@ -30,6 +30,7 @@ use rustcraft_rules::{
     },
     modules::Module,
     net::energy::{Producer, Shared, Store, join_groups},
+    grow::{self, Seed, Shown as GrowShown},
     power::{self as rules, Battery, Form, PowerView, Shown, Water},
     tuning::Tuning,
 };
@@ -58,6 +59,8 @@ pub struct Sources {
     ticks: u64,
     /// What each block shows now, for its look, its window and the self-test.
     pub views: HashMap<Pos, PowerView>,
+    /// Slice 18: the seeds growing on tanks (CR2), found by the rescan.
+    pub seeds: BTreeSet<Pos>,
 }
 
 /// After a rescan: the groups again, and the nets joined to whole structures.
@@ -448,11 +451,91 @@ pub(super) fn sinks(game: &Game<'_>, s: &Sources, t: &Tuning) -> Vec<Sink> {
         held: solution_of(game, g).floor() as u64,
         capacity: rules::solution_room(g.len(), t) as u64,
     }));
+    // Slice 18: a seed drinks from the tank under it (CR2); a grown one no more.
+    out.extend(s.seeds.iter().map(|&p| {
+        let seed = read_seed(game, p);
+        Sink {
+            key: p,
+            blocks: vec![p],
+            fluid: rules::SOLUTION,
+            held: seed.solution.floor() as u64,
+            capacity: if seed.progress >= 1.0 {
+                0
+            } else {
+                grow::buffer(t) as u64
+            },
+        }
+    }));
     out
+}
+
+// ---- Slice 18: growing crystals (CR2) ----
+
+const PROGRESS_KEY: &str = "grow";
+
+fn read_seed(game: &Game<'_>, pos: Pos) -> Seed {
+    Seed {
+        progress: read_key(game, pos, PROGRESS_KEY),
+        solution: read_key(game, pos, SOLUTION_KEY),
+    }
+}
+
+static SEEDS: std::sync::LazyLock<std::sync::Mutex<HashMap<(String, Pos), GrowShown>>> =
+    std::sync::LazyLock::new(Default::default);
+
+fn seeds() -> std::sync::MutexGuard<'static, HashMap<(String, Pos), GrowShown>> {
+    SEEDS.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+/// The seed at `pos`, for the self-test.
+pub(super) fn seed_at(game: &Game<'_>, pos: Pos) -> Option<Seed> {
+    (game.native_block(pos) == grow::SEED).then(|| read_seed(game, pos))
+}
+
+/// What the seed at `pos` showed last.
+pub(super) fn seed_shown(dimension: &str, pos: Pos) -> Option<GrowShown> {
+    seeds().get(&(dimension.to_owned(), pos)).copied()
+}
+
+/// After the fluid tick filled the seeds: each grows `dt` seconds on what it holds and shows its
+/// stage.
+fn grow_seeds(game: &mut Game<'_>, seeds_at: &[Pos], dt: f64, t: &Tuning) {
+    let dimension = game.native_dimension().to_owned();
+    for &p in seeds_at {
+        if game.native_block(p) != grow::SEED {
+            continue;
+        }
+        let mut seed = read_seed(game, p);
+        let before = seed;
+        let shown = seed.grow(dt, t);
+        if seed != before {
+            machines::change_entity(game, p, false, |e| {
+                write_f64(&mut e.nbt, PROGRESS_KEY, seed.progress);
+                write_f64(&mut e.nbt, SOLUTION_KEY, seed.solution.max(0.0));
+            });
+        }
+        crate::game::rustcraft_crystals::set_stage(game, p, grow::stage(seed.progress));
+        seeds().insert((dimension.clone(), p), shown);
+    }
 }
 
 /// What the fluid tick put into each sink, written back on its key block.
 pub(super) fn write_sinks(game: &mut Game<'_>, before: &[Sink], after: &BTreeMap<Pos, Sink>) {
+    // Slice 18: the seeds are the one-block solution sinks (a crystal's are two blocks or more).
+    let seeds_at: Vec<Pos> = before
+        .iter()
+        .filter(|s| s.fluid == rules::SOLUTION && s.blocks.len() == 1)
+        .map(|s| s.key)
+        .collect();
+    write_fluids(game, before, after);
+    if !seeds_at.is_empty() {
+        let t = crate::game::rustcraft_server::tuning();
+        let dt = crate::game::rustcraft_fluids::EVERY as f64 / t.ticks_per_second;
+        grow_seeds(game, &seeds_at, dt, t);
+    }
+}
+
+fn write_fluids(game: &mut Game<'_>, before: &[Sink], after: &BTreeMap<Pos, Sink>) {
     for b in before {
         let Some(a) = after.get(&b.key) else { continue };
         if a.held <= b.held {
@@ -528,6 +611,32 @@ fn shown_text(v: &PowerView) -> Text {
     }
 }
 
+/// A seed's look: how far it has grown, «Нет раствора в баке» or grown (CR2).
+fn seed_text(game: &Game<'_>, pos: Pos) -> Text {
+    match seed_shown(game.native_dimension(), pos) {
+        Some(GrowShown::Growing(p)) => line(
+            "rustcraft.grow.growing",
+            "Growing: %s",
+            &[Text::literal(format!("{}%", (p * 100.0).floor()))],
+        ),
+        Some(GrowShown::NoSolution(_)) => line(
+            "rustcraft.grow.no_solution",
+            "No solution in the tank",
+            &[],
+        ),
+        Some(GrowShown::Grown) => line(
+            "rustcraft.grow.grown",
+            "The druse has grown: break it for 2–4 shards",
+            &[],
+        ),
+        None => line(
+            "rustcraft.grow.no_solution",
+            "No solution in the tank",
+            &[],
+        ),
+    }
+}
+
 /// The look of a crystal or a slice-8 power block.
 pub(super) fn diagnosis(
     _game: &Game<'_>,
@@ -536,6 +645,9 @@ pub(super) fn diagnosis(
     block: &str,
     t: &Tuning,
 ) -> Option<Text> {
+    if block == grow::SEED {
+        return Some(seed_text(_game, pos));
+    }
     let ours = block == content::CRYSTAL
         || matches!(
             Machine::of(block),

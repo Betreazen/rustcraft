@@ -22,6 +22,7 @@ pub mod monorail;
 pub mod orders2;
 pub mod rest;
 pub mod run;
+pub mod s18_energy;
 pub mod slice10;
 pub mod slice11;
 pub mod slice12;
@@ -319,6 +320,16 @@ pub trait Bench {
         into: Pos,
         slot: usize,
     ) -> Result<crate::utility::found::Lift, String>;
+
+    // ---- Slice 18, energy stream ----
+
+    /// Breaks the block at `pos` as `tool` would (none: by hand), the drops rolled by its loot
+    /// table and handed back instead of dropped.
+    fn break_block(&mut self, pos: Pos, tool: Option<&str>) -> Result<Vec<(String, u32)>, String>;
+    /// The seed at `pos` (CR2): its growth and the solution it holds.
+    fn seed(&self, pos: Pos) -> Option<crate::grow::Seed>;
+    /// Sets how far the seed at `pos` has grown.
+    fn set_seed(&mut self, pos: Pos, progress: f64) -> Result<(), String>;
 }
 
 /// A mob as the self-test reads it.
@@ -496,6 +507,8 @@ pub fn catalog() -> Vec<Build> {
     all.extend(traversal::ALL);
     all.extend(handbook::ALL);
     all.extend(rest::ALL);
+    // Slice 18, energy stream.
+    all.extend(s18_energy::ALL);
     all
 }
 

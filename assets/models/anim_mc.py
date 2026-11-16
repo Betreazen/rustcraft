@@ -71,7 +71,9 @@ ANIM = {
         'half_b': {'on': [wave_move(Y, 0.6, PULSE, 3, base=0.4)], 'off': 'rest'},
         'beam': {'on': [], 'off': 'hide'},
     },
-    'windmill': {'rotor': {'on': [spin('y', 2.4)], 'off': 'always'}},
+    # Slice 18: the windmill's top and rotor stand a block up (export_mc LIFTED lowers their models).
+    'windmill': {'rotor': {'on': [still_move(Z, 16), spin('y', 2.4)], 'off': 'always'},
+                 'top': {'on': [still_move(Z, 16)], 'off': 'always'}},
     'battery': {'level_charge': {'on': [], 'off': 'rest', 'level': True}},
     'tank': {'level_fluid': {'on': [], 'off': 'rest', 'level': True, 'tinted': True}},
     'dock_unload': dict(('lit%d' % i, {'on': [], 'off': 'always', 'show': ('eq', 3, 3, i)}) for i in range(3)),
