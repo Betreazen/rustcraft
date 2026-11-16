@@ -213,6 +213,19 @@ mod tests {
     }
 
     #[test]
+    fn the_menu_files_carry_the_panel_and_its_extras() {
+        for menu in ["furnace", "crusher"] {
+            let path = format!(
+                "{}/../../content/data/rustcraft/horizon/menu/{menu}.json",
+                env!("CARGO_MANIFEST_DIR")
+            );
+            let json: serde_json::Value =
+                serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+            assert_eq!(json["data_slots"], ALL_DATA_SLOTS, "{path}");
+        }
+    }
+
+    #[test]
     fn a_window_without_data_yet_shows_the_defaults() {
         assert_eq!(decode(&[]), Panel::default());
         assert_eq!(decode(&[500]).progress, 0.5);

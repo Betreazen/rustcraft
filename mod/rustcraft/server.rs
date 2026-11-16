@@ -449,6 +449,8 @@ pub(super) fn on_destroy_block(game: &mut Game<'_>, pos: [i32; 3]) {
         return;
     };
     base::on_destroy_block(game, pos, &player.dimension, player.game_mode == CREATIVE);
+    // Slice 18, stream 3: a drawn-window machine's modules, queue and reserve fall out.
+    machines::on_destroyed(game, &player.dimension, pos, player.game_mode == CREATIVE);
     crate::game::rustcraft_utility::forget_grown(game, &player.dimension, pos);
     if block == rustcraft_rules::traversal::ANCHOR {
         zipline::on_anchor_broken(game, &player.dimension, pos);

@@ -262,7 +262,19 @@ pub(super) fn draw(game: &Game<'_>, block: &str, batch: &mut HudBatch, o: [f32; 
 }
 
 fn sockets(game: &Game<'_>, batch: &mut HudBatch, o: [f32; 2], l: &Layout, s: &Sheet) {
+    // Slice 18, stream 3: the sockets its tier opens (A5: 3 / 3 / 4 / 4), and past them any that
+    // still holds a module (a block taken down a tier).
+    let open = game.native_screen_pos().map_or(sheet::SOCKETS, |pos| {
+        let block = game.native_block(pos);
+        rustcraft_rules::machines::sockets::open(
+            &block,
+            Some(i32::from(crate::game::rustcraft_tiers::tier_of(game, pos, &block))),
+        )
+    });
     for (k, p) in l.sockets.iter().enumerate() {
+        if k >= open && s.modules.get(k).cloned().flatten().is_none() {
+            continue;
+        }
         let module = s.modules.get(k).cloned().flatten();
         socket(game, batch, o, *p, module.is_none());
         if let Some(id) = module {

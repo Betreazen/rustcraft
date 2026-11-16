@@ -40,7 +40,7 @@ use rustcraft_rules::{
     machines::{
         sheet::{
             Bar as SheetBar, Cursor, Kind as SheetKind, Press, Sheet, Status as SheetStatus,
-            press_socket, put_free, severity_code,
+            severity_code,
         },
         style::Severity,
     },
@@ -61,7 +61,9 @@ const MODULES_KEY: &str = "modules";
 /// A turret's role in its block entity, for other mods (SoulsCraft's altar waves): `attack` or
 /// `support`, written whenever its modules change.
 const ROLE_KEY: &str = "role";
-const MODULE_SLOTS: usize = 3;
+// Slice 18, stream 3: room for four sockets (tiers 3 and 4, A5); how many are open is the
+// block's tier's (rustcraft_rules::machines::sockets::open).
+const MODULE_SLOTS: usize = rustcraft_rules::tiers::MAX_SOCKETS;
 const SHOT_TYPE: &str = "minecraft:generic";
 const BLEED_TYPE: &str = "minecraft:magic";
 const POISON: &str = "minecraft:poison";
@@ -209,6 +211,16 @@ fn read_modules(nbt: &Compound) -> Vec<Option<String>> {
         }
     }
     out
+}
+
+/// Slice 18, stream 3: the sockets' items of any machine's block entity (the drawn windows keep
+/// their modules under the same key, rustcraft_machines).
+pub(super) fn read_module_items(nbt: &Compound) -> Vec<Option<String>> {
+    read_modules(nbt)
+}
+
+pub(super) fn write_module_items(nbt: &mut Compound, modules: &[Option<String>]) {
+    write_modules(nbt, modules);
 }
 
 fn write_modules(nbt: &mut Compound, modules: &[Option<String>]) {
@@ -1724,7 +1736,18 @@ pub(super) fn on_sheet_button(
                 item: c.item.to_string(),
                 count: c.count,
             });
-            let Some(after) = press_socket(&mut slots, k, holder, cursor.as_ref()) else {
+            // Slice 18, stream 3: only the sockets its tier opens take a module.
+            let open = rustcraft_rules::machines::sockets::open(
+                &entity.id,
+                machines::read_int(&entity.nbt, rustcraft_rules::machines::sockets::TIER_KEY),
+            );
+            let Some(after) = rustcraft_rules::machines::sheet::press_socket_in(
+                &mut slots,
+                k,
+                holder,
+                open,
+                cursor.as_ref(),
+            ) else {
                 return;
             };
             *carried = after.map(|c| {
@@ -1775,7 +1798,12 @@ pub(super) fn on_sheet_quick_move(
         return;
     };
     let mut slots = rustcraft_rules::modules::read(&read_modules(&entity.nbt));
-    if put_free(&mut slots, holder, &stack.item) {
+    // Slice 18, stream 3: only into the sockets its tier opens.
+    let open = rustcraft_rules::machines::sockets::open(
+        &entity.id,
+        machines::read_int(&entity.nbt, rustcraft_rules::machines::sockets::TIER_KEY),
+    );
+    if rustcraft_rules::machines::sheet::put_free_in(&mut slots, holder, open, &stack.item) {
         stack.count -= 1;
         write_sockets(entity, kind, &slots);
         *handled = true;

@@ -1041,5 +1041,9 @@
   "item.rustcraft.mixer_4": "Mixer · tier 4",
   "item.rustcraft.disintegrator_4": "Disintegrator · tier 4",
   "item.rustcraft.charger_4": "Charger · tier 4",
-  "rustcraft.tier.swapped": "%s: tier %s took the place of tier %s"
+  "rustcraft.tier.swapped": "%s: tier %s took the place of tier %s",
+  "rustcraft.window.work": "Progress",
+  "rustcraft.window.module_slot.fits": "Takes: %s",
+  "rustcraft.window.queue_cell": "Queue cell",
+  "rustcraft.window.reserve": "%s more wait behind the slot"
 }

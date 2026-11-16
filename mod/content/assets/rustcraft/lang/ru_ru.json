@@ -3689,5 +3689,9 @@
   "item.rustcraft.mixer_4": "Смеситель · ступень 4",
   "item.rustcraft.disintegrator_4": "Дезинтегратор · ступень 4",
   "item.rustcraft.charger_4": "Зарядник · ступень 4",
-  "rustcraft.tier.swapped": "%s: ступень %s встала на место ступени %s"
+  "rustcraft.tier.swapped": "%s: ступень %s встала на место ступени %s",
+  "rustcraft.window.work": "Ход работы",
+  "rustcraft.window.module_slot.fits": "Подходят: %s",
+  "rustcraft.window.queue_cell": "Ячейка очереди",
+  "rustcraft.window.reserve": "Ещё %s ждут за ячейкой"
 }
