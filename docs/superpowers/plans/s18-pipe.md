@@ -106,7 +106,7 @@ Files: `window.rs` (rows «Гнездо / Канал / Направление / 
 
 ### Task 13: README «Что проверить в игре: срез 18» (поток 1), last try, report.
 - [x] README section (325d069).
-- [ ] last try green: try 2 (all commits to 53d1041) was queued behind other streams for 40+ min when this stream handed back; rerun it on resume.
+- [ ] last try green: try 2 (pwsh PID 27036, log scratchpad/try2.log) still queued behind four other streams' tries after 1 h+; it stages the live tree when it starts (all commits to 48bbb58). Check its log; on a failure fix and re-run on this worktree.
 
 ### Left (resume here)
 
