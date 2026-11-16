@@ -106,7 +106,7 @@ Files: `window.rs` (rows «Гнездо / Канал / Направление / 
 
 ### Task 13: README «Что проверить в игре: срез 18» (поток 1), last try, report.
 - [x] README section (325d069).
-- [ ] last try green.
+- [ ] last try green: try 2 (all commits to 53d1041) was queued behind other streams for 40+ min when this stream handed back; rerun it on resume.
 
 ### Left (resume here)
 
