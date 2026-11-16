@@ -1839,11 +1839,11 @@ fn support_rows(game: &Game<'_>, dimension: &str, pos: Pos, _slots: &[Option<Mod
 fn role_rows(slots: &[Option<Module>], s: &mut Sheet) {
     let effect = |m: &Module| matches!(m, Module::Bleed | Module::Poison | Module::Slow);
     let name = |m: &Module| Text::translate(&format!("item.{}", m.item().replace(':', ".")), &[]);
-    let idle: Vec<Text> = slots.iter().flatten().filter(|m| effect(m)).map(name).collect();
+    let idle: Vec<Text> = slots.iter().flatten().filter(|m| effect(*m)).map(name).collect();
     if idle.is_empty() {
         return;
     }
-    let working: Vec<Text> = slots.iter().flatten().filter(|m| !effect(m)).map(name).collect();
+    let working: Vec<Text> = slots.iter().flatten().filter(|m| !effect(*m)).map(name).collect();
     s.rows.push(v(&line(
         "rustcraft.turret.working",
         "Work: %s · do not work: %s",
