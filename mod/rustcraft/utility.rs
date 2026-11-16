@@ -421,14 +421,17 @@ fn owner(game: &Game<'_>, pos: Pos) -> Option<u128> {
 
 // ---- The trash ----
 
+/// UT7: what the trash burns a step on the first tier.
+const TRASH_BATCH: u32 = 8;
+
 fn trash(game: &mut Game<'_>, pos: Pos, _t: &Tuning) -> Shown {
     let slots = items(game, pos);
     if slots.iter().take(9).all(|s| s.as_ref().is_none_or(|s| s.count == 0)) {
         return Shown::Blocked("trash_no_filter");
     }
-    let speed = modules::count(&base::modules_at(game, pos), Module::Speed);
-    // A9: speed modules stack in full; a machine has at most four sockets.
-    let mut batch = 8u32 << speed.min(rustcraft_rules::modules::MAX_SOCKETS as u32);
+    // UT7: a batch of 8 a step; speed modules shorten the step (`paced`), not the batch, so a
+    // speed module is work ×2 (A7), not ×4.
+    let mut batch = TRASH_BATCH;
     let per = paced(game, pos, Util::Trash).1;
     let filter: Vec<&str> = slots.iter().take(9).flatten().map(|s| &*s.item).collect();
     let mut burned = 0;
