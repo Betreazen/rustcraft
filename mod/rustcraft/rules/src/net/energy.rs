@@ -307,7 +307,13 @@ pub fn supply_with_storage(
             output: s.give,
         })
         .collect();
-    let second = supply_report(&givers, &lacking, circuits, dt);
+    // A pass with nobody to give or nobody to take shares nothing: skip it (its sources would
+    // only report 0 given).
+    let second = if givers.is_empty() || lacking.is_empty() {
+        Supply::default()
+    } else {
+        supply_report(&givers, &lacking, circuits, dt)
+    };
     let left: Vec<Producer> = producers
         .iter()
         .map(|p| Producer {
@@ -324,7 +330,11 @@ pub fn supply_with_storage(
             request: s.take,
         })
         .collect();
-    let third = supply_report(&left, &takers, circuits, dt);
+    let third = if left.is_empty() || takers.is_empty() {
+        Supply::default()
+    } else {
+        supply_report(&left, &takers, circuits, dt)
+    };
     let mut got = first.got;
     for (b, e) in second.got {
         *got.entry(b).or_insert(0.0) += e;
@@ -381,15 +391,23 @@ fn share_out(
         })
         .collect();
     for circuit in circuits {
-        let ps: Vec<Producer> = left
+        // By the circuit's own members, not the level's every source and consumer: a level of
+        // many small nets made this pass nets × blocks. Both are in block order, as before.
+        let ps: Vec<Producer> = circuit
+            .members
             .iter()
-            .filter(|(b, e)| circuit.members.contains(*b) && **e > 0.0)
-            .map(|(&block, &output)| Producer { block, output })
+            .filter_map(|b| left.get(b).map(|&output| Producer { block: *b, output }))
+            .filter(|p| p.output > 0.0)
             .collect();
-        let cs: Vec<Consumer> = wanting
+        let cs: Vec<Consumer> = circuit
+            .members
             .iter()
-            .filter(|(b, w)| circuit.members.contains(*b) && **w > 0.0)
-            .map(|(&block, &request)| Consumer { block, request })
+            .filter_map(|b| {
+                wanting
+                    .get(b)
+                    .map(|&request| Consumer { block: *b, request })
+            })
+            .filter(|c| c.request > 0.0)
             .collect();
         if ps.is_empty() || cs.is_empty() {
             continue;
@@ -698,6 +716,33 @@ mod tests {
         );
         let total: f64 = s.got.values().sum();
         assert!(close(total, 32.0));
+    }
+
+    #[test]
+    fn many_small_nets_each_share_their_own() {
+        // A level of many nets (the load scene: rows of machines, each on its own channel): each
+        // net shares its source among its machines only, housings among its members or not.
+        let rows = 50;
+        let at = |row: i32, x: i32| row * 100 + x;
+        let producers: Vec<Producer> = (0..rows).map(|r| producer(at(r, 0), 4.0)).collect();
+        let consumers: Vec<Consumer> = (0..rows)
+            .flat_map(|r| [consumer(at(r, 5), 8.0), consumer(at(r, 9), 8.0)])
+            .collect();
+        let nets: Vec<Circuit> = (0..rows)
+            .map(|r| circuit(&[at(r, 0), at(r, 3), at(r, 5), at(r, 9)], 32.0))
+            .collect();
+        let s = supply_with_storage(&producers, &consumers, &[], &nets, DT);
+        for r in 0..rows {
+            assert!(close(s.got[&[at(r, 5), 0, 0]], 2.0));
+            assert!(close(s.got[&[at(r, 9), 0, 0]], 2.0));
+            assert!(close(s.used[&[at(r, 0), 0, 0]], 4.0));
+        }
+        assert!(s.given.is_empty() && s.taken.is_empty());
+        // Nobody asks: every source is reported, having given nothing.
+        let idle = supply_with_storage(&producers, &[], &[], &nets, DT);
+        assert!(idle.got.is_empty());
+        assert_eq!(idle.used.len(), rows as usize);
+        assert!(idle.used.values().all(|e| close(*e, 0.0)));
     }
 
     #[test]

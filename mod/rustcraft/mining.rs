@@ -146,7 +146,7 @@ enum What {
 }
 
 pub(super) fn read(game: &Game<'_>, pos: Pos, machine: Machine, t: &Tuning) -> Option<Held> {
-    let entity = game.native_mod_block_entity(pos)?;
+    let entity = crate::game::rustcraft_machines::entity(game, pos)?;
     let slots = base::modules_at(game, pos);
     let mode = machines::read_work(&entity.nbt);
     let (work, energy) = rules::factors(mode, &slots, t);
@@ -597,7 +597,7 @@ pub(super) fn sheet(
     t: &Tuning,
     s: &mut Sheet,
 ) {
-    let Some(entity) = game.native_mod_block_entity(pos) else {
+    let Some(entity) = crate::game::rustcraft_machines::entity(game, pos) else {
         return;
     };
     let slots = base::modules_at(game, pos);

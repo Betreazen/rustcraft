@@ -180,7 +180,7 @@ pub(super) fn rebuild(
 // ---- The tanks and the pumps as the fluid tick sees them ----
 
 fn read_tank(game: &Game<'_>, pos: Pos) -> Option<TankBlock> {
-    let entity = game.native_mod_block_entity(pos)?;
+    let entity = crate::game::rustcraft_machines::entity(game, pos)?;
     let amount = read_int(&entity.nbt, AMOUNT_KEY).map_or(0, |a| a.max(0) as u64);
     let fluid = match entity.nbt.get(&JavaString::from(FLUID_KEY)) {
         Some(Tag::String(s)) => Some(s.to_string_lossy()).filter(|s| !s.is_empty()),
@@ -458,7 +458,7 @@ pub(super) fn tick(game: &mut Game<'_>, level: &mut LevelNet, tuning: &Tuning) {
     let mut pumps: BTreeMap<Pos, Option<(FluidKey, u64)>> = pumps_at
         .iter()
         .filter_map(|&p| {
-            let entity = game.native_mod_block_entity(p)?;
+            let entity = crate::game::rustcraft_machines::entity(game, p)?;
             Some((p, read_held(&entity.nbt)))
         })
         .collect();
@@ -645,7 +645,7 @@ fn show_windows(game: &mut Game<'_>, level: &mut LevelNet, groups: &[TankGroup])
             note,
         });
         for &pos in &g.blocks {
-            let shown = game.native_mod_block_entity(pos).map(|e| e.data.clone());
+            let shown = crate::game::rustcraft_machines::entity(game, pos).map(|e| e.data.clone());
             if shown.as_ref() != Some(&data) {
                 game.native_with_mod_block_entity(pos, |e| e.data = data.clone());
             }
@@ -696,7 +696,7 @@ fn under(game: &Game<'_>, pos: Pos) -> Under {
 }
 
 pub(super) fn read_pump(game: &Game<'_>, pos: Pos, tuning: &Tuning) -> Option<PumpHeld> {
-    let entity = game.native_mod_block_entity(pos)?;
+    let entity = crate::game::rustcraft_machines::entity(game, pos)?;
     let pump = Pump {
         progress: read_f64(&entity.nbt, PROGRESS_KEY).clamp(0.0, 1.0),
         held: read_held(&entity.nbt),

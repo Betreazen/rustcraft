@@ -96,12 +96,13 @@ pub(super) fn rescan(level: &mut LevelNet) {
 // ---- What the sources offer ----
 
 fn read_key(game: &Game<'_>, pos: Pos, key: &str) -> f64 {
-    game.native_mod_block_entity(pos)
-        .map_or(0.0, |e| read_f64(&e.nbt, key))
+    machines::entity(game, pos).map_or(0.0, |e| read_f64(&e.nbt, key))
 }
 
 fn write_key(game: &mut Game<'_>, pos: Pos, key: &str, value: f64) {
-    game.native_with_mod_block_entity(pos, |e| write_f64(&mut e.nbt, key, value.max(0.0)));
+    machines::change_entity(game, pos, false, |e| {
+        write_f64(&mut e.nbt, key, value.max(0.0))
+    });
 }
 
 /// A crystal group's solution, mB, kept on its least block (the rest is moved there).

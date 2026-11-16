@@ -31,7 +31,7 @@ pub(super) struct Held {
 }
 
 pub(super) fn read(game: &Game<'_>, pos: Pos) -> Option<Held> {
-    let entity = game.native_mod_block_entity(pos)?;
+    let entity = crate::game::rustcraft_machines::entity(game, pos)?;
     Some(Held {
         generator: Generator {
             fuel: slot_of(&entity, content::GEN_FUEL),

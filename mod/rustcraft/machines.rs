@@ -26,7 +26,10 @@ use crate::game::{
     rustcraft_power as power,
     rustcraft_server::LevelNet,
 };
-use horizon_client::{containers::ModBlockEntity, items::ItemStack};
+use horizon_client::{
+    containers::{BlockEntity, ModBlockEntity},
+    items::ItemStack,
+};
 use horizon_world::nbt::{Compound, JavaString, Tag};
 use rustcraft_rules::{
     geom::Pos,
@@ -186,6 +189,39 @@ pub(super) fn circuits(
         .collect()
 }
 
+// ---- The block entities, read and changed in place ----
+
+/// The mod block entity at `pos`, borrowed: what `native_mod_block_entity` gives
+/// (SRC/crates/horizon-client/src/game/native_host_bridge.rs:26-31) without copying its slots,
+/// compound and data slots, which the machines' tick did for every machine every tick.
+pub(super) fn entity<'a>(game: &'a Game<'_>, pos: Pos) -> Option<&'a ModBlockEntity> {
+    match game.world.block_entities.get(&(pos[0], pos[1], pos[2])) {
+        Some(BlockEntity::Mod(m)) if !m.id.is_empty() => Some(m),
+        _ => None,
+    }
+}
+
+/// Runs `change` on the mod block entity at `pos` as `native_with_mod_block_entity` does
+/// (native_hooks.rs:10719-10739): its chunk is saved next time, and comparators read it again
+/// when `items_moved`. That call copies the slots to see whether they changed; the caller knows.
+pub(super) fn change_entity<R>(
+    game: &mut Game<'_>,
+    pos: Pos,
+    items_moved: bool,
+    change: impl FnOnce(&mut ModBlockEntity) -> R,
+) -> Option<R> {
+    let key = (pos[0], pos[1], pos[2]);
+    let out = match game.world.block_entities.get_mut(&key) {
+        Some(BlockEntity::Mod(m)) if !m.id.is_empty() => change(m),
+        _ => return None,
+    };
+    game.world.modified.insert((key.0 >> 4, key.2 >> 4));
+    if items_moved {
+        game.container_changed(key);
+    }
+    Some(out)
+}
+
 // ---- Slots, fuel and the saved compound, for every machine ----
 
 /// What slot `i` of a block entity holds, as the rules see it.
@@ -327,17 +363,18 @@ pub(super) fn buffer_spec(machine: Machine, tuning: &Tuning) -> (f64, f64) {
 pub(super) const BUFFER_KEY: &str = "energy";
 
 pub(super) fn buffer_energy(game: &Game<'_>, pos: Pos) -> f64 {
-    game.native_mod_block_entity(pos)
-        .map_or(0.0, |e| read_f64(&e.nbt, BUFFER_KEY))
+    entity(game, pos).map_or(0.0, |e| read_f64(&e.nbt, BUFFER_KEY))
 }
 
 pub(super) fn set_buffer_energy(game: &mut Game<'_>, pos: Pos, energy: f64) -> bool {
-    game.native_with_mod_block_entity(pos, |e| write_f64(&mut e.nbt, BUFFER_KEY, energy.max(0.0)))
-        .is_some()
+    change_entity(game, pos, false, |e| {
+        write_f64(&mut e.nbt, BUFFER_KEY, energy.max(0.0))
+    })
+    .is_some()
 }
 
 fn read_buffer(game: &Game<'_>, pos: Pos, machine: Machine, tuning: &Tuning) -> Option<BufferHeld> {
-    let entity = game.native_mod_block_entity(pos)?;
+    let entity = entity(game, pos)?;
     let (capacity, charge) = buffer_spec(machine, tuning);
     let energy = read_f64(&entity.nbt, BUFFER_KEY).clamp(0.0, capacity);
     let room = (capacity - energy).max(0.0) * tuning.ticks_per_second;
@@ -366,8 +403,8 @@ pub(super) fn tick(game: &mut Game<'_>, level: &mut LevelNet, tuning: &Tuning) {
         .collect();
     let units: Vec<(Pos, Machine, Unit)> = level
         .machines
-        .clone()
-        .into_iter()
+        .iter()
+        .map(|(&pos, &machine)| (pos, machine))
         .filter(|(pos, _)| !resting.contains_key(pos))
         .filter_map(|(pos, machine)| {
             let unit = match machine.kind() {
@@ -583,14 +620,13 @@ pub(super) fn takes_catalyst(block: &str) -> bool {
 
 /// Slice 11: the catalyst tank of the machine at `pos`, if it takes one.
 pub(super) fn catalyst_at(game: &Game<'_>, pos: Pos) -> Option<CatalystTank> {
-    let entity = game.native_mod_block_entity(pos)?;
+    let entity = entity(game, pos)?;
     takes_catalyst(&entity.id).then(|| read_catalyst(&entity.nbt))
 }
 
 /// Slice 11: writes a machine's catalyst tank back.
 pub(super) fn set_catalyst(game: &mut Game<'_>, pos: Pos, tank: &CatalystTank) {
-    let tank = tank.clone();
-    game.native_with_mod_block_entity(pos, move |e| write_catalyst(&mut e.nbt, &tank));
+    change_entity(game, pos, false, |e| write_catalyst(&mut e.nbt, tank));
 }
 
 /// A number in [0, 1) for the enricher's chance: xorshift over a seed from the clock.
@@ -667,23 +703,21 @@ fn read(
     recipes: &MachineRecipes,
     tuning: &Tuning,
 ) -> Option<Held> {
-    let entity = game.native_mod_block_entity(pos)?;
-    let slot = |i: usize| entity.items.get(i).cloned().flatten();
+    let entity = entity(game, pos)?;
+    let slot = |i: usize| entity.items.get(i).and_then(Option::as_ref);
     let input = slot(content::MACHINE_INPUT);
     let output = slot(content::MACHINE_OUTPUT);
     let catalyst = read_catalyst(&entity.nbt);
     let processor = Processor {
-        input: input.as_ref().map(|s| (s.item.to_string(), s.count)),
-        output: output.as_ref().map(|s| (s.item.to_string(), s.count)),
+        input: input.map(|s| (s.item.to_string(), s.count)),
+        output: output.map(|s| (s.item.to_string(), s.count)),
         progress: read_f64(&entity.nbt, PROGRESS_KEY).clamp(0.0, 1.0),
         mode: read_work(&entity.nbt),
         modules: Vec::new(),
         catalyst: catalyst.active().map(|c| c.factors(tuning)),
         lucky: false,
     };
-    let job = input
-        .as_ref()
-        .and_then(|input| job_of(game, machine, input, recipes, tuning));
+    let job = input.and_then(|input| job_of(game, machine, input, recipes, tuning));
     let nominal = base_energy(machine, tuning) * processor.factors().1;
     Some(Held {
         processor,
@@ -747,7 +781,8 @@ fn run(
         return Some(shown);
     }
     let result: Vec<ItemStack> = job.map(|j| j.result).into_iter().collect();
-    game.native_with_mod_block_entity(pos, move |entity| {
+    let moved = processor.input != before.input || processor.output != before.output;
+    change_entity(game, pos, moved, move |entity| {
         write_slots(
             entity,
             [content::MACHINE_INPUT, content::MACHINE_OUTPUT],

@@ -183,8 +183,7 @@ fn read_owner(nbt: &Compound) -> Option<u128> {
 }
 
 pub(super) fn owner_at(game: &Game<'_>, pos: Pos) -> Option<u128> {
-    game.native_mod_block_entity(pos)
-        .and_then(|e| read_owner(&e.nbt))
+    crate::game::rustcraft_machines::entity(game, pos).and_then(|e| read_owner(&e.nbt))
 }
 
 pub(super) fn set_owner(game: &mut Game<'_>, pos: Pos, owner: u128, placed: u64) -> bool {
@@ -221,7 +220,7 @@ fn write_modules(nbt: &mut Compound, modules: &[Option<String>]) {
 }
 
 pub(super) fn modules_at(game: &Game<'_>, pos: Pos) -> Vec<Option<Module>> {
-    game.native_mod_block_entity(pos)
+    crate::game::rustcraft_machines::entity(game, pos)
         .map(|e| rustcraft_rules::modules::read(&read_modules(&e.nbt)))
         .unwrap_or_else(|| vec![None; MODULE_SLOTS])
 }
@@ -1667,7 +1666,7 @@ fn dock_sheet(
             "Loads a cargo worker standing by it",
             &[],
         )));
-        let empty = game.native_mod_block_entity(pos).is_none_or(|e| {
+        let empty = crate::game::rustcraft_machines::entity(game, pos).is_none_or(|e| {
             e.items
                 .iter()
                 .all(|x| x.as_ref().is_none_or(|x| x.count == 0))
@@ -1693,7 +1692,7 @@ fn dock_sheet(
         let severity = if e > 0.0 { Severity::Ok } else { Severity::Bad };
         s.status = status(severity, &text);
     } else {
-        let full = game.native_mod_block_entity(pos).is_some_and(|e| {
+        let full = crate::game::rustcraft_machines::entity(game, pos).is_some_and(|e| {
             e.items.len() >= content::DOCK_SLOTS
                 && e.items
                     .iter()

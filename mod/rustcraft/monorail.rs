@@ -293,8 +293,7 @@ fn read_name(entity: &ModBlockEntity) -> String {
 }
 
 fn station_energy(game: &Game<'_>, pos: Pos) -> f64 {
-    game.native_mod_block_entity(pos)
-        .map_or(0.0, |e| read_f64(&e.nbt, ENERGY_KEY))
+    crate::game::rustcraft_machines::entity(game, pos).map_or(0.0, |e| read_f64(&e.nbt, ENERGY_KEY))
 }
 
 /// Whether the cabin passes through the block at `p` (capsule::room_cells): one with no
@@ -514,7 +513,7 @@ pub struct StationHeld {
 }
 
 pub(super) fn read_station(game: &Game<'_>, pos: Pos, tuning: &Tuning) -> Option<StationHeld> {
-    let entity = game.native_mod_block_entity(pos)?;
+    let entity = crate::game::rustcraft_machines::entity(game, pos)?;
     let energy = read_f64(&entity.nbt, ENERGY_KEY).clamp(0.0, tuning.station_buffer);
     let room = (tuning.station_buffer - energy).max(0.0) * tuning.ticks_per_second;
     Some(StationHeld {
@@ -1361,7 +1360,7 @@ fn destination(
 }
 
 fn read_known(game: &Game<'_>, station: Pos) -> BTreeSet<Pos> {
-    let Some(entity) = game.native_mod_block_entity(station) else {
+    let Some(entity) = crate::game::rustcraft_machines::entity(game, station) else {
         return BTreeSet::new();
     };
     match entity.nbt.get(&JavaString::from(KNOWN_KEY)) {

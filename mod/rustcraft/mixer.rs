@@ -120,8 +120,7 @@ fn write_tanks_to(nbt: &mut Compound, t: &Tanks) {
 }
 
 pub(super) fn read_tanks(game: &Game<'_>, pos: Pos) -> Option<Tanks> {
-    game.native_mod_block_entity(pos)
-        .map(|e| read_tanks_of(&e.nbt))
+    crate::game::rustcraft_machines::entity(game, pos).map(|e| read_tanks_of(&e.nbt))
 }
 
 pub(super) fn write_tanks(game: &mut Game<'_>, pos: Pos, t: &Tanks) {
@@ -159,7 +158,7 @@ pub(super) fn read(
     recipes: &MachineRecipes,
     t: &Tuning,
 ) -> Option<Held> {
-    let entity = game.native_mod_block_entity(pos)?;
+    let entity = crate::game::rustcraft_machines::entity(game, pos)?;
     let tanks = read_tanks_of(&entity.nbt);
     let mixer = Mixer {
         water: tanks.water,
@@ -324,7 +323,7 @@ fn fluid_bar(label: Text, amount: u64, size: u64, colour: u32) -> SheetBar {
 
 /// The mixer's window: energy, water and product bars, its progress, its state.
 pub(super) fn sheet(game: &Game<'_>, dimension: &str, pos: Pos, t: &Tuning, s: &mut Sheet) {
-    let Some(entity) = game.native_mod_block_entity(pos) else {
+    let Some(entity) = crate::game::rustcraft_machines::entity(game, pos) else {
         return;
     };
     s.mode = Some(machines::read_work(&entity.nbt).code());

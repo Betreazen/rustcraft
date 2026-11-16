@@ -200,7 +200,7 @@ pub(super) fn read(
     temp: Option<&TempPage>,
     tuning: &Tuning,
 ) -> Option<Held> {
-    let entity = game.native_mod_block_entity(pos)?;
+    let entity = crate::game::rustcraft_machines::entity(game, pos)?;
     let allowed = allowed_pages(&entity, tuning);
     let mut patterns = read_patterns(&entity.nbt);
     patterns.resize(allowed.max(patterns.len()), Default::default());
