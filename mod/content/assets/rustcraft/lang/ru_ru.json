@@ -3670,5 +3670,10 @@
   "rustcraft.gear.night_on": "Ночное зрение включено",
   "rustcraft.gear.night_off": "Ночное зрение выключено",
   "rustcraft.gear.no_magnet": "В нагруднике нет модуля магнита",
-  "rustcraft.gear.no_night": "В шлеме нет модуля ночного зрения"
+  "rustcraft.gear.no_night": "В шлеме нет модуля ночного зрения",
+  "rustcraft.gear.window.charge": "Заряд",
+  "rustcraft.gear.window.amount": "%s из %s Е",
+  "rustcraft.gear.window.on": "включён · клавиша %s",
+  "rustcraft.gear.window.off": "выключен · клавиша %s",
+  "rustcraft.gear.window.auto": "работает сам"
 }

@@ -1022,5 +1022,10 @@
   "rustcraft.gear.night_on": "Night vision on",
   "rustcraft.gear.night_off": "Night vision off",
   "rustcraft.gear.no_magnet": "No magnet module in the chestplate",
-  "rustcraft.gear.no_night": "No night vision module in the helmet"
+  "rustcraft.gear.no_night": "No night vision module in the helmet",
+  "rustcraft.gear.window.charge": "Charge",
+  "rustcraft.gear.window.amount": "%s of %s E",
+  "rustcraft.gear.window.on": "on · key %s",
+  "rustcraft.gear.window.off": "off · key %s",
+  "rustcraft.gear.window.auto": "works by itself"
 }

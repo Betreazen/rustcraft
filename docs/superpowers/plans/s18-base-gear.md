@@ -134,12 +134,12 @@ Audit: pmodules «Магнит … притягивает» DIFFERS, «Бег +5
 
 Audit: armor «Окно части: гнёзда, полоса заряда, строки модулей» DIFFERS.
 
-**Files:** `gear.rs` (window title and a drawn bar over the menu, API 78 if the menu draw hook takes server windows; otherwise the item's own window as a sheet of `rustcraft_sheets`).
+**Files:** rules `gear/window.rs` (new), `gear.rs` (server sends the view on `rustcraft:gear_window` when the window opens; client draws a panel beside the chest menu in `native_screen_render_post`, API 78, found by the title key), `hook_screen_render_post.rs` (one line).
 
-- [ ] Check SRC for drawing over a server chest menu; choose; record.
-- [ ] Rules: `pub fn window_lines(g, h, suit) -> Vec<(String, String)>` (charge line «11 000 из 20 000 Е», one line per module with state and key) with a test.
-- [ ] Wiring, self-test reading the lines through the bench.
-- [ ] Commit.
+- [x] Checked: API 78 `native_screen_render_post` draws over any open screen, server menus included (`docs/native-mods.md:965`), title in `NativeScreenView.title`.
+- [x] Rules: `window::view(g, h) -> View { charge, capacity, modules: [(item, State::{Auto,On,Off})], levels }`, `grouped` («11 000»), `key_label`, tests.
+- [x] Wiring. Self-test: none (a drawn client panel); unit tests cover the view, the bots' screenshot checks the panel.
+- [x] Commit.
 
 ### Task 9: The energy shield: axe by tier, tier 4 reflects
 

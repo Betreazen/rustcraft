@@ -563,13 +563,61 @@ pub(super) fn on_player_input(game: &mut Game<'_>, player: u128, flags: i32) {
     }
 }
 
-/// `native_net_from_server` on a client: the server's dash.
+/// `native_net_from_server` on a client: the server's dash, a gear window's view.
 pub(super) fn on_net(channel: &str, data: &[u8]) {
+    if channel == rules::window::CHANNEL {
+        *WINDOW.lock().unwrap_or_else(PoisonError::into_inner) = serde_json::from_slice(data).ok();
+        return;
+    }
     if channel != DASH_CHANNEL || data.len() != 12 {
         return;
     }
     let f = |i: usize| f32::from_le_bytes([data[i], data[i + 1], data[i + 2], data[i + 3]]);
     *PUSH.lock().unwrap_or_else(PoisonError::into_inner) = Some([f(0), f(4), f(8)]);
+}
+
+// ---- Slice 18: the gear window's charge and modules, on the client ----
+
+/// The view of the gear window the server opened last.
+static WINDOW: Mutex<Option<rules::window::View>> = Mutex::new(None);
+const PANEL_GAP: f32 = 4.0;
+const PANEL_WIDTH: f32 = 168.0;
+const LINE: f32 = 11.0;
+
+/// `native_screen_render_post`: beside a gear window's sockets, its charge bar and a line a
+/// module (guide `armor`).
+pub(super) fn draw_window(game: &Game<'_>, batch: &mut horizon_client::hud::HudBatch, screen: &horizon_client::mod_api::NativeScreenView<'_>) {
+    use crate::game::rustcraft_screens as kit;
+    if screen.title.and_then(|t| t.translation_key()) != Some(rules::window::TITLE_KEY) {
+        return;
+    }
+    let Some(v) = WINDOW.lock().unwrap_or_else(PoisonError::into_inner).clone() else { return };
+    let o = [screen.rect[0] + screen.rect[2] + PANEL_GAP, screen.rect[1]];
+    let height = 38.0 + LINE * v.modules.len() as f32;
+    kit::background(game, batch, o, [PANEL_WIDTH, height]);
+    kit::label(game, batch, &kit::tr("rustcraft.gear.window.charge", "Charge"), o, [8.0, 7.0]);
+    let share = if v.capacity > 0.0 { v.charge / v.capacity } else { 0.0 };
+    kit::bar(game, batch, [o[0] + 8.0, o[1] + 17.0, PANEL_WIDTH - 16.0, 5.0], share, kit::ENERGY);
+    let amount = kit::tr_with(
+        "rustcraft.gear.window.amount",
+        "%s of %s E",
+        &[rules::window::grouped(v.charge), rules::window::grouped(v.capacity)],
+    );
+    kit::text(game, batch, &amount, o, [8.0, 25.0], kit::VALUE);
+    for (i, (item, st)) in v.modules.iter().enumerate() {
+        let name = kit::tr(&format!("item.{}", item.replace(':', ".")), item);
+        let key = Module::of(item)
+            .and_then(rules::window::key_of)
+            .map(|k| rules::window::key_label(&game.native_mod_key("rustcraft", k.name(), k.default_key())));
+        let state = match (st, key) {
+            (rules::window::State::On, Some(k)) => kit::tr_with("rustcraft.gear.window.on", "on · key %s", &[k]),
+            (rules::window::State::Off, Some(k)) => kit::tr_with("rustcraft.gear.window.off", "off · key %s", &[k]),
+            _ => kit::tr("rustcraft.gear.window.auto", "works by itself"),
+        };
+        let line = format!("{name}: {state}");
+        let colour = if *st == rules::window::State::Off { kit::TEXT } else { kit::TEXT_ON };
+        kit::text(game, batch, &kit::fit(game, &line, PANEL_WIDTH - 16.0), o, [8.0, 38.0 + LINE * i as f32], colour);
+    }
 }
 
 /// The window's tick: a dash waiting is pushed.
@@ -919,6 +967,16 @@ fn open_windows(game: &mut Game<'_>) {
         let used = rules::window_slots(g);
         if let Some(window) = game.native_open_menu_with_input(uuid, 1, title, items, 0..used) {
             state().open.insert(uuid, (window, id, g));
+            // Slice 18: the charge and the modules' lines, drawn beside the sockets.
+            let view = rules::window::view(g, &state().store.held.get(&id).cloned().unwrap_or_default());
+            match serde_json::to_vec(&view) {
+                Ok(bytes) => {
+                    if let Err(e) = game.native_net_send_to_player(uuid, rules::window::CHANNEL, &bytes) {
+                        log::warn!("rustcraft: the gear window's view was not sent: {e}");
+                    }
+                }
+                Err(e) => log::warn!("rustcraft: the gear window's view does not write: {e}"),
+            }
         }
     }
 }

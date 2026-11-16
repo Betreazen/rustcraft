@@ -56,6 +56,20 @@ pub fn key_of(m: Module) -> Option<keys::GearKey> {
     keys::GearKey::ALL.into_iter().find(|k| k.module() == Some(m))
 }
 
+/// A key's label from vanilla's name: `key.keyboard.z` → `Z`, `key.keyboard.semicolon` → `;`.
+pub fn key_label(key: &str) -> String {
+    let last = key.rsplit('.').next().unwrap_or(key);
+    match last {
+        "semicolon" => ";".to_owned(),
+        "comma" => ",".to_owned(),
+        "period" => ".".to_owned(),
+        "apostrophe" => "'".to_owned(),
+        "slash" => "/".to_owned(),
+        "unknown" => "—".to_owned(),
+        other => other.to_uppercase(),
+    }
+}
+
 /// A whole number of energy with its thousands apart, as the guide writes them: «11 000».
 pub fn grouped(n: f64) -> String {
     let digits = (n.max(0.0).round() as u64).to_string();
@@ -90,6 +104,13 @@ mod tests {
         assert_eq!(view(chest, &h).modules[0].1, State::On);
         assert_eq!(key_of(Module::Magnet).map(|k| k.default_key()), Some("key.keyboard.z"));
         assert_eq!(key_of(Module::Run), None);
+    }
+
+    #[test]
+    fn keys_are_labelled_as_the_keyboard_shows_them() {
+        assert_eq!(key_label("key.keyboard.z"), "Z");
+        assert_eq!(key_label("key.keyboard.semicolon"), ";");
+        assert_eq!(key_label("key.keyboard.f9"), "F9");
     }
 
     #[test]
