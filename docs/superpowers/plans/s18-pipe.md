@@ -1,6 +1,6 @@
 # Срез 18, поток 1 «Магистраль» — план
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** every MISSING / DIFFERS line of `docs/design/06-audit/pipe.md` (sections start, pipe, mat) becomes DONE in the game or a recorded engine limit.
 
@@ -115,5 +115,5 @@ Files: `window.rs` (rows «Гнездо / Канал / Направление / 
 - Task 4: ee1cb8f (auto chests)
 - Task 5: 9f124a6 (mode names, slowed text, «Под фальш-панелью»)
 - Task 6: 0b98a41 (covered/F4, facade back on break, sneaking wrench takes the housing)
-- Task 7: bfa1030 (node window, own mod screen ; line boost on item nets)
+- Task 7: bfa1030 (node window, own mod screen `rustcraft:node`; line boost on item nets)
 - try: not run yet (bench maintenance.txt of the pack session holds it)
