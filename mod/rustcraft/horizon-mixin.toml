@@ -1128,3 +1128,18 @@ bindings = [
   { name = "who", ty = "Option<&crate::game::native_mob_draw::NativePlayerRender<'_>>", value = "who" },
   { name = "draw", ty = "&mut crate::game::native_block_entity_draw::BlockEntityDraw", value = "&mut *draw" },
 ]
+
+# The technical enchantments at the anvil (both sides): no catalog entry, so by its target
+# (SRC crates/horizon-client/src/game/native_hooks.rs:6103, NeoForge's AnvilUpdateEvent).
+[[injection]]
+id = "anvil_update"
+target = "horizon_client::game::native_hooks::Game<'_>::native_anvil_update"
+kind = "HEAD"
+helper = "hook_anvil_update.rs"
+bindings = [
+  { name = "left", ty = "&horizon_client::items::ItemStack", value = "left" },
+  { name = "right", ty = "Option<&horizon_client::items::ItemStack>", value = "right" },
+  { name = "output", ty = "&mut Option<horizon_client::items::ItemStack>", value = "&mut *output" },
+  { name = "xp_cost", ty = "&mut i32", value = "&mut *xp_cost" },
+  { name = "material_cost", ty = "&mut i32", value = "&mut *material_cost" },
+]

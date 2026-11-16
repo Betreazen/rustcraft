@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 use crate::geom::Pos;
 
 pub mod compass;
+pub mod enchant;
 pub mod keys;
 pub mod looks;
 pub mod moves;
@@ -290,8 +291,8 @@ pub fn blade_bonus(tier: u8) -> f32 {
     if tier >= 4 { 1.0 } else { 0.0 }
 }
 
-/// The technical enchantments' books (4.12 K3, round 14: made on the crafting table, levels by
-/// how many go into a piece's window, up to III).
+/// The technical enchantments' books (4.12 K3: made on the crafting table; slice 18: put on a
+/// piece at the anvil, up to III, rustcraft_rules::gear::enchant).
 pub const BOOK_CAPACITY: &str = "rustcraft:book_capacity";
 pub const BOOK_THRIFT: &str = "rustcraft:book_thrift";
 pub const MAX_LEVEL: u8 = 3;
@@ -396,33 +397,23 @@ pub fn spend(h: &mut Held, amount: f64) -> bool {
     true
 }
 
-/// The window of a piece: its module sockets, then the two book slots.
+/// The window of a piece: its module sockets (slice 18: the books go on at the anvil).
 pub fn window_slots(g: Gear) -> usize {
-    g.sockets() + 2
+    g.sockets()
 }
 
-/// Whether `item` may stay in slot `slot` of `g`'s window: a module of its piece in a socket
-/// (no two alike), a book of its kind in the book slots (up to III).
+/// Whether `item` may stay in socket `slot` of `g`'s window: a module of its piece (no two alike).
 pub fn window_takes(g: Gear, slot: usize, item: &str, count: u32) -> bool {
-    let sockets = g.sockets();
-    if slot < sockets {
-        let Kind::Armor(piece) = g.kind else {
-            return false;
-        };
-        return Module::of(item).is_some_and(|m| m.piece() == piece) && count == 1;
-    }
-    match slot - sockets {
-        0 => item == BOOK_CAPACITY && count <= u32::from(MAX_LEVEL),
-        1 => item == BOOK_THRIFT && count <= u32::from(MAX_LEVEL),
-        _ => false,
-    }
+    let Kind::Armor(piece) = g.kind else {
+        return false;
+    };
+    slot < g.sockets() && Module::of(item).is_some_and(|m| m.piece() == piece) && count == 1
 }
 
-/// The window's slots as `Held` keeps them: (modules, capacity level, thrift level).
-pub fn from_window(g: Gear, slots: &[Option<(String, u32)>]) -> (Vec<String>, u8, u8) {
-    let sockets = g.sockets();
+/// The window's sockets as `Held` keeps them: its modules.
+pub fn from_window(g: Gear, slots: &[Option<(String, u32)>]) -> Vec<String> {
     let mut modules: Vec<String> = Vec::new();
-    for (i, s) in slots.iter().enumerate().take(sockets) {
+    for (i, s) in slots.iter().enumerate().take(g.sockets()) {
         if let Some((item, n)) = s
             && window_takes(g, i, item, *n)
             && !modules.contains(item)
@@ -430,15 +421,7 @@ pub fn from_window(g: Gear, slots: &[Option<(String, u32)>]) -> (Vec<String>, u8
             modules.push(item.clone());
         }
     }
-    let level = |i: usize, book: &str| {
-        slots
-            .get(sockets + i)
-            .cloned()
-            .flatten()
-            .filter(|(item, _)| item == book)
-            .map_or(0, |(_, n)| n.min(u32::from(MAX_LEVEL)) as u8)
-    };
-    (modules, level(0, BOOK_CAPACITY), level(1, BOOK_THRIFT))
+    modules
 }
 
 #[cfg(test)]
@@ -469,21 +452,15 @@ mod tests {
     }
 
     #[test]
-    fn a_window_keeps_modules_of_its_piece_and_books() {
+    fn a_window_keeps_modules_of_its_piece() {
         let boots = Gear { kind: Kind::Armor(Piece::Boots), tier: 3 };
-        assert_eq!(window_slots(boots), 4);
-        let slots = vec![
-            Some(("rustcraft:pm_jump".to_owned(), 1)),
-            Some(("rustcraft:pm_night".to_owned(), 1)),
-            Some((BOOK_CAPACITY.to_owned(), 2)),
-            Some((BOOK_THRIFT.to_owned(), 5)),
-        ];
-        let (modules, cap, thrift) = from_window(boots, &slots);
-        assert_eq!(modules, vec!["rustcraft:pm_jump".to_owned()], "night vision is the helmet's");
-        assert_eq!((cap, thrift), (2, 3), "more than three books give level III");
+        assert_eq!(window_slots(boots), 2);
+        let slots = vec![Some(("rustcraft:pm_jump".to_owned(), 1)), Some(("rustcraft:pm_night".to_owned(), 1))];
+        assert_eq!(from_window(boots, &slots), vec!["rustcraft:pm_jump".to_owned()], "night vision is the helmet's");
         let blade = Gear { kind: Kind::Blade, tier: 2 };
-        assert_eq!(window_slots(blade), 2);
+        assert_eq!(window_slots(blade), 0, "a weapon has no window: its books go on at the anvil");
         assert!(!window_takes(blade, 0, "rustcraft:pm_run", 1));
+        assert!(!window_takes(boots, 0, BOOK_CAPACITY, 1));
     }
 
     #[test]

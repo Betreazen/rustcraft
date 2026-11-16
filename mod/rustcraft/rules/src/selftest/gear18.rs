@@ -6,18 +6,20 @@
 //! - Armour of the next tier is made from the piece below and the new alloy, keeping the piece's
 //!   number: its charge, modules and enchantments.
 //! - A zipline rope comes down by itself five minutes after it was tied, both anchors with it.
+//! - The anvil puts technical books on a piece: I, then II, then III, and no further.
 
 use super::{Bench, Build, Scenario, at, plot_area};
 use crate::gear::{Held, Module};
 use crate::geom::Pos;
 use crate::tuning::Tuning;
 
-pub const ALL: [Build; 5] = [
+pub const ALL: [Build; 6] = [
     charger_fills_the_suit_capacity,
     charger_skips_the_zipline,
     turret_aims_at_its_target,
     armour_upgrade_keeps_the_piece,
     rope_comes_down_in_time,
+    anvil_puts_the_books_on,
 ];
 
 const STONE: &str = "minecraft:stone";
@@ -143,4 +145,15 @@ fn rope_comes_down_in_time(o: Pos, _: &Tuning) -> Scenario {
             let saved = b.ropes().iter().any(|r| r.a == a && r.b == far);
             Ok(!saved && b.block(a) == "minecraft:air" && b.block(far) == "minecraft:air")
         })
+}
+
+fn anvil_puts_the_books_on(o: Pos, _: &Tuning) -> Scenario {
+    Scenario::new("gear_anvil_puts_the_books_on", plot_area(o)).check("Capacity I, II, III on a blade, a fourth book does nothing", |b, _| {
+        let got = b.anvil_capacity("rustcraft:blade_3", 1, 4);
+        if got == [Some(1), Some(2), Some(3), None] {
+            Ok(())
+        } else {
+            Err(format!("the anvil gave {got:?}"))
+        }
+    })
 }

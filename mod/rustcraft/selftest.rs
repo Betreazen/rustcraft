@@ -862,6 +862,10 @@ impl Bench for GameBench<'_, '_> {
         crate::game::rustcraft_gear::held(&stack)
     }
 
+    fn anvil_capacity(&mut self, piece: &str, level: u8, books: usize) -> Vec<Option<u8>> {
+        crate::game::rustcraft_gear::anvil_for_selftest(piece, level, books)
+    }
+
     fn age_rope(&mut self, id: u64, ms: u64) -> Result<(), String> {
         crate::game::rustcraft_zipline::age_rope_for_selftest(self.game, id, ms)
     }

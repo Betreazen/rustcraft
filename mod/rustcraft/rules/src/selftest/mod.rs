@@ -337,6 +337,11 @@ pub trait Bench {
     fn turret_aim(&self, _pos: Pos) -> Option<(f32, f32)> {
         None
     }
+    /// What the anvil makes of a piece `piece` (with no enchantment yet) and `books` Capacity
+    /// books of level `level` one after another: the piece's Capacity level after each.
+    fn anvil_capacity(&mut self, _piece: &str, _level: u8, _books: usize) -> Vec<Option<u8>> {
+        Vec::new()
+    }
     /// Rope `id` as if tied `ms` earlier.
     fn age_rope(&mut self, _id: u64, _ms: u64) -> Result<(), String> {
         Err("not on this bench".to_owned())

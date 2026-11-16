@@ -652,7 +652,7 @@
   "item.rustcraft.pm_night": "Night Vision Module",
   "item.rustcraft.pm_magnet": "Magnet Module",
   "item.rustcraft.pm_damper": "Damper Module",
-  "rustcraft.gear.window": "Modules: %s · books: Capacity, Thrift",
+  "rustcraft.gear.window": "Modules: %s · enchantments at the anvil",
   "rustcraft.gear.not_ready": "The piece is getting ready, try again",
   "rustcraft.gear.empty": "No charge: put it on a charger",
   "rustcraft.util.plate_full": "Everything on you is charged",
@@ -1035,5 +1035,8 @@
   "rustcraft.backpack.wearing": "A backpack is on your back already",
   "rustcraft.backpack.worn": "The backpack is on your back",
   "rustcraft.backpack.taken_off": "The backpack is off your back",
-  "rustcraft.backpack.no_room": "No room in the inventory to take the backpack off"
+  "rustcraft.backpack.no_room": "No room in the inventory to take the backpack off",
+  "rustcraft.enchant.capacity": "Capacity %s",
+  "rustcraft.enchant.thrift": "Thrift %s",
+  "rustcraft.gear.no_window": "No sockets: put the technical books on at the anvil"
 }

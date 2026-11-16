@@ -221,6 +221,7 @@ pub(super) fn on_inventory_tick(game: &mut Game<'_>, slot: i32) {
     };
     let Some(g) = gear else { return };
     if numbered {
+        sync_levels(game, slot);
         show_bar(game, slot, g);
         return;
     }
@@ -255,6 +256,150 @@ fn bar_of(stack: &ItemStack) -> Option<u8> {
 }
 
 const MODEL_DATA: &str = "minecraft:custom_model_data";
+
+// ---- Slice 18: the technical enchantments at the anvil ----
+
+const GLINT: &str = "minecraft:enchantment_glint_override";
+const LORE: &str = "minecraft:lore";
+
+fn byte_of(data: Option<&horizon_world::nbt::Compound>, key: &str) -> Option<u8> {
+    match data?.get(&JavaString::from(key))? {
+        Tag::Byte(v) => u8::try_from(*v).ok(),
+        _ => None,
+    }
+}
+
+/// A lore line «Ёмкость II».
+fn lore_line(book: rules::enchant::Book, level: u8) -> Tag {
+    Tag::Compound(horizon_world::nbt::Compound::from([
+        (JavaString::from("translate"), Tag::String(JavaString::from(book.name_key()))),
+        (JavaString::from("with"), Tag::List(vec![Tag::String(JavaString::from(rules::enchant::roman(level)))])),
+        (JavaString::from("italic"), Tag::Byte(0)),
+        (JavaString::from("color"), Tag::String(JavaString::from("aqua"))),
+    ]))
+}
+
+/// Writes a piece's levels on its stack: custom data for the anvil, the glint and lore lines.
+fn write_levels(stack: &mut ItemStack, capacity: u8, thrift: u8) {
+    use rules::enchant::{Book, CAPACITY_KEY, THRIFT_KEY};
+    let mut data = stack.custom_data().cloned().unwrap_or_default();
+    data.insert(JavaString::from(CAPACITY_KEY), Tag::Byte(capacity as i8));
+    data.insert(JavaString::from(THRIFT_KEY), Tag::Byte(thrift as i8));
+    stack.data_mut().set_other(CUSTOM_DATA, Some(Tag::Compound(data)));
+    let lines: Vec<Tag> = [(Book::Capacity, capacity), (Book::Thrift, thrift)]
+        .into_iter()
+        .filter(|(_, l)| *l > 0)
+        .map(|(b, l)| lore_line(b, l))
+        .collect();
+    let any = !lines.is_empty();
+    stack.data_mut().set_other(LORE, any.then(|| Tag::List(lines)));
+    stack.data_mut().set_other(GLINT, any.then_some(Tag::Byte(1)));
+}
+
+/// A carried piece's levels and the server's agree: the stack's (from the anvil) win when it has
+/// them; a piece without them (older, or new) gets the server's written on.
+fn sync_levels(game: &mut Game<'_>, slot: i32) {
+    use rules::enchant::{CAPACITY_KEY, THRIFT_KEY};
+    let Some(stack) = game.native_carried_stack(slot) else { return };
+    let Some(id) = id_of(stack) else { return };
+    let on_stack = (byte_of(stack.custom_data(), CAPACITY_KEY), byte_of(stack.custom_data(), THRIFT_KEY));
+    let mut s = state();
+    let h = s.store.held.entry(id).or_default();
+    match on_stack {
+        (Some(c), Some(t)) => {
+            let (c, t) = (c.min(rules::MAX_LEVEL), t.min(rules::MAX_LEVEL));
+            if (h.capacity, h.thrift) != (c, t) {
+                h.capacity = c;
+                h.thrift = t;
+                s.dirty = true;
+            }
+        }
+        _ => {
+            let (c, t) = (h.capacity, h.thrift);
+            drop(s);
+            if let Some(stack) = game.native_carried_stack(slot) {
+                write_levels(stack, c, t);
+            }
+        }
+    }
+}
+
+/// The self-test: a piece through the anvil with `books` Capacity books of `level`, one after
+/// another; its Capacity level after each (None when the anvil made nothing).
+pub(super) fn anvil_for_selftest(piece: &str, level: u8, books: usize) -> Vec<Option<u8>> {
+    let mut left = ItemStack::new(piece, 1);
+    let mut book = ItemStack::new(rules::BOOK_CAPACITY, 1);
+    let mut data = horizon_world::nbt::Compound::new();
+    data.insert(JavaString::from(rules::enchant::LEVEL_KEY), Tag::Byte(level as i8));
+    book.data_mut().set_other(CUSTOM_DATA, Some(Tag::Compound(data)));
+    let mut out = Vec::new();
+    for _ in 0..books {
+        let (mut output, mut xp, mut cost) = (None, 0, 0);
+        on_anvil_update(&left, Some(&book), &mut output, &mut xp, &mut cost);
+        match output {
+            Some(made) => {
+                out.push(byte_of(made.custom_data(), rules::enchant::CAPACITY_KEY));
+                left = made;
+            }
+            None => out.push(None),
+        }
+    }
+    out
+}
+
+/// A book's level: I for one made on the crafting table.
+fn book_level(stack: &ItemStack) -> u8 {
+    byte_of(stack.custom_data(), rules::enchant::LEVEL_KEY).unwrap_or(1).clamp(1, rules::MAX_LEVEL)
+}
+
+/// `native_anvil_update` (both sides): a technical book on a gear piece raises its level; two
+/// books of a kind make one of the next level (guide `enchants`).
+pub(super) fn on_anvil_update(
+    left: &ItemStack,
+    right: Option<&ItemStack>,
+    output: &mut Option<ItemStack>,
+    xp_cost: &mut i32,
+    material_cost: &mut i32,
+) {
+    use rules::enchant::{self as e, Book};
+    let Some(right) = right else { return };
+    let Some(book) = Book::of(&right.item) else { return };
+    let level = book_level(right);
+    if Book::of(&left.item) == Some(book) {
+        let new = e::combine(book_level(left), level);
+        let mut out = left.clone();
+        out.count = 1;
+        let mut data = out.custom_data().cloned().unwrap_or_default();
+        data.insert(JavaString::from(e::LEVEL_KEY), Tag::Byte(new as i8));
+        out.data_mut().set_other(CUSTOM_DATA, Some(Tag::Compound(data)));
+        out.data_mut().set_other(LORE, Some(Tag::List(vec![lore_line(book, new)])));
+        *output = Some(out);
+        *xp_cost = e::cost(new);
+        *material_cost = 1;
+        return;
+    }
+    if Gear::of(&left.item).is_none() {
+        return;
+    }
+    let data = left.custom_data();
+    let (capacity, thrift) = (
+        byte_of(data, e::CAPACITY_KEY).unwrap_or(0),
+        byte_of(data, e::THRIFT_KEY).unwrap_or(0),
+    );
+    let now = if book == Book::Capacity { capacity } else { thrift };
+    let Some(new) = e::apply(now, level) else {
+        *output = None;
+        return;
+    };
+    let mut out = left.clone();
+    match book {
+        Book::Capacity => write_levels(&mut out, new, thrift),
+        Book::Thrift => write_levels(&mut out, capacity, new),
+    }
+    *output = Some(out);
+    *xp_cost = e::cost(new);
+    *material_cost = 1;
+}
 
 /// The `minecraft:custom_model_data` of a lit blade or shield: its first flag (the item model's
 /// `minecraft:condition` shows the field; tools/gen_gear_dark.py).
@@ -363,6 +508,11 @@ pub(super) fn on_use_item(game: &mut Game<'_>, stack: &ItemStack, claimed: &mut 
     let Some(player) = game.native_acting_player() else { return };
     if player.sneaking {
         *claimed = true;
+        // Slice 18: a weapon has no sockets: its books go on at the anvil.
+        if g.sockets() == 0 {
+            tell(game, player.uuid, line("rustcraft.gear.no_window", "No sockets: put the technical books on at the anvil", &[]));
+            return;
+        }
         match id_of(stack) {
             Some(id) => state().opening.push((player.uuid, id, g)),
             None => tell(game, player.uuid, line("rustcraft.gear.not_ready", "The piece is getting ready, try again", &[])),
@@ -555,7 +705,7 @@ fn shoot(game: &mut Game<'_>, player: &horizon_client::mod_api::NativeServerPlay
     }
 }
 
-/// `native_menu_input_closed`: a piece's window keeps its modules and books.
+/// `native_menu_input_closed`: a piece's window keeps its modules.
 pub(super) fn on_menu_input_closed(uuid: u128, window: i32, slots: &mut [Option<ItemStack>]) {
     let mut s = state();
     let Some(&(open, id, g)) = s.open.get(&uuid) else { return };
@@ -567,34 +717,16 @@ pub(super) fn on_menu_input_closed(uuid: u128, window: i32, slots: &mut [Option<
         .iter()
         .map(|x| x.as_ref().filter(|x| x.count > 0).map(|x| (x.item.to_string(), x.count)))
         .collect();
-    let (modules, capacity, thrift) = rules::from_window(g, &view);
+    let modules = rules::from_window(g, &view);
     // What stays in the piece is taken out of the window; the rest goes back to the player.
-    let sockets = g.sockets();
-    for (i, slot) in slots.iter_mut().enumerate() {
-        let Some(st) = slot.as_mut() else { continue };
-        let keep = if i < sockets {
-            modules.iter().any(|m| *m == *st.item)
-        } else {
-            let level = if i == sockets { capacity } else { thrift };
-            level > 0 && rules::window_takes(g, i, &st.item, 1)
-        };
-        if !keep {
-            continue;
-        }
-        if i < sockets {
+    for slot in slots.iter_mut().take(g.sockets()) {
+        if slot.as_ref().is_some_and(|st| modules.iter().any(|m| *m == *st.item)) {
             *slot = None;
-        } else {
-            let level = u32::from(if i == sockets { capacity } else { thrift });
-            st.count -= level.min(st.count);
-            if st.count == 0 {
-                *slot = None;
-            }
         }
     }
     let h = s.store.held.entry(id).or_default();
+    h.on.retain(|m| modules.contains(m));
     h.modules = modules;
-    h.capacity = capacity;
-    h.thrift = thrift;
     s.dirty = true;
     save(&mut s);
 }
@@ -1250,14 +1382,12 @@ fn open_windows(game: &mut Game<'_>) {
             let mut items: Vec<Option<ItemStack>> = (0..g.sockets())
                 .map(|i| h.modules.get(i).map(|m| ItemStack::new(m, 1)))
                 .collect();
-            items.push((h.capacity > 0).then(|| ItemStack::new(rules::BOOK_CAPACITY, u32::from(h.capacity))));
-            items.push((h.thrift > 0).then(|| ItemStack::new(rules::BOOK_THRIFT, u32::from(h.thrift))));
             items.resize(9, None);
             items
         };
         let title = line(
             "rustcraft.gear.window",
-            "Modules: %s · books: Capacity, Thrift",
+            "Modules: %s · enchantments at the anvil",
             &[Text::literal(g.sockets().to_string())],
         );
         let used = rules::window_slots(g);

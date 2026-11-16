@@ -995,11 +995,14 @@ fn declare_gear(items: &mut Vec<Item>) {
         max_stack_size: Some(1),
         ..Item::default()
     });
+    // Slice 18: the books shine like enchanted ones (their level is in their custom data and
+    // goes on at the anvil, rustcraft_gear).
     for book in [gear::BOOK_CAPACITY, gear::BOOK_THRIFT] {
         items.push(Item {
             id: book.into(),
             template: "minecraft:book".into(),
             max_stack_size: Some(16),
+            components: BTreeMap::from([("minecraft:enchantment_glint_override".to_owned(), serde_json::json!(true))]),
             ..Item::default()
         });
     }

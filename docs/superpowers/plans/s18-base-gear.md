@@ -207,8 +207,8 @@ Audit: backpack «Рюкзак из звёздной стали (81 слот) в
 Audit: enchants «Книга накладывается на наковальне, уровни складываются» DIFFERS.
 
 **Files:** rules `gear/enchant.rs` (new: `Book { kind, level }` from custom data, `combine(a, b)` like vanilla books, `apply(piece_level, book_level)`, level cost), hook file `hook_anvil_update.rs` (target), `gear.rs` (levels mirrored on the stack: custom data `rustcraft:cap` / `rustcraft:thrift`, glint, lore; the window loses its book slots, books left in old pieces stay counted).
-- [ ] Tests: I+I = II, II+I = II, III+III = III; piece 1 + book 1 = 2; piece 2 + book 1 = 2; cost.
-- [ ] Commit.
+- [x] Tests: I+I = II, II+I = II, III+III = III; piece 1 + book 1 = 2; piece 2 + book 1 = 2; cost.
+- [x] Commit.
 
 ### Task 16: The anchor everywhere and its window
 
