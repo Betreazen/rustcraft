@@ -5,13 +5,14 @@
 //!   медностали берётся сплав этой ступени»).
 
 use super::magistral::{channel, line};
-use super::{Bench, Build, Scenario, at, plot_area};
+use super::transport::{chest, fill, item_line};
+use super::{Bench, Build, Scenario, at, count_of, plot_area};
 use crate::housing::Diagnosis;
 use crate::net::topology::ChannelKind;
 use crate::geom::Pos;
 use crate::tuning::Tuning;
 
-pub const ALL: [Build; 2] = [recipes_craft, node_tiers];
+pub const ALL: [Build; 3] = [recipes_craft, node_tiers, chests_work_both_ways];
 
 /// A handbook recipe: its three rows, what each letter is, what it makes and how many.
 pub struct Recipe {
@@ -145,6 +146,32 @@ fn node_tiers(o: Pos, t: &Tuning) -> Scenario {
                 Err(_) if b.property(o, "tier").as_deref() == Some("2") => Ok(()),
                 other => Err(format!("a lower tier swapped: {other:?}")),
             }
+        })
+}
+
+/// Guide `quickstart` 5: ore in the left chest, an electric furnace beside the line with a
+/// crystal against it, an empty chest on the right; no joint is set. The magistral gives the
+/// furnace the ore and the right chest the ingots, and never moves ore from chest to chest.
+fn chests_work_both_ways(o: Pos, _t: &Tuning) -> Scenario {
+    let (left, right) = (chest(o, 1), chest(o, 3));
+    let furnace = at(o, [2, 0, -1]);
+    Scenario::new("pipe_chests_work_both_ways_by_default", plot_area(o))
+        .then("chest, furnace with a crystal, chest on an item line", move |b, _| {
+            item_line(b, o, 1, 3, &[1, 3])?;
+            b.place(furnace, "rustcraft:furnace", &[])?;
+            b.place(at(o, [2, 0, -2]), "rustcraft:crystal", &[])?;
+            fill(b, left, "minecraft:raw_iron", 2)
+        })
+        .until("an ingot reaches the right chest", 1200, move |b, _| {
+            let items = b.items(right);
+            if count_of(&items, "minecraft:raw_iron") > 0 {
+                return Err("ore went from chest to chest".into());
+            }
+            Ok(count_of(&items, "minecraft:iron_ingot") >= 1)
+        })
+        .check("the left chest gave its ore", move |b, _| {
+            let n = count_of(&b.items(left), "minecraft:raw_iron");
+            if n == 0 { Ok(()) } else { Err(format!("{n} ore left in the left chest")) }
         })
 }
 
