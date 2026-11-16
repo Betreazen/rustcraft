@@ -1027,5 +1027,7 @@
   "rustcraft.gear.window.amount": "%s of %s E",
   "rustcraft.gear.window.on": "on · key %s",
   "rustcraft.gear.window.off": "off · key %s",
-  "rustcraft.gear.window.auto": "works by itself"
+  "rustcraft.gear.window.auto": "works by itself",
+  "rustcraft.compass.mode_structures": "Compass: structures",
+  "rustcraft.compass.mode_biomes": "Compass: biomes"
 }

@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::geom::Pos;
 
+pub mod compass;
 pub mod keys;
 pub mod moves;
 pub mod shield;

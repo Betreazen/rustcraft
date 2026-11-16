@@ -166,10 +166,10 @@ Audit: rifle «Сцена: луч выстрела» MISSING, «приближе
 
 Audit: scout_compass «Стрелка показывает на цель» MISSING, «Правый клик переключает цель» MISSING.
 
-**Files:** rules `gear/compass.rs` (new: `Mode { Places, Biomes }`, `toggle`, which kind of place a mode takes); `gear.rs` (right click toggles, stored per player); `explore.rs` gets one added function argument-free accessor (stream 6 file: additive only); item model `items/scout_compass.json` → `range_dispatch` on `minecraft:compass` target `lodestone`, 32 generated textures `scout_compass_00..31.png` (needle drawn over the compass by `tools/gen_compass.py`); server writes `minecraft:lodestone_tracker` (target, tracked false) on the held compass when its target changes.
+**Files:** rules `gear/compass.rs` (new: `Mode { Structures, Biomes }`, `toggled`, `takes`, `target(atlas, mode, …)`); `gear.rs` (right click toggles, stored per player); `explore.rs` (stream 6's file, smallest change: `player` takes the compass `Option<Mode>` instead of a bool and returns the needle's target); item model `items/scout_compass.json` → `range_dispatch` on `minecraft:compass` target `lodestone`, 32 generated textures `scout_compass_00..31.png` (needle drawn over the compass by `tools/gen_scout_compass.py`); `native_inventory_tick` writes `minecraft:lodestone_tracker` (target, tracked false) on a carried compass when its target changes.
 
-- [ ] Tests: toggle, filter of places by mode.
-- [ ] Commit.
+- [x] Tests: toggle, filter of places by mode.
+- [x] Commit.
 
 ### Task 12: Zipline ropes come down after 5 minutes
 

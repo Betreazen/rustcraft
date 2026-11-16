@@ -105,6 +105,9 @@ struct State {
     /// Players whose leftover burst modifier (from a logout or a restart mid-burst) was taken
     /// off since they came on.
     cleaned: HashSet<u128>,
+    /// Slice 18: each player's scout compass mode and the place its needle points at.
+    compass_mode: HashMap<u128, rules::compass::Mode>,
+    needles: HashMap<u128, (String, [i32; 3])>,
 }
 
 /// The client's side of the dash: a push the server asked for, applied at the window's next tick.
@@ -207,6 +210,7 @@ fn needs_full(game: &mut Game<'_>, slot: i32) -> f64 {
 
 /// `native_inventory_tick`: a gear piece without a number gets one.
 pub(super) fn on_inventory_tick(game: &mut Game<'_>, slot: i32) {
+    point_compass(game, slot);
     let (gear, numbered) = match game.native_carried_stack(slot) {
         Some(s) => (Gear::of(&s.item), id_of(s).is_some()),
         None => return,
@@ -273,9 +277,65 @@ pub(super) fn item_bar(stack: &ItemStack, bar: &mut Option<(i32, u32)>) {
     }
 }
 
+// ---- Slice 18: the scout compass's needle and its two targets ----
+
+const LODESTONE: &str = "minecraft:lodestone_tracker";
+
+/// The place a carried scout compass points at, as its `minecraft:lodestone_tracker` (the item
+/// model's needle reads it), written when it changed; taken off when there is none.
+fn point_compass(game: &mut Game<'_>, slot: i32) {
+    let holds = game
+        .native_carried_stack(slot)
+        .is_some_and(|s| *s.item == *crate::game::rustcraft_explore::COMPASS);
+    if !holds {
+        return;
+    }
+    let Some(player) = game.native_acting_player() else { return };
+    let needle = state().needles.get(&player.uuid).cloned();
+    let want = needle.map(|(dimension, pos)| {
+        Tag::Compound(horizon_world::nbt::Compound::from([
+            (
+                JavaString::from("target"),
+                Tag::Compound(horizon_world::nbt::Compound::from([
+                    (JavaString::from("dimension"), Tag::String(JavaString::from(dimension.as_str()))),
+                    (JavaString::from("pos"), Tag::IntArray(pos.to_vec())),
+                ])),
+            ),
+            (JavaString::from("tracked"), Tag::Byte(0)),
+        ]))
+    });
+    let Some(stack) = game.native_carried_stack(slot) else { return };
+    if stack.data().and_then(|d| d.other(LODESTONE)) == want.as_ref() {
+        return;
+    }
+    stack.data_mut().set_other(LODESTONE, want);
+}
+
+/// A right click with the scout compass switches what it looks for: structures or biomes.
+fn switch_compass(game: &mut Game<'_>, player: u128) {
+    let mode = {
+        let mut s = state();
+        let m = s.compass_mode.entry(player).or_default();
+        *m = m.toggled();
+        *m
+    };
+    let said = match mode {
+        rules::compass::Mode::Structures => line("rustcraft.compass.mode_structures", "Compass: structures", &[]),
+        rules::compass::Mode::Biomes => line("rustcraft.compass.mode_biomes", "Compass: biomes", &[]),
+    };
+    tell(game, player, said);
+}
+
 /// `native_use_item`: a sneaking right click with a piece opens its window; the rifle shoots.
 pub(super) fn on_use_item(game: &mut Game<'_>, stack: &ItemStack, claimed: &mut bool) {
     if *claimed {
+        return;
+    }
+    if *stack.item == *crate::game::rustcraft_explore::COMPASS {
+        if let Some(player) = game.native_acting_player() {
+            *claimed = true;
+            switch_compass(game, player.uuid);
+        }
         return;
     }
     let Some(g) = Gear::of(&stack.item) else { return };
@@ -842,7 +902,12 @@ pub(super) fn tick(game: &mut Game<'_>, dimension: &str) {
         let compass = worn
             .iter()
             .any(|(slot, st)| *slot == EquipmentSlot::MainHand && *st.item == *crate::game::rustcraft_explore::COMPASS);
-        crate::game::rustcraft_explore::player(game, &p, compass);
+        let mode = compass.then(|| state().compass_mode.get(&p.uuid).copied().unwrap_or_default());
+        let needle = crate::game::rustcraft_explore::player(game, &p, mode);
+        match needle {
+            Some(at) => state().needles.insert(p.uuid, (p.dimension.clone(), at)),
+            None => state().needles.remove(&p.uuid),
+        };
         player_tick(game, &p, &worn);
     }
     if now.is_multiple_of(200) {
