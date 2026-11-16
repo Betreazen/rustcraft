@@ -429,6 +429,47 @@ pub(super) fn rescan(
     save(game, dimension);
 }
 
+/// S6 (slice 18): after the level's topology is made, each terminal that touches no cell shows
+/// the storage on an item net a housing beside it is on (rustcraft_rules::storage::cells::
+/// terminal_on_net).
+pub(super) fn link_far_terminals(
+    game: &Game<'_>,
+    dimension: &str,
+    topology: &rustcraft_rules::net::topology::Topology,
+) {
+    let linked = with_level(dimension, |level| {
+        let mut blocks: BTreeMap<u32, Vec<Pos>> = BTreeMap::new();
+        for (&c, &id) in &level.cell_of {
+            blocks.entry(id).or_default().push(c);
+        }
+        for (&t, id) in &level.terminals {
+            if let Some(id) = id {
+                blocks.entry(*id).or_default().push(t);
+            }
+        }
+        let far: Vec<Pos> = level
+            .terminals
+            .iter()
+            .filter(|(_, id)| id.is_none())
+            .map(|(t, _)| *t)
+            .collect();
+        let mut linked = Vec::new();
+        for t in far {
+            let found = cells::terminal_on_net(t, &blocks, topology);
+            if let Some(id) = found {
+                level.terminals.insert(t, found);
+                linked.push(id);
+            }
+        }
+        linked
+    })
+    .unwrap_or_default();
+    // S3: a far terminal's stack module counts too.
+    for id in linked {
+        refresh_stack_module(game, dimension, id, None);
+    }
+}
+
 fn write_id(game: &mut Game<'_>, cell: Pos, id: u32) {
     let written = game.native_with_mod_block_entity(cell, |entity| {
         write_int(&mut entity.nbt, ID_KEY, id as i32);

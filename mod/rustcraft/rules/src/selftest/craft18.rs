@@ -3,6 +3,7 @@
 //! - The storage keeps stacks with components (an enchanted book, a named block) whole.
 //! - The stack module in the terminal's socket raises the stack of the whole storage (S3); the
 //!   filter module goes into its own socket and comes back out.
+//! - An extra terminal anywhere on the storage's magistral shows the storage (S6).
 
 use super::transport::{chest, item_line, joint};
 use super::{Bench, Build, Scenario, at, plot_area, same};
@@ -12,7 +13,8 @@ use crate::storage::modules::{FILTER, SOCKET_FILTER, SOCKET_STACK, STACK_MODULES
 use crate::storage::terminal::{self, Press};
 use crate::tuning::Tuning;
 
-pub const ALL: [Build; 3] = [
+pub const ALL: [Build; 4] = [
+    storage_far_terminal,
     storage_keeps_component_stacks,
     storage_stack_module_raises_the_stack,
     storage_filter_socket,
@@ -109,5 +111,17 @@ fn storage_filter_socket(o: Pos, _: &Tuning) -> Scenario {
         .check("it comes back out", move |b, _| {
             let after = b.press_cursor(t, socket(SOCKET_FILTER)?, None)?;
             same("cursor", after, Some((FILTER.to_owned(), 1)))
+        })
+}
+
+fn storage_far_terminal(o: Pos, _: &Tuning) -> Scenario {
+    let far = at(o, [1, 0, 1]);
+    Scenario::new("storage18_far_terminal_on_the_net", plot_area(o))
+        .then("a storage, and a terminal by housing 1 away from its cells", move |b, _| {
+            storage_on_a_net(b, o)?;
+            b.place(far, TERMINAL, &[])
+        })
+        .until("the far terminal shows the storage", 40, move |b, _| {
+            Ok(b.storage(far).is_some_and(|v| v.cells == 2))
         })
 }

@@ -89,12 +89,60 @@ pub fn terminal_storage(terminal: Pos, cell_of: &HashMap<Pos, u32>) -> Option<u3
         .find_map(|face| cell_of.get(&step(terminal, face)).copied())
 }
 
+/// S6 (slice 18): the storage an extra terminal at `terminal`, touching no cell, shows: one whose
+/// blocks (`storages`: each storage's cells and the terminals that touch them) touch a housing
+/// of an item net that a housing beside the terminal is on; the lowest id when there are more.
+pub fn terminal_on_net(
+    terminal: Pos,
+    storages: &BTreeMap<u32, Vec<Pos>>,
+    topology: &crate::net::topology::Topology,
+) -> Option<u32> {
+    use crate::net::topology::ChannelKind;
+    let beside: BTreeSet<Pos> = Face::ALL.into_iter().map(|f| step(terminal, f)).collect();
+    let nets: Vec<&BTreeSet<Pos>> = topology
+        .nets
+        .iter()
+        .filter(|n| n.kind == ChannelKind::Item && n.housings.iter().any(|h| beside.contains(h)))
+        .map(|n| &n.housings)
+        .collect();
+    storages
+        .iter()
+        .find(|(_, blocks)| {
+            blocks.iter().any(|b| {
+                Face::ALL
+                    .into_iter()
+                    .any(|f| nets.iter().any(|n| n.contains(&step(*b, f))))
+            })
+        })
+        .map(|(id, _)| *id)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     fn cells(list: &[(Pos, Option<u32>)]) -> BTreeMap<Pos, Option<u32>> {
         list.iter().copied().collect()
+    }
+
+    #[test]
+    fn an_extra_terminal_on_the_net_shows_the_storage() {
+        // S6: housings x 1..=10 with an item channel; cells beside housing 10, a terminal beside
+        // housing 2; another net's housing far off.
+        use crate::net::topology::{Channel, ChannelKind, Housing, Layout, Node, analyse};
+        let mut layout = Layout::default();
+        layout.nodes.insert([0, 0, 0], Node { tier: 1 });
+        let item = Some(Channel { kind: ChannelKind::Item, tier: 1 });
+        for x in 1..=10 {
+            layout.housings.insert([x, 0, 0], Housing { slots: [item, None, None, None] });
+        }
+        layout.nodes.insert([50, 0, 0], Node { tier: 1 });
+        layout.housings.insert([51, 0, 0], Housing { slots: [item, None, None, None] });
+        let t = analyse(&layout, &crate::tuning::Tuning::default());
+        let storages = BTreeMap::from([(4, vec![[10, 1, 0], [11, 1, 0]])]);
+        assert_eq!(terminal_on_net([2, 1, 0], &storages, &t), Some(4));
+        assert_eq!(terminal_on_net([51, 1, 0], &storages, &t), None, "another net");
+        assert_eq!(terminal_on_net([2, 5, 0], &storages, &t), None, "off the magistral");
     }
 
     #[test]

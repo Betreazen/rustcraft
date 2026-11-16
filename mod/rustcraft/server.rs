@@ -528,6 +528,8 @@ fn rescan(game: &mut Game<'_>, dimension: &str, level: &mut LevelNet) {
     monorail::rescan(game, dimension, &found.rails, &stations);
     zipline::rescan(game, dimension, &found.anchors);
     level.topology = topology::analyse(&level.layout, &TUNING);
+    // Slice 18 (S6): extra terminals anywhere on the storage's magistral.
+    storage::link_far_terminals(game, dimension, &level.topology);
     level.recipes = machines::load_recipes(game);
     orders::forget_book();
     machines::teach_slot_rules(game, &level.recipes);
