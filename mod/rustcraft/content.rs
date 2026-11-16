@@ -803,6 +803,13 @@ pub fn declare_items(items: &mut Vec<Item>) {
             ..Item::default()
         });
     }
+    // Slice 18: starsteel's backpack, worn on the back (rustcraft_backpack).
+    items.push(Item {
+        id: rustcraft_rules::backpack::STAR.into(),
+        template: "minecraft:iron_ingot".into(),
+        max_stack_size: Some(1),
+        ..Item::default()
+    });
     for (_, id) in rustcraft_rules::modules::ITEMS {
         items.push(Item {
             id: id.into(),

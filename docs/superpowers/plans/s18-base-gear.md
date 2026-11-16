@@ -36,7 +36,8 @@
 
 ## Пределы движка
 
-(filled in as tasks confirm them)
+1. **Слот рюкзака на спине.** В Horizon нет API, которое добавляет игроку слот снаряжения: `EquipmentSlot` — восемь слотов игры (`SRC/crates/horizon-world/src/player_inventory.rs:8-17`), в `docs/native-mods.md` нет хука регистрации слота (поиск «equipment slot», «accessory», «curio», «trinket»). Сделано вместо этого: свой слот мода — сервер хранит, какой рюкзак надет на игрока (`data/rustcraft_backpacks.dat`, `worn`), рюкзак рисуется на спине слоем игрока (API 149), открывается клавишей B, снимается B с приседанием. В окне инвентаря игры этого слота не видно.
+2. **Окно на 81 слот.** Окно-сундук игры — не больше 6 рядов (54 слота). Рюкзак из звёздной стали открывается страницами по 45 слотов со стрелками в шестом ряду.
 
 ---
 
@@ -196,10 +197,10 @@ Audit: jetpack «джетпак на спине, пламя» MISSING; zipline �
 
 Audit: backpack «Рюкзак из звёздной стали (81 слот) в своём слоте на спине» MISSING.
 
-**Files:** content: item `backpack_3` + recipe `lbl|lcl|lll` with starsteel; `backpack.rs`: worn into the mod's own back slot (a sneaking right click with it puts it on, the B key opens it, an empty-hand sneaking B takes it off), contents in the backpack store, a window of 81 slots as pages of 54 + 27.
-- [ ] Check SRC for an equipment slot API; record the limit.
-- [ ] Rules: `backpack::slots(tier)` 27 / 54 / 81, `pages(81) == [54, 27]` tests.
-- [ ] Commit.
+**Files:** content: item `backpack_3` (`content.rs` block), icon/model/item/recipe `lbl|lcl|lll` with starsteel from `tools/gen_backpack_star.py`; `backpack.rs`: a sneaking right click puts it on the mod's own back slot (taken from the inventory in `native_inventory_tick`), the B key opens the worn one, a sneaking B takes it off (`native_give_stack`); worn backpacks in the store's `worn`; the window shows pages of 45 slots (45 + 36) with arrows in the sixth row (`server.rs` one line in `on_menu_clicked`); the looks flag draws it on the back.
+- [x] Checked SRC: no API adds a player equipment slot — recorded under «Пределы движка».
+- [x] Rules: `backpack::STAR`, `STAR_SLOTS` 81, `pages`, `page_range`, `turn` with tests. Self-test: none (wearing needs a player; the bots check).
+- [x] Commit.
 
 ### Task 15: Technical enchantments at the anvil
 

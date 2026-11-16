@@ -1029,5 +1029,11 @@
   "rustcraft.gear.window.off": "off · key %s",
   "rustcraft.gear.window.auto": "works by itself",
   "rustcraft.compass.mode_structures": "Compass: structures",
-  "rustcraft.compass.mode_biomes": "Compass: biomes"
+  "rustcraft.compass.mode_biomes": "Compass: biomes",
+  "item.rustcraft.backpack_3": "Starsteel backpack",
+  "rustcraft.backpack.title_page": "Backpack · %s slots · page %s of %s",
+  "rustcraft.backpack.wearing": "A backpack is on your back already",
+  "rustcraft.backpack.worn": "The backpack is on your back",
+  "rustcraft.backpack.taken_off": "The backpack is off your back",
+  "rustcraft.backpack.no_room": "No room in the inventory to take the backpack off"
 }

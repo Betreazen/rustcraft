@@ -1,0 +1,18 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    "lbl",
+    "lcl",
+    "lll"
+  ],
+  "key": {
+    "l": "minecraft:leather",
+    "b": "rustcraft:starsteel",
+    "c": "minecraft:chest"
+  },
+  "result": {
+    "id": "rustcraft:backpack_3",
+    "count": 1
+  }
+}
