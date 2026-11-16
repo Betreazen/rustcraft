@@ -94,7 +94,8 @@ Files: housing update tag with `slots`, `native_block_entity_submit` draws tinte
 
 ### Task 11: Joint window as the handbook panel
 Files: `window.rs` (rows «Гнездо / Канал / Направление / Фильтр / Приоритет»), fluid channel filter and priority, closes when the player walks away (> 8 blocks).
-- [ ] RED/GREEN `joint_window` tests for distance and fluid filter rows.
+- [x] RED/GREEN `joint_window` tests for distance and fluid filter rows (7d65877, 1f3b98c).
+- [ ] the drawn table panel instead of the chest menu (see Пределы / left).
 - [ ] commit.
 
 ### Task 12: Housing channels drop on explosion; XP reports; catalysts
@@ -105,9 +106,14 @@ Files: `window.rs` (rows «Гнездо / Канал / Направление / 
 
 ### Task 13: README «Что проверить в игре: срез 18» (поток 1), last try, report.
 
+## Противоречия справочника (for the integrator / stream 8)
+
+- data.js gives the tier-2 node (`tiered('узла')`: sparksteel, copper, shard) the same grid as `mod_output` (`MODR('a2', 'copper')`); the first try crafted the module. Done: node tiers 2–4 take the node of the tier below in the middle (1f3b98c). The `node` recipe note in data.js needs that sentence.
+
 ## Пределы движка
 
-(filled in as found, with SRC evidence)
+- Node window in single-player: presses go client → server through `native_net_send_to_server`, which errors without a remote server (SRC native_net.rs:230-240); the station's rename has the same limit. On a server (the pack's case) it works.
+- Facades are drawn each frame now (no `draw.keep()`): kept geometry is not redrawn when the held item changes (SRC native_block_entity_draw.rs:200-211), and F5 needs that. Perf note for the integrator.
 
 ## Status log
 
@@ -118,4 +124,4 @@ Files: `window.rs` (rows «Гнездо / Канал / Направление / 
 - Task 7: bfa1030 (node window, own mod screen `rustcraft:node`; line boost on item nets)
 - Task 8: 05285c2 (wrench turns machines, lifts them with contents; workers stay stream 6)
 - Task 9–10: 9e8346e (strips, bottleneck frame, F5; facades no longer kept: perf note for the integrator)
-- try: not run yet (bench maintenance.txt of the pack session holds it)
+- try 1 (staged at 6a24db4): build OK; RC 144/145 (pipe_recipes_craft: node_2 = mod_output grid, fixed 1f3b98c), PCT 42/42, SC 87/87
