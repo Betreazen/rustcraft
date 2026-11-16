@@ -138,7 +138,7 @@
 - [x] done 8bc4712 (`Util::paced_by_nature`: speed modules do nothing in the four farm machines; storage module read both as Module::Storage and as the raw item; rows: water, rod·wait (240 px); test `every_machine_window_fits_the_screen`; self-test `fishery18_keeps_the_rods_last_point`; try pending)
 
 ### Task 15: Feeder — babies fed (age +10%), head counts per kind in the window, «Предел животных», a pair every 20 s, 3 food slots
-- [ ] done
+- [x] done 01aaddd (rules `baby_fed`, `baby_to_feed`, `herd_full`, `heads`; food level on the model; no in-world self-test for babies: the bench spawns no baby mob — bots check; slice12 feeder test waits 2×LIMIT for the 20 s pace; try pending)
 
 ### Task 16: Butcher — recipe `bsb|bhb|brb`, energy blade accepted, 4 E/s and «Нет энергии», looting / fire aspect, kill XP into a condenser beside it, economy module effect
 - [ ] done
