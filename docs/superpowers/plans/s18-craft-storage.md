@@ -1,0 +1,171 @@
+# Срез 18, поток 5 «Крафт и склад» — план
+
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking. A resumed agent continues from the first unticked task; the ticks below are the truth.
+
+**Goal:** every MISSING / DIFFERS line of `docs/design/06-audit/craft-storage.md` becomes DONE in the game, or a recorded engine limit.
+
+**Architecture:** logic in `mod/rustcraft/rules` (storage, orders, utility, butcher) with unit tests; the bundle (`storage.rs`, `terminal.rs`, `tablet.rs`, `orders.rs`, `farm.rs`, `butcher.rs`, `builder.rs`, the craft functions of `utility.rs`) only wires it to the game. Every mechanic gets a self-test scenario in `rules/src/selftest/craft18.rs` (new file, registered in `selftest/mod.rs` with one added line).
+
+**Tech Stack:** Rust 2024, Horizon native mod API at `7e4e421` (SRC = the launcher's source tree), JSON content mod.
+
+**Spec:** `docs/superpowers/specs/2026-11-16-handbook-parity-design.md`; master plan `docs/superpowers/plans/2026-11-16-handbook-parity.md`.
+
+## Global Constraints
+
+- Horizon is pinned to `7e4e421224743469035ba0c34fc21e569e64a17d`, Minecraft 26.3. Horizon itself is not changed.
+- The game follows the handbook (`docs/showcase/js/data.js`, `ui.js`, `scenes.js`). The handbook changes only for the spec's contradictions and for an engine limit that has been checked in `SRC`.
+- Text and docs are in Russian per `CONTRIBUTING.md` (ru_ru and en_us). Commit messages in English, email `128125070+Betreazen@users.noreply.github.com`, every commit ends with `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`. Commit with `git commit -- <paths>` on `s18/craft-storage` only.
+- Shared files (`content.rs`, `server.rs`, `selftest.rs`, `rules/src/selftest/mod.rs`, `rules/src/tuning.rs`, `rules/src/modules.rs`, lang json, `horizon-mixin.toml`, window files): only add own blocks of lines, never rewrite others'.
+- Every 3–5 tasks: `pwsh -NoProfile -File "C:\Claude code projects\horizon-joint-dev\joint.ps1" try -Mod rustcraft -Path "C:\Claude code projects\rustcraft-s18\craft-storage" -Owner s18-craft-storage` — RC, PCT, SC self-tests all green. Rules tests any time: `cargo test --release -q` in `mod/rustcraft/rules`.
+- Numbers: where the handbook names a number, take it.
+
+## Cross-stream contracts this plan relies on
+
+- **Module items (stream 4).** The stack and filter modules are stream 4's items. This stream recognises them by item id in ONE place, `rules/src/storage/modules.rs`: `STACK_MODULES = [("rustcraft:module_stack", 1), ("rustcraft:module_stack_1024", 2), ("rustcraft:module_stack_4096", 3)]`, `FILTER_MODULE = "rustcraft:module_filter"`, `CAPACITY_MODULE = "rustcraft:module_capacity"` (exists today). If stream 4 names them otherwise, the integrator edits that one file.
+- **Module sets (stream 4).** Which machine takes which module is `modules.rs` `Holder::takes` (stream 4). This stream implements the *effects* (capacity pages and slots, stack, storage buffer) by counting the item ids in the block's module slots, and does not edit `Holder::takes`.
+- **Tiers (stream 3).** The 3/3/4/4 socket rule needs machine tiers (stream 3's `rustcraft_rules::tiers`). This stream adds `utility::sockets(u, tier)` and reads the tier from the block entity key `tier` (default: the machine's opening tier from the handbook), so stream 3's swap writes it and it works.
+- **Crystal shard (stream 2).** Recipes stay on the amethyst shard; the integrator switches them.
+
+## Пределы движка
+
+(Filled in as found, each with SRC evidence.)
+
+- Ghost translucency: to check `native_draw_block` / `native_draw_model` for alpha in SRC before Task 22.
+
+---
+
+## Part A — the storage
+
+### Task 1: Items with components in the storage (cell «хранит любые предметы»; brewer/enchanter «готовое на склад»; README 614, 643)
+
+**Files:** `rules/src/storage/keys.rs`, `rules/src/storage/wire.rs`, `rules/src/storage/terminal.rs` (ItemRef variant bit), `rules/src/net/stock.rs` (only the `storable` callers keep working), `storage.rs` (`key_of`, `stack_of`, `stored_stack`, listing variants, `key_of_ref`), `terminal.rs` (draw the variant's stack), `transport.rs:378` (one line: the net key carries the payload — stream 1's file, flagged to the integrator).
+
+- Key of a stack with components: `item#<hex of the network NBT of the stack's components>` (`keys::component_key(item, payload_hex)`); `keys::storable` is true unless the payload is empty (`item#` alone stays the unstorable mark for over-long payloads > `MAX_PAYLOAD` = 2048 hex chars).
+- `keys::parse` returns (item, damage); new `keys::payload(key) -> Option<&str>`.
+- Wire: `Line.damage` top bit `VARIANT = 0x8000` marks a component line whose low 11 bits are its index among the store's component keys of that item (sorted); `Listing.variants: Vec<(u16 item, u16 index, String payload)>` so the client builds the stack (`save::item_from_nbt`) to draw and name it.
+- Press: `ItemRef = (number, damage_or_variant)`; encode: a variant press sets bit 31 (negative i32) with the 11-bit index in the damage field.
+- [ ] rules tests: key round trip; two enchanted books with different payloads are two keys; wire round trip with variants; press round trip with a variant.
+- [ ] wiring + self-test `storage_keeps_enchanted_book` (a hopper-fed enchanted book and a named stone go into the storage and come back out whole).
+- [ ] commit
+
+### Task 2: Stack module S3 and the terminal's three sockets (stack, recipe book, filter)
+
+**Files:** `rules/src/storage/modules.rs` (new: ids above, `stack_tier(items) -> u8`), `rules/src/storage/terminal.rs` (sockets rects `SOCKETS: [[f32;2];3]`, `Press::Socket(k)` replacing `Press::Book`), `storage.rs` (sockets saved in the terminal's compound `sockets`; `Store::stack_module` set from the storage's terminals on rescan/press), `terminal.rs` (draw three sockets).
+- rules: `stack_tier(&[Some("rustcraft:module_stack_1024")]) == 2`; the best module of all the storage's terminals counts; `Store::stack_of(64)` = 1024 with tier 2.
+- self-test `storage_stack_module_raises_the_stack`: a 1-cell storage takes 27×256 stone with the module.
+- [ ] done
+
+### Task 3: Filter module and the «своя» tab (TM1)
+
+**Files:** `rules/src/storage/view.rs` (`Tab::Own`, `Facts.own`), `rules/src/storage/filter.rs` (new: the filter's list in custom data `rustcraft:filter`: item ids, at most 27), `storage.rs` (Listing `own: Vec<u16>` from the filter module in a socket), `terminal.rs` (fifth tab), filter window: right click with the filter module opens a three-row server menu (`native_open_menu`, the tablet's way) — a click with an item on the cursor marks it, a click on a marked item unmarks it (`filter_menu.rs`, new, own file).
+- rules tests: mark / unmark / limit 27; `Tab::Own.shows` only marked ids.
+- self-test `storage_filter_tab_lists_marked`: (rules-level view with a filter list; in world: filter module in a socket makes `Listing.own` non-empty).
+- [ ] done
+
+### Task 4: Extra terminals anywhere on the magistral (S6)
+
+**Files:** `rules/src/storage/cells.rs` (`terminal_storage_on_net(terminal, cell_of, topology)`: a terminal touching no cell takes the storage that is a joint of an item net its touched housing is on), `storage.rs` (rescan uses it; needs the level topology → `rescan` gets `&Topology`; the caller in `server.rs` passes it — one added argument).
+- rules test: terminal two housings away on the same item net finds the storage; on another net — none.
+- self-test `storage_far_terminal_sees_the_storage`.
+- [ ] done
+
+### Task 5: Terminal window: any count, limits list, order chain, «Склад полон», «Нет свободного автокрафтера»
+
+**Files:** `rules/src/storage/terminal.rs`, `rules/src/storage/wire.rs` (order steps), `terminal.rs`, `storage.rs`, lang.
+- Order count: a count row «− N +» (±1 / ±8 with shift / ×64 with right button), «Заказать» orders N (≤ 2047).
+- «Лимиты» mode: the grid shows only items with a limit, each cell's tooltip / overlay its limit; the row edits the chosen one (list of all limits).
+- Order queue: each order's steps (`OrderLine.steps: Vec<(kind, done, of)>`, current highlighted) drawn as a chain under the status.
+- State `Full` («Склад полон») when used == total; order wait `NoFreeCrafter` («Нет свободного автокрафтера») when a crafter exists but all are busy.
+- [ ] rules tests, self-test `storage_full_says_so`, commit
+
+### Task 6: Tablet: drawn window (API 111), deposit, search, tabs, limits
+
+**Files:** `tablet.rs` (server: the list goes by mod message `rustcraft:tablet`, the presses come back by `native_net_send_to_server` → `native_net_from_client`), new `tablet_screen.rs` (client: `native_mod_screen_open`, draws with the terminal's drawing helpers, the player's inventory drawn by the screen, click on an inventory item = deposit), `rules/src/storage/tablet.rs` (press codec: take / deposit slot / limit), `hook_net_from_client.rs` (one added dispatch line).
+- rules tests: press codec round trip; deposit of a stack the storage has no room for leaves the rest.
+- self-test `tablet_deposit_puts_into_storage` (server function `tablet::deposit_from` called by the bench).
+- [ ] done
+
+### Task 7: Cell holes highlighted in the world (S8)
+
+**Files:** `storage.rs` (holes written into each terminal's block entity `holes` int array on rescan), `terminal.rs` client block-entity draw: red stained glass at each hole relative to the terminal (`native_draw_block`, as the projector's ghost).
+- rules test: none new (shape exists); self-test `storage_holes_written_to_terminal`.
+- [ ] done
+
+### Task 8: Orders through the kitchen (and the brewer)
+
+**Files:** `rules/src/orders/mod.rs` (`KINDS` + kitchen kind, steps for food recipes), `orders.rs` (dispatch to the kitchen: put ingredients into its slots 0..9, take the dish from 9..13), `terminal.rs` `KIND_BLOCKS`.
+- rules test: an order for bread plans a kitchen step.
+- self-test `orders_bread_through_kitchen`.
+- [ ] done
+
+## Part B — the craft machines, common
+
+### Task 9: Work modes for repair, kitchen, brewer, enchanter, archeo, builder
+
+**Files:** `rules/src/utility/mod.rs` (`has_modes(u)`, `step_ticks/step_energy` with a `WorkMode`), `rules/src/machines/sheet.rs` (`Kind::Util` shape `mode: u.has_modes()` — one changed line, stream 3's file, flagged), `utility.rs` (`paced` reads the mode `util_mode`; `on_button` handles `Press::Mode`; `sheet` sets `s.mode`).
+- rules test: boost halves ticks ×3 energy (via `WorkMode::factors`), eco ×2 ticks ×0.35.
+- self-test `util_modes_switch` (press Boost on a repair stand → `util_mode` = 2, step 2.5 s in its row).
+- [ ] done
+
+### Task 10: Sockets 3/3/4/4 by tier; module effects capacity / stack / storage
+
+**Files:** `rules/src/utility/mod.rs` (`opening_tier(u)`, `sockets(tier)`), `rules/src/storage/modules.rs` ids, `utility.rs`, `farm.rs`.
+- Capacity: kitchen and brewer +1 page each; repair +2 material slots.
+- Storage module: fishery buffer 9 → 18.
+- Sockets: brewer, archeo, projector, builder (tier 3) and enchanter (tier 4) get 4 sockets — needs `sheet.rs` `SOCKETS` per shape (stream 3's file; done as `Shape.socket_count`, flagged).
+- [ ] done
+
+### Task 11: Levels on models (feeder food, shearer milk, apiary honey, brewer brew)
+
+**Files:** `utility.rs`, `farm.rs` — `anim::show_level` each step.
+- [ ] done
+
+## Part C — the craft machines, one by one (windows per ui.js through the sheet: rows, bars, toggles)
+
+### Task 12: Repair — string for rod, bow, crossbow; slots 3 / 2 / 3; durability bar «алмазная кирка · 970 из 1561»
+- `rules/src/utility/repair.rs` (`material_of`), `rules/src/utility/mod.rs` slots `Repair => s(8, 0..5, 5..8)` (0..3 to repair, 3..5 material, 5..8 out), `utility.rs`, update `selftest/slice12.rs` output slot.
+- [ ] done
+
+### Task 13: Kitchen — pages, milk from a tank, empty buckets back/none, 4 s, «Нет молока в баке», handbook dish list
+- Pages: page = chosen dish (toggle row picks the dish of the page in view; pages 1 + capacity modules); `KITCHEN_RECIPES` without the golden carrot / apple (not in the handbook); milk: a recipe with `milk_bucket` takes 1000 mB of `rustcraft:milk` from a tank it touches instead (helper `fluids::take_touching` / `put_touching`, added block in `fluids.rs`, flagged), no bucket item; step 80 ticks; window rows: page tabs, the dish, its ingredients, milk bar.
+- [ ] done
+
+### Task 14: Fishery — sky over the water, Lure, rod kept at its last point («Удочка изношена»), storage module, no speed, window rows
+- [ ] done
+
+### Task 15: Feeder — babies fed (age +10%), head counts per kind in the window, «Предел животных», a pair every 20 s, 3 food slots
+- [ ] done
+
+### Task 16: Butcher — recipe `bsb|bhb|brb`, energy blade accepted, 4 E/s and «Нет энергии», looting / fire aspect, kill XP into a condenser beside it, economy module effect
+- [ ] done
+
+### Task 17: Shearer — built-in shears, milking into a tank (cows, mooshrooms, goats), «Некуда сливать молоко», window rows and milk bar
+- [ ] done
+
+### Task 18: Apiary — choice honey / combs in the window, «Нет пустых бутылок», hive rows
+- [ ] done
+
+### Task 19: Brewer — pages: potion + kind; automatic steps (nether wart → effect ingredient → redstone / glowstone / gunpowder / dragon breath); capacity pages; steps and fuel bar in the window
+- [ ] done
+
+### Task 20: Experience condenser — 30 970 points, give 1 / 10 / all, take 1 / 10 / all, 2 E/s while moving, «Конденсатор полон», bar «Хранит», condenser keeps its points when broken
+- [ ] done
+
+### Task 21: Enchanter — level 1–30 chosen (− / + buttons), cost 1/2/3 by level, condenser must hold ≥ level levels, 10 s; archeo — the table of where the block lay (the toggle row becomes a line «Расчищает: …»), 10 s
+- [ ] done
+
+## Part D — the projector and the builder
+
+### Task 22: Projector — area by two wrench corners up to 32³, plan kept in the item on break, rotate / mirror, block states, compact plan encoding
+- [ ] done
+
+### Task 23: Projector — missing-block list with storage counts, «В руку», red cell for a foreign block, 4 E/s while the ghost is shown, «Нет сохранённой постройки», «Нет склада на магистрали»
+- [ ] done
+
+### Task 24: Builder — blocks from the storage on the same magistral, 2 blocks/s, places block states, waits naming what is missing, «Клетка занята чужим блоком», window rows (layer N of M, progress, missing, skipped)
+- [ ] done
+
+## Part E — hand-off
+
+### Task 25: `mod/README.md` «Что проверить в игре: срез 18» (stream 5 section), last try green, report
+- [ ] done
