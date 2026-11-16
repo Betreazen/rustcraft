@@ -83,6 +83,26 @@ pub enum Aim {
     Valid { block: Pos, anchor: Pos },
 }
 
+/// Slice 18: the anchor's ghost before it is set (guide `zipline`: «Виден контур якоря»): the
+/// anchor model's boxes (zip_anchor.json, block sixteenths), drawn translucent.
+pub const GHOST_BOXES: [([f64; 3], [f64; 3]); 3] = [
+    ([5.0, 0.0, 5.0], [11.0, 1.0, 11.0]),
+    ([7.0, 1.0, 7.0], [9.0, 10.0, 9.0]),
+    ([6.0, 10.0, 6.0], [10.0, 12.0, 10.0]),
+];
+
+/// The ghost's boxes of an anchor at `anchor`, in world coordinates.
+pub fn ghost_boxes(anchor: Pos) -> Vec<([f64; 3], [f64; 3])> {
+    let base = anchor.map(f64::from);
+    GHOST_BOXES
+        .iter()
+        .map(|(lo, hi)| {
+            let at = |v: &[f64; 3]| [base[0] + v[0] / 16.0, base[1] + v[1] / 16.0, base[2] + v[2] / 16.0];
+            (at(lo), at(hi))
+        })
+        .collect()
+}
+
 /// Z1: where the zipline aims, along `path` (the look's cells from the eye's, ray::blocks_along).
 pub fn aim(path: &[Pos], cell: impl Fn(Pos) -> Cell) -> Aim {
     let Some(&hit) = path.iter().skip(1).find(|p| !cell(**p).passed()) else {
@@ -491,6 +511,14 @@ mod tests {
         assert_eq!(ropes.get(id).map(|r| r.tied_ms), Some(1_000), "a stamped rope keeps its time");
         let old: Ropes = serde_json::from_str(r#"{"next":1,"ropes":[{"id":1,"owner":"x","dimension":"o","a":[0,0,0],"b":[1,0,0]}]}"#).expect("an older store reads");
         assert_eq!(old.ropes[0].tied_ms, 0);
+    }
+
+    #[test]
+    fn the_ghost_stands_where_the_anchor_goes() {
+        let b = ghost_boxes([10, 64, -3]);
+        assert_eq!(b.len(), 3);
+        assert_eq!(b[0].0, [10.3125, 64.0, -2.6875]);
+        assert_eq!(b[2].1, [10.625, 64.75, -2.375]);
     }
 
     #[test]

@@ -4,8 +4,8 @@
 // - Z1, on the client: while the player holds the zipline, the block its use would hook is
 //   outlined (`native_visuals`, a depth-tested rim of the block's selection shape, API 86's
 //   visual sources, game/native_visuals.rs): green when the anchor goes on top of it, red when it
-//   has no room, blue on a rope's anchor. No hook draws free geometry in the world for the
-//   player's own view, so the outline is the aimed block's, not a ghost of the anchor.
+//   has no room, blue on a rope's anchor. Slice 18: over a block that takes it, the anchor's
+//   translucent ghost too (`native_world_primitives`' filled boxes of its model's shape).
 // - Z2: a use ties a rope: an anchor block at the player's feet and one on the target
 //   (`native_set_block`), each with the other end in its block entity (rope id, other end, which
 //   one draws). The rope is saved in the world's `data/rustcraft_ropes.json`; a player keeps
@@ -689,6 +689,25 @@ pub(super) fn visuals(game: &Game<'_>, rims: &mut Vec<NativeBlockRim>) {
         argb,
         width: AIM_WIDTH,
     });
+}
+
+/// The ghost's colour: the outline's green, translucent.
+const GHOST: u32 = 0x6655_FF55;
+
+/// `native_world_primitives` (slice 18): where a zipline's use would set its anchor, the anchor's
+/// translucent ghost, with the outline above (guide `zipline`).
+pub(super) fn ghost(game: &Game<'_>, primitives: &mut horizon_client::world_primitives::WorldPrimitives) {
+    if game.native_held().is_none_or(|(item, _, _)| item != "rustcraft:zipline") {
+        return;
+    }
+    let Some(p) = game.native_player() else { return };
+    let eye = [p.x, p.y + EYE, p.z];
+    let Aim::Valid { anchor, .. } = aim_of(game, eye, ray::look_direction(p.yaw, p.pitch)) else {
+        return;
+    };
+    for (lo, hi) in rules::ghost_boxes(anchor) {
+        primitives.filled_box(lo, hi, GHOST);
+    }
 }
 
 /// `native_block_entity_submit`: an anchor's cord up to the rope, and the start anchor's rope to

@@ -230,7 +230,7 @@ Audit: turret «Цели чипами», «Окно поддержки: Игро
 
 Audit: zipline «Перед установкой виден контур якоря» DIFFERS.
 
-- [ ] Check SRC for a client hook drawing a model in the world for the own view (beyond `native_visuals` outlines); record the result under «Пределы движка».
+- [x] Checked SRC: `native_world_primitives` (`docs/native-mods.md` «World primitives», `native_hooks.rs:3001`, no trait gate at `world_primitives.rs:43`) draws translucent filled boxes. Not a limit: the ghost is the anchor model's three boxes in translucent green (`traversal::ghost_boxes`, test), drawn with the outline. Not a textured model: primitives are coloured boxes, lines, beams and text only.
 - [ ] `mod/README.md` «Что проверить в игре: срез 18 — база и снаряжение».
 - [ ] Final `try`; report.
 

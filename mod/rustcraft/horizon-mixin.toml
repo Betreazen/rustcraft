@@ -1143,3 +1143,16 @@ bindings = [
   { name = "xp_cost", ty = "&mut i32", value = "&mut *xp_cost" },
   { name = "material_cost", ty = "&mut i32", value = "&mut *material_cost" },
 ]
+
+# The zipline anchor's translucent ghost (client): no catalog entry, so by its target
+# (SRC crates/horizon-client/src/game/native_hooks.rs:3001, called from world_primitives.rs:43
+# for every frame with no trait-mod gate).
+[[injection]]
+id = "world_primitives"
+target = "horizon_client::game::native_hooks::Game<'_>::native_world_primitives"
+kind = "HEAD"
+helper = "hook_world_primitives.rs"
+bindings = [
+  { name = "game", ty = "&crate::game::Game<'_>", value = "&*self" },
+  { name = "primitives", ty = "&mut horizon_client::world_primitives::WorldPrimitives", value = "&mut *primitives" },
+]
