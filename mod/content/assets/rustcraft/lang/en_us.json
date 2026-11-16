@@ -1044,5 +1044,11 @@
   "rustcraft.node.window.items_rate": "%s → %s items/s",
   "rustcraft.node.window.modules": "Modules",
   "rustcraft.node.window.short": "Not enough energy: machines slowed",
-  "rustcraft.node.window.no_line": "No housing on this line"
+  "rustcraft.node.window.no_line": "No housing on this line",
+  "rustcraft.wrench.turned": "Turned: faces %s",
+  "rustcraft.wrench.lifted": "Lifted with its contents",
+  "rustcraft.facing.north": "north",
+  "rustcraft.facing.east": "east",
+  "rustcraft.facing.south": "south",
+  "rustcraft.facing.west": "west"
 }

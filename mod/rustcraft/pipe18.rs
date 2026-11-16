@@ -12,8 +12,13 @@ use crate::game::{
     rustcraft_content as content,
     rustcraft_server::{self as server},
 };
-use horizon_client::{items::ItemStack, mod_api::NativeServerPlayer, text::Text};
-use rustcraft_rules::{geom::Pos, net::node_tier};
+use horizon_client::{items::ItemStack, mod_api::NativeServerPlayer, save, text::Text};
+use horizon_world::nbt::{Compound, JavaString, Tag};
+use crate::game::rustcraft_utility::CUSTOM_DATA;
+use rustcraft_rules::{
+    geom::Pos,
+    net::{node_tier, wrench},
+};
 
 /// `NativeServerPlayer::game_mode` of creative.
 const CREATIVE: i32 = 1;
@@ -39,6 +44,16 @@ pub(super) fn state_for_placement(
 /// `native_use_item_on`, before everything else: a node of a higher tier clicked on a node takes
 /// its place (U2).
 pub(super) fn on_use_item_on(game: &mut Game<'_>, stack: &ItemStack, pos: Pos, claimed: &mut bool) {
+    // The sneaking wrench lifts a machine with its contents (guide `wrench`).
+    if !*claimed
+        && &*stack.item == content::WRENCH
+        && let Some(player) = game.native_acting_player()
+        && player.sneaking
+        && lift_to_player(game, &player, pos)
+    {
+        *claimed = true;
+        return;
+    }
     if *claimed || game.native_block(pos) != content::NODE {
         return;
     }
@@ -212,6 +227,23 @@ pub(super) fn bench(game: &mut Game<'_>, action: &str, pos: Pos) -> Result<Strin
                 .ok_or_else(|| format!("no housing taken at {pos:?}"))
         }
         "facade_items" => Ok(facade_items(game, pos).join(",")),
+        "rotate" => rotate_machine(game, pos)
+            .map(str::to_owned)
+            .ok_or_else(|| format!("nothing turned at {pos:?}")),
+        // Lifts the machine and places its item back at once, as a player would: what it holds after.
+        "lift_and_place" => {
+            let dimension = game.native_dimension().to_owned();
+            let stack = lift_machine(game, &dimension, pos).ok_or("nothing lifted")?;
+            if game.native_block(pos) != "minecraft:air" {
+                return Err("the machine stayed".into());
+            }
+            let state = game.native_default_state(&stack.item).ok_or("no state")?;
+            if !game.native_set_block(&dimension, pos, state, 3) {
+                return Err("not placed back".into());
+            }
+            on_place_block(game, &stack, pos);
+            Ok(stack.item.to_string())
+        }
         "node_view" => {
             let axis: usize = arg.parse().unwrap_or(0);
             let dimension = game.native_dimension().to_owned();
@@ -227,4 +259,115 @@ pub(super) fn bench(game: &mut Game<'_>, action: &str, pos: Pos) -> Result<Strin
         }
         _ => Err(format!("no action {name}")),
     }
+}
+
+// ---- The wrench on machines (guide `wrench`) ----
+//
+// A click turns a machine a quarter clockwise (`facing`, in place: its block entity stays); a
+// sneaking click lifts it as one item: its block item with the block entity's compound and slots
+// in its custom data (rustcraft_rules::net::wrench::LIFTED). The slots are emptied before the
+// block goes, so nothing drops twice; placing the item puts both back (`on_place_block`).
+
+/// The machine at `pos` turned a quarter clockwise; its new facing.
+pub(super) fn rotate_machine(game: &mut Game<'_>, pos: Pos) -> Option<&'static str> {
+    let block = game.native_block(pos);
+    if content::Machine::of(&block).is_none() || !wrench::handles(&block) {
+        return None;
+    }
+    let next = wrench::rotate(&game.native_block_property(pos, "facing")?)?;
+    game.native_set_block_property(pos, "facing", next).then_some(next)
+}
+
+/// The machine at `pos` taken out of the world as one item with its contents and settings.
+pub(super) fn lift_machine(game: &mut Game<'_>, dimension: &str, pos: Pos) -> Option<ItemStack> {
+    let block = game.native_block(pos);
+    if content::Machine::of(&block).is_none() || !wrench::handles(&block) {
+        return None;
+    }
+    let entity = game.native_mod_block_entity(pos)?;
+    let items: Vec<Tag> = entity
+        .items
+        .iter()
+        .enumerate()
+        .filter_map(|(i, s)| {
+            let s = s.as_ref()?;
+            let mut t = match save::item_to_nbt(s) {
+                Tag::Compound(c) => c,
+                _ => return None,
+            };
+            t.insert(JavaString::from("Slot"), Tag::Int(i as i32));
+            Some(Tag::Compound(t))
+        })
+        .collect();
+    let mut data = Compound::default();
+    let mut lifted = Compound::default();
+    lifted.insert(JavaString::from("nbt"), Tag::Compound(entity.nbt.clone()));
+    lifted.insert(JavaString::from("items"), Tag::List(items));
+    data.insert(JavaString::from(wrench::LIFTED), Tag::Compound(lifted));
+    let air = game.native_default_state("minecraft:air")?;
+    // Emptied first: the slots ride in the item, the block must not drop them too.
+    game.native_with_mod_block_entity(pos, |e| e.items.iter_mut().for_each(|s| *s = None));
+    if !game.native_set_block(dimension, pos, air, 3) {
+        return None;
+    }
+    let mut stack = ItemStack::new(&block, 1);
+    stack
+        .data_mut()
+        .set_other(CUSTOM_DATA, Some(Tag::Compound(data)));
+    server::mark_level_stale(dimension);
+    Some(stack)
+}
+
+/// `native_place_block`: a lifted machine's item gives the new block its compound and slots back.
+pub(super) fn on_place_block(game: &mut Game<'_>, stack: &ItemStack, pos: Pos) {
+    let Some(data) = stack.custom_data() else {
+        return;
+    };
+    let Some(Tag::Compound(lifted)) = data.get(&JavaString::from(wrench::LIFTED)) else {
+        return;
+    };
+    let nbt = match lifted.get(&JavaString::from("nbt")) {
+        Some(Tag::Compound(c)) => c.clone(),
+        _ => Compound::default(),
+    };
+    let items: Vec<(usize, ItemStack)> = match lifted.get(&JavaString::from("items")) {
+        Some(Tag::List(list)) => list
+            .iter()
+            .filter_map(|t| {
+                let Tag::Compound(c) = t else { return None };
+                let slot = match c.get(&JavaString::from("Slot")) {
+                    Some(Tag::Int(i)) => usize::try_from(*i).ok()?,
+                    _ => return None,
+                };
+                Some((slot, save::item_from_nbt(t)?))
+            })
+            .collect(),
+        _ => Vec::new(),
+    };
+    game.native_with_mod_block_entity(pos, move |e| {
+        e.nbt = nbt;
+        for (slot, item) in items {
+            if let Some(s) = e.items.get_mut(slot) {
+                *s = Some(item);
+            }
+        }
+    });
+    game.native_block_entity_sync(pos);
+}
+
+/// The sneaking wrench on a machine: lifted into the player's inventory; what has no room drops.
+fn lift_to_player(game: &mut Game<'_>, player: &NativeServerPlayer, pos: Pos) -> bool {
+    let Some(stack) = lift_machine(game, &player.dimension, pos) else {
+        return false;
+    };
+    if let Some(rest) = game.native_give_stack(player.uuid, stack) {
+        let nbt = Compound::from([(JavaString::from("Item"), save::item_to_nbt(&rest))]);
+        let at = pos.map(|c| f64::from(c) + 0.5);
+        if game.native_summon(&player.dimension, "minecraft:item", at, nbt).is_none() {
+            log::warn!("rustcraft: the lifted {} at {pos:?} was lost", rest.item);
+        }
+    }
+    let text = server::line("rustcraft.wrench.lifted", "Lifted with its contents", &[]);
+    server::tell(game, player.uuid, text);
+    true
 }

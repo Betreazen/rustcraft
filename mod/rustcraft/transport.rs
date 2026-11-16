@@ -517,6 +517,17 @@ pub(super) fn on_right_click_block(
     if player.sneaking {
         return;
     }
+    // s18/pipe (guide `wrench`): a click on a machine turns it; the joint window opens on a housing.
+    if let Some(facing) = crate::game::rustcraft_pipe18::rotate_machine(game, pos) {
+        *canceled = true;
+        let text = server::line(
+            "rustcraft.wrench.turned",
+            "Turned: faces %s",
+            &[server::line(&format!("rustcraft.facing.{facing}"), facing, &[])],
+        );
+        server::tell(game, player.uuid, text);
+        return;
+    }
     let target = if game.native_block(pos) == content::HOUSING {
         Some((pos, Face::from_normal(face)))
     } else {

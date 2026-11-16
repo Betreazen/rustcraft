@@ -12,12 +12,13 @@ use crate::net::topology::ChannelKind;
 use crate::geom::Pos;
 use crate::tuning::Tuning;
 
-pub const ALL: [Build; 5] = [
+pub const ALL: [Build; 6] = [
     recipes_craft,
     node_tiers,
     chests_work_both_ways,
     facade_and_lift,
     node_window_and_boost,
+    wrench_turns_and_lifts,
 ];
 
 /// A handbook recipe: its three rows, what each letter is, what it makes and how many.
@@ -259,6 +260,31 @@ fn node_window_and_boost(o: Pos, t: &Tuning) -> Scenario {
             } else {
                 Err(format!("{moved} moved in {BOOST_WINDOW} ticks, {want} expected"))
             }
+        })
+}
+
+/// Guide `wrench`: a click turns a machine a quarter clockwise; a sneaking click lifts it as one
+/// item that, placed again, holds what the machine held.
+fn wrench_turns_and_lifts(o: Pos, _t: &Tuning) -> Scenario {
+    let f = at(o, [1, 0, 0]);
+    Scenario::new("pipe_wrench_turns_and_lifts_machines", plot_area(o))
+        .then("an electric furnace facing north with 5 raw iron", move |b, _| {
+            b.place(f, "rustcraft:furnace", &[("facing", "north")])?;
+            b.put(f, 0, "minecraft:raw_iron", 5)
+        })
+        .check("a click turns it east", move |b, _| {
+            let to = b.pipe("rotate", f)?;
+            let now = b.property(f, "facing");
+            if to == "east" && now.as_deref() == Some("east") {
+                Ok(())
+            } else {
+                Err(format!("turned to {to}, facing {now:?}"))
+            }
+        })
+        .then("lifted and placed back", move |b, _| b.pipe("lift_and_place", f).map(|_| ()))
+        .check("it holds its 5 raw iron again", move |b, _| {
+            let n = count_of(&b.items(f), "minecraft:raw_iron");
+            if n == 5 { Ok(()) } else { Err(format!("{n} raw iron after the lift")) }
         })
 }
 

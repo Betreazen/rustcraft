@@ -3692,5 +3692,11 @@
   "rustcraft.node.window.items_rate": "%s → %s предметов/с",
   "rustcraft.node.window.modules": "Модули",
   "rustcraft.node.window.short": "Не хватает энергии: машины замедлены",
-  "rustcraft.node.window.no_line": "На этой линии нет корпусов"
+  "rustcraft.node.window.no_line": "На этой линии нет корпусов",
+  "rustcraft.wrench.turned": "Повёрнута: смотрит на %s",
+  "rustcraft.wrench.lifted": "Снята вместе с содержимым",
+  "rustcraft.facing.north": "север",
+  "rustcraft.facing.east": "восток",
+  "rustcraft.facing.south": "юг",
+  "rustcraft.facing.west": "запад"
 }
