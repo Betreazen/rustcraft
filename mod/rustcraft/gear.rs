@@ -250,23 +250,40 @@ fn bar_of(stack: &ItemStack) -> Option<u8> {
     }
 }
 
-/// A carried piece's bar width, written into its custom data when it changed.
+const MODEL_DATA: &str = "minecraft:custom_model_data";
+
+/// The `minecraft:custom_model_data` of a lit blade or shield: its first flag (the item model's
+/// `minecraft:condition` shows the field; tools/gen_gear_dark.py).
+fn lit_flags(lit: bool) -> Tag {
+    Tag::Compound(horizon_world::nbt::Compound::from([(
+        JavaString::from("flags"),
+        Tag::List(vec![Tag::Byte(i8::from(lit))]),
+    )]))
+}
+
+/// A carried piece's bar width, written into its custom data when it changed; a blade's or a
+/// shield's lit flag the same way (slice 18).
 fn show_bar(game: &mut Game<'_>, slot: i32, g: Gear) {
-    let width = {
+    let (width, lit) = {
         let s = state();
         let Some(stack) = game.native_carried_stack(slot) else { return };
         let Some(id) = id_of(stack) else { return };
         let h = s.store.held.get(&id).cloned().unwrap_or_default();
         let w = rules::bar(h.charge, shown_capacity(g, &h));
-        if bar_of(stack) == Some(w) {
+        let lit = rules::lit(g, &h).map(lit_flags);
+        let same_lit = lit.is_none() || stack.data().and_then(|d| d.other(MODEL_DATA)) == lit.as_ref();
+        if bar_of(stack) == Some(w) && same_lit {
             return;
         }
-        w
+        (w, lit)
     };
     if let Some(stack) = game.native_carried_stack(slot) {
         let mut data = stack.custom_data().cloned().unwrap_or_default();
         data.insert(JavaString::from(rules::BAR_KEY), Tag::Byte(width as i8));
         stack.data_mut().set_other(CUSTOM_DATA, Some(Tag::Compound(data)));
+        if let Some(flags) = lit {
+            stack.data_mut().set_other(MODEL_DATA, Some(flags));
+        }
     }
 }
 

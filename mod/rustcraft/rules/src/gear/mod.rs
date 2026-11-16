@@ -370,6 +370,17 @@ pub fn bar_rgb(width: u8) -> u32 {
     }
 }
 
+/// Slice 18: whether a blade's or a shield's field is lit (guide `blade`: «без заряда гаснет»,
+/// `eshield`: «поле светится, пока есть заряд»): it holds a hit's or a block's charge. None for
+/// other gear, whose look does not change.
+pub fn lit(g: Gear, h: &Held) -> Option<bool> {
+    match g.kind {
+        Kind::Blade => Some(h.charge + 1e-9 >= cost(BLADE_HIT, h)),
+        Kind::Shield => Some(h.charge + 1e-9 >= SHIELD_PER_DAMAGE),
+        _ => None,
+    }
+}
+
 /// A cost after Thrift: −10 % a level.
 pub fn cost(base: f64, h: &Held) -> f64 {
     base * (1.0 - 0.1 * f64::from(h.thrift.min(MAX_LEVEL)))
@@ -532,6 +543,16 @@ mod tests {
     fn aiming_the_rifle_zooms_twice() {
         assert_eq!(zoom(1.0), 0.5);
         assert_eq!(zoom(1.1), 0.55);
+    }
+
+    #[test]
+    fn a_blade_and_a_shield_go_dark_without_charge() {
+        let blade = Gear { kind: Kind::Blade, tier: 2 };
+        assert_eq!(lit(blade, &Held { charge: 25.0, ..Held::default() }), Some(true));
+        assert_eq!(lit(blade, &Held { charge: 24.0, ..Held::default() }), Some(false));
+        let shield = Gear { kind: Kind::Shield, tier: 3 };
+        assert_eq!(lit(shield, &Held::default()), Some(false));
+        assert_eq!(lit(Gear { kind: Kind::Rifle, tier: 4 }, &Held::default()), None);
     }
 
     #[test]
