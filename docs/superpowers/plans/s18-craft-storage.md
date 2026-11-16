@@ -135,7 +135,7 @@
 - [x] done (rules `utility::kitchen`; fluids.rs block `touching_amount/take_touching/put_touching`, flagged; tank = the one it touches, as the mixer's water — a fluid-channel joint for the kitchen would need fluids.rs net code of stream 3; milk buckets as items still work and leave their buckets; self-test `kitchen18_cake_with_milk_from_a_tank`; try pending)
 
 ### Task 14: Fishery — sky over the water, Lure, rod kept at its last point («Удочка изношена»), storage module, no speed, window rows
-- [ ] done
+- [x] done 8bc4712 (`Util::paced_by_nature`: speed modules do nothing in the four farm machines; storage module read both as Module::Storage and as the raw item; rows: water, rod·wait (240 px); test `every_machine_window_fits_the_screen`; self-test `fishery18_keeps_the_rods_last_point`; try pending)
 
 ### Task 15: Feeder — babies fed (age +10%), head counts per kind in the window, «Предел животных», a pair every 20 s, 3 food slots
 - [ ] done
