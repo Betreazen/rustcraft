@@ -48,13 +48,22 @@ pub const LIMIT_MINUS: Rect = [96.0, 100.0, 13.0, 12.0];
 pub const LIMIT_PLUS: Rect = [110.0, 100.0, 13.0, 12.0];
 pub const LIMIT_CLEAR: Rect = [124.0, 100.0, 13.0, 12.0];
 pub const LIMIT_DESTROY: Rect = [140.0, 100.0, 66.0, 12.0];
-/// The orders mode's row under the grid: order ×1, ×8, ×64, then «держать N» and its buttons.
+/// The orders mode's row under the grid (slice 18: any count): «−», the count, «+», «Заказать»,
+/// then «держать N» and its buttons. ORDER_BUTTONS in ORDER_MINUS, ORDER_PLUS, ORDER_GO order.
 pub const ORDER_BUTTONS: [Rect; 3] = [
-    [24.0, 100.0, 16.0, 12.0],
-    [42.0, 100.0, 16.0, 12.0],
-    [60.0, 100.0, 20.0, 12.0],
+    [24.0, 100.0, 10.0, 12.0],
+    [58.0, 100.0, 10.0, 12.0],
+    [70.0, 100.0, 32.0, 12.0],
 ];
-pub const KEEP_TEXT: [f32; 2] = [84.0, 102.0];
+pub const ORDER_COUNT: Rect = [35.0, 100.0, 22.0, 12.0];
+pub const ORDER_MINUS: usize = 0;
+pub const ORDER_PLUS: usize = 1;
+pub const ORDER_GO: usize = 2;
+pub const KEEP_TEXT: [f32; 2] = [104.0, 102.0];
+/// Slice 18: the «Лимиты» mode lists every item as a row (those with a limit first), this many a
+/// page, in the grid's place.
+pub const LIMIT_ROWS: usize = 5;
+pub const LIMIT_ROW_H: f32 = 11.0;
 pub const KEEP_MINUS: Rect = [166.0, 100.0, 13.0, 12.0];
 pub const KEEP_PLUS: Rect = [180.0, 100.0, 13.0, 12.0];
 pub const KEEP_CLEAR: Rect = [194.0, 100.0, 12.0, 12.0];
@@ -66,8 +75,23 @@ pub const CANCEL: Rect = [194.0, 127.0, 12.0, 11.0];
 pub const INVENTORY: [f32; 2] = [26.0, 152.0];
 pub const INVENTORY_LABEL_Y: f32 = INVENTORY[1] - 10.0;
 pub const HEIGHT: f32 = INVENTORY[1] + 80.0;
-/// What the order buttons order.
-pub const ORDER_COUNTS: [u16; 3] = [1, 8, 64];
+/// The most one order press orders (the press's count field).
+pub const MAX_ORDER: u16 = MAX_DAMAGE as u16;
+
+/// Slice 18: the order count after «−» or «+» by `delta`, never below 1 nor past MAX_ORDER.
+pub fn step_count(count: u16, delta: i32) -> u16 {
+    (i32::from(count) + delta).clamp(1, i32::from(MAX_ORDER)) as u16
+}
+
+/// The «Лимиты» mode's row `i` (its whole width).
+pub fn limit_row(i: usize) -> Rect {
+    [GRID[0], GRID[1] + LIMIT_ROW_H * i as f32, 18.0 * COLUMNS as f32, LIMIT_ROW_H - 1.0]
+}
+
+/// The row at `at` in the «Лимиты» mode.
+pub fn limit_row_at(at: [f32; 2]) -> Option<usize> {
+    (0..LIMIT_ROWS).find(|&i| inside(limit_row(i), at))
+}
 
 /// Where the item of the page's `i`th place goes.
 pub fn cell(i: usize) -> [f32; 2] {
@@ -94,7 +118,7 @@ pub enum Part {
     LimitPlus,
     LimitClear,
     LimitDestroy,
-    /// The orders mode: an order button by its place in ORDER_COUNTS.
+    /// The orders mode: «−», «+» or «Заказать» (ORDER_MINUS, ORDER_PLUS, ORDER_GO).
     Order(usize),
     KeepMinus,
     KeepPlus,
@@ -481,6 +505,21 @@ pub fn press_book(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn any_count_can_be_ordered() {
+        assert_eq!(step_count(1, -1), 1);
+        assert_eq!(step_count(1, 8), 9);
+        assert_eq!(step_count(2000, 64), MAX_ORDER);
+        let p = Press::Order {
+            item: 5,
+            count: MAX_ORDER,
+        };
+        assert_eq!(decode(encode(p).unwrap()), Some(p));
+        assert_eq!(limit_row_at([30.0, 46.0]), Some(0));
+        assert_eq!(limit_row_at([30.0, 45.0 + 11.0 * 4.0 + 2.0]), Some(4));
+        assert_eq!(limit_row_at([30.0, 45.0 + 11.0 * 5.0 + 2.0]), None);
+    }
 
     #[test]
     fn a_component_stacks_press_names_its_place() {

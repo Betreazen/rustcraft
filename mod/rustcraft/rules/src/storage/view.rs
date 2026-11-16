@@ -95,6 +95,13 @@ pub fn visible<'a, K: Ord>(
     out
 }
 
+/// Slice 18: the «Лимиты» mode's list: every entry, those with a limit first, each part in the
+/// order it had.
+pub fn limits_first<K>(mut entries: Vec<Entry<K>>) -> Vec<Entry<K>> {
+    entries.sort_by_key(|e| e.limit.is_none());
+    entries
+}
+
 /// How many pages `shown` entries fill; one even for none.
 pub fn pages(shown: usize) -> usize {
     shown.div_ceil(PER_PAGE).max(1)
@@ -149,6 +156,15 @@ mod tests {
 
     fn keys(v: Vec<&Entry<String>>) -> Vec<&str> {
         v.into_iter().map(|e| e.key.as_str()).collect()
+    }
+
+    #[test]
+    fn the_limits_list_has_the_limited_items_first() {
+        let mut limited = entry("seeds", 1);
+        limited.limit = Some(Limit { max: 64, destroy_surplus: true });
+        let l = limits_first(vec![entry("stone", 900), limited, entry("dirt", 5)]);
+        let names: Vec<&str> = l.iter().map(|e| e.key.as_str()).collect();
+        assert_eq!(names, vec!["seeds", "stone", "dirt"]);
     }
 
     #[test]

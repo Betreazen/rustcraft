@@ -121,7 +121,21 @@ pub struct OrderLine {
     pub done: u32,
     pub keep: bool,
     pub wait: OrderWait,
+    /// Slice 18: its chain of steps, at most MAX_STEPS (in the tail).
+    pub steps: Vec<OrderStep>,
 }
+
+/// Slice 18: one step of an order's chain: its machine kind (`orders::KINDS` place), what it
+/// makes (a number) and whether it runs now.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct OrderStep {
+    pub kind: u8,
+    pub item: u16,
+    pub current: bool,
+}
+
+/// The steps of an order's chain a list carries.
+pub const MAX_STEPS: usize = 6;
 
 /// What a terminal's window shows.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -170,6 +184,7 @@ pub struct Variant {
 const TAIL_VARIANTS: u8 = 1;
 const TAIL_SOCKETS: u8 = 2;
 const TAIL_OWN: u8 = 3;
+const TAIL_STEPS: u8 = 4;
 
 /// How many lines fit in one message.
 pub const MAX_LINES: usize = (MAX_BYTES - HEADER - MAX_HOLES * HOLE - ORDERS - 2) / ENTRY;
@@ -250,6 +265,22 @@ fn encode_tail(listing: &Listing, room: usize) -> Vec<u8> {
     numbers_section(&mut out, TAIL_SOCKETS, &listing.sockets);
     let own = &listing.own[..listing.own.len().min(64)];
     numbers_section(&mut out, TAIL_OWN, own);
+    let orders = &listing.orders[..listing.orders.len().min(MAX_ORDERS)];
+    if orders.iter().any(|o| !o.steps.is_empty()) {
+        let mut body = Vec::new();
+        for o in orders {
+            let steps = &o.steps[..o.steps.len().min(MAX_STEPS)];
+            body.push(steps.len() as u8);
+            for s in steps {
+                body.push(s.kind);
+                body.extend(s.item.to_le_bytes());
+                body.push(u8::from(s.current));
+            }
+        }
+        out.push(TAIL_STEPS);
+        out.extend((body.len() as u16).to_le_bytes());
+        out.extend(body);
+    }
     let room = room.saturating_sub(out.len());
     let mut body = Vec::new();
     let mut n: u16 = 0;
@@ -281,7 +312,21 @@ fn decode_tail(r: &mut Reader<'_>, listing: &mut Listing) {
         };
         r.0 = rest;
         let mut s = Reader(section);
-        if tag == TAIL_SOCKETS || tag == TAIL_OWN {
+        if tag == TAIL_STEPS {
+            for o in &mut listing.orders {
+                let n = s.u8().unwrap_or(0);
+                for _ in 0..n {
+                    let (Some(kind), Some(item), Some(current)) = (s.u8(), s.u16(), s.u8()) else {
+                        break;
+                    };
+                    o.steps.push(OrderStep {
+                        kind,
+                        item,
+                        current: current == 1,
+                    });
+                }
+            }
+        } else if tag == TAIL_SOCKETS || tag == TAIL_OWN {
             let numbers: Vec<u16> = std::iter::from_fn(|| s.u16()).collect();
             if tag == TAIL_SOCKETS {
                 listing.sockets = numbers;
@@ -394,6 +439,7 @@ impl Reader<'_> {
             done,
             keep,
             wait,
+            steps: Vec::new(),
         })
     }
 }
@@ -501,6 +547,18 @@ mod tests {
                     done: 2,
                     keep: false,
                     wait: OrderWait::Running,
+                    steps: vec![
+                        OrderStep {
+                            kind: 1,
+                            item: 30,
+                            current: false,
+                        },
+                        OrderStep {
+                            kind: 0,
+                            item: 812,
+                            current: true,
+                        },
+                    ],
                 },
                 OrderLine {
                     id: 4,
@@ -509,6 +567,7 @@ mod tests {
                     done: 0,
                     keep: true,
                     wait: OrderWait::Items(vec![(5, 2), (6, 7)]),
+                    steps: Vec::new(),
                 },
                 OrderLine {
                     id: 5,
@@ -517,6 +576,7 @@ mod tests {
                     done: 0,
                     keep: false,
                     wait: OrderWait::Machines(vec![3]),
+                    steps: Vec::new(),
                 },
                 OrderLine {
                     id: 6,
@@ -525,6 +585,7 @@ mod tests {
                     done: 0,
                     keep: false,
                     wait: OrderWait::Busy(0),
+                    steps: Vec::new(),
                 },
                 OrderLine {
                     id: 7,
@@ -533,6 +594,7 @@ mod tests {
                     done: 0,
                     keep: false,
                     wait: OrderWait::Energy(4),
+                    steps: Vec::new(),
                 },
             ],
             orderable: vec![1, 2, 812],
@@ -570,6 +632,7 @@ mod tests {
         l.orders = vec![
             OrderLine {
                 wait: OrderWait::Items(vec![(1, 1); MAX_WANTS]),
+                steps: Vec::new(),
                 ..OrderLine::default()
             };
             MAX_ORDERS
@@ -597,6 +660,9 @@ mod tests {
         l.variants.clear();
         l.sockets.clear();
         l.own.clear();
+        for o in &mut l.orders {
+            o.steps.clear();
+        }
         let mut bytes = encode(&l);
         bytes[0] = 2;
         assert_eq!(decode(&bytes), Some(l));
@@ -610,6 +676,9 @@ mod tests {
         l.variants.clear();
         l.sockets.clear();
         l.own.clear();
+        for o in &mut l.orders {
+            o.steps.clear();
+        }
         let bytes = encode(&l);
         assert_eq!(decode(&bytes[..bytes.len() - 1]), None);
         assert_eq!(decode(&[9]), None);
