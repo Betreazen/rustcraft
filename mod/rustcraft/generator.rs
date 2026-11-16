@@ -81,6 +81,8 @@ pub(super) fn run(
         requested: balance.requested,
         supplied: balance.supplied,
         shown: Some(shown),
+        stored: balance.stored,
+        capacity: balance.capacity,
     });
     if generator == before && data == shown_data {
         return Some(shown);

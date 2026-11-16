@@ -244,6 +244,7 @@ impl Ledger {
             produced: sum(&self.outputs),
             requested: sum(&self.requests),
             supplied: members.iter().filter_map(|b| got.get(b)).sum(),
+            ..GroupBalance::default()
         }
     }
 }
@@ -257,6 +258,10 @@ pub struct GroupBalance {
     pub requested: f64,
     /// What its consumers got.
     pub supplied: f64,
+    /// Slice 18 (guide `gen_fuel`: «сколько в запасе»): the charge and the size of the batteries
+    /// on its circuits, E.
+    pub stored: f64,
+    pub capacity: f64,
 }
 
 impl GroupBalance {
@@ -267,6 +272,19 @@ impl GroupBalance {
         got: &BTreeMap<Pos, f64>,
     ) -> GroupBalance {
         Ledger::new(producers, consumers).balance(members, got)
+    }
+
+    /// The balance with the batteries of its circuits: `stores` their (charge, size), E, one
+    /// entry a battery structure.
+    pub fn with_storage(self, stores: impl IntoIterator<Item = (f64, f64)>) -> GroupBalance {
+        let (stored, capacity) = stores
+            .into_iter()
+            .fold((0.0, 0.0), |(s, c), (a, b)| (s + a, c + b));
+        GroupBalance {
+            stored,
+            capacity,
+            ..self
+        }
     }
 
     /// Whether every consumer gets all it asks for (E3).
@@ -384,6 +402,28 @@ pub fn join_groups(circuits: &mut [Circuit], groups: &[BTreeSet<Pos>]) {
             }
         }
     }
+}
+
+/// Slice 18 (guide `structure`, `battery`): a structure of two blocks or more feeds the machines
+/// touching any of its blocks without a channel, with its whole output: a circuit with no channel
+/// cap of the structure's blocks and the blocks touching them that `machine` says are machines. A
+/// machine still passes nothing on (E10): it is a member only of the structures it touches.
+pub fn contact_circuits(groups: &[BTreeSet<Pos>], machine: impl Fn(Pos) -> bool) -> Vec<Circuit> {
+    groups
+        .iter()
+        .filter(|g| g.len() > 1)
+        .filter_map(|g| {
+            let around: BTreeSet<Pos> = g
+                .iter()
+                .flat_map(|&b| Face::ALL.into_iter().map(move |f| step(b, f)))
+                .filter(|n| !g.contains(n) && machine(*n))
+                .collect();
+            (!around.is_empty()).then(|| Circuit {
+                members: g.iter().copied().chain(around).collect(),
+                cap: f64::INFINITY,
+            })
+        })
+        .collect()
 }
 
 /// What `supply_report` shares out: each consumer's energy and each source's rest.
@@ -705,9 +745,13 @@ mod tests {
             produced: 16.0,
             requested: 8.0,
             supplied: 8.0,
+            ..GroupBalance::default()
         };
         assert!(full.enough());
         assert_eq!(full.slowdown_percent(), 0);
+        // Slice 18: what its batteries hold, two structures summed.
+        let b = full.with_storage([(3_200.0, 40_000.0), (800.0, 80_000.0)]);
+        assert!(close(b.stored, 4_000.0) && close(b.capacity, 120_000.0));
     }
 
     fn store(x: i32, give: f64, take: f64) -> Store {
@@ -777,6 +821,26 @@ mod tests {
         let mut apart = [circuit(&[0, 1], 32.0)];
         join_groups(&mut apart, &[[[9, 0, 0]].into()]);
         assert!(!apart[0].members.contains(&[9, 0, 0]));
+    }
+
+    #[test]
+    fn a_machine_touching_one_block_of_a_structure_gets_its_whole_output() {
+        // A fed 2×2 crystal structure gives 32 E/s, 8 from each crystal (x 0..=3 stand for its
+        // blocks). A machine at x=-1 touches only x=0 and asks 40: it gets all 32, not 8.
+        let blocks: BTreeSet<Pos> = (0..4).map(|x| [x, 0, 0]).collect();
+        let machines = [[-1, 0, 0], [9, 0, 0]];
+        let circuits = contact_circuits(&[blocks], |p| machines.contains(&p));
+        assert_eq!(circuits.len(), 1);
+        assert!(!circuits[0].members.contains(&[9, 0, 0]));
+        let producers: Vec<Producer> = (0..4).map(|x| producer(x, 8.0)).collect();
+        let got = supply(&producers, &[consumer(-1, 40.0), consumer(9, 8.0)], &circuits, DT);
+        assert!(close(got[&[-1, 0, 0]], 32.0));
+        assert!(!got.contains_key(&[9, 0, 0]));
+        // A lone block makes no such circuit; nor does a structure no machine touches.
+        let lone: BTreeSet<Pos> = [[20, 0, 0]].into();
+        assert!(contact_circuits(&[lone], |_| true).is_empty());
+        let far: BTreeSet<Pos> = [[30, 0, 0], [31, 0, 0]].into();
+        assert!(contact_circuits(&[far], |_| false).is_empty());
     }
 
     #[test]

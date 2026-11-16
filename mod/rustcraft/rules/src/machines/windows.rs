@@ -43,7 +43,9 @@ fn item_of(data: &[i32], i: usize) -> Option<u32> {
 pub mod generator {
     use super::*;
 
-    pub const DATA_SLOTS: usize = 8;
+    pub const DATA_SLOTS: usize = 10;
+    /// Slice 18: the batteries' charge and size go in hundreds of E (data slots are 16-bit).
+    const STORE_SCALE: f64 = 0.01;
 
     /// What the generator's window shows.
     #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -58,6 +60,9 @@ pub mod generator {
         pub requested: f64,
         pub supplied: f64,
         pub shown: Option<Shown>,
+        /// Slice 18: the charge and size of the batteries on its circuit, E (to 100 E).
+        pub stored: f64,
+        pub capacity: f64,
     }
 
     pub fn encode(p: &GenPanel) -> Vec<i32> {
@@ -71,6 +76,8 @@ pub mod generator {
             scaled(p.supplied, ENERGY_SCALE),
             shown,
             percent,
+            scaled(p.stored, STORE_SCALE),
+            scaled(p.capacity, STORE_SCALE),
         ]
     }
 
@@ -83,6 +90,8 @@ pub mod generator {
             requested: energy(data, 4),
             supplied: energy(data, 5),
             shown: (data.len() > 6).then(|| shown_of(at(data, 6), at(data, 7))),
+            stored: f64::from(at(data, 8)) / STORE_SCALE,
+            capacity: f64::from(at(data, 9)) / STORE_SCALE,
         }
     }
 
@@ -354,6 +363,8 @@ mod tests {
             requested: 16.0,
             supplied: 16.0,
             shown: Some(Shown::Working),
+            stored: 3_200.0,
+            capacity: 40_000.0,
         };
         let data = generator::encode(&p);
         assert_eq!(data.len(), generator::DATA_SLOTS);
