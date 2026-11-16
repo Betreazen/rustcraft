@@ -10,6 +10,8 @@
 //! - The repair stand's window switches its work mode; the feeder's has none (guide MODES).
 //! - The repair stand mends a fishing rod with string (guide `repair`).
 //! - The kitchen bakes a cake with milk from the tank it touches and leaves no bucket.
+//! - The fishing station keeps a rod's last point and says the rod is worn; a block over the
+//!   water closes it.
 
 use super::transport::{chest, fill, item_line, joint};
 use super::{Bench, Build, Scenario, at, plot_area, same};
@@ -19,7 +21,8 @@ use crate::storage::modules::{FILTER, SOCKET_FILTER, SOCKET_STACK, STACK_MODULES
 use crate::storage::terminal::{self, Press};
 use crate::tuning::Tuning;
 
-pub const ALL: [Build; 10] = [
+pub const ALL: [Build; 11] = [
+    fishery_keeps_the_rods_last_point,
     kitchen_cake_with_milk_from_a_tank,
     repair_mends_a_rod_with_string,
     util_work_mode_switch,
@@ -265,5 +268,49 @@ fn kitchen_cake_with_milk_from_a_tank(o: Pos, _: &Tuning) -> Scenario {
         .check("the milk came from the tank and no bucket is left", move |b, _| {
             same("milk", b.tank(tank).map(|g| g.amount), Some(0))?;
             same("buckets", super::count_of(&b.items(p), "minecraft:bucket"), 0)
+        })
+}
+
+/// The translation key of the status line of the machine window at `pos`.
+fn status_key(b: &dyn Bench, pos: Pos) -> String {
+    b.sheet(pos)
+        .and_then(|s| s.status)
+        .and_then(|s| s.text.get("translate").and_then(|t| t.as_str()).map(str::to_owned))
+        .unwrap_or_default()
+}
+
+/// A stone basin of water 5 × 5, 2 deep, round x 4, z 0 from `o`, its surface at y 3.
+fn basin(b: &mut dyn Bench, o: Pos) -> Result<(), String> {
+    for x in 1..=7 {
+        for z in -3..=3 {
+            b.place(at(o, [x, 0, z]), "minecraft:stone", &[])?;
+            for y in 1..=2 {
+                let inside = (2..=6).contains(&x) && (-2..=2).contains(&z);
+                b.place(at(o, [x, y, z]), if inside { "minecraft:water" } else { "minecraft:stone" }, &[])?;
+            }
+        }
+    }
+    Ok(())
+}
+
+fn fishery_keeps_the_rods_last_point(o: Pos, _: &Tuning) -> Scenario {
+    let p = at(o, [4, 3, 0]);
+    const ROD: &str = r#"{id:"minecraft:fishing_rod",count:1,components:{"minecraft:damage":63}}"#;
+    Scenario::new("fishery18_keeps_the_rods_last_point", plot_area(o))
+        .then("a station on open water with a rod one catch from breaking", move |b, _| {
+            basin(b, o)?;
+            b.place(p, "rustcraft:fishery", &[])?;
+            b.set_buffer(p, 200.0)?;
+            same("rod in", b.insert_snbt(p, ROD)?, 1)
+        })
+        .until("it says the rod is worn", 100, move |b, _| {
+            Ok(status_key(b, p) == "rustcraft.util.fish_rod_worn")
+        })
+        .check("the rod is still there", move |b, _| {
+            same("rod", super::count_of(&b.items(p), "minecraft:fishing_rod"), 1)
+        })
+        .then("a block over the water", move |b, _| b.place(at(o, [2, 3, 2]), "minecraft:stone", &[]))
+        .until("it says there is not enough open water", 100, move |b, _| {
+            Ok(status_key(b, p) == "rustcraft.util.fish_no_water")
         })
 }

@@ -513,7 +513,7 @@
   "rustcraft.util.kitchen_none": "Choose a dish on a page",
   "rustcraft.util.kitchen_missing": "No ingredients",
   "rustcraft.util.fish_no_rod": "No fishing rod",
-  "rustcraft.util.fish_no_water": "Needs open water under it: 5 × 5, 2 deep",
+  "rustcraft.util.fish_no_water": "Not enough open water",
   "rustcraft.util.feed_empty": "No feed",
   "rustcraft.util.feed_nobody": "No pair to feed",
   "rustcraft.util.shear_no_tools": "No shears or bucket",
@@ -1046,5 +1046,13 @@
   "rustcraft.util.kitchen.page_hint": "Click: the next dish",
   "rustcraft.util.kitchen.locked": "One more page for each capacity module",
   "rustcraft.util.kitchen_no_milk": "No milk in the tank",
-  "rustcraft.fluid.milk.name": "Milk"
+  "rustcraft.fluid.milk.name": "Milk",
+  "rustcraft.util.fishery.water_ok": "Open water 5×5, deeper than 2",
+  "rustcraft.util.fishery.water_bad": "Not enough open water: 5×5, deeper than 2, nothing over it",
+  "rustcraft.util.fishery.rod": "Rod: %s of %s %s",
+  "rustcraft.util.fishery.wait": "Next catch in %s s",
+  "rustcraft.util.fishery.ready": "The line is out",
+  "rustcraft.util.fish_rod_worn": "The rod is worn out",
+  "rustcraft.util.fishery.rod_wait": "%s · %s",
+  "rustcraft.util.kitchen.milk_line": "Milk in the tank: %s of %s buckets"
 }

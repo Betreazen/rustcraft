@@ -79,9 +79,32 @@ pub fn open_water(depths: &[i32]) -> bool {
     depths.len() == (WATER_SIDE * WATER_SIDE) as usize && depths.iter().all(|d| *d >= WATER_DEPTH)
 }
 
-/// The fishing station's next wait, from a random number 0..1.
-pub fn fish_wait(random: f64) -> u64 {
-    FISH_MIN_TICKS + ((FISH_MAX_TICKS - FISH_MIN_TICKS) as f64 * random.clamp(0.0, 1.0)) as u64
+/// The fishing station's next wait, from a random number 0..1; slice 18 (guide `fishery`): Lure
+/// takes 5 s off a level (with Lure III 15–45 s).
+pub fn fish_wait(random: f64, lure: u32) -> u64 {
+    let off = LURE_TICKS * u64::from(lure.min(3));
+    FISH_MIN_TICKS - off + ((FISH_MAX_TICKS - FISH_MIN_TICKS) as f64 * random.clamp(0.0, 1.0)) as u64
+}
+
+/// Ticks a level of Lure takes off the wait.
+pub const LURE_TICKS: u64 = 100;
+/// The catch buffer: 9 slots, 18 with a storage module.
+pub const FISH_BUFFER: usize = 9;
+
+/// The catch slots a station with `storage` storage modules uses.
+pub fn fish_buffer(storage: u32) -> usize {
+    if storage > 0 { 2 * FISH_BUFFER } else { FISH_BUFFER }
+}
+
+/// Slice 18: the rod's last point is not spent: a rod one catch from breaking stops the station
+/// («Удочка изношена»), to be mended at the repair stand.
+pub fn rod_worn(damage: u32, max_damage: u32) -> bool {
+    max_damage > 0 && damage + 1 >= max_damage
+}
+
+/// Slice 18: «без блоков над водой»: every cell over the water is empty.
+pub fn open_sky(above: &[bool]) -> bool {
+    above.iter().all(|filled| !filled)
 }
 
 /// What a full hive gives: a honey bottle for a glass bottle, else its combs.
@@ -96,6 +119,23 @@ pub fn harvest(has_bottle: bool) -> (&'static str, u32) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn lure_shortens_the_wait_and_the_rod_keeps_its_last_point() {
+        assert_eq!(fish_wait(0.0, 0), 600);
+        assert_eq!(fish_wait(1.0, 0), 1200);
+        // Lure III: 15–45 s.
+        assert_eq!(fish_wait(0.0, 3), 300);
+        assert_eq!(fish_wait(1.0, 3), 900);
+        assert_eq!(fish_wait(0.0, 9), 300, "no more than III counts");
+        assert!(rod_worn(63, 64));
+        assert!(!rod_worn(62, 64));
+        assert!(!rod_worn(5, 0));
+        assert_eq!(fish_buffer(0), 9);
+        assert_eq!(fish_buffer(1), 18);
+        assert!(open_sky(&[false; 24]));
+        assert!(!open_sky(&[false, true]));
+    }
 
     fn fed(id: u32, kind: &str, takes: bool) -> Fed {
         Fed {
@@ -131,7 +171,7 @@ mod tests {
         shallow[7] = 1;
         assert!(!open_water(&shallow));
         assert!(!open_water(&[3; 9]));
-        assert!((FISH_MIN_TICKS..=FISH_MAX_TICKS).contains(&fish_wait(0.5)));
+        assert!((FISH_MIN_TICKS..=FISH_MAX_TICKS).contains(&fish_wait(0.5, 0)));
         assert_eq!(harvest(false), ("minecraft:honeycomb", 3));
         assert!(is_feed("minecraft:carrot") && !is_feed("minecraft:stone"));
     }

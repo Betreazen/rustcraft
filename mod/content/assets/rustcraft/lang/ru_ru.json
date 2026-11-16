@@ -513,7 +513,7 @@
   "rustcraft.util.kitchen_none": "Выбери блюдо на странице",
   "rustcraft.util.kitchen_missing": "Нет ингредиентов",
   "rustcraft.util.fish_no_rod": "Нет удочки",
-  "rustcraft.util.fish_no_water": "Нужна открытая вода под ней: 5 × 5, глубже 2 блоков",
+  "rustcraft.util.fish_no_water": "Мало открытой воды",
   "rustcraft.util.feed_empty": "Нет корма",
   "rustcraft.util.feed_nobody": "Некого кормить парой",
   "rustcraft.util.shear_no_tools": "Нет ножниц или ведра",
@@ -3694,5 +3694,13 @@
   "rustcraft.util.kitchen.page_hint": "Клик: следующее блюдо",
   "rustcraft.util.kitchen.locked": "Ещё одна страница за каждый модуль ёмкости",
   "rustcraft.util.kitchen_no_milk": "Нет молока в баке",
-  "rustcraft.fluid.milk.name": "Молоко"
+  "rustcraft.fluid.milk.name": "Молоко",
+  "rustcraft.util.fishery.water_ok": "Открытая вода 5×5, глубже 2 блоков",
+  "rustcraft.util.fishery.water_bad": "Мало открытой воды: нужно 5×5, глубже 2 блоков, без блоков над водой",
+  "rustcraft.util.fishery.rod": "Удочка: %s из %s %s",
+  "rustcraft.util.fishery.wait": "До улова %s с",
+  "rustcraft.util.fishery.ready": "Леска заброшена",
+  "rustcraft.util.fish_rod_worn": "Удочка изношена",
+  "rustcraft.util.fishery.rod_wait": "%s · %s",
+  "rustcraft.util.kitchen.milk_line": "Молоко в баке: %s из %s вёдер"
 }

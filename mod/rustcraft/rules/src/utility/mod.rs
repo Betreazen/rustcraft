@@ -123,8 +123,11 @@ impl Util {
             Util::Charger => s("rustcraft:charger", 1000.0, 128.0, 0, 2),
             Util::ChargePlate => s("rustcraft:charge_plate", 1000.0, 256.0, 0, 2),
             Util::Repair => s("rustcraft:repair", 400.0, 32.0, 0, 2),
-            // Slice 18: a toggle a page, its rows (what, the step, the page's dish).
-            Util::Kitchen => s("rustcraft:kitchen", 400.0, 16.0, kitchen::PAGES_MAX, 3),
+            // Slice 18: a toggle a page, its rows (the page's dish and what it takes, the milk in
+            // the tank: a line, not a bar, so the window fits 240 pixels).
+            Util::Kitchen => s("rustcraft:kitchen", 400.0, 16.0, kitchen::PAGES_MAX, 2),
+            // Slice 18: its rows: the water; the rod and the wait (18 catch slots leave room for
+            // two in 240 pixels).
             Util::Fishery => s("rustcraft:fishery", 200.0, 8.0, 0, 2),
             Util::Feeder => s("rustcraft:feeder", 200.0, 8.0, 0, 2),
             Util::Shearer => s("rustcraft:shearer", 200.0, 8.0, 0, 2),
@@ -157,8 +160,8 @@ impl Util {
             // capacity module (3..11), 11..14 the repaired tools.
             Util::Repair => s(REPAIR_OUT.end, 0..REPAIR_MATERIAL.end, REPAIR_OUT),
             Util::Kitchen => s(13, 0..9, 9..13),
-            // 0 the rod, 1..10 the catch.
-            Util::Fishery => s(10, 0..1, 1..10),
+            // 0 the rod, 1..19 the catch (9 slots, 18 with a storage module).
+            Util::Fishery => s(1 + 2 * farm::FISH_BUFFER, 0..1, 1..1 + 2 * farm::FISH_BUFFER),
             Util::Feeder => s(9, 0..9, 0..0),
             // 0 shears, 1 empty buckets, 2..11 wool and milk.
             Util::Shearer => s(11, 0..2, 2..11),
@@ -205,9 +208,15 @@ impl Util {
     /// experience, the building machine's progress.
     pub fn bars(self) -> usize {
         match self {
-            Util::Repair | Util::Kitchen | Util::Shearer | Util::Brewer | Util::XpTank | Util::Builder => 2,
+            Util::Repair | Util::Shearer | Util::Brewer | Util::XpTank | Util::Builder => 2,
             _ => 1,
         }
+    }
+
+    /// Slice 18: the fishing station, the feeder, the shearer and the apiary collector: the water
+    /// or the animals set their pace, so a speed module does nothing for them.
+    pub fn paced_by_nature(self) -> bool {
+        matches!(self, Util::Fishery | Util::Feeder | Util::Shearer | Util::Apiary)
     }
 
     /// A machine that works on the animals or the world round it (radius module, K1-style).
@@ -336,6 +345,8 @@ pub fn sockets_for_tier(tier: u8) -> usize {
 /// `Normal`.
 pub fn paced(u: Util, mode: crate::machines::processor::WorkMode, speed: u32, economy: u32) -> (u64, f64) {
     let mode = if u.has_modes() { mode } else { crate::machines::processor::WorkMode::Normal };
+    // The farm machines' pace is the water's or the animals' (guide: no speed module for them).
+    let speed = if u.paced_by_nature() { 0 } else { speed };
     let (fast, dear) = mode.factors();
     let ticks = ((step_ticks(u) >> speed.min(4)) as f64 / fast).round().max(1.0) as u64;
     let cost = step_energy(u) * 2.5f64.powi(speed as i32) * 0.6f64.powi(economy as i32) * dear;
@@ -399,6 +410,16 @@ mod tests {
     }
 
     #[test]
+    fn every_machine_window_fits_the_screen() {
+        // Slice 18: a window must fit 240 GUI pixels (1280 × 720 at GUI scale 3).
+        use crate::machines::sheet::{Kind, MAX_HEIGHT, layout};
+        for u in Util::ALL {
+            let h = layout(Kind::Util(u).shape()).height;
+            assert!(h <= MAX_HEIGHT, "{u:?}: {h}");
+        }
+    }
+
+    #[test]
     fn sockets_grow_with_the_tier() {
         assert_eq!(sockets_for_tier(Util::Repair.opening_tier()), 3);
         assert_eq!(sockets_for_tier(Util::Brewer.opening_tier()), 4);
@@ -420,6 +441,7 @@ mod tests {
         // No modes: the feeder keeps its pace whatever is saved.
         assert_eq!(paced(Util::Feeder, WorkMode::Boost, 0, 0).0, step_ticks(Util::Feeder));
         assert!(Util::Builder.has_modes() && !Util::Fishery.has_modes());
+        assert_eq!(paced(Util::Feeder, WorkMode::Normal, 2, 0).0, step_ticks(Util::Feeder), "no speed");
     }
 
     #[test]

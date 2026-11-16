@@ -15,9 +15,10 @@
 //   bottle for a glass bottle, else its combs: `honey`.
 use crate::game::{
     Game, rustcraft_base as base,
+    rustcraft_server::line,
     rustcraft_utility::{self as util, fits, items, put, spend, take_one, with_items},
 };
-use horizon_client::items::ItemStack;
+use horizon_client::{items::ItemStack, text::Text};
 use rustcraft_rules::{
     butcher::Animal,
     geom::Pos,
@@ -86,33 +87,61 @@ fn depths(game: &Game<'_>, pos: Pos) -> Vec<i32> {
     out
 }
 
+/// Slice 18: whether any cell over the 5 × 5 water is filled: the row beside the station and the
+/// row over it.
+fn sky_closed(game: &Game<'_>, pos: Pos) -> bool {
+    let half = rules::WATER_SIDE / 2;
+    let mut filled = Vec::new();
+    for dy in 0..=1 {
+        for dx in -half..=half {
+            for dz in -half..=half {
+                if dy == 0 && dx == 0 && dz == 0 {
+                    continue;
+                }
+                let b = game.native_block([pos[0] + dx, pos[1] + dy, pos[2] + dz]);
+                filled.push(!matches!(b.as_str(), "minecraft:air" | "minecraft:cave_air" | "minecraft:void_air"));
+            }
+        }
+    }
+    !rules::open_sky(&filled)
+}
+
+/// The catch slots it uses: 9, 18 with a storage module.
+fn catch_slots(game: &Game<'_>, pos: Pos) -> std::ops::Range<usize> {
+    let storage = util::module_count(game, pos, rustcraft_rules::storage::modules::STORAGE)
+        + modules::count(&base::modules_at(game, pos), Module::Storage);
+    1..1 + rules::fish_buffer(storage)
+}
+
 fn fish(game: &mut Game<'_>, dimension: &str, pos: Pos, cost: f64, now: u64) -> Shown {
     let Some(rod) = items(game, pos).first().cloned().flatten() else {
         return Shown::Blocked("fish_no_rod");
     };
-    if !rules::open_water(&depths(game, pos)) {
+    if !rules::open_water(&depths(game, pos)) || sky_closed(game, pos) {
         return Shown::Blocked("fish_no_water");
     }
+    let max = game.items().get(&rod.item).map_or(0, |i| i.max_damage);
+    if rules::rod_worn(rod.damage, max) {
+        return Shown::Blocked("fish_rod_worn");
+    }
+    let lure = rod.enchantment_level("minecraft:lure");
     let key = (dimension.to_owned(), pos);
-    let due = *state().fish_due.entry(key.clone()).or_insert_with(|| now + rules::fish_wait(util::random()));
+    let due = *state().fish_due.entry(key.clone()).or_insert_with(|| now + rules::fish_wait(util::random(), lure));
     if now < due {
         return Shown::Working;
     }
-    if !fits(game, pos, 1..10, &[ItemStack::new("minecraft:cod", 1)]) {
+    let slots = catch_slots(game, pos);
+    if !fits(game, pos, slots.clone(), &[ItemStack::new("minecraft:cod", 1)]) {
         return Shown::Blocked("output_full");
     }
     if !spend(game, pos, cost) {
         return Shown::NoEnergy;
     }
-    state().fish_due.insert(key, now + rules::fish_wait(util::random()));
+    state().fish_due.insert(key, now + rules::fish_wait(util::random(), lure));
     let catch = game.sequence_loot("minecraft:gameplay/fishing", "minecraft:gameplay/fishing", Some(&rod));
-    let max = game.items().get(&rod.item).map_or(0, |i| i.max_damage);
     with_items(game, pos, |items| {
         if let Some(Some(r)) = items.get_mut(0) {
             r.damage += 1;
-            if max > 0 && r.damage >= max {
-                items[0] = None;
-            }
         }
     });
     let who = owner(game, pos);
@@ -120,9 +149,51 @@ fn fish(game: &mut Game<'_>, dimension: &str, pos: Pos, cost: f64, now: u64) -> 
         if let Some(o) = who {
             base::report(Report::Fish { owner: o, item: c.item.to_string(), count: c.count });
         }
-        put(game, pos, 1..10, c);
+        put(game, pos, slots.clone(), c);
     }
     Shown::Working
+}
+
+/// Slice 18 (guide `ui.js`, window `fishery`): the station's rows: the water, the rod (its
+/// enchantments and durability), the wait to the next catch.
+pub(super) fn fishery_rows(game: &Game<'_>, dimension: &str, pos: Pos, now: u64) -> Vec<Text> {
+    let open = rules::open_water(&depths(game, pos)) && !sky_closed(game, pos);
+    let water = if open {
+        line("rustcraft.util.fishery.water_ok", "Open water 5×5, deeper than 2", &[])
+    } else {
+        line("rustcraft.util.fishery.water_bad", "Not enough open water: 5×5, deeper than 2, nothing over it", &[])
+    };
+    let rod = match items(game, pos).first().cloned().flatten() {
+        Some(r) => {
+            let max = game.items().get(&r.item).map_or(0, |i| i.max_damage);
+            let ench: Vec<String> = r
+                .enchantments()
+                .iter()
+                .map(|(e, l)| format!("{} {l}", e.rsplit(':').next().unwrap_or(e)))
+                .collect();
+            line(
+                "rustcraft.util.fishery.rod",
+                "Rod: %s of %s %s",
+                &[
+                    Text::literal(max.saturating_sub(r.damage).to_string()),
+                    Text::literal(max.to_string()),
+                    Text::literal(ench.join(", ")),
+                ],
+            )
+        }
+        None => line("rustcraft.util.fish_no_rod", "No rod", &[]),
+    };
+    let due = state().fish_due.get(&(dimension.to_owned(), pos)).copied();
+    let wait = match due {
+        Some(d) if d > now => line(
+            "rustcraft.util.fishery.wait",
+            "Next catch in %s s",
+            &[Text::literal(((d - now) / 20).to_string())],
+        ),
+        _ => line("rustcraft.util.fishery.ready", "The line is out", &[]),
+    };
+    let rod_and_wait = line("rustcraft.util.fishery.rod_wait", "%s · %s", &[rod, wait]);
+    vec![water, rod_and_wait]
 }
 
 // ---- The feeder ----

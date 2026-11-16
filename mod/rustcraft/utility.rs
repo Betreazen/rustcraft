@@ -1431,6 +1431,10 @@ fn craft_sheet(game: &Game<'_>, dimension: &str, pos: Pos, u: Util, s: &mut Shee
             });
         }
         Util::Kitchen => kitchen_sheet(game, pos, s),
+        Util::Fishery => {
+            let now = state().ticks.get(dimension).copied().unwrap_or(0);
+            s.rows = farm::fishery_rows(game, dimension, pos, now).iter().map(base::v).collect();
+        }
         _ => {}
     }
 }
@@ -1459,15 +1463,16 @@ fn kitchen_sheet(game: &Game<'_>, pos: Pos, s: &mut Sheet) {
         }
         None => line("rustcraft.util.kitchen.no_dish", "Click a page to choose its dish", &[]),
     };
-    s.rows.push(base::v(&row));
     let milk = server_milk(pos);
-    s.bars.push(Bar {
-        label: base::v(&line("rustcraft.util.kitchen.milk", "Milk in the tank", &[])),
-        value: base::v(&Text::literal(format!("{} / {} B", milk.0 / BUCKET_MB, (milk.0 + milk.1) / BUCKET_MB))),
-        share: if milk.0 + milk.1 > 0 { milk.0 as f64 / (milk.0 + milk.1) as f64 } else { 0.0 },
-        energy: false,
-        colour: Some(0xFFF2_F2F2),
-    });
+    let milk_line = line(
+        "rustcraft.util.kitchen.milk_line",
+        "Milk in the tank: %s of %s buckets",
+        &[
+            Text::literal((milk.0 / BUCKET_MB).to_string()),
+            Text::literal(((milk.0 + milk.1) / BUCKET_MB).to_string()),
+        ],
+    );
+    s.rows = vec![base::v(&row), base::v(&milk_line)];
     let _ = MILK;
 }
 
