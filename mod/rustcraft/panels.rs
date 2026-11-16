@@ -17,6 +17,7 @@ use crate::game::{
 use horizon_client::{hud::HudBatch, mod_api::NativeScreen};
 use rustcraft_rules::{
     machines::{
+        extras,
         panel::{Rect, energy_text, inside, slot_frame},
         processor::WorkMode,
         style::{self, colour},
@@ -185,9 +186,11 @@ fn draw_alloy(game: &Game<'_>, data: &[i32], batch: &mut HudBatch, o: [f32; 2]) 
     for s in aw::INPUTS.iter().chain(&aw::OUTPUTS) {
         slot(game, batch, o, *s);
     }
-    for s in aw::MODULE_SLOTS {
-        socket(game, batch, o, s, true);
-    }
+    // Slice 18: the queue cells under the inputs, the sockets its tier opens, the reserve.
+    let ex = extras::decode(data, aw::EXTRAS_AT);
+    kit::cells_part(game, batch, o, &ex, aw::cell);
+    kit::sockets_part(game, batch, o, &ex, &aw::MODULE_SLOTS, None);
+    kit::reserve_part(game, batch, o, &ex, [aw::OUTPUTS[0][0], aw::OUTPUTS[0][1] + 18.0]);
     kit::arrow(game, batch, o, aw::ARROW, p.progress);
     let fuel = tr("rustcraft.window.fuel", "Fuel");
     label(game, batch, &fuel, o, [aw::FUEL[0] - 2.0, aw::LABEL_FUEL_Y]);
@@ -337,7 +340,10 @@ fn tab(game: &Game<'_>, batch: &mut HudBatch, o: [f32; 2], i: usize, p: &cw::Cra
 /// `native_screen_click` for the three windows: the button under `at`.
 pub(super) fn button_at(machine: Machine, data: &[i32], at: [f32; 2]) -> Option<i32> {
     match machine {
-        Machine::Alloy => aw::button_at(at),
+        Machine::Alloy => aw::button_at(at).or_else(|| {
+            kit::socket_at(&extras::decode(data, aw::EXTRAS_AT), &aw::MODULE_SLOTS, at)
+                .map(|k| kit::SOCKET_BUTTON + k as i32)
+        }),
         Machine::Crafter => cw::button_at(at, cw::decode(data).pages),
         _ => None,
     }
@@ -366,7 +372,13 @@ pub(super) fn tooltip(
 ) {
     match machine {
         Machine::Generator => generator_tooltip(data, at, lines),
-        Machine::Alloy => alloy_tooltip(data, at, lines),
+        Machine::Alloy => {
+            let ex = extras::decode(data, aw::EXTRAS_AT);
+            let reserve_at = [aw::OUTPUTS[0][0], aw::OUTPUTS[0][1] + 18.0];
+            if !kit::extras_tooltip(game, "rustcraft:alloy", &ex, &aw::MODULE_SLOTS, aw::cell, reserve_at, at, lines) {
+                alloy_tooltip(data, at, lines);
+            }
+        }
         Machine::Crafter => crafter_tooltip(game, data, at, lines),
         _ => {}
     }

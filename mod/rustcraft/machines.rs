@@ -689,7 +689,7 @@ pub(super) fn set_catalyst(game: &mut Game<'_>, pos: Pos, tank: &CatalystTank) {
 }
 
 /// A number in [0, 1) for the enricher's chance: xorshift over a seed from the clock.
-fn roll() -> f64 {
+pub(super) fn roll() -> f64 {
     use std::sync::atomic::{AtomicU64, Ordering};
     static SEED: AtomicU64 = AtomicU64::new(0);
     let mut x = SEED.load(Ordering::Relaxed);
