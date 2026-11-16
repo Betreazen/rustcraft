@@ -115,7 +115,14 @@ pub(super) fn update_tag(entity: &ModBlockEntity, tag: &mut Option<Compound>) {
     let mut c = Compound::new();
     // The zipline's anchors draw their rope from theirs (rustcraft_zipline).
     let zipline = crate::game::rustcraft_zipline::KEYS;
-    for key in [ON_KEY, LEVEL_KEY, COLOUR_KEY].into_iter().chain(EXTRA_KEYS).chain(zipline) {
+    // Slice 18: what the crystals, panels and windmills draw (rustcraft_power).
+    let power = crate::game::rustcraft_power::DRAW_KEYS;
+    for key in [ON_KEY, LEVEL_KEY, COLOUR_KEY]
+        .into_iter()
+        .chain(EXTRA_KEYS)
+        .chain(zipline)
+        .chain(power)
+    {
         if let Some(v) = entity.nbt.get(&JavaString::from(key)) {
             c.insert(JavaString::from(key), v.clone());
         }

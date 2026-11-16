@@ -22,6 +22,7 @@ use crate::game::{
     rustcraft_window::named,
 };
 use horizon_client::{items::ItemStack, mod_api::NativeHeightmap, text::Text};
+use horizon_world::nbt::{JavaString, Tag};
 use rustcraft_rules::{
     geom::{Face, Pos, step},
     machines::{
@@ -29,7 +30,10 @@ use rustcraft_rules::{
         style::Severity,
     },
     modules::Module,
-    net::energy::{Producer, Shared, Store, join_groups},
+    net::energy::{
+        Circuit, Consumer, GroupBalance, Ledger, Producer, Shared, Store, contact_circuits,
+        join_groups,
+    },
     grow::{self, Seed, Shown as GrowShown},
     power::{self as rules, Battery, Form, PowerView, Shown, Water},
     tuning::Tuning,
@@ -61,6 +65,24 @@ pub struct Sources {
     pub views: HashMap<Pos, PowerView>,
     /// Slice 18: the seeds growing on tanks (CR2), found by the rescan.
     pub seeds: BTreeSet<Pos>,
+    /// Slice 18, once a second: the circuit balance of each lava generator and crystal structure
+    /// (by its anchor), and what holds each structure back (E9).
+    balances: HashMap<Pos, GroupBalance>,
+    limits: HashMap<Pos, rules::Limit>,
+    /// Slice 18: the sides of each crystal, panel and windmill a housing touches (its link_*
+    /// connectors), and what each block's entity last told clients to draw.
+    links: HashMap<Pos, u8>,
+    drawn: HashMap<Pos, Drawn>,
+}
+
+/// What a crystal, a panel or a windmill tells clients to draw (slice 18): its connectors, and
+/// for a crystal whether it is a merged structure's anchor (its box), a hidden member, and fed.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct Drawn {
+    links: u8,
+    size: Option<[i32; 3]>,
+    hide: bool,
+    fed: bool,
 }
 
 /// After a rescan: the groups again, and the nets joined to whole structures.
@@ -82,6 +104,27 @@ pub(super) fn rescan(level: &mut LevelNet) {
     s.turbines = rules::groups(&of(Machine::Turbine), false);
     s.turbine_water.clear();
     s.outputs.clear();
+    // Slice 18: the connectors show on the sides a housing touches.
+    let housings = &level.layout.housings;
+    let linked = level.crystals.iter().copied().chain(
+        level
+            .machines
+            .iter()
+            .filter(|(_, m)| matches!(m, Machine::Solar | Machine::Windmill))
+            .map(|(p, _)| *p),
+    );
+    s.links = linked
+        .map(|p| {
+            let mask = Face::ALL
+                .iter()
+                .enumerate()
+                .filter(|(_, f)| housings.contains_key(&step(p, **f)))
+                .fold(0u8, |m, (i, _)| m | 1 << i);
+            (p, mask)
+        })
+        .collect();
+    let links = &s.links;
+    s.drawn.retain(|p, _| links.contains_key(p));
     s.views
         .retain(|p, _| level.crystals.contains(p) || level.machines.contains_key(p));
     let groups: Vec<BTreeSet<Pos>> = s
@@ -94,6 +137,18 @@ pub(super) fn rescan(level: &mut LevelNet) {
         .cloned()
         .collect();
     join_groups(&mut level.power.circuits, &groups);
+    // Slice 18: a structure feeds the machines touching it with its whole output, not each block
+    // its share (guide `structure`, `battery`).
+    let machines = &level.machines;
+    let contact = contact_circuits(&groups, |p| {
+        machines.get(&p).is_some_and(|m| {
+            !matches!(
+                m.kind(),
+                content::Kind::Power | content::Kind::Battery | content::Kind::Generator
+            )
+        })
+    });
+    level.power.circuits.extend(contact);
 }
 
 // ---- What the sources offer ----
@@ -274,6 +329,7 @@ pub(super) fn run_source(
                 stored: 0.0,
                 capacity: 0.0,
                 fluid: lava,
+                max_out: 0.0,
             }
         }
         _ => {
@@ -304,6 +360,7 @@ pub(super) fn run_source(
                 stored: total,
                 capacity: 0.0,
                 fluid: 0.0,
+                max_out: 0.0,
             }
         }
     };
@@ -342,7 +399,15 @@ pub(super) fn stores(game: &Game<'_>, s: &Sources, t: &Tuning) -> Vec<Store> {
 
 /// After the sharing: batteries keep what they took and lose what they gave, spread over their
 /// blocks; crystal structures drink their solution.
-pub(super) fn settle(game: &mut Game<'_>, s: &mut Sources, shared: &Shared, t: &Tuning) {
+pub(super) fn settle(
+    game: &mut Game<'_>,
+    s: &mut Sources,
+    shared: &Shared,
+    producers: &[Producer],
+    consumers: &[Consumer],
+    circuits: &[Circuit],
+    t: &Tuning,
+) {
     let dt = 1.0 / t.ticks_per_second;
     for g in s.batteries.clone() {
         let (stored, b) = battery_of(game, &g, t);
@@ -367,6 +432,7 @@ pub(super) fn settle(game: &mut Game<'_>, s: &mut Sources, shared: &Shared, t: &
             stored: after,
             capacity: b.capacity,
             fluid: taken,
+            max_out: b.give,
         };
         for &p in &g {
             s.views.insert(p, view);
@@ -402,11 +468,226 @@ pub(super) fn settle(game: &mut Game<'_>, s: &mut Sources, shared: &Shared, t: &
             stored: 0.0,
             capacity: 0.0,
             fluid: left,
+            max_out: 0.0,
         };
         for &p in g {
             s.views.insert(p, view);
         }
     }
+    if views_due {
+        balances(s, shared, producers, consumers, circuits, t);
+        tell_draw(game, s);
+    }
+}
+
+/// Slice 18, once a second: what each crystal, panel and windmill should draw, told to clients
+/// when it changed (`native_block_entity_sync`): a merged structure draws as one crystal from its
+/// anchor, bright with solution and dim without (guide `structure`), and every block its
+/// connectors on the sides a housing touches.
+fn tell_draw(game: &mut Game<'_>, s: &mut Sources) {
+    let mut want: HashMap<Pos, Drawn> = s
+        .links
+        .iter()
+        .map(|(&p, &links)| (p, Drawn { links, ..Drawn::default() }))
+        .collect();
+    for g in &s.crystals {
+        let Form::Box(_) = rules::form(g) else {
+            continue;
+        };
+        let lo = rules::anchor(g);
+        let hi: Vec<i32> = (0..3)
+            .map(|k| g.iter().map(|p| p[k]).max().unwrap_or(lo[k]))
+            .collect();
+        let size = [hi[0] - lo[0] + 1, hi[1] - lo[1] + 1, hi[2] - lo[2] + 1];
+        let fed = s
+            .views
+            .get(&lo)
+            .is_some_and(|v| matches!(v.shown, Shown::Gives(_)));
+        for &p in g {
+            let d = want.entry(p).or_default();
+            d.fed = fed;
+            if p == lo {
+                d.size = Some(size);
+            } else {
+                d.hide = true;
+            }
+        }
+    }
+    for (p, d) in want {
+        if s.drawn.get(&p) == Some(&d) {
+            continue;
+        }
+        let written = game
+            .native_with_mod_block_entity(p, |e| {
+                let n = &mut e.nbt;
+                n.insert(JavaString::from(LINKS_KEY), Tag::Byte(d.links as i8));
+                n.insert(JavaString::from(HIDE_KEY), Tag::Byte(i8::from(d.hide)));
+                n.insert(JavaString::from(FED_KEY), Tag::Byte(i8::from(d.fed)));
+                let size = d.size.map_or_else(Vec::new, |s| s.to_vec());
+                n.insert(JavaString::from(SIZE_KEY), Tag::IntArray(size));
+            })
+            .is_some();
+        if written {
+            game.native_block_entity_sync(p);
+            s.drawn.insert(p, d);
+        }
+    }
+}
+
+// ---- Slice 18: what clients draw of crystals, panels and windmills ----
+
+const LINKS_KEY: &str = "links";
+const HIDE_KEY: &str = "hide";
+const FED_KEY: &str = "fed";
+const SIZE_KEY: &str = "st";
+/// The keys a client draws from (rustcraft_anim::update_tag sends them).
+pub(super) const DRAW_KEYS: [&str; 4] = [LINKS_KEY, HIDE_KEY, FED_KEY, SIZE_KEY];
+/// The connectors' models by face, in `Face::ALL`'s order.
+const LINK_FACES: [&str; 6] = ["west", "east", "down", "up", "north", "south"];
+const CRYSTAL_LIT: &str = "rustcraft:block/crystal__lit";
+const BLOCK_LIT: &str = "rustcraft:block/crystalblock__lit";
+/// A structure without solution is drawn this bright (P.crystalblock `dim: 0.35`).
+const DIM: u32 = 0x59_5959;
+
+fn link_model(block: &str, face: &str) -> Option<String> {
+    let name = block.strip_prefix("rustcraft:")?;
+    let linked = matches!(name, "crystal" | "solar" | "windmill");
+    // The panel and the windmill have no connector on top.
+    (linked && (face != "up" || name == "crystal"))
+        .then(|| format!("rustcraft:block/{name}__link_{face}"))
+}
+
+/// `native_standalone_models`: the crystal's lit models and every connector.
+pub(super) fn standalone_models(models: &mut Vec<String>) {
+    models.push(CRYSTAL_LIT.to_owned());
+    models.push(BLOCK_LIT.to_owned());
+    for block in [content::CRYSTAL, content::SOLAR, content::WINDMILL] {
+        for face in LINK_FACES {
+            models.extend(link_model(block, face));
+        }
+    }
+}
+
+fn nbt_byte(nbt: &horizon_world::nbt::Compound, key: &str) -> i32 {
+    match nbt.get(&JavaString::from(key)) {
+        Some(Tag::Byte(v)) => i32::from(*v),
+        Some(Tag::Int(v)) => *v,
+        _ => 0,
+    }
+}
+
+fn nbt_size(nbt: &horizon_world::nbt::Compound) -> Option<[i32; 3]> {
+    match nbt.get(&JavaString::from(SIZE_KEY)) {
+        Some(Tag::IntArray(v)) if v.len() == 3 => Some([v[0], v[1], v[2]].map(|n| n.clamp(1, 3))),
+        _ => None,
+    }
+}
+
+/// `native_block_entity_submit` of a crystal, a panel or a windmill (the windmill's rotor and
+/// top are rustcraft_anim's): its connectors; a crystal itself, pulsing (P.crystal), as one
+/// crystal over a merged structure's box from its anchor (bright with solution, dim without), or
+/// nothing for the structure's other blocks. True when it drew the whole block.
+pub(super) fn draw(
+    game: &Game<'_>,
+    block: &str,
+    entity: &horizon_client::containers::ModBlockEntity,
+    draw: &mut crate::game::native_block_entity_draw::BlockEntityDraw,
+) -> bool {
+    let crystal = block == content::CRYSTAL;
+    if !crystal && link_model(block, "west").is_none() {
+        return false;
+    }
+    let nbt = &entity.nbt;
+    let links = nbt_byte(nbt, LINKS_KEY);
+    for (i, face) in LINK_FACES.iter().enumerate() {
+        if links & (1 << i) != 0
+            && let Some(model) = link_model(block, face)
+        {
+            game.native_draw_model(draw, &model, 0xFF_FFFF);
+        }
+    }
+    if !crystal {
+        // The panel's connectors stand still; the windmill's rotor keeps it drawn each frame.
+        if block == content::SOLAR {
+            draw.keep();
+        }
+        return false;
+    }
+    if nbt_byte(nbt, HIDE_KEY) != 0 {
+        draw.keep();
+        return true;
+    }
+    let t = (draw.game_time.rem_euclid(1_200_000) as f32 + draw.partial) / 20.0;
+    // P.crystal: glow 0.1 + 0.2 pulse(t, 3), here as brightness 0.8..1.
+    let pulse = 0.8 + 0.2 * (0.5 + 0.5 * (t * 3.0).sin());
+    let grey = |k: f32| {
+        let c = (k.clamp(0.0, 1.0) * 255.0) as u32;
+        c << 16 | c << 8 | c
+    };
+    match nbt_size(nbt) {
+        Some(size) => {
+            let fed = nbt_byte(nbt, FED_KEY) != 0;
+            draw.push();
+            draw.scale(size.map(|n| n as f32));
+            game.native_draw_model(draw, BLOCK_LIT, if fed { grey(pulse) } else { DIM });
+            draw.pop();
+            if !fed {
+                draw.keep();
+            }
+        }
+        None => {
+            game.native_draw_model(draw, CRYSTAL_LIT, grey(pulse));
+        }
+    }
+    true
+}
+
+/// `native_block_entity_render_bounding_box`: a merged structure's anchor draws over its box.
+pub(super) fn bounds(entity: &horizon_client::containers::ModBlockEntity, bounds: &mut [f32; 6]) {
+    if let Some(size) = nbt_size(&entity.nbt) {
+        for k in 0..3 {
+            bounds[3 + k] = bounds[3 + k].max(size[k] as f32);
+        }
+    }
+}
+
+/// Slice 18, once a second: each lava generator's and crystal structure's circuit balance (E17,
+/// ui.js `balance`), and what holds each structure back (E9: its channels let through the sum of
+/// the energy nets it is on).
+fn balances(
+    s: &mut Sources,
+    shared: &Shared,
+    producers: &[Producer],
+    consumers: &[Consumer],
+    circuits: &[Circuit],
+    t: &Tuning,
+) {
+    let ledger = Ledger::new(producers, consumers);
+    let mut balances = HashMap::new();
+    for &p in &s.lava {
+        let members = ledger.group_of(p, circuits);
+        balances.insert(p, with_storage(s, &members, ledger.balance(&members, &shared.got)));
+    }
+    let mut limits = HashMap::new();
+    for g in &s.crystals {
+        let anchor = rules::anchor(g);
+        let mut members = BTreeSet::new();
+        for &b in g {
+            members.extend(ledger.group_of(b, circuits));
+        }
+        balances.insert(anchor, with_storage(s, &members, ledger.balance(&members, &shared.got)));
+        let nets: Vec<f64> = circuits
+            .iter()
+            .filter(|c| c.cap.is_finite() && g.iter().any(|b| c.members.contains(b)))
+            .map(|c| c.cap)
+            .collect();
+        let channel = (!nets.is_empty()).then(|| nets.iter().sum());
+        let view = s.views.get(&anchor);
+        let fed = view.is_some_and(|v| v.shown == Shown::Gives(v.output)) && g.len() > 1;
+        limits.insert(anchor, rules::structure_limit(g.len(), rules::form(g), fed, channel, t));
+    }
+    s.balances = balances;
+    s.limits = limits;
 }
 
 // ---- Fluids into the lava generators and the crystal structures ----
@@ -773,10 +1054,11 @@ pub(super) fn sheet(
                 "Takes %s E/s",
                 &[e(v.fluid)],
             )));
+            // Slice 18 (ui.js): «Отдаёт 0 из 192 Е/с».
             s.rows.push(base::v(&line(
-                "rustcraft.battery.gives",
-                "Gives %s E/s",
-                &[e(v.output)],
+                "rustcraft.battery.gives_of",
+                "Gives %s of %s E/s",
+                &[e(v.output), e(v.max_out)],
             )));
         }
         SheetKind::LavaGenerator => {
@@ -796,11 +1078,19 @@ pub(super) fn sheet(
                 energy: false,
                 colour: None,
             });
+            // Slice 18 (ui.js `gen_lava`): its output and its circuit's balance.
+            s.bars.push(gives_bar(v.output, t.lava_output));
             s.rows.push(base::v(&line(
                 "rustcraft.power.lava_hint",
                 "A bucket gives %s E at %s E/s",
                 &[e(t.lava_energy_per_bucket), e(t.lava_output)],
             )));
+            let balance = level.sources.balances.get(&pos).copied().unwrap_or_default();
+            s.rows.extend(balance_rows(&balance));
+        }
+        SheetKind::Structure => {
+            structure_sheet(level, pos, &v, t, s);
+            return;
         }
         SheetKind::Turbine => {
             let (water, depth, upstream) = level
@@ -864,6 +1154,165 @@ pub(super) fn sheet(
         severity: severity_code(severity(&v)),
         text: base::v(&shown_text(&v)),
     });
+}
+
+/// Slice 18 (guide `gen_fuel`, `gen_lava`, `structure`): `balance` with the batteries among
+/// `members`, each battery structure once.
+pub(super) fn with_storage(s: &Sources, members: &BTreeSet<Pos>, balance: GroupBalance) -> GroupBalance {
+    balance.with_storage(
+        s.batteries
+            .iter()
+            .filter(|g| g.iter().any(|p| members.contains(p)))
+            .filter_map(|g| g.iter().next().and_then(|p| s.views.get(p)))
+            .map(|v| (v.stored, v.capacity)),
+    )
+}
+
+// ---- Slice 18: the structure's window, the balance rows ----
+
+/// ui.js `gives(now, most)`: the output bar.
+fn gives_bar(now: f64, most: f64) -> SheetBar {
+    SheetBar {
+        label: base::v(&line("rustcraft.window.gives", "Output", &[])),
+        value: base::v(&line(
+            "rustcraft.power.gives_of",
+            "gives %s of %s E/s",
+            &[e(now), e(most)],
+        )),
+        share: if most > 0.0 { (now / most).min(1.0) } else { 0.0 },
+        energy: true,
+        colour: None,
+    }
+}
+
+/// ui.js `balance`: the circuit's production and demand, its batteries and whether it is enough.
+fn balance_rows(b: &GroupBalance) -> Vec<serde_json::Value> {
+    let stored = if b.capacity > 0.0 {
+        line(
+            "rustcraft.power.balance_stored",
+            "stored %s of %s E",
+            &[e(b.stored.floor()), e(b.capacity)],
+        )
+    } else {
+        line("rustcraft.power.balance_no_store", "no batteries", &[])
+    };
+    let enough = if b.enough() {
+        line("rustcraft.power.balance_enough", "enough", &[])
+    } else {
+        line(
+            "rustcraft.power.balance_short",
+            "machines slowed by %s",
+            &[Text::literal(format!("{}%", b.slowdown_percent()))],
+        )
+    };
+    let mut second = stored;
+    second.push(Text::literal(" · "));
+    second.push(enough);
+    vec![
+        base::v(&line(
+            "rustcraft.power.balance",
+            "Circuit: makes %s E/s, uses %s E/s",
+            &[e(b.produced), e(b.requested)],
+        )),
+        base::v(&second),
+    ]
+}
+
+/// E9: what holds a structure back, as its status line says it.
+fn limit_text(limit: rules::Limit, v: &PowerView) -> (Severity, Text) {
+    match limit {
+        rules::Limit::Size => (
+            Severity::Ok,
+            line(
+                "rustcraft.structure.limit_size",
+                "Held back by its size: more crystals give more",
+                &[],
+            ),
+        ),
+        rules::Limit::Solution => (
+            Severity::Warn,
+            line(
+                "rustcraft.structure.limit_solution",
+                "Held back by solution: without it %s E/s, as one crystal",
+                &[e(v.output)],
+            ),
+        ),
+        rules::Limit::Channel(cap) => (
+            Severity::Warn,
+            line(
+                "rustcraft.structure.limit_channel",
+                "Held back by the channel: it lets through %s of %s E/s",
+                &[e(cap), e(v.output)],
+            ),
+        ),
+        rules::Limit::Shape => (Severity::Warn, shown_text(v)),
+    }
+}
+
+/// ui.js `structure`: crystals and form, the output, the solution tank, the circuit's balance and
+/// what holds it back (E9).
+fn structure_sheet(level: &LevelNet, pos: Pos, v: &PowerView, t: &Tuning, s: &mut Sheet) {
+    let Some(g) = level.sources.crystals.iter().find(|g| g.contains(&pos)) else {
+        return;
+    };
+    let anchor = rules::anchor(g);
+    let form = rules::form(g);
+    s.rows.push(base::v(&line(
+        "rustcraft.structure.crystals",
+        "Crystals: %s",
+        &[Text::literal(g.len().to_string())],
+    )));
+    let form_text = match rules::form_name(form) {
+        Some(name) => Text::literal(name),
+        None if g.len() == 1 => line("rustcraft.structure.single", "one crystal", &[]),
+        None => line("rustcraft.structure.broken", "broken", &[]),
+    };
+    s.rows.push(base::v(&line(
+        "rustcraft.structure.form",
+        "Form: %s",
+        &[form_text],
+    )));
+    let most = rules::structure_output(g.len(), form, true, t);
+    s.bars.push(gives_bar(v.output, most));
+    let room = rules::solution_room(g.len(), t);
+    let per_minute = rules::solution_per_second(g.len(), t) * 60.0 / rules::BUCKET;
+    s.bars.push(SheetBar {
+        label: base::v(&line("rustcraft.structure.solution", "Solution", &[])),
+        value: base::v(&line(
+            "rustcraft.structure.solution_line",
+            "%s of %s mB · %s buckets a minute",
+            &[e(v.fluid.floor()), e(room), e(per_minute)],
+        )),
+        share: if room > 0.0 { (v.fluid / room).min(1.0) } else { 0.0 },
+        energy: false,
+        colour: Some(SOLUTION_COLOUR),
+    });
+    let balance = level.sources.balances.get(&anchor).copied().unwrap_or_default();
+    s.rows.extend(balance_rows(&balance));
+    let (severity, text) = if g.len() == 1 {
+        (Severity::Ok, shown_text(v))
+    } else {
+        let limit = level
+            .sources
+            .limits
+            .get(&anchor)
+            .copied()
+            .unwrap_or(rules::Limit::Size);
+        limit_text(limit, v)
+    };
+    s.status = Some(SheetStatus {
+        severity: severity_code(severity),
+        text: base::v(&text),
+    });
+}
+
+/// The solution's colour, as the guide draws it (ui.js `structure`).
+const SOLUTION_COLOUR: u32 = 0xFF59_D38C;
+
+/// What holds the crystal structure at `pos` back (E9), for the self-test.
+pub(super) fn limit_at(level: &LevelNet, pos: Pos) -> Option<rules::Limit> {
+    let g = level.sources.crystals.iter().find(|g| g.contains(&pos))?;
+    level.sources.limits.get(&rules::anchor(g)).copied()
 }
 
 /// What the self-test reads of a power block or crystal.

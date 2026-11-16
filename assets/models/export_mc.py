@@ -875,6 +875,9 @@ def items(out):
 # The model's sides (energy.py's link_<side>, z up, y south) as the game's faces.
 LINK_FACES = {'x-': 'west', 'x+': 'east', 'y-': 'north', 'y+': 'south', 'z-': 'down', 'z+': 'up'}
 LINKED = ('crystal', 'windmill', 'solar')
+# Every face tinted, so the client's tint sets how bright it glows: the crystal's pulse
+# (P.crystal), a structure lit with solution and dim without (P.crystalblock).
+LIT = ('crystal', 'crystalblock')
 # The seed's stages, one model each (P.seed shows stage<n> and hides the others).
 STAGED = {'seed': 3}
 
@@ -889,6 +892,10 @@ def energy_parts(out, name, every, skin, stats):
             if boxes:
                 model = '%s__link_%s' % (name, face)
                 out.text('models/block/%s.json' % model, model_json(skin.textures(), elements(boxes, skin, stats)))
+    if name in LIT:
+        boxes = [b for b in every if not any(fnmatch.fnmatchcase(b[0], p) for p in ALWAYS_HIDDEN)]
+        out.text('models/block/%s__lit.json' % name,
+                 model_json(skin.textures(), elements(boxes, skin, stats, tint_index=True)))
     if name in STAGED:
         for n in range(STAGED[name]):
             hidden = ['stage%d' % i for i in range(STAGED[name]) if i != n]
