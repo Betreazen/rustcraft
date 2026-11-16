@@ -43,6 +43,12 @@ impl Book {
     }
 }
 
+/// Vanilla enchantments that never go on gear (guide `blade`: «Прочность и починка не
+/// накладываются: прочности нет»).
+pub fn refused_on_gear(enchantment: &str) -> bool {
+    matches!(enchantment, "minecraft:unbreaking" | "minecraft:mending")
+}
+
 /// Two books of one kind at the anvil: two of a level make the next (up to III), else the higher.
 pub fn combine(a: u8, b: u8) -> u8 {
     let (a, b) = (a.clamp(1, MAX_LEVEL), b.clamp(1, MAX_LEVEL));
@@ -82,6 +88,13 @@ mod tests {
         assert_eq!(combine(3, 3), 3);
         assert_eq!(Book::of(BOOK_THRIFT), Some(Book::Thrift));
         assert_eq!(Book::of("minecraft:book"), None);
+    }
+
+    #[test]
+    fn unbreaking_and_mending_stay_off_gear() {
+        assert!(refused_on_gear("minecraft:unbreaking"));
+        assert!(refused_on_gear("minecraft:mending"));
+        assert!(!refused_on_gear("minecraft:sharpness"));
     }
 
     #[test]

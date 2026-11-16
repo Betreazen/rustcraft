@@ -241,4 +241,4 @@ Audit: zipline «Перед установкой виден контур яко�
 - The stack module item `mod_stack` for the backpack socket (stream 4's module list). Not done here: the backpack's module socket and stacks up to 1024 wait for that item, and a stack above 99 cannot sit in the game's chest window (the item stack size component is 1..99), so it needs the backpack's own drawn screen (API 111) — left open, see the report.
 - The scout compass counting a structure kind as visited (audit: DIFFERS, small) is `explore.rs`' rule (stream 6).
 - The energy shield that runs dry while held up keeps blocking (audit: DONE with a caveat) — not changed.
-- Whether the anvil lets vanilla Unbreaking and Mending onto gear (audit: unconfirmed) — not checked in game.
+- Vanilla Unbreaking and Mending on gear (audit: unconfirmed): the anvil hook now refuses them (`enchant::refused_on_gear`, test); the game's own enchanting table is not hooked.

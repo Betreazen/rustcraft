@@ -363,6 +363,13 @@ pub(super) fn on_anvil_update(
 ) {
     use rules::enchant::{self as e, Book};
     let Some(right) = right else { return };
+    // Unbreaking and Mending never go on gear: it has no durability.
+    if Gear::of(&left.item).is_some()
+        && right.stored_enchantments().iter().chain(right.enchantments()).any(|(id, _)| e::refused_on_gear(id))
+    {
+        *output = None;
+        return;
+    }
     let Some(book) = Book::of(&right.item) else { return };
     let level = book_level(right);
     if Book::of(&left.item) == Some(book) {
