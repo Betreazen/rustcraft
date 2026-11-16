@@ -116,7 +116,8 @@
 - Capacity: kitchen and brewer +1 page each; repair +2 material slots.
 - Storage module: fishery buffer 9 → 18.
 - Sockets: brewer, archeo, projector, builder (tier 3) and enchanter (tier 4) get 4 sockets — needs `sheet.rs` `SOCKETS` per shape (stream 3's file; done as `Shape.socket_count`, flagged).
-- [ ] done
+- [x] rules 19f7219: `Util::opening_tier`, `sockets_for_tier`. Capacity effect for repair (cabeef1), kitchen/brewer pages in tasks 13/19, storage module in task 14.
+- [ ] the 4th socket in the window: waits for stream 3's per-tier sockets in sheet.rs (same SOCKETS const for all sheets); after the merge `sheet.rs` takes `sockets_for_tier`
 
 ### Task 11: Levels on models (feeder food, shearer milk, apiary honey, brewer brew)
 
@@ -127,7 +128,7 @@
 
 ### Task 12: Repair — string for rod, bow, crossbow; slots 3 / 2 / 3; durability bar «алмазная кирка · 970 из 1561»
 - `rules/src/utility/repair.rs` (`material_of`), `rules/src/utility/mod.rs` slots `Repair => s(8, 0..5, 5..8)` (0..3 to repair, 3..5 material, 5..8 out), `utility.rs`, update `selftest/slice12.rs` output slot.
-- [ ] done
+- [x] done cabeef1 (capacity read from raw module items via `utility::module_items`; machines.rs Util slot rule passes them, flagged; `Util::bars` + sheet.rs line, flagged; self-test `repair18_mends_a_rod_with_string`; try pending)
 
 ### Task 13: Kitchen — pages, milk from a tank, empty buckets back/none, 4 s, «Нет молока в баке», handbook dish list
 - Pages: page = chosen dish (toggle row picks the dish of the page in view; pages 1 + capacity modules); `KITCHEN_RECIPES` without the golden carrot / apple (not in the handbook); milk: a recipe with `milk_bucket` takes 1000 mB of `rustcraft:milk` from a tank it touches instead (helper `fluids::take_touching` / `put_touching`, added block in `fluids.rs`, flagged), no bucket item; step 80 ticks; window rows: page tabs, the dish, its ingredients, milk bar.
