@@ -92,7 +92,7 @@
 
 **Files:** `storage.rs` (holes written into each terminal's block entity `holes` int array on rescan), `terminal.rs` client block-entity draw: red stained glass at each hole relative to the terminal (`native_draw_block`, as the projector's ghost).
 - rules test: none new (shape exists); self-test `storage_holes_written_to_terminal`.
-- [ ] done
+- [x] done (self-test `storage18_terminal_keeps_its_holes`; red glass at 0.9 scale; a far terminal (S6) does not draw them; try pending)
 
 ### Task 8: Orders through the kitchen (and the brewer)
 
