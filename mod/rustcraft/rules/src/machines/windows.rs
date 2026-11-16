@@ -151,21 +151,31 @@ pub mod alloy {
     pub const INPUTS: [[f32; 2]; 4] = [[10.0, 26.0], [28.0, 26.0], [46.0, 26.0], [64.0, 26.0]];
     pub const ARROW: Rect = [86.0, 31.0, 44.0, 8.0];
     pub const OUTPUTS: [[f32; 2]; 3] = [[150.0, 26.0], [168.0, 26.0], [186.0, 26.0]];
-    pub const FUEL: [f32; 2] = [10.0, 56.0];
-    pub const FLAME: Rect = [32.0, 61.0, 60.0, 6.0];
-    pub const MODULE_SLOTS: [[f32; 2]; 3] = [[150.0, 56.0], [168.0, 56.0], [186.0, 56.0]];
+    /// Slice 18: the queue cells under the inputs (rustcraft_rules::machines::queue), as many
+    /// as are open; the parts below moved down a row for them.
+    pub fn cell(k: usize) -> [f32; 2] {
+        [10.0 + 18.0 * k as f32, 44.0]
+    }
+    pub const FUEL: [f32; 2] = [10.0, 74.0];
+    pub const FLAME: Rect = [32.0, 79.0, 60.0, 6.0];
+    /// The module sockets (A5: three on tiers 1–2, four on 3–4).
+    pub const MODULE_SLOTS: [[f32; 2]; 4] =
+        [[132.0, 74.0], [150.0, 74.0], [168.0, 74.0], [186.0, 74.0]];
     /// The «take own alloy» switch: one well, two segments (style::segment_rects).
-    pub const TAKE_OWN_WELL: Rect = [8.0, 87.0, 131.0, 13.0];
-    pub const TAKE_OWN: [Rect; 2] = [[9.0, 88.0, 64.0, 11.0], [74.0, 88.0, 64.0, 11.0]];
-    pub const ENERGY_BAR: Rect = [8.0, 113.0, 198.0, 5.0];
-    pub const STATUS: Rect = [8.0, 121.0, 198.0, 12.0];
+    pub const TAKE_OWN_WELL: Rect = [8.0, 103.0, 131.0, 13.0];
+    pub const TAKE_OWN: [Rect; 2] = [[9.0, 104.0, 64.0, 11.0], [74.0, 104.0, 64.0, 11.0]];
+    pub const ENERGY_BAR: Rect = [8.0, 127.0, 198.0, 5.0];
+    pub const STATUS: Rect = [8.0, 134.0, 198.0, 12.0];
     pub const LABEL_SLOTS_Y: f32 = 16.0;
-    pub const LABEL_FUEL_Y: f32 = 46.0;
-    pub const LABEL_TAKE_Y: f32 = 77.0;
-    pub const LABEL_ENERGY_Y: f32 = 104.0;
-    pub const INVENTORY: [f32; 2] = [26.0, 147.0];
+    pub const LABEL_FUEL_Y: f32 = 64.0;
+    pub const LABEL_TAKE_Y: f32 = 94.0;
+    pub const LABEL_ENERGY_Y: f32 = 118.0;
+    pub const INVENTORY: [f32; 2] = [26.0, 160.0];
     pub const INVENTORY_LABEL_Y: f32 = INVENTORY[1] - 10.0;
     pub const HEIGHT: f32 = INVENTORY[1] + 80.0;
+    /// Slice 18: the window's own data slots, then the extras.
+    pub const EXTRAS_AT: usize = DATA_SLOTS;
+    pub const ALL_DATA_SLOTS: usize = DATA_SLOTS + crate::machines::extras::DATA;
 
     /// The switch's button at `at`: on or off.
     pub fn button_at(at: [f32; 2]) -> Option<i32> {
@@ -380,8 +390,8 @@ mod tests {
         assert_eq!(data.len(), alloy::DATA_SLOTS);
         assert_eq!(alloy::decode(&data), p);
         assert!(alloy::decode(&[]).take_own);
-        assert_eq!(alloy::button_at([10.0, 90.0]), Some(alloy::TAKE_OWN_ON));
-        assert_eq!(alloy::button_at([100.0, 90.0]), Some(alloy::TAKE_OWN_OFF));
+        assert_eq!(alloy::button_at([10.0, 106.0]), Some(alloy::TAKE_OWN_ON));
+        assert_eq!(alloy::button_at([100.0, 106.0]), Some(alloy::TAKE_OWN_OFF));
         assert_eq!(alloy::button_at([100.0, 60.0]), None);
     }
 
@@ -471,6 +481,7 @@ mod tests {
                     .map(|p| slot_frame(*p)),
             )
             .chain([slot_frame(a::FUEL)])
+            .chain((0..crate::machines::extras::MAX_CELLS).map(|k| slot_frame(a::cell(k))))
         {
             fits(r, a::HEIGHT, a::INVENTORY_LABEL_Y);
         }

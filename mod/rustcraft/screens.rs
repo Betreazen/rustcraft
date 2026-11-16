@@ -438,9 +438,9 @@ fn slots_part(
         [panel::ARROW[0] - 4.0, panel::LABEL_WORK_Y],
     );
     arrow(game, batch, o, panel::ARROW, p.progress);
-    label(game, batch, &output, o, [panel::OUTPUT[0] - 4.0, panel::LABEL_OUTPUT_Y]);
+    label_right(game, batch, &output, o, panel::OUTPUT[0] + 17.0, panel::LABEL_OUTPUT_Y);
     slot(game, batch, o, panel::OUTPUT);
-    reserve_part(game, batch, o, ex, panel::OUTPUT);
+    reserve_part(game, batch, o, ex, panel::RESERVE);
 }
 
 // ---- Slice 18, stream 3: sockets, queue cells and reserve of the drawn windows ----
@@ -498,11 +498,11 @@ pub(super) fn cells_part(
     }
 }
 
-/// What waits behind the result slot, «+192», right of it.
-pub(super) fn reserve_part(game: &Game<'_>, batch: &mut HudBatch, o: [f32; 2], ex: &Extras, slot_at: [f32; 2]) {
+/// What waits behind the result slot, «+192», written at `at`.
+pub(super) fn reserve_part(game: &Game<'_>, batch: &mut HudBatch, o: [f32; 2], ex: &Extras, at: [f32; 2]) {
     if ex.reserve > 0 {
         let s = format!("+{}", ex.reserve);
-        text(game, batch, &s, o, [slot_at[0] + 20.0, slot_at[1] + 5.0], VALUE);
+        text(game, batch, &s, o, at, VALUE);
     }
 }
 
@@ -522,7 +522,7 @@ pub(super) fn extras_tooltip(
     ex: &Extras,
     sockets: &[[f32; 2]],
     cell: impl Fn(usize) -> [f32; 2],
-    output: [f32; 2],
+    reserve_at: [f32; 2],
     at: [f32; 2],
     lines: &mut Vec<String>,
 ) -> bool {
@@ -552,7 +552,7 @@ pub(super) fn extras_tooltip(
         }
         return true;
     }
-    if ex.reserve > 0 && panel::inside([output[0] + 18.0, output[1], 40.0, 16.0], at) {
+    if ex.reserve > 0 && panel::inside([reserve_at[0] - 2.0, reserve_at[1] - 2.0, 32.0, 12.0], at) {
         lines.push(tr_with(
             "rustcraft.window.reserve",
             "%s more wait behind the slot",
@@ -958,7 +958,7 @@ pub(super) fn tooltip(
     }
     let p = panel::decode(data);
     let ex = extras::decode(data, panel::EXTRAS_AT);
-    if extras_tooltip(game, block, &ex, &panel::MODULE_SLOTS, panel::cell, panel::OUTPUT, at, lines) {
+    if extras_tooltip(game, block, &ex, &panel::MODULE_SLOTS, panel::cell, panel::RESERVE, at, lines) {
         return;
     }
     if panel::inside(panel::ARROW, at) {
