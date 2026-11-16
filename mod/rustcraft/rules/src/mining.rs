@@ -210,6 +210,25 @@ pub fn slot_max(modules: &[Option<String>], base_max: u32) -> u32 {
     }
 }
 
+// ---- Slice 18: the living vein's mode and window (guide `vein`, ui.js `vein`) ----
+
+/// The vein's pace under work mode `mode` (A1): its step of `ticks` and its `cost` in E, the
+/// guide's «Экономный: скорость ×0,5, энергия ×0,35; Форсаж: скорость ×2, энергия ×3».
+pub fn vein_paced(mode: WorkMode, ticks: u64, cost: f64) -> (u64, f64) {
+    let (work, energy) = mode.factors();
+    (((ticks as f64 / work).round() as u64).max(1), cost * energy)
+}
+
+/// How far the vein is to its next block (ui.js `work`): `now` its level's tick count, `every`
+/// its step.
+pub fn vein_progress(now: u64, every: u64) -> f64 {
+    if every == 0 {
+        0.0
+    } else {
+        (now % every) as f64 / every as f64
+    }
+}
+
 // ---- The miner ----
 
 /// The square's offsets along one axis: `side` cells round the miner, one more on the low side
@@ -690,6 +709,19 @@ mod tests {
         assert_eq!(fired, 2);
         assert_eq!(Shown::working(0.5), Shown::Slowed(50));
         assert_eq!(Shown::working(0.0), Shown::NoEnergy);
+    }
+
+    #[test]
+    fn the_veins_mode_sets_its_pace_and_cost() {
+        assert_eq!(vein_paced(WorkMode::Normal, 1200, 2000.0), (1200, 2000.0));
+        let (t, e) = vein_paced(WorkMode::Economy, 1200, 2000.0);
+        assert_eq!(t, 2400);
+        assert!((e - 700.0).abs() < 1e-9);
+        let (t, e) = vein_paced(WorkMode::Boost, 1200, 2000.0);
+        assert_eq!(t, 600);
+        assert!((e - 6000.0).abs() < 1e-9);
+        assert!((vein_progress(1500, 1200) - 0.25).abs() < 1e-9);
+        assert_eq!(vein_progress(5, 0), 0.0);
     }
 
     #[test]

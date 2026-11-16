@@ -5,7 +5,7 @@ use super::{Build, Scenario, at, plot_area, same};
 use crate::grow::{self, DRUSE, SEED, SHARD, STAGE};
 use crate::tuning::Tuning;
 
-pub const ALL: [Build; 7] = [
+pub const ALL: [Build; 8] = [
     shard_recipes,
     druse_breaks_into_shards,
     seed_grows_on_solution,
@@ -13,6 +13,7 @@ pub const ALL: [Build; 7] = [
     structure_window_and_look,
     structure_unfed_window_and_look,
     miner_fills_a_load_dock,
+    vein_window,
 ];
 
 const TANK: &str = "rustcraft:tank";
@@ -221,6 +222,29 @@ fn miner_fills_a_load_dock(o: crate::geom::Pos, _t: &Tuning) -> Scenario {
         .until("the chest comes first", 1200, move |b, _| Ok(raw(b, chest) >= 1))
         .check("and the dock got no more", move |b, m2| {
             same("dock", f64::from(raw(b, dock)), m2.get("dock"))
+        })
+}
+
+/// Guide `vein` (ui.js): its window has the work modes, a progress bar beside the energy and the
+/// free cells round it; boost is the mode a press sets.
+fn vein_window(o: crate::geom::Pos, _t: &Tuning) -> Scenario {
+    use crate::machines::{processor::WorkMode, sheet::Press};
+    let vein = at(o, [5, 3, 5]);
+    Scenario::new("s18_vein_window", plot_area(o))
+        .then("a living vein in the open", move |b, _| b.place(vein, "rustcraft:vein", &[]))
+        .check("its window: modes, two bars, free cells and grown blocks", move |b, _| {
+            let s = b.sheet(vein).ok_or("no sheet for the vein")?;
+            same("mode", s.mode, Some(WorkMode::Normal.code()))?;
+            same("bars", s.bars.len(), 2)?;
+            let rows: Vec<String> = s.rows.iter().map(|r| r.to_string()).collect();
+            if !(rows.len() == 2 && rows[0].contains("rustcraft.vein.free") && rows[1].contains("rustcraft.vein.grown")) {
+                return Err(format!("rows {rows:?}"));
+            }
+            Ok(())
+        })
+        .then("boost pressed", move |b, _| b.press_cursor(vein, Press::Mode(WorkMode::Boost).id(), None).map(|_| ()))
+        .check("the window shows boost", move |b, _| {
+            same("mode", b.sheet(vein).and_then(|s| s.mode), Some(WorkMode::Boost.code()))
         })
 }
 

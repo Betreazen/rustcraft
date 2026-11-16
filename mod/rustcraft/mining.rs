@@ -24,7 +24,8 @@ use rustcraft_rules::{
     geom::{Face, Pos, step},
     machines::{
         sheet::{
-            Kind as SheetKind, Sheet, Status as SheetStatus, Toggle as SheetToggle, severity_code,
+            Bar as SheetBar, Kind as SheetKind, Sheet, Status as SheetStatus,
+            Toggle as SheetToggle, severity_code,
         },
         style::Severity,
     },
@@ -824,6 +825,62 @@ fn survey(
     }
     state().surveys.insert(key, s);
     s.done.then_some(s.ores)
+}
+
+// ---- Slice 18: the living vein's mode and window (guide `vein`, ui.js `vein`) ----
+
+const GROWN_KEY: &str = "grown";
+
+/// The vein's step and cost under its work mode.
+pub(super) fn vein_paced(game: &Game<'_>, pos: Pos, ticks: u64, cost: f64) -> (u64, f64) {
+    let mode = crate::game::rustcraft_machines::entity(game, pos)
+        .map(|e| machines::read_work(&e.nbt))
+        .unwrap_or_default();
+    rules::vein_paced(mode, ticks, cost)
+}
+
+/// The vein grew a block: one more for «Выращено всего».
+pub(super) fn vein_grew(game: &mut Game<'_>, pos: Pos) {
+    game.native_with_mod_block_entity(pos, |e| {
+        let n = read_long(&e.nbt, GROWN_KEY) + 1;
+        e.nbt.insert(JavaString::from(GROWN_KEY), Tag::Long(n as i64));
+    });
+}
+
+/// ui.js `vein`: its mode, «Ход работы», «Свободных клеток вокруг» and «Выращено всего» (what it
+/// does and its pace go to the rows' hints).
+pub(super) fn vein_sheet(game: &Game<'_>, pos: Pos, now: u64, every: u64, s: &mut Sheet) {
+    let Some(entity) = crate::game::rustcraft_machines::entity(game, pos) else {
+        return;
+    };
+    s.mode = Some(machines::read_work(&entity.nbt).code());
+    let free = rustcraft_rules::utility::vein::cells()
+        .into_iter()
+        .map(|c| [pos[0] + c[0], pos[1] + c[1], pos[2] + c[2]])
+        .filter(|p| matches!(game.native_block(*p).as_str(), "minecraft:air" | "minecraft:cave_air"))
+        .count();
+    let old_rows = std::mem::take(&mut s.rows);
+    s.rows.push(base::v(&line(
+        "rustcraft.vein.free",
+        "Free cells around: %s",
+        &[Text::literal(free.to_string())],
+    )));
+    s.rows.push(base::v(&line(
+        "rustcraft.vein.grown",
+        "Grown in all: %s blocks",
+        &[Text::literal(read_long(&entity.nbt, GROWN_KEY).to_string())],
+    )));
+    s.hints = vec![old_rows.clone(), old_rows];
+    s.bars.push(SheetBar {
+        label: base::v(&line("rustcraft.vein.progress", "Progress", &[])),
+        value: base::v(&Text::literal(format!(
+            "{:.0}%",
+            rules::vein_progress(now, every) * 100.0
+        ))),
+        share: rules::vein_progress(now, every),
+        energy: false,
+        colour: None,
+    });
 }
 
 /// The self-test's plot cleared: what it showed goes.

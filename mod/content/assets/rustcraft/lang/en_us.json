@@ -1047,5 +1047,8 @@
   "rustcraft.miner.outlet.magistral": "magistral",
   "rustcraft.miner.outlet.dock": "load dock",
   "rustcraft.miner.outlet_hint": "It picks in order: a chest beside it, else the magistral, else a load dock by the monorail",
-  "rustcraft.miner.energy": "%s of %s E/s"
+  "rustcraft.miner.energy": "%s of %s E/s",
+  "rustcraft.vein.free": "Free cells around: %s",
+  "rustcraft.vein.grown": "Grown in all: %s blocks",
+  "rustcraft.vein.progress": "Progress"
 }

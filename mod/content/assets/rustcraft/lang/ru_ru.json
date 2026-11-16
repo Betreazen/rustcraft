@@ -3695,5 +3695,8 @@
   "rustcraft.miner.outlet.magistral": "магистраль",
   "rustcraft.miner.outlet.dock": "блок погрузки",
   "rustcraft.miner.outlet_hint": "Сам выбирает по порядку: сундук вплотную, иначе магистраль, иначе блок погрузки у монорельса",
-  "rustcraft.miner.energy": "%s из %s Е/с"
+  "rustcraft.miner.energy": "%s из %s Е/с",
+  "rustcraft.vein.free": "Свободных клеток вокруг: %s",
+  "rustcraft.vein.grown": "Выращено всего: %s блоков",
+  "rustcraft.vein.progress": "Ход работы"
 }

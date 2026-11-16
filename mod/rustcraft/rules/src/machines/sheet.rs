@@ -224,11 +224,13 @@ impl Kind {
             Kind::Util(u) => {
                 let spec = u.spec();
                 let count = u.slots().count;
+                // Slice 18: the living vein has the work modes and a progress bar (ui.js `vein`).
+                let vein = u == crate::utility::Util::Vein;
                 Shape {
                     sockets,
-                    mode: false,
+                    mode: vein,
                     rows: spec.rows,
-                    bars: 1,
+                    bars: if vein { 2 } else { 1 },
                     toggles: spec.toggles,
                     slots: if count > 1 { count } else { 0 },
                     ..Shape::default()
