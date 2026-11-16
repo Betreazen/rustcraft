@@ -942,6 +942,10 @@ fn declare_gear(items: &mut Vec<Item>) {
             ("!minecraft:max_damage".to_owned(), serde_json::json!({})),
             ("!minecraft:damage".to_owned(), serde_json::json!({})),
         ]);
+        // Slice 18: an axe switches the energy shield off for 5 / 3 / 1.5 s by tier.
+        if g.kind == gear::Kind::Shield {
+            components.insert("minecraft:blocks_attacks".to_owned(), gear::shield::blocks_attacks(g.tier));
+        }
         if let Some(slot) = g.slot_name() {
             components.insert(
                 "minecraft:equippable".to_owned(),

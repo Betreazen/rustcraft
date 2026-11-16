@@ -145,13 +145,13 @@ Audit: armor «Окно части: гнёзда, полоса заряда, с�
 
 Audit: eshield «Топор выключает на 5 / 3 / 1,5 с» DIFFERS, «Ступень 4 отражает снаряды» MISSING.
 
-**Files:** rules `gear/mod.rs` (`pub fn axe_disable_scale(tier) -> f32`: 1.0 / 0.6 / 0.3), `content.rs` (the shields' `blocks_attacks.disable_cooldown_scale` — gear's own lines), new `hook_projectile_impact.rs`, `hook_hears_projectiles.rs`, `gear.rs::on_projectile_impact`.
+**Files:** rules `gear/shield.rs` (new: `axe_seconds`, `axe_disable_scale` 1.0 / 0.6 / 0.3, `blocks_attacks(tier)` JSON, `back_motion`), `content.rs` (the shields' `blocks_attacks.disable_cooldown_scale` — gear's own lines), new `hook_projectile_impact.rs`, `hook_hears_projectiles.rs`, `gear.rs::on_projectile_impact`.
 
 **Interfaces:** `pub fn reflects(tier: u8, facing_yaw: f32, from: [f64;3], to_player: [f64;3]) -> bool` (tier 4 and the projectile comes from the front half).
 
-- [ ] Tests for both functions.
-- [ ] GREEN, wiring: a projectile hitting a blocking tier-4 shield bearer from the front is cancelled and a new one of its kind flies back to its shooter.
-- [ ] Commit.
+- [x] Tests for both functions.
+- [x] GREEN, wiring: a projectile hitting a blocking tier-4 shield bearer from the front is cancelled and a new one of its kind flies back to its shooter.
+- [x] Commit.
 
 ### Task 10: The rifle's beam and zoom
 

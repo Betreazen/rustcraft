@@ -96,7 +96,7 @@ struct State {
     /// The dash: each player's last input flags and the tick forward last went down.
     input: HashMap<u128, (i32, u64)>,
     /// Players holding up a charged energy shield, by entity id: the shield's number.
-    blocking: HashMap<i32, u64>,
+    blocking: HashMap<i32, (u64, u8)>,
     /// Slice 18: the tick each player began to sprint (the run module's burst), the players
     /// whose burst modifier is on, and the players whose magnet pulls.
     sprint: HashMap<u128, u64>,
@@ -645,7 +645,7 @@ pub(super) fn on_use_start(stack: &ItemStack, entity: Option<i32>, canceled: &mu
         return;
     }
     if let Some(e) = entity {
-        s.blocking.insert(e, id);
+        s.blocking.insert(e, (id, g.tier));
     }
 }
 
@@ -653,6 +653,67 @@ pub(super) fn on_use_start(stack: &ItemStack, entity: Option<i32>, canceled: &mu
 pub(super) fn on_use_stop(entity: Option<i32>) {
     if let Some(e) = entity {
         state().blocking.remove(&e);
+    }
+}
+
+// ---- Slice 18: the fourth tier's shield sends projectiles back ----
+
+/// `native_hears_projectile_impacts`: the server keeps its flying projectiles for the hook below.
+pub(super) fn hears_projectiles(hears: &mut bool) {
+    *hears = true;
+}
+
+/// How fast a projectile flies back, blocks a tick (an arrow from a full bow: 3).
+const BACK_SPEED: f64 = 1.6;
+
+/// `native_projectile_impact`: a projectile meeting a player who holds up a charged fourth-tier
+/// energy shield in front of it is cancelled and a new one of its kind flies back at its shooter,
+/// shot by the shield's bearer (guide `eshield`).
+#[allow(clippy::too_many_arguments)]
+pub(super) fn on_projectile_impact(
+    game: &mut Game<'_>,
+    dimension: &str,
+    projectile: u32,
+    kind: &str,
+    owner: u32,
+    entity: Option<u32>,
+    entity_kind: &str,
+    at: [f64; 3],
+    canceled: &mut bool,
+) {
+    if *canceled || entity_kind != "minecraft:player" || owner == 0 {
+        return;
+    }
+    let Some(target) = entity.and_then(|e| i32::try_from(e).ok()) else { return };
+    let Some((_, tier)) = state().blocking.get(&target).copied() else { return };
+    let Some(p) = game.native_server_players().into_iter().find(|p| p.entity_id == target) else { return };
+    let shooter = game
+        .mobs
+        .iter()
+        .find(|m| m.id == owner)
+        .map(|m| [m.position.x, m.position.y + f64::from(m.height()) * 0.6, m.position.z])
+        .or_else(|| {
+            game.native_server_players()
+                .into_iter()
+                .find(|q| q.entity_id as u32 == owner)
+                .map(|q| [q.position[0], q.position[1] + 1.2, q.position[2]])
+        });
+    let Some(shooter) = shooter else { return };
+    if !rules::shield::reflects(tier, p.yaw, p.position, shooter) {
+        return;
+    }
+    *canceled = true;
+    game.native_remove_entity(dimension, projectile);
+    let motion = rules::shield::back_motion(at, shooter, BACK_SPEED);
+    let start = [at[0] + motion[0] * 0.5, at[1] + motion[1] * 0.5, at[2] + motion[2] * 0.5];
+    let words = [(p.uuid >> 96) as u32, (p.uuid >> 64) as u32, (p.uuid >> 32) as u32, p.uuid as u32].map(|w| w as i32);
+    let nbt = horizon_world::nbt::Compound::from([
+        (JavaString::from("Motion"), Tag::List(motion.iter().map(|v| Tag::Double(v.to_bits())).collect())),
+        (JavaString::from("Owner"), Tag::IntArray(words.to_vec())),
+        (JavaString::from("pickup"), Tag::Byte(0)),
+    ]);
+    if game.native_summon(dimension, kind, start, nbt).is_none() {
+        log::debug!("rustcraft: a {kind} sent back by a shield did not spawn");
     }
 }
 
@@ -679,7 +740,7 @@ pub(super) fn on_incoming_damage(entity: i32, kind: &str, damage_type: &str, cau
     }
     // W8: a hit from someone on a held-up energy shield costs 10 E a point, at least 10 E.
     if causing != 0
-        && let Some(&id) = s.blocking.get(&entity)
+        && let Some(&(id, _)) = s.blocking.get(&entity)
     {
         let cost = (f64::from(*amount) * rules::SHIELD_PER_DAMAGE).max(rules::SHIELD_PER_DAMAGE);
         let cost = s.store.held.get(&id).map_or(cost, |h| rules::cost(cost, h));

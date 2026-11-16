@@ -1064,3 +1064,32 @@ bindings = [
   { name = "key", ty = "&str", value = "key" },
   { name = "pressed", ty = "bool", value = "pressed" },
 ]
+
+# The fourth tier's energy shield sends projectiles back (API 136, server).
+[[injection]]
+id = "hears_projectile_impacts"
+hook = "hears_projectile_impacts"
+hook_version = 1
+kind = "HEAD"
+helper = "hook_hears_projectiles.rs"
+bindings = [
+  { name = "hears", ty = "&mut bool", value = "&mut *hears" },
+]
+
+[[injection]]
+id = "projectile_impact"
+hook = "projectile_impact"
+hook_version = 1
+kind = "HEAD"
+helper = "hook_projectile_impact.rs"
+bindings = [
+  { name = "game", ty = "&mut crate::game::Game<'_>", value = "&mut *self" },
+  { name = "dimension", ty = "&str", value = "dimension" },
+  { name = "projectile", ty = "u32", value = "projectile" },
+  { name = "kind", ty = "&str", value = "kind" },
+  { name = "owner", ty = "u32", value = "owner" },
+  { name = "entity", ty = "Option<u32>", value = "entity" },
+  { name = "entity_kind", ty = "&str", value = "entity_kind" },
+  { name = "at", ty = "[f64; 3]", value = "at" },
+  { name = "canceled", ty = "&mut bool", value = "&mut *canceled" },
+]

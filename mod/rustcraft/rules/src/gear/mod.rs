@@ -11,6 +11,7 @@ use crate::geom::Pos;
 
 pub mod keys;
 pub mod moves;
+pub mod shield;
 pub mod shot;
 pub mod window;
 
