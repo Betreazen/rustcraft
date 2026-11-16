@@ -254,8 +254,7 @@ fn write_role(nbt: &mut Compound, role: Role) {
 
 /// The turret's role as its block entity says it, for the self-test.
 pub(super) fn role_at(game: &Game<'_>, pos: Pos) -> Option<String> {
-    match game
-        .native_mod_block_entity(pos)?
+    match crate::game::rustcraft_machines::entity(game, pos)?
         .nbt
         .get(&JavaString::from(ROLE_KEY))
     {
@@ -1130,8 +1129,7 @@ fn anchors(game: &mut Game<'_>, dimension: &str, level: &LevelNet, t: &Tuning) {
         if !list.iter().any(|a| a.pos == p)
             && let Some(owner) = owner_at(game, p)
         {
-            let placed = game
-                .native_mod_block_entity(p)
+            let placed = crate::game::rustcraft_machines::entity(game, p)
                 .and_then(|e| match e.nbt.get(&JavaString::from(PLACED_KEY)) {
                     Some(Tag::Long(l)) => Some(*l as u64),
                     _ => None,
@@ -1417,8 +1415,7 @@ pub(super) fn v(t: &Text) -> Value {
 
 /// The sockets' modules of the block at `pos`, as item ids, one a socket.
 pub(super) fn module_items(game: &Game<'_>, pos: Pos) -> Vec<Option<String>> {
-    let mut items = game
-        .native_mod_block_entity(pos)
+    let mut items = crate::game::rustcraft_machines::entity(game, pos)
         .map(|e| read_modules(&e.nbt))
         .unwrap_or_default();
     items.resize(MODULE_SLOTS, None);

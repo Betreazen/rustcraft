@@ -387,7 +387,7 @@ fn snapshot(
     }
     for (pos, slots) in read {
         let machine = machines.get(&pos).copied();
-        let entity = machine.and_then(|_| game.native_mod_block_entity(pos));
+        let entity = machine.and_then(|_| crate::game::rustcraft_machines::entity(game, pos));
         let slots = slots
             .into_iter()
             .map(|(slot, held, can_take)| {
@@ -528,7 +528,7 @@ pub(super) fn forget(game: &mut Game<'_>, pos: Pos) {
 
 /// The slice-2 mode a machine kept in its block entity, if any.
 fn legacy_machine_mode(game: &Game<'_>, pos: Pos) -> Option<Mode> {
-    let entity = game.native_mod_block_entity(pos)?;
+    let entity = crate::game::rustcraft_machines::entity(game, pos)?;
     match entity.nbt.get(&JavaString::from(LEGACY_JOINT_KEY)) {
         Some(Tag::Byte(code)) => Mode::from_code(*code as u8),
         _ => None,

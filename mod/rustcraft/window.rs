@@ -298,7 +298,7 @@ fn context(game: &mut Game<'_>, dimension: &str, housing: Pos) -> Option<Context
     if game.native_block(housing) != content::HOUSING {
         return None;
     }
-    let entity = game.native_mod_block_entity(housing)?;
+    let entity = crate::game::rustcraft_machines::entity(game, housing)?;
     let slots = server::read_slots(&entity.nbt);
     let joints = read_joints(&entity.nbt);
     let saved = transport::legacy_modes(game);
@@ -812,7 +812,7 @@ pub(super) fn all_joints(
 ) -> BTreeMap<Pos, HousingJoints> {
     housings
         .filter_map(|pos| {
-            let entity = game.native_mod_block_entity(pos)?;
+            let entity = crate::game::rustcraft_machines::entity(game, pos)?;
             let joints = read_joints(&entity.nbt);
             (!joints.settings.is_empty()).then_some((pos, joints))
         })

@@ -340,8 +340,7 @@ pub(super) fn rescan(game: &mut Game<'_>, dimension: &str, rails: &[Pos], statio
         level.dirty = true;
     }
     for &p in &found_stations {
-        let name = game
-            .native_mod_block_entity(p)
+        let name = crate::game::rustcraft_machines::entity(game, p)
             .map(|e| read_name(&e))
             .unwrap_or_default();
         if level.net.stations.get(&p).map(|s| &s.name) != Some(&name) {
@@ -589,8 +588,7 @@ fn take_touched(game: &mut Game<'_>, level: &mut LevelRail) {
             }
         }
         if game.native_block(p) == content::STATION {
-            let name = game
-                .native_mod_block_entity(p)
+            let name = crate::game::rustcraft_machines::entity(game, p)
                 .map(|e| read_name(&e))
                 .unwrap_or_default();
             level.net.stations.insert(p, Station { name, energy: 0.0 });

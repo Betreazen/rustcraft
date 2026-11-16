@@ -470,8 +470,7 @@ fn drop_stack(game: &mut Game<'_>, dimension: &str, pos: Pos, stack: &ItemStack)
 
 /// The placer puts one block of slot `slot` into `cell`, as a player clicking its front face.
 fn place(game: &mut Game<'_>, dimension: &str, pos: Pos, slot: usize, face: Face, cell: Pos) {
-    let Some(stack) = game
-        .native_mod_block_entity(pos)
+    let Some(stack) = crate::game::rustcraft_machines::entity(game, pos)
         .and_then(|e| e.items.get(slot).cloned().flatten())
     else {
         return;

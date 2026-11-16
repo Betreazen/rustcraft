@@ -372,8 +372,7 @@ pub(super) fn rescan(
     let ids: BTreeMap<Pos, Option<u32>> = cell_blocks
         .iter()
         .map(|&p| {
-            let id = game
-                .native_mod_block_entity(p)
+            let id = crate::game::rustcraft_machines::entity(game, p)
                 .and_then(|e| read_int(&e.nbt, ID_KEY))
                 .and_then(|id| u32::try_from(id).ok());
             (p, id)

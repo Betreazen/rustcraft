@@ -467,8 +467,7 @@ pub(super) fn on_destroy_block(game: &mut Game<'_>, pos: [i32; 3]) {
     }
     // Slice 15: a terminal broken in survival gives back its recipe book.
     if block == content::TERMINAL && player.game_mode != CREATIVE {
-        let book = game
-            .native_mod_block_entity(pos)
+        let book = crate::game::rustcraft_machines::entity(game, pos)
             .is_some_and(|e| orders::has_book(&e.nbt));
         if book && game.native_give_items(orders::book_item(), 1) == 0 {
             drop_item(game, &player.dimension, pos, orders::book_item());
@@ -477,9 +476,8 @@ pub(super) fn on_destroy_block(game: &mut Game<'_>, pos: [i32; 3]) {
     if block != content::HOUSING || player.game_mode == CREATIVE {
         return;
     }
-    let Some(held) = game
-        .native_mod_block_entity(pos)
-        .map(|entity| read_slots(&entity.nbt))
+    let Some(held) =
+        crate::game::rustcraft_machines::entity(game, pos).map(|entity| read_slots(&entity.nbt))
     else {
         return;
     };
@@ -584,8 +582,7 @@ fn scan(game: &Game<'_>, dimension: &str, level: &mut LevelNet) -> Found {
     // A mod block's entry is named after its block (native_diagnostics.rs:76-88, 207-218).
     for (pos, kind) in game.native_level_block_entities(dimension) {
         if kind == content::HOUSING {
-            let slots = game
-                .native_mod_block_entity(pos)
+            let slots = crate::game::rustcraft_machines::entity(game, pos)
                 .map(|entity| read_slots(&entity.nbt))
                 .unwrap_or_default();
             layout.housings.insert(pos, slots);
@@ -662,9 +659,8 @@ fn put_channel(game: &mut Game<'_>, player: &NativeServerPlayer, pos: Pos, chann
 }
 
 fn take_channel(game: &mut Game<'_>, player: &NativeServerPlayer, pos: Pos) {
-    let Some(held) = game
-        .native_mod_block_entity(pos)
-        .map(|entity| read_slots(&entity.nbt))
+    let Some(held) =
+        crate::game::rustcraft_machines::entity(game, pos).map(|entity| read_slots(&entity.nbt))
     else {
         return;
     };
