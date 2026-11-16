@@ -427,7 +427,10 @@ fn owner(game: &Game<'_>, pos: Pos) -> Option<u128> {
 
 fn trash(game: &mut Game<'_>, pos: Pos, _t: &Tuning) -> Shown {
     let slots = items(game, pos);
-    if slots.iter().take(9).all(|s| s.as_ref().is_none_or(|s| s.count == 0)) {
+    // Slice 18 (guide `trash`): the filter is its joints' (the wrench); its own filter cells, if
+    // any are set, narrow it further.
+    let own_filter = slots.iter().take(9).any(|s| s.as_ref().is_some_and(|s| s.count > 0));
+    if !own_filter && !joint_filter_set(game, pos) {
         return Shown::Blocked("trash_no_filter");
     }
     // Slice 18: 8 / 16 / 32 / 64 a second by tier; a speed module shortens the step (paced), so it
@@ -438,7 +441,7 @@ fn trash(game: &mut Game<'_>, pos: Pos, _t: &Tuning) -> Shown {
     let mut burned = 0;
     for slot in 9..18 {
         let Some(Some(s)) = slots.get(slot) else { continue };
-        if !filter.contains(&&*s.item) {
+        if own_filter && !filter.contains(&&*s.item) {
             continue;
         }
         let n = s.count.min(batch);
@@ -465,6 +468,55 @@ fn trash(game: &mut Game<'_>, pos: Pos, _t: &Tuning) -> Shown {
         Shown::NoEnergy
     } else {
         Shown::Idle("trash_empty")
+    }
+}
+
+/// Slice 18: whether any joint of a housing beside the trash at `pos` names what to destroy.
+fn joint_filter_set(game: &Game<'_>, pos: Pos) -> bool {
+    Face::ALL.iter().any(|&face| {
+        let o = face.offset();
+        let housing = [pos[0] + o[0], pos[1] + o[1], pos[2] + o[2]];
+        if game.native_block(housing) != crate::game::rustcraft_content::HOUSING {
+            return false;
+        }
+        let Some(e) = machines::entity(game, housing) else {
+            return false;
+        };
+        let joints = crate::game::rustcraft_window::read_joints(&e.nbt);
+        (0..4).any(|slot| {
+            joints
+                .get(face.opposite(), slot)
+                .is_some_and(tiered::trash_filter_set)
+        })
+    })
+}
+
+/// Slice 18 (guide `trash`): a trash placed beside a housing, or a housing beside a trash, gets
+/// the trash's joint settings where the housing has none: an empty allow list at the lowest
+/// priority (rustcraft_rules::machines::tiered::trash_joint).
+pub(super) fn on_placed(game: &mut Game<'_>, pos: Pos) {
+    let here = game.native_block(pos);
+    let housing = crate::game::rustcraft_content::HOUSING;
+    let trash = Util::Trash.spec().block;
+    for face in Face::ALL {
+        let o = face.offset();
+        let there = [pos[0] + o[0], pos[1] + o[1], pos[2] + o[2]];
+        let (h, toward) = if here == trash && game.native_block(there) == housing {
+            (there, face.opposite())
+        } else if here == housing && game.native_block(there) == trash {
+            (pos, face)
+        } else {
+            continue;
+        };
+        machines::change_entity(game, h, false, |e| {
+            let mut joints = crate::game::rustcraft_window::read_joints(&e.nbt);
+            for slot in 0..4 {
+                if joints.get(toward, slot).is_none() {
+                    joints = joints.with(toward, slot, tiered::trash_joint());
+                }
+            }
+            crate::game::rustcraft_window::write_joints(&mut e.nbt, &joints);
+        });
     }
 }
 

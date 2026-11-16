@@ -425,6 +425,8 @@ pub(super) fn on_container_accepts(
 /// magistral or the machines, and any block placed beside a housing may be a new joint.
 pub(super) fn on_place_block(game: &mut Game<'_>, stack: &ItemStack, pos: [i32; 3]) {
     base::on_place_block(game, stack, pos);
+    // Slice 18, stream 3: a trash's joints start empty and last (guide `trash`).
+    crate::game::rustcraft_utility::on_placed(game, pos);
     let Some(player) = game.native_acting_player() else {
         mark_all_stale();
         return;

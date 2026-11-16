@@ -1049,6 +1049,11 @@ pub(super) fn slot_takes(
                 .filter(|s| s.count > 0)
                 .map(|s| s.item.to_string())
                 .collect();
+            // Slice 18 (guide `trash`): with no filter cells of its own, the trash's joints'
+            // filters decide what reaches it.
+            if u == rustcraft_rules::utility::Util::Trash && filter.is_empty() {
+                return u.slots().inputs.contains(&slot);
+            }
             u.takes(slot, item, &filter)
         }
         Machine::Mixer => {

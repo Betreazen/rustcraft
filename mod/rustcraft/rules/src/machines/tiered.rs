@@ -2,7 +2,29 @@
 //! `disintegrator`) and with the work mode (UT7: every machine has the three modes).
 
 use crate::machines::processor::WorkMode;
+use crate::net::items::{Filter, Mode};
+use crate::net::settings::{JointSetting, PRIORITY_LIMIT};
 use crate::utility::Util;
+
+/// A trash's joint as it is placed (guide `trash`): it takes in, its allow list is empty, so it
+/// takes nothing until the wrench names what to destroy, and its priority is the lowest, so only
+/// what no storage or machine took reaches it.
+pub fn trash_joint() -> JointSetting {
+    JointSetting {
+        mode: Mode::Into,
+        filter: Filter {
+            allow_only: true,
+            items: Default::default(),
+        },
+        priority: -PRIORITY_LIMIT,
+    }
+}
+
+/// Whether a trash joint's setting names what to destroy: an allow list with something in it,
+/// or a block list (everything but what it names).
+pub fn trash_filter_set(s: &JointSetting) -> bool {
+    !s.filter.allow_only || !s.filter.items.is_empty()
+}
 
 /// Items (or buckets) the trash destroys a step of one second on `tier` (guide `trash`:
 /// 8 / 16 / 32 / 64 a second on tiers 1–4). A speed module shortens the step instead (×2 each).
@@ -29,6 +51,18 @@ pub fn in_mode(ticks: u64, energy: f64, mode: WorkMode) -> (u64, f64) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_new_trash_joint_takes_nothing_and_comes_last() {
+        let j = trash_joint();
+        assert!(!j.filter.passes("minecraft:cobblestone"));
+        assert_eq!(j.priority, -PRIORITY_LIMIT);
+        assert!(!trash_filter_set(&j));
+        let mut named = j.clone();
+        named.filter.items.insert("minecraft:cobblestone".into());
+        assert!(named.filter.passes("minecraft:cobblestone"));
+        assert!(trash_filter_set(&named));
+    }
 
     #[test]
     fn trash_rate_by_tier() {

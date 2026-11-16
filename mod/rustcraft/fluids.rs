@@ -123,9 +123,32 @@ pub(super) fn default_mode(block: &str) -> Option<Mode> {
         Some(TANK_DEFAULT)
     } else if block == content::MIXER {
         Some(Mode::Both)
+    } else if block == TRASH {
+        // Slice 18 (guide `trash`): the trash destroys fluids its joint's filter lets in.
+        Some(TANK_DEFAULT)
     } else {
         None
     }
+}
+
+/// Slice 18: the trash block, a fluid sink of the fluid nets.
+const TRASH: &str = "rustcraft:trash";
+
+/// Slice 18: how much fluid (mB) each trash of the level may destroy this pass: its tier's rate
+/// a second, in buckets, over the pass, as far as its buffer pays 1 E a bucket (guide `trash`).
+fn trash_room(game: &Game<'_>, level: &LevelNet) -> BTreeMap<Pos, u64> {
+    level
+        .machines
+        .iter()
+        .filter(|(_, m)| **m == Machine::Util(rustcraft_rules::utility::Util::Trash))
+        .map(|(&p, _)| {
+            let tier = crate::game::rustcraft_tiers::tier_at(game, p);
+            let rate = u64::from(rustcraft_rules::machines::tiered::trash_batch(tier));
+            let pass = rate * BUCKET * EVERY / 20;
+            let paid = (machines::buffer_energy(game, p).max(0.0) * BUCKET as f64) as u64;
+            (p, pass.min(paid))
+        })
+        .collect()
 }
 
 /// Builds the fluid nets' joints again after a rescan.
@@ -238,6 +261,9 @@ struct Inventories<'a> {
     /// Slice 11: the furnaces' and crushers' catalyst tanks.
     catalysts: &'a mut BTreeMap<Pos, CatalystTank>,
     tuning: &'a Tuning,
+    /// Slice 18: what each trash may still destroy this pass, mB, and what it destroyed.
+    trash: BTreeMap<Pos, u64>,
+    destroyed: BTreeMap<Pos, u64>,
 }
 
 impl FluidInventories for Inventories<'_> {
@@ -258,6 +284,9 @@ impl FluidInventories for Inventories<'_> {
     }
 
     fn room_for(&self, block: Pos, fluid: &str) -> u64 {
+        if let Some(room) = self.trash.get(&block) {
+            return *room;
+        }
         if let Some(c) = self.catalysts.get(&block) {
             return c.room_for(fluid, self.tuning);
         }
@@ -303,6 +332,12 @@ impl FluidInventories for Inventories<'_> {
     }
 
     fn put(&mut self, block: Pos, fluid: &str, amount: u64) -> u64 {
+        if let Some(room) = self.trash.get_mut(&block) {
+            let n = (*room).min(amount);
+            *room -= n;
+            *self.destroyed.entry(block).or_default() += n;
+            return n;
+        }
         if let Some(c) = self.catalysts.get_mut(&block) {
             return c.put(fluid, amount, self.tuning);
         }
@@ -429,6 +464,8 @@ fn catalysts_from_tanks(
 /// One move of the level's fluids: pumps into the tanks they touch, then every fluid net.
 pub(super) fn tick(game: &mut Game<'_>, level: &mut LevelNet, tuning: &Tuning) {
     let now = level.ticks;
+    // Slice 18: the trashes' room this pass, read before the nets borrow the level.
+    let trash = trash_room(game, level);
     let pumps_at: Vec<Pos> = level
         .machines
         .iter()
@@ -535,6 +572,8 @@ pub(super) fn tick(game: &mut Game<'_>, level: &mut LevelNet, tuning: &Tuning) {
         mixer_tank,
         catalysts: &mut catalysts,
         tuning,
+        trash,
+        destroyed: BTreeMap::new(),
     };
     f.no_lane.retain(|_, (_, until)| *until > now);
     for net in &f.nets {
@@ -569,6 +608,12 @@ pub(super) fn tick(game: &mut Game<'_>, level: &mut LevelNet, tuning: &Tuning) {
             f.no_lane
                 .insert(joints[n.joint].block, (n.fluid, now + NOTE_HOLD));
         }
+    }
+    // Slice 18: each trash pays 1 E a bucket it destroyed.
+    let destroyed = std::mem::take(&mut inv.destroyed);
+    for (pos, mb) in destroyed {
+        let e = machines::buffer_energy(game, pos);
+        machines::set_buffer_energy(game, pos, e - mb as f64 / BUCKET as f64);
     }
     write_back(game, &before, &groups, per_block);
     power::write_sinks(game, &sinks_before, &sinks);
