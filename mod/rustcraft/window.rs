@@ -239,6 +239,7 @@ pub(super) fn on_menu_closed(uuid: u128, window: i32) {
 
 /// Each tick of a level: open the windows asked for there, then answer their clicks.
 pub(super) fn tick(game: &mut Game<'_>, dimension: &str, level: &mut LevelNet) {
+    close_when_far(game, dimension, level.ticks);
     let (opening, clicks) = {
         let mut guard = windows();
         // Through the guard once, so its fields borrow apart.
@@ -265,6 +266,34 @@ pub(super) fn tick(game: &mut Game<'_>, dimension: &str, level: &mut LevelNet) {
     }
     for c in clicks {
         answer(game, dimension, level, c);
+    }
+}
+
+/// s18/pipe (guide `wrench`: «окно закрывается, если отойти»): once a second, a window whose
+/// player walked out of reach of its housing, or left its level, closes.
+fn close_when_far(game: &mut Game<'_>, dimension: &str, ticks: u64) {
+    if !ticks.is_multiple_of(20) {
+        return;
+    }
+    let open: Vec<(u128, Pos)> = windows()
+        .sessions
+        .iter()
+        .filter(|(_, s)| s.dimension == dimension)
+        .map(|(u, s)| (*u, s.housing))
+        .collect();
+    if open.is_empty() {
+        return;
+    }
+    let players = game.native_server_players();
+    for (uuid, housing) in open {
+        let near = players.iter().any(|p| {
+            p.uuid == uuid
+                && p.dimension == dimension
+                && rustcraft_rules::net::joint_window::within_reach(p.position, housing)
+        });
+        if !near {
+            game.native_close_menu(uuid);
+        }
     }
 }
 

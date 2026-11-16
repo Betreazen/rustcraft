@@ -258,8 +258,27 @@ pub fn pick(page: &Page, item: &str) -> Action {
     }
 }
 
+/// s18/pipe: how far a player may stand from the housing whose joint window is open, blocks
+/// (survival's reach and a little more).
+pub const REACH: f64 = 8.0;
+
+/// Whether a player whose feet are at `feet` is within REACH of the middle of `housing`.
+pub fn within_reach(feet: [f64; 3], housing: crate::geom::Pos) -> bool {
+    let d: f64 = (0..3)
+        .map(|i| (feet[i] - (f64::from(housing[i]) + 0.5)).powi(2))
+        .sum();
+    d.sqrt() <= REACH
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_window_stays_open_within_reach_of_its_housing() {
+        assert!(super::within_reach([0.5, 0.0, 0.5], [0, 0, 0]));
+        assert!(super::within_reach([8.0, 0.5, 0.5], [0, 0, 0]));
+        assert!(!super::within_reach([9.0, 0.5, 0.5], [0, 0, 0]));
+    }
+
     use super::*;
 
     fn page() -> Page {
