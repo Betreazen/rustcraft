@@ -296,12 +296,14 @@ pub mod crafter {
     pub const LABEL_ENERGY_Y: f32 = 102.0;
     pub const ENERGY_BAR: Rect = [8.0, 111.0, 198.0, 5.0];
     /// The work mode switch: one well, three segments (style::segment_rects).
-    pub const MODE_WELL: Rect = [8.0, 119.0, 198.0, 13.0];
+    /// Slice 18: «Режим работы» is written left of the switch, as the guide's window has it.
+    pub const MODE_WELL: Rect = [76.0, 119.0, 130.0, 13.0];
     pub const MODE_BUTTONS: [Rect; 3] = [
-        [9.0, 120.0, 65.0, 11.0],
-        [75.0, 120.0, 65.0, 11.0],
-        [141.0, 120.0, 64.0, 11.0],
+        [77.0, 120.0, 42.0, 11.0],
+        [120.0, 120.0, 42.0, 11.0],
+        [163.0, 120.0, 42.0, 11.0],
     ];
+    pub const LABEL_MODE: [f32; 2] = [8.0, 122.0];
     pub const STATUS: Rect = [8.0, 135.0, 198.0, 12.0];
     pub const INVENTORY: [f32; 2] = [26.0, 159.0];
     pub const INVENTORY_LABEL_Y: f32 = INVENTORY[1] - 10.0;
@@ -434,8 +436,9 @@ mod tests {
     #[test]
     fn the_crafters_buttons() {
         use crafter::*;
-        assert_eq!(button_at([10.0, 121.0], 1), Some(0));
-        assert_eq!(button_at([150.0, 125.0], 1), Some(2));
+        assert_eq!(button_at([78.0, 121.0], 1), Some(0));
+        assert_eq!(button_at([170.0, 125.0], 1), Some(2));
+        assert_eq!(button_at([10.0, 121.0], 1), None);
         assert_eq!(button_at(cell(0), 1), Some(CELL_BUTTON));
         assert_eq!(
             button_at([cell(8)[0] + 8.0, cell(8)[1] + 8.0], 1),

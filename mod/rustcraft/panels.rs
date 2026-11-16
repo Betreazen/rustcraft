@@ -316,6 +316,7 @@ fn draw_crafter(game: &Game<'_>, data: &[i32], batch: &mut HudBatch, o: [f32; 2]
         cw::ENERGY_BAR,
         cw::LABEL_ENERGY_Y,
     );
+    label(game, batch, &tr("rustcraft.window.mode", "Work mode"), o, cw::LABEL_MODE);
     kit::modes_part(game, batch, o, p.mode, &cw::MODE_BUTTONS, None);
     if let Some(shown) = p.shown {
         kit::status_part(game, batch, o, cw::STATUS, Machine::Crafter, shown);
