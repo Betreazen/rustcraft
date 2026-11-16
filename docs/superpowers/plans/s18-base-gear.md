@@ -51,10 +51,10 @@ Audit: pmodules «Ёмкость костюма» DIFFERS (bug), zipline «16 з
 - `pub fn charger_capacity(g: Gear, h: &Held) -> Option<f64>`: None for the zipline (its charges come from string only), else `capacity(g, h, h.suit || self_suit)`.
 - `pub fn add_charge(h: &mut Held, cap: f64, to: f64)`: a charger never lowers the charge.
 
-- [ ] Test (RED): `the_suit_module_lets_chargers_fill_half_again` — chestplate t3 with `pm_capacity` → `charger_capacity == 30 000`; leggings with `suit: true` → 30 000; zipline → None; `add_charge` of 10 over a charge of 31 000 above 30 000 keeps 31 000.
-- [ ] GREEN in rules; `battery()` uses `charger_capacity`; `charge()` never lowers; `player_tick` writes `suit` on worn armour, stops trimming the charge to the capacity.
-- [ ] Self-test `gear_charger_fills_the_suit_capacity`: charger with a t3 chestplate holding the capacity module at 19 990 E; until its charge > 20 100. `gear_charger_skips_the_zipline`: a zipline with 3 charges stays at 3 after 60 ticks on a charger.
-- [ ] Commit.
+- [x] Test (RED): `the_suit_module_lets_chargers_fill_half_again` — chestplate t3 with `pm_capacity` → `charger_capacity == 30 000`; leggings with `suit: true` → 30 000; zipline → None; `add_charge` of 10 over a charge of 31 000 above 30 000 keeps 31 000.
+- [x] GREEN in rules; `battery()` uses `charger_capacity`; `charge()` never lowers; `player_tick` writes `suit` on worn armour, stops trimming the charge to the capacity.
+- [x] Self-test `gear_charger_fills_the_suit_capacity`: charger with a t3 chestplate holding the capacity module at 19 990 E; until its charge > 20 100. `gear_charger_skips_the_zipline`: a zipline with 3 charges stays at 3 after 60 ticks on a charger.
+- [x] Commit.
 
 ### Task 2: The turret turns to its target and shows its shot
 

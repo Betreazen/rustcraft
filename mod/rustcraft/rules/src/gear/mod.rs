@@ -288,6 +288,10 @@ pub struct Held {
     pub modules: Vec<String>,
     pub capacity: u8,
     pub thrift: u8,
+    /// Whether the piece was last worn in a suit whose chestplate holds the suit capacity module
+    /// (G6); the chargers fill it to that battery when it is off the player.
+    #[serde(default)]
+    pub suit: bool,
 }
 
 impl Held {
@@ -304,6 +308,23 @@ pub fn capacity(g: Gear, h: &Held, suit_capacity: bool) -> f64 {
         c *= 1.5;
     }
     c
+}
+
+/// The battery a charger or the plate fills `g` holding `h` to: the suit capacity module counts
+/// for the chestplate holding it and for a piece last worn with that chestplate. None for the
+/// zipline: its charges come back from string only.
+pub fn charger_capacity(g: Gear, h: &Held) -> Option<f64> {
+    if g.kind == Kind::Zipline {
+        return None;
+    }
+    let own = matches!(g.kind, Kind::Armor(Piece::Chestplate)) && h.has(Module::Capacity);
+    Some(capacity(g, h, h.suit || own))
+}
+
+/// A charger's fill: the charge goes up to `to`, never above `cap`, and never down (a piece
+/// holding more than its battery now, after the suit module came off, keeps it).
+pub fn add_charge(h: &mut Held, cap: f64, to: f64) {
+    h.charge = h.charge.max(to.min(cap));
 }
 
 /// A cost after Thrift: −10 % a level.
@@ -432,6 +453,24 @@ mod tests {
         assert_eq!(harpoon_anchor(hit, Some([3, 10, 0]), false, false), None);
         assert_eq!(harpoon_anchor(hit, None, false, true), None);
         assert!((HARPOON_CAPACITY / HARPOON_SHOT - 40.0).abs() < 1e-9, "forty shots a charge");
+    }
+
+    #[test]
+    fn the_suit_module_lets_chargers_fill_half_again() {
+        let chest = Gear { kind: Kind::Armor(Piece::Chestplate), tier: 3 };
+        let mut h = Held { modules: vec![Module::Capacity.item().to_owned()], ..Held::default() };
+        assert_eq!(charger_capacity(chest, &h), Some(30_000.0), "the chestplate counts its own module");
+        let legs = Gear { kind: Kind::Armor(Piece::Leggings), tier: 3 };
+        assert_eq!(charger_capacity(legs, &Held::default()), Some(20_000.0));
+        assert_eq!(charger_capacity(legs, &Held { suit: true, ..Held::default() }), Some(30_000.0));
+        let zip = Gear::of("rustcraft:zipline").expect("the zipline is gear");
+        assert_eq!(charger_capacity(zip, &Held::default()), None, "string only");
+        h.charge = 31_000.0;
+        add_charge(&mut h, 30_000.0, 30_010.0);
+        assert_eq!(h.charge, 31_000.0, "a charger never lowers the charge");
+        h.charge = 100.0;
+        add_charge(&mut h, 30_000.0, 40_000.0);
+        assert_eq!(h.charge, 30_000.0);
     }
 
     #[test]

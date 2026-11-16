@@ -36,6 +36,8 @@ pub mod transport;
 pub mod turret;
 pub mod windows;
 pub mod workers;
+// Slice 18, base and gear (stream 7).
+pub mod gear18;
 
 use std::collections::BTreeMap;
 
@@ -319,6 +321,18 @@ pub trait Bench {
         into: Pos,
         slot: usize,
     ) -> Result<crate::utility::found::Lift, String>;
+
+    // ---- Slice 18, base and gear (stream 7) ----
+
+    /// `put_gear` of a piece holding `held` (its charge, modules, levels).
+    /// (Defaults keep other benches compiling; the game's bench answers.)
+    fn put_gear_held(&mut self, _pos: Pos, _slot: usize, _item: &str, _held: crate::gear::Held) -> Result<(), String> {
+        Err("not on this bench".to_owned())
+    }
+    /// The held data of the gear piece in slot `slot` at `pos`.
+    fn gear_held(&self, _pos: Pos, _slot: usize) -> Option<crate::gear::Held> {
+        None
+    }
 }
 
 /// A mob as the self-test reads it.
@@ -496,6 +510,8 @@ pub fn catalog() -> Vec<Build> {
     all.extend(traversal::ALL);
     all.extend(handbook::ALL);
     all.extend(rest::ALL);
+    // Slice 18, base and gear (stream 7).
+    all.extend(gear18::ALL);
     all
 }
 

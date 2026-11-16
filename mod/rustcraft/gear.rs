@@ -169,15 +169,19 @@ pub(super) fn battery(game: &Game<'_>, stack: &ItemStack) -> Option<Battery> {
     let mut s = state();
     load(&mut s, game);
     let (_, g, h) = held_of(&s, stack)?;
-    let cap = rules::capacity(g, &h, false);
+    let cap = rules::charger_capacity(g, &h)?;
     Some(Battery { charge: h.charge.min(cap), capacity: cap })
 }
 
-/// Sets a piece's charge.
+/// A charger's fill: the piece's charge goes up to `charge_now`, within its charger battery, and
+/// never down.
 pub(super) fn charge(stack: &ItemStack, charge_now: f64) {
     let mut s = state();
     let Some(id) = id_of(stack) else { return };
-    s.store.held.entry(id).or_default().charge = charge_now.max(0.0);
+    let Some(g) = Gear::of(&stack.item) else { return };
+    let h = s.store.held.entry(id).or_default();
+    let Some(cap) = rules::charger_capacity(g, h) else { return };
+    rules::add_charge(h, cap, charge_now);
     s.dirty = true;
 }
 
@@ -658,9 +662,12 @@ fn player_tick(game: &mut Game<'_>, p: &horizon_client::mod_api::NativeServerPla
     let mut view = View::default();
     let mut wants_flight = false;
     for (slot, id, g, h) in &pieces {
-        let cap = rules::capacity(*g, h, suit);
-        let mut h = h.clone();
-        h.charge = h.charge.min(cap);
+        let h = h.clone();
+        if matches!(g.kind, Kind::Armor(_)) && h.suit != suit {
+            let mut s = state();
+            s.store.held.entry(*id).or_default().suit = suit;
+            s.dirty = true;
+        }
         if *slot == EquipmentSlot::MainHand {
             if g.kind == Kind::Blade {
                 view.blade = Some((*id, g.tier, h.charge >= rules::cost(rules::BLADE_HIT, &h)));
@@ -706,7 +713,7 @@ fn player_tick(game: &mut Game<'_>, p: &horizon_client::mod_api::NativeServerPla
         if drain > 0.0 {
             let mut s = state();
             let e = s.store.held.entry(*id).or_default();
-            e.charge = (e.charge.min(cap) - drain).max(0.0);
+            e.charge = (e.charge - drain).max(0.0);
             s.dirty = true;
         }
     }

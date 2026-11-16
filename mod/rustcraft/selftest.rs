@@ -842,6 +842,25 @@ impl Bench for GameBench<'_, '_> {
             .map(|e| (e.stack.item.to_string(), e.stack.count))
             .collect()
     }
+
+    // ---- Slice 18, base and gear (stream 7) ----
+
+    fn put_gear_held(&mut self, pos: Pos, slot: usize, item: &str, held: rustcraft_rules::gear::Held) -> Result<(), String> {
+        let mut stack = ItemStack::new(item, 1);
+        crate::game::rustcraft_gear::number(&mut stack);
+        crate::game::rustcraft_gear::set_held(&stack, held);
+        self.change_entity(pos, move |e| {
+            if e.items.len() <= slot {
+                e.items.resize(slot + 1, None);
+            }
+            e.items[slot] = Some(stack);
+        })
+    }
+
+    fn gear_held(&self, pos: Pos, slot: usize) -> Option<rustcraft_rules::gear::Held> {
+        let stack = self.game.native_mod_block_entity(pos)?.items.get(slot).cloned().flatten()?;
+        crate::game::rustcraft_gear::held(&stack)
+    }
 }
 
 /// The slice-7 half of the bench.
