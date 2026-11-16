@@ -1171,7 +1171,13 @@ pub(super) fn with_storage(s: &Sources, members: &BTreeSet<Pos>, balance: GroupB
     balance.with_storage(
         s.batteries
             .iter()
-            .filter(|g| g.iter().any(|p| members.contains(p)))
+            // On its circuits, or touching one of its blocks (a battery touching a source or a
+            // machine takes and gives by contact, E10).
+            .filter(|g| {
+                g.iter().any(|p| {
+                    members.contains(p) || Face::ALL.iter().any(|f| members.contains(&step(*p, *f)))
+                })
+            })
             .filter_map(|g| g.iter().next().and_then(|p| s.views.get(p)))
             .map(|v| (v.stored, v.capacity)),
     )

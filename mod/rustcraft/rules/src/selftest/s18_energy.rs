@@ -5,7 +5,7 @@ use super::{Build, Scenario, at, plot_area, same};
 use crate::grow::{self, DRUSE, SEED, SHARD, STAGE};
 use crate::tuning::Tuning;
 
-pub const ALL: [Build; 10] = [
+pub const ALL: [Build; 11] = [
     shard_recipes,
     druse_breaks_into_shards,
     seed_grows_on_solution,
@@ -16,6 +16,7 @@ pub const ALL: [Build; 10] = [
     vein_window,
     structure_three_by_three,
     structure_cube,
+    generator_windows,
 ];
 
 const TANK: &str = "rustcraft:tank";
@@ -290,6 +291,39 @@ fn structure_three_by_three(o: crate::geom::Pos, t: &Tuning) -> Scenario {
 
 fn structure_cube(o: crate::geom::Pos, t: &Tuning) -> Scenario {
     structure_box("s18_structure_3x3x3", o, t, 3)
+}
+
+/// ui.js `gen_lava`, `battery`: the lava generator's window has its output bar and its circuit's
+/// balance with the battery beside the furnace it feeds; the battery's says «Отдаёт X из Y».
+fn generator_windows(o: crate::geom::Pos, _t: &Tuning) -> Scenario {
+    let gen = at(o, [2, 0, 2]);
+    let tank = at(o, [1, 0, 2]);
+    let oven = at(o, [3, 0, 2]);
+    let battery = at(o, [2, 0, 3]);
+    Scenario::new("s18_generator_windows", plot_area(o))
+        .then("a lava generator on a tank of lava, a furnace and a battery by it", move |b, _| {
+            b.place(tank, TANK, &[])?;
+            b.set_tank(tank, "minecraft:lava", 8000)?;
+            b.place(gen, "rustcraft:gen_lava", &[])?;
+            b.place(battery, "rustcraft:battery", &[])?;
+            b.place(oven, "rustcraft:furnace", &[])
+        })
+        .until("the lava generator's window: lava and output bars, the balance", LIMIT, move |b, _| {
+            let Some(s) = b.sheet(gen) else { return Ok(false) };
+            let rows: Vec<String> = s.rows.iter().map(|r| r.to_string()).collect();
+            Ok(s.bars.len() == 2
+                && rows.len() == 3
+                && rows[1].contains("rustcraft.power.balance")
+                && rows[2].contains("rustcraft.power.balance_stored"))
+        })
+        .check("the battery's window says what it gives of its most", move |b, _| {
+            let s = b.sheet(battery).ok_or("no sheet for the battery")?;
+            if s.rows.iter().any(|r| r.to_string().contains("rustcraft.battery.gives_of")) {
+                Ok(())
+            } else {
+                Err(format!("rows {:?}", s.rows))
+            }
+        })
 }
 
 /// CR2: on a tank of water the seed stands; broken, it gives its one shard back.
