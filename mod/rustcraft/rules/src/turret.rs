@@ -148,6 +148,10 @@ pub struct Given {
     pub amplifier: u8,
     /// Bleeding: damage a second, for the turret's own timer when SoulsCraft is not there.
     pub damage: f64,
+    /// Slowness: the share of the mob's speed it takes, exactly (guide `mod_slow`: 0.2 a module,
+    /// at most 0.6), given as a movement speed modifier rather than the base game's effect, whose
+    /// steps are 15%.
+    pub slow: f64,
 }
 
 /// A mob's resistances: duration multipliers by effect key (0 immune, a missing key 1).
@@ -160,9 +164,9 @@ impl Resist {
     }
 }
 
-/// The slowness level that comes nearest to `percent` in the base game's steps of 15% a level.
-pub fn slowness_amplifier(percent: f64) -> u8 {
-    ((percent / 15.0).round().max(1.0) - 1.0) as u8
+/// The share of speed `slow` slowness modules take: 20% each, never past the cap (TR2).
+pub fn slow_fraction(slow: u32, t: &Tuning) -> f64 {
+    (t.slow_percent * f64::from(slow)).min(t.slow_cap) / 100.0
 }
 
 /// TR1, TR2, TR5: what one shot of `l` gives a mob with `resist`, undead or not.
@@ -180,6 +184,7 @@ pub fn effects(l: &Loadout, t: &Tuning, resist: &Resist, undead: bool) -> Vec<Gi
             ticks: ticks(Effect::Bleed, t.bleed_seconds),
             amplifier: (l.bleed - 1).min(255) as u8,
             damage: t.bleed_damage * f64::from(l.bleed),
+            slow: 0.0,
         });
     }
     if l.poison > 0 && !undead {
@@ -188,15 +193,16 @@ pub fn effects(l: &Loadout, t: &Tuning, resist: &Resist, undead: bool) -> Vec<Gi
             ticks: ticks(Effect::Poison, t.poison_seconds),
             amplifier: (l.poison - 1).min(255) as u8,
             damage: 0.0,
+            slow: 0.0,
         });
     }
     if l.slow > 0 {
-        let percent = (t.slow_percent * f64::from(l.slow)).min(t.slow_cap);
         out.push(Given {
             effect: Effect::Slow,
             ticks: ticks(Effect::Slow, t.slow_seconds),
-            amplifier: slowness_amplifier(percent),
+            amplifier: 0,
             damage: 0.0,
+            slow: slow_fraction(l.slow, t),
         });
     }
     out.retain(|g| g.ticks > 0);
@@ -372,11 +378,12 @@ mod tests {
         assert_eq!(two[0].amplifier, 1);
         let slows = |n: usize| {
             let l = load(&vec![Module::Slow; n]);
-            effects(&l, &t, &Resist::default(), false)[0].amplifier
+            effects(&l, &t, &Resist::default(), false)[0].slow
         };
-        // 20% → level 1 (15%), 40% → level 3 (45%), 60% → level 4 (60%), 80% still 60%.
-        assert_eq!(slows(1), 0);
-        assert_eq!(slows(3), 3);
+        // Guide `mod_slow`: exactly −20% a module, −40% with two, never past −60%.
+        assert!((slows(1) - 0.2).abs() < 1e-9);
+        assert!((slows(2) - 0.4).abs() < 1e-9);
+        assert!((slows(3) - 0.6).abs() < 1e-9);
         assert_eq!(slows(4), slows(3));
     }
 

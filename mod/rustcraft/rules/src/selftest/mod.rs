@@ -331,6 +331,9 @@ pub struct MobView {
     pub pos: [f64; 3],
     pub health: f32,
     pub effects: Vec<(String, u32, u8)>,
+    /// Slice 18: the share of its speed a turret's slowness takes now (its movement speed
+    /// modifier `rustcraft:turret_slow`), if it is slowed.
+    pub slow: Option<f64>,
 }
 
 impl MobView {

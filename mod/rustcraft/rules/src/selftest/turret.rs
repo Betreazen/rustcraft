@@ -188,7 +188,7 @@ fn effects_combine(o: Pos, t: &Tuning) -> Scenario {
     .until("one shot bleeds, poisons and slows", 60, |b, m| {
         let s = mob(b, m, "mob0")?;
         Ok(s.effect("minecraft:poison").is_some()
-            && s.effect("minecraft:slowness").is_some()
+            && s.slow.is_some()
             && b.bleeding(m.get("mob0") as u32))
     })
     .check("as the rules give them", move |b, m| {
@@ -202,12 +202,8 @@ fn effects_combine(o: Pos, t: &Tuning) -> Scenario {
         let slow = given
             .iter()
             .find(|g| g.effect == turret::Effect::Slow)
-            .map(|g| g.amplifier);
-        same(
-            "slowness amplifier",
-            s.effect("minecraft:slowness").map(|e| e.1),
-            slow,
-        )
+            .map(|g| g.slow);
+        same("slowness", s.slow, slow)
     })
 }
 
@@ -220,9 +216,7 @@ fn poison_spares_the_undead(o: Pos, t: &Tuning) -> Scenario {
         vec![(HUSK, 6, None)],
         None,
     )
-    .until("the husk is slowed", 60, |b, m| {
-        Ok(mob(b, m, "mob0")?.effect("minecraft:slowness").is_some())
-    })
+    .until("the husk is slowed", 60, |b, m| Ok(mob(b, m, "mob0")?.slow.is_some()))
     .check("but not poisoned (TR5)", |b, m| {
         same(
             "poison",
@@ -234,7 +228,7 @@ fn poison_spares_the_undead(o: Pos, t: &Tuning) -> Scenario {
 
 fn slowness_stops_at_its_cap(o: Pos, t: &Tuning) -> Scenario {
     let m3 = [Module::Slow, Module::Slow, Module::Slow];
-    let want = turret::slowness_amplifier(t.slow_cap);
+    let want = turret::slow_fraction(3, t);
     arena(
         "turret_slowness_stops_at_its_cap",
         o,
@@ -244,9 +238,9 @@ fn slowness_stops_at_its_cap(o: Pos, t: &Tuning) -> Scenario {
         None,
     )
     .until(
-        "three slow modules give the cap's level",
+        "three slow modules take exactly 60% of its speed",
         60,
-        move |b, m| Ok(mob(b, m, "mob0")?.effect("minecraft:slowness").map(|e| e.1) == Some(want)),
+        move |b, m| Ok(mob(b, m, "mob0")?.slow.is_some_and(|s| (s - want).abs() < 1e-6)),
     )
 }
 
@@ -372,8 +366,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_cap_is_a_level_the_rules_give() {
+    fn the_cap_is_60_percent_exactly() {
         let t = Tuning::default();
-        assert_eq!(turret::slowness_amplifier(t.slow_cap), 3);
+        assert!((turret::slow_fraction(3, &t) - 0.6).abs() < 1e-9);
+        assert!((turret::slow_fraction(1, &t) - 0.2).abs() < 1e-9);
     }
 }

@@ -8,9 +8,11 @@
 //   experience from RustCraft (`native_give_experience`, API 101) and Path-of-craft-tree the
 //   `kill` report (D5, X8), both from `native_living_death` of a mob a turret hit lately.
 // - Effects: the base game's `MobEffectInstance` on the mob, as `/effect give` puts it on one
-//   (game/commands/effects.rs:74-90): poison, slowness, and SoulsCraft's `soulscraft:bleeding`
+//   (game/commands/effects.rs:74-90): poison and SoulsCraft's `soulscraft:bleeding`
 //   when that effect is registered (`horizon_client::brewing::effect`); without SoulsCraft the
 //   turret keeps its own bleeding timer, damage of `minecraft:magic`, which armour does not cut.
+//   Slowness (slice 18) is a movement speed modifier on the mob (`horizon_client::mobs::finalize`,
+//   what `/attribute .. modifier add` edits), exactly −20% a module, taken off when it runs out.
 // - Resistances: SoulsCraft's mobs.json, where Tuning::soulscraft_mobs says it may be, read once;
 //   undead from the world's `#minecraft:undead` entity tag.
 // - Support buffs: heal through `native_set_player_status`; guard in
@@ -65,7 +67,9 @@ const MODULE_SLOTS: usize = 3;
 const SHOT_TYPE: &str = "minecraft:generic";
 const BLEED_TYPE: &str = "minecraft:magic";
 const POISON: &str = "minecraft:poison";
-const SLOWNESS: &str = "minecraft:slowness";
+/// Slice 18: a turret's slowness is a movement speed modifier of this id on the mob (exactly −20% a
+/// module, guide `mod_slow`), not the base game's effect with its 15% steps.
+pub(super) const SLOW_ID: &str = "rustcraft:turret_slow";
 const OWN_BLEED: &str = "soulscraft:bleeding";
 /// A death this long after a turret's hit is the turret's kill (the base game's 100 ticks for a
 /// player's).
@@ -128,6 +132,8 @@ struct Base {
     turrets: HashMap<(String, Pos), TurretState>,
     hits: HashMap<u32, Hit>,
     bleeds: HashMap<u32, Bleed>,
+    /// Slice 18: (dimension, mob) → the tick its turret slowness comes off.
+    slows: HashMap<(String, u32), u64>,
     deaths: Vec<(u32, String, Pos)>,
     /// Player → the buffs on them now, and what was applied as modifiers.
     buffs: HashMap<u128, Buff>,
@@ -510,6 +516,7 @@ pub(super) fn tick(game: &mut Game<'_>, dimension: &str, level: &LevelNet, t: &T
     crate::game::rustcraft_utility::tick(game, dimension, level, t);
     crate::game::rustcraft_gear::tick(game, dimension);
     bleed(game, dimension, now, t);
+    unslow(game, dimension, now);
     deaths(game, t);
     if now.is_multiple_of(ANCHOR_EVERY) {
         buffs(game, now);
@@ -722,7 +729,7 @@ fn attack(
                 give_mob_effect(game, id, POISON, g.ticks, g.amplifier);
             }
             Effect::Slow => {
-                give_mob_effect(game, id, SLOWNESS, g.ticks, g.amplifier);
+                slow_mob(game, dimension, id, g.slow, now + u64::from(g.ticks));
             }
             Effect::Bleed => {
                 if !(shared_bleeding()
@@ -743,6 +750,44 @@ fn attack(
     }
     game.native_hurt_entity(dimension, id, t.turret_damage as f32, SHOT_TYPE, None);
     turret::shown(l, true, Shown::Shooting(kind))
+}
+
+/// Slice 18: a turret's slowness on mob `id`: `share` of its speed off until tick `until`
+/// (`add_multiplied_total` −share, what `/attribute .. modifier add` puts on a mob).
+fn slow_mob(game: &mut Game<'_>, dimension: &str, id: u32, share: f64, until: u64) {
+    use horizon_client::mobs::finalize::{self, Attr, Op};
+    let Some(m) = game.mobs.iter_mut().find(|m| m.id == id && !m.removed) else {
+        return;
+    };
+    finalize::add_modifier(m, Attr::MovementSpeed, SLOW_ID, -share, Op::AddMultipliedTotal);
+    state().slows.insert((dimension.to_owned(), id), until);
+}
+
+/// Slowness past its time comes off; once a second also from a mob nobody remembers slowing (a
+/// restart forgets the timers, the modifier stays on the mob).
+fn unslow(game: &mut Game<'_>, dimension: &str, now: u64) {
+    use horizon_client::mobs::finalize::{self, Attr};
+    let (due, known): (Vec<u32>, BTreeSet<u32>) = {
+        let mut s = state();
+        let due = s
+            .slows
+            .iter()
+            .filter(|((d, _), until)| d == dimension && **until <= now)
+            .map(|((_, id), _)| *id)
+            .collect::<Vec<_>>();
+        for id in &due {
+            s.slows.remove(&(dimension.to_owned(), *id));
+        }
+        let known = s.slows.keys().filter(|(d, _)| d == dimension).map(|(_, id)| *id).collect();
+        (due, known)
+    };
+    let sweep = now.is_multiple_of(ANCHOR_EVERY);
+    for m in game.mobs.iter_mut() {
+        let off = due.contains(&m.id) || (sweep && !known.contains(&m.id));
+        if off && finalize::has_modifier(m, Attr::MovementSpeed, SLOW_ID) {
+            finalize::remove_modifier(m, Attr::MovementSpeed, SLOW_ID);
+        }
+    }
 }
 
 /// The turret's own bleeding: its damage once a second while it lasts.

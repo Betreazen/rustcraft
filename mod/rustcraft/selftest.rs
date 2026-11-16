@@ -905,5 +905,12 @@ pub(super) fn slice7_mob(game: &Game<'_>, id: u32) -> Option<MobView> {
                 )
             })
             .collect(),
+        // Slice 18: the turret's slowness modifier, as the share of speed it takes.
+        slow: horizon_client::mobs::finalize::modifier_amount(
+            m,
+            horizon_client::mobs::finalize::Attr::MovementSpeed,
+            base::SLOW_ID,
+        )
+        .map(|a| -a),
     })
 }
