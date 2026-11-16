@@ -3671,5 +3671,8 @@
   "rustcraft.worker.swapped": "Шасси заменено: гнёзд %s, инструмент и груз остались",
   "rustcraft.worker.not_higher": "У этого шасси гнёзд не больше, чем у нынешнего",
   "rustcraft.worker.socket_locked": "Гнездо шасси из кристаллита или звёздной стали",
-  "rustcraft.worker.limit": "Достигнут предел работников: %s на игрока"
+  "rustcraft.worker.limit": "Достигнут предел работников: %s на игрока",
+  "rustcraft.worker.filter_all": "Фильтр: берёт всё",
+  "rustcraft.worker.filter": "Фильтр: %s",
+  "rustcraft.worker.filter_hint": "Shift+клик по растению или блоку в инвентаре — в фильтр; клик здесь — сбросить фильтр"
 }

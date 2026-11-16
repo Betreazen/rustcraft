@@ -8,7 +8,10 @@ use crate::monorail::shape;
 use crate::tuning::Tuning;
 use crate::worker::{Errand, Tool, Worker};
 
-pub const ALL: [Build; 7] = [
+pub const ALL: [Build; 9] = [
+    reaper_filter_pumpkins,
+    scoop_filter_sand,
+
     chassis_swaps_up,
     limit_per_player,
 
@@ -278,4 +281,72 @@ fn limit_per_player(o: Pos, _: &Tuning) -> Scenario {
             same("no limit", b.worker_room(LIMIT_OWNER, 0), true)?;
             same("another owner", b.worker_room(LIMIT_OWNER + 1, 1), true)
         })
+}
+
+/// A straight floor track x 0..=6 at y 1 on stone, and a worker of `tool` with `filter` at its
+/// start.
+fn filtered(
+    name: &'static str,
+    o: Pos,
+    tool: Tool,
+    filter: &'static [&'static str],
+    build: impl FnMut(&mut dyn Bench, &mut Memo) -> Result<(), String> + Send + 'static,
+) -> Scenario {
+    Scenario::new(name, plot_area(o))
+        .then("a track", move |b, _| {
+            floor(b, o, -1..=7, -3..=3)?;
+            for x in 0..=6 {
+                rail(b, at(o, [x, 1, 0]), Face::YNeg)?;
+            }
+            Ok(())
+        })
+        .then("what stands beside it", build)
+        .then("a worker with a filter", move |b, m| {
+            spawn(b, m, at(o, [0, 1, 0]), tool, &[])?;
+            b.set_worker_filter(m.get("worker") as u64, filter)
+        })
+}
+
+fn reaper_filter_pumpkins(o: Pos, _: &Tuning) -> Scenario {
+    // H6: a reaper filtered to pumpkins takes the pumpkin and leaves the ripe wheat.
+    let wheat = at(o, [2, 1, 1]);
+    let fruit = at(o, [4, 1, 1]);
+    let stem = at(o, [4, 1, 2]);
+    filtered("worker_reaper_filter_pumpkins", o, Tool::Reaper, &["minecraft:pumpkin"], move |b, _| {
+        b.place(at(wheat, [0, -1, 0]), "minecraft:farmland", &[])?;
+        b.place(wheat, "minecraft:wheat", &[("age", "7")])?;
+        b.place(at(stem, [0, -1, 0]), "minecraft:farmland", &[])?;
+        b.place(fruit, "minecraft:pumpkin", &[])?;
+        b.place(stem, "minecraft:attached_pumpkin_stem", &[("facing", "north")])
+    })
+    .until("it takes the pumpkin", RIDE, |b, m| {
+        Ok(count_of(&worker_of(b, m)?.hold.slots, "minecraft:pumpkin") >= 1)
+    })
+    .wait(100)
+    .check("the ripe wheat stays", move |b, m| {
+        same("wheat age", b.property(wheat, "age"), Some("7".to_owned()))?;
+        same("wheat taken", count_of(&worker_of(b, m)?.hold.slots, "minecraft:wheat"), 0)
+    })
+}
+
+fn scoop_filter_sand(o: Pos, _: &Tuning) -> Scenario {
+    // The scoop filtered to sand digs the sand beside its way and leaves the dirt.
+    let sand = at(o, [2, 0, 1]);
+    let dirt = at(o, [4, 0, 1]);
+    filtered("worker_scoop_filter_sand", o, Tool::Scoop, &["minecraft:sand"], move |b, _| {
+        // Stone under both, so the sand does not fall.
+        b.place(at(sand, [0, -1, 0]), STONE, &[])?;
+        b.place(at(dirt, [0, -1, 0]), STONE, &[])?;
+        b.place(sand, "minecraft:sand", &[])?;
+
+        b.place(dirt, "minecraft:dirt", &[])
+    })
+    .until("it digs the sand", RIDE, |b, m| {
+        Ok(count_of(&worker_of(b, m)?.hold.slots, "minecraft:sand") >= 1)
+    })
+    .wait(100)
+    .check("the dirt stays", move |b, m| {
+        same("dirt", b.block(dirt), "minecraft:dirt".to_owned())?;
+        same("dirt taken", count_of(&worker_of(b, m)?.hold.slots, "minecraft:dirt"), 0)
+    })
 }

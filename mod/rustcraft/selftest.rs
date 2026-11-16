@@ -820,6 +820,11 @@ impl Bench for GameBench<'_, '_> {
         workers::may_place_for_selftest(owner, limit)
     }
 
+    fn set_worker_filter(&mut self, id: u64, items: &[&str]) -> Result<(), String> {
+        workers::filter_for_selftest(DIMENSION, id, items)
+    }
+
+
 
 
     fn anim(&self, pos: Pos) -> Option<rustcraft_rules::anim::Shown> {

@@ -330,7 +330,10 @@ pub trait Bench {
     fn swap_chassis(&mut self, id: u64, item: &str) -> Result<String, String>;
     /// W8: whether `owner` may place one more worker under a server limit of `limit`.
     fn worker_room(&self, owner: u128, limit: u32) -> bool;
+    /// H6: worker `id`'s filter set to `items`.
+    fn set_worker_filter(&mut self, id: u64, items: &[&str]) -> Result<(), String>;
 }
+
 
 
 

@@ -1023,5 +1023,8 @@
   "rustcraft.worker.swapped": "Chassis replaced: %s sockets, tool and load kept",
   "rustcraft.worker.not_higher": "That chassis has no more sockets than this one",
   "rustcraft.worker.socket_locked": "A socket of a crystallite or starsteel chassis",
-  "rustcraft.worker.limit": "Worker limit reached: %s per player"
+  "rustcraft.worker.limit": "Worker limit reached: %s per player",
+  "rustcraft.worker.filter_all": "Filter: takes everything",
+  "rustcraft.worker.filter": "Filter: %s",
+  "rustcraft.worker.filter_hint": "Shift-click a plant or block in your inventory: into the filter; click here: clear it"
 }

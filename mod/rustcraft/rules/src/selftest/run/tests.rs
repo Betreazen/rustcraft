@@ -309,6 +309,10 @@ impl Bench for Fake {
     fn worker_room(&self, _: u128, _: u32) -> bool {
         true
     }
+    fn set_worker_filter(&mut self, _: u64, _: &[&str]) -> Result<(), String> {
+        Ok(())
+    }
+
 
 
 }

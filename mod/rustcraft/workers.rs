@@ -101,6 +101,8 @@ struct Click {
     uuid: u128,
     window: i32,
     slot: usize,
+    /// A shift-click (mode 1): an item of the inventory goes into the filter (H6).
+    shift: bool,
 }
 
 #[derive(Default)]
@@ -562,7 +564,12 @@ pub(super) fn on_menu_clicked(uuid: u128, window: i32, slot: i32, mode: i32) {
         return;
     }
     if let Ok(slot) = usize::try_from(slot) {
-        s.clicks.push(Click { uuid, window, slot });
+        s.clicks.push(Click {
+            uuid,
+            window,
+            slot,
+            shift: mode == 1,
+        });
     }
 }
 
@@ -848,7 +855,10 @@ fn scoop(
     };
     let cells: Vec<Pos> = digging::scoop_cells(cell, mount, side, depth, under_rail)
         .into_iter()
-        .filter(|&p| digging::is_scooped(&game.native_block(p)))
+        .filter(|&p| {
+            let block = game.native_block(p);
+            digging::is_scooped(&block) && digging::wanted(&block, &w.filter)
+        })
         .collect();
     let mut done = 0usize;
     w.aim = cells.first().copied();
@@ -1071,6 +1081,7 @@ fn reap(game: &mut Game<'_>, dimension: &str, w: &mut Worker, cell: Pos, mount: 
     let plans: Vec<plants::Harvest> = {
         let view = View { game };
         zone.iter()
+            .filter(|&&p| plants::wanted(&view.block(p), &w.filter))
             .filter_map(|&p| plants::plan(&view, p, lo[1], top))
             .collect()
     };
@@ -1499,7 +1510,7 @@ fn windows(game: &mut Game<'_>, dimension: &str, level: &mut LevelFleet, t: &Tun
             game.native_close_menu(c.uuid);
             continue;
         };
-        if click(game, c.uuid, c.slot, w, t) {
+        if click(game, c.uuid, c.slot, c.shift, w, t) {
             level.dirty = true;
         }
         let items = cells(game, w, t);
@@ -1545,7 +1556,18 @@ fn give(game: &mut Game<'_>, uuid: u128, item: &str, count: u32) -> u32 {
 /// A click: on the tool, an upgrade or the hold it goes to the player; on an item of the
 /// player's inventory below, that item goes in (a tool to the tool slot, an upgrade to a free
 /// slot, anything else to the hold). Whether the worker changed.
-fn click(game: &mut Game<'_>, uuid: u128, slot: usize, w: &mut Worker, t: &Tuning) -> bool {
+fn click(
+    game: &mut Game<'_>,
+    uuid: u128,
+    slot: usize,
+    shift: bool,
+    w: &mut Worker,
+    t: &Tuning,
+) -> bool {
+    // H6: a click on the state cell clears the filter.
+    if slot == NOTE_CELL {
+        return !std::mem::take(&mut w.filter).is_empty();
+    }
     if slot == TOOL_CELL {
         let Some(tool) = w.tool else { return false };
         if give(game, uuid, tool.item(), 1) == 1 {
@@ -1595,6 +1617,10 @@ fn click(game: &mut Game<'_>, uuid: u128, slot: usize, w: &mut Worker, t: &Tunin
         return false;
     };
     let item = stack.item.to_string();
+    // H6: a shift-click names the item in the filter; the item stays with the player.
+    if shift {
+        return w.filter_add(&item);
+    }
     let (keep, back): (u32, Option<String>) = if let Some(tool) = Tool::of(&item) {
         let old = w.tool.replace(tool);
         // A cargo hold changes the hold's size (guide `tool_hold`).
@@ -1742,6 +1768,12 @@ fn cells(game: &Game<'_>, w: &Worker, t: &Tuning) -> Vec<Option<ItemStack>> {
                 "rustcraft.worker.hold_hint",
                 "A full hold goes to the unload dock",
             ),
+            filter_line(game, &w.filter),
+
+            hint(
+                "rustcraft.worker.filter_hint",
+                "Shift-click a plant or block in your inventory: into the filter; click here: clear it",
+            ),
         ],
         false,
     ));
@@ -1763,6 +1795,31 @@ fn cells(game: &Game<'_>, w: &Worker, t: &Tuning) -> Vec<Option<ItemStack>> {
         };
     }
     out
+}
+
+/// H6: what the filter names, or that it takes everything.
+pub(super) fn filter_line(game: &Game<'_>, filter: &[String]) -> Text {
+    if filter.is_empty() {
+        return line("rustcraft.worker.filter_all", "Filter: takes everything", &[]);
+    }
+    let mut names = Text::literal(String::new());
+    for (i, f) in filter.iter().enumerate() {
+        if i > 0 {
+            names.push(Text::literal(", "));
+        }
+        names.push(Text::translate(&item_key(game, f), &[]));
+    }
+    line("rustcraft.worker.filter", "Filter: %s", &[names])
+}
+
+/// The translation key of `id`: a block's `block.ns.path`, else the item's `item.ns.path`.
+fn item_key(game: &Game<'_>, id: &str) -> String {
+    let path = id.replace(':', ".");
+    if game.native_default_state(id).is_some() {
+        format!("block.{path}")
+    } else {
+        format!("item.{path}")
+    }
 }
 
 fn hint(key: &str, fallback: &str) -> Text {
@@ -1847,7 +1904,23 @@ pub(super) fn may_place_for_selftest(owner: u128, limit: u32) -> bool {
     .may_add(owned(owner))
 }
 
+/// H6 for the self-test: worker `id`'s filter set to `items`.
+pub(super) fn filter_for_selftest(dimension: &str, id: u64, items: &[&str]) -> Result<(), String> {
+    let mut s = state();
+    let level = s.levels.get_mut(dimension).ok_or("no workers in this level")?;
+    let w = level
+        .fleet
+        .workers
+        .iter_mut()
+        .find(|w| w.id == id)
+        .ok_or("no such worker")?;
+    w.filter = items.iter().map(|i| (*i).to_owned()).collect();
+    level.dirty = true;
+    Ok(())
+}
+
 /// A worker as the server holds it now.
+
 
 
 pub(super) fn worker_for_selftest(dimension: &str, id: u64) -> Option<Worker> {

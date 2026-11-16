@@ -89,9 +89,9 @@ Audit lines: chassis «Ставится на монорельс», «Ездит 
 
 ### Task 7: Harvest filter H6 and the scoop's filter
 
-- [ ] Tests: `a_filtered_reaper_takes_only_pumpkins`, `a_filtered_scoop_digs_only_sand`.
-- [ ] `Worker.filter: Vec<String>`; in the window: shift-click (or a click on the filter row) puts an item into the filter, a click on a filter cell clears it. Self-tests `worker_reaper_filter_pumpkins`, `worker_scoop_filter_sand`.
-- [ ] Commit.
+- [x] Tests: `a_filtered_reaper_takes_only_pumpkins`, `a_filtered_scoop_digs_only_sand`.
+- [x] `Worker.filter: Vec<String>`; in the window: shift-click (or a click on the filter row) puts an item into the filter, a click on a filter cell clears it. Self-tests `worker_reaper_filter_pumpkins`, `worker_scoop_filter_sand`.
+- [x] Commit.
 
 ### Task 8: The chassis window as the handbook draws it
 
