@@ -546,6 +546,19 @@ fn line_of(game: &Game<'_>, o: &Order) -> Option<OrderLine> {
         Wait::Busy(kind) => OrderWait::Busy(kind_code(kind)),
         Wait::Energy(kind) => OrderWait::Energy(kind_code(kind)),
     };
+    // Slice 18: its chain of steps, the running ones marked.
+    let steps = o
+        .chain
+        .iter()
+        .filter_map(|(kind, item, current)| {
+            Some(rustcraft_rules::storage::wire::OrderStep {
+                kind: kind_code(kind),
+                item: number(game, item)?,
+                current: *current,
+            })
+        })
+        .take(rustcraft_rules::storage::wire::MAX_STEPS)
+        .collect();
     Some(OrderLine {
         id: o.id,
         item: number(game, &o.item)?,
@@ -553,6 +566,7 @@ fn line_of(game: &Game<'_>, o: &Order) -> Option<OrderLine> {
         done: o.done,
         keep: o.keep,
         wait,
+        steps,
     })
 }
 
