@@ -109,7 +109,7 @@ VANILLA = {
     'sweet_berry_bush': 'sweet_berries', 'cave_vines': 'glow_berries', 'cocoa': 'cocoa_beans',
     'mob': 'zombie_spawn_egg', 'skeleton': 'skeleton_spawn_egg', 'cow': 'cow_spawn_egg',
     'sheep': 'sheep_spawn_egg', 'bee': 'bee_spawn_egg', 'player': 'player_head',
-    'axe': 'iron_axe',
+    'axe': 'iron_axe', 'anvil': 'anvil',
 }
 # Cells no item shows: a tinted cube (ARGB), as the guide draws water, lava and the ghost.
 TINT = {'water': 0xB03F76E4, 'lava': 0xF0E8601C, 'lavapool': 0xF0E8601C, 'ghost': 0x7066E8F0}
