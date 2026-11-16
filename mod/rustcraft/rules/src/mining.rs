@@ -188,6 +188,28 @@ pub fn slots_of(slots: &[Option<Module>], t: &Tuning) -> usize {
     (t.miner_slots << n.min(8)).min(t.miner_slots_max)
 }
 
+/// Slice 18 (guide `miner`, `mod_stack`): the item ids of the stack modules (stream «modules»
+/// names them in `modules::Module`; the miner knows them by id, so it reads them either way).
+pub const STACK_MODULES: [&str; 3] = [
+    "rustcraft:module_stack",
+    "rustcraft:module_stack_2",
+    "rustcraft:module_stack_3",
+];
+
+/// A miner's slot size for an item the game stacks to `base_max`: with a stack module in it, 64
+/// becomes 256 (16 becomes 64); a single item stays single.
+pub fn slot_max(modules: &[Option<String>], base_max: u32) -> u32 {
+    let stacked = modules
+        .iter()
+        .flatten()
+        .any(|m| STACK_MODULES.contains(&m.as_str()));
+    if stacked && base_max > 1 {
+        base_max * 4
+    } else {
+        base_max
+    }
+}
+
 // ---- The miner ----
 
 /// The square's offsets along one axis: `side` cells round the miner, one more on the low side
@@ -668,6 +690,16 @@ mod tests {
         assert_eq!(fired, 2);
         assert_eq!(Shown::working(0.5), Shown::Slowed(50));
         assert_eq!(Shown::working(0.0), Shown::NoEnergy);
+    }
+
+    #[test]
+    fn a_stack_module_makes_the_miners_slots_hold_256() {
+        let none: Vec<Option<String>> = vec![None, Some("rustcraft:module_speed".into())];
+        assert_eq!(slot_max(&none, 64), 64);
+        let stack = vec![Some("rustcraft:module_stack_2".to_owned())];
+        assert_eq!(slot_max(&stack, 64), 256);
+        assert_eq!(slot_max(&stack, 16), 64);
+        assert_eq!(slot_max(&stack, 1), 1);
     }
 
     #[test]

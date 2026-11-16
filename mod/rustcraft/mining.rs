@@ -418,9 +418,11 @@ fn take(
         return false;
     };
     crate::game::rustcraft_utility::forget_grown(game, dimension, cell);
+    // Slice 18: a stack module makes the slots hold four times as much (guide `mod_stack`).
+    let modules = base::module_items(game, at);
     let maxes: Vec<u32> = drops
         .iter()
-        .map(|d| machines::max_stack(game, &d.item))
+        .map(|d| rules::slot_max(&modules, machines::max_stack(game, &d.item)))
         .collect();
     let left: Vec<ItemStack> = game
         .native_with_mod_block_entity(at, |e| {
