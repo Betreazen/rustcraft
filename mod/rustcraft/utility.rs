@@ -50,7 +50,7 @@ use rustcraft_rules::{
     geom::{Face, Pos},
     machines::{
         sheet::{Bar, Kind as SheetKind, Press, Sheet, Status as SheetStatus, Toggle, severity_code},
-        tiered,
+        charging, tiered,
         style::Severity,
     },
     modules::{self, Module},
@@ -398,8 +398,8 @@ pub(super) fn tick(game: &mut Game<'_>, dimension: &str, level: &LevelNet, t: &T
         let shown = match u {
             Util::Trash => trash(game, pos, t),
             Util::Disintegrator => disintegrate(game, pos, cost),
-            Util::Charger => charge_slots(game, pos, every),
-            Util::ChargePlate => plate(game, dimension, pos),
+            Util::Charger => charge_slots(game, dimension, pos, every),
+            Util::ChargePlate => plate(game, dimension, pos, every),
             Util::Repair => repair_one(game, pos, cost),
             Util::Kitchen => cook(game, pos, cost),
             Util::Brewer => brew(game, pos, cost),
@@ -554,75 +554,123 @@ fn battery_of(game: &Game<'_>, s: &ItemStack) -> Option<charge::Battery> {
     crate::game::rustcraft_gear::battery(game, s)
 }
 
-fn charge_slots(game: &mut Game<'_>, pos: Pos, every: u64) -> Shown {
+fn charge_slots(game: &mut Game<'_>, dimension: &str, pos: Pos, every: u64) -> Shown {
     let slots = items(game, pos);
     let held: Vec<(usize, charge::Battery)> = (0..4)
         .filter_map(|i| slots.get(i).cloned().flatten().and_then(|s| battery_of(game, &s).map(|b| (i, b))))
         .collect();
-    if held.is_empty() {
-        return Shown::Idle("charge_empty");
-    }
-    let offer = energy(game, pos).min(Util::Charger.spec().draw * every as f64 / 20.0);
-    let batteries: Vec<_> = held.iter().map(|(_, b)| *b).collect();
-    let (after, used) = charge::share(&batteries, offer);
-    if used <= 0.0 && held.iter().any(|(_, b)| !b.full()) {
-        return Shown::NoEnergy;
-    }
-    spend(game, pos, used);
-    for ((slot, _), b) in held.iter().zip(&after) {
-        if let Some(s) = slots.get(*slot).cloned().flatten() {
-            crate::game::rustcraft_gear::charge(&s, b.charge);
+    // Slice 18 (guide `charger`): its speed module charges faster, its economy module draws less
+    // of its buffer an E given (rustcraft_rules::machines::charging).
+    let t = crate::game::rustcraft_server::tuning();
+    let secs = every as f64 / 20.0;
+    let factors = modules::factors(&base::modules_at(game, pos), t);
+    let (mut offer, per) =
+        charging::charger_offer(Util::Charger.spec().draw, secs, factors, energy(game, pos));
+    let mut given = 0.0;
+    let mut needs = false;
+    if !held.is_empty() {
+        let batteries: Vec<_> = held.iter().map(|(_, b)| *b).collect();
+        needs = batteries.iter().any(|b| !b.full());
+        let (after, used) = charge::share(&batteries, offer);
+        offer -= used;
+        given += used;
+        for ((slot, _), b) in held.iter().zip(&after) {
+            if let Some(s) = slots.get(*slot).cloned().flatten() {
+                crate::game::rustcraft_gear::charge(&s, b.charge);
+            }
+        }
+        // Full ones go to the output slots, for the net.
+        for ((slot, _), b) in held.iter().zip(&after) {
+            if b.full()
+                && let Some(s) = items(game, pos).get(*slot).cloned().flatten()
+                && put(game, pos, 4..8, s).is_none()
+            {
+                with_items(game, pos, |items| items[*slot] = None);
+            }
         }
     }
-    // Full ones go to the output slots, for the net.
-    for ((slot, _), b) in held.iter().zip(&after) {
-        if b.full()
-            && let Some(s) = items(game, pos).get(*slot).cloned().flatten()
-            && put(game, pos, 4..8, s).is_none()
-        {
-            with_items(game, pos, |items| items[*slot] = None);
-        }
+    // «…или встань на него в снаряжении»: the gear of a player standing on it.
+    let standing = standing_on(game, dimension, pos);
+    for uuid in &standing {
+        let (took, wanted) = charge_worn(game, *uuid, offer);
+        offer -= took;
+        given += took;
+        needs |= wanted;
     }
-    Shown::Working
+    spend(game, pos, given * per);
+    match charging::charged(!held.is_empty() || !standing.is_empty(), needs, given) {
+        charging::Charged::Working => Shown::Working,
+        charging::Charged::NoEnergy => Shown::NoEnergy,
+        charging::Charged::Full | charging::Charged::Empty if !held.is_empty() || !standing.is_empty() => {
+            Shown::Idle("plate_full")
+        }
+        _ => Shown::Idle("charge_empty"),
+    }
 }
 
-fn plate(game: &mut Game<'_>, dimension: &str, pos: Pos) -> Shown {
-    let below = [pos[0], pos[1] - 1, pos[2]];
-    if game.native_block(below) != crate::game::rustcraft_content::HOUSING {
-        return Shown::Blocked("plate_no_housing");
-    }
-    let standing: Vec<u128> = game
-        .native_server_players()
+/// The players standing on the block at `pos` (their feet in the cell above it, or on a thin
+/// plate in its own cell).
+fn standing_on(game: &Game<'_>, dimension: &str, pos: Pos) -> Vec<u128> {
+    game.native_server_players()
         .into_iter()
         .filter(|p| {
             p.dimension == dimension
                 && p.position[0].floor() as i32 == pos[0]
                 && p.position[2].floor() as i32 == pos[2]
-                && (p.position[1] - f64::from(pos[1])).abs() < 1.2
+                && (p.position[1] - f64::from(pos[1])) > -0.01
+                && (p.position[1] - f64::from(pos[1])) < 1.2
         })
         .map(|p| p.uuid)
-        .collect();
+        .collect()
+}
+
+/// W3: charges a player's worn armour (the jetpack with the chestplate) and both hands from
+/// `offer` E, each in turn: (what it took, whether anything wanted charge).
+fn charge_worn(game: &mut Game<'_>, uuid: u128, mut offer: f64) -> (f64, bool) {
+    use horizon_world::player_inventory::EquipmentSlot as E;
+    let mut took_all = 0.0;
+    let mut wanted = false;
+    for slot in [E::Head, E::Chest, E::Legs, E::Feet, E::MainHand, E::OffHand] {
+        let Some(st) = game.native_player_equipment(uuid, slot) else { continue };
+        let Some(b) = battery_of(game, &st) else { continue };
+        wanted |= !b.full();
+        let (after, took) = b.fill(offer);
+        if took > 0.0 {
+            crate::game::rustcraft_gear::charge(&st, after.charge);
+            offer -= took;
+            took_all += took;
+        }
+    }
+    (took_all, wanted)
+}
+
+fn plate(game: &mut Game<'_>, dimension: &str, pos: Pos, every: u64) -> Shown {
+    let below = [pos[0], pos[1] - 1, pos[2]];
+    if game.native_block(below) != crate::game::rustcraft_content::HOUSING {
+        return Shown::Blocked("plate_no_housing");
+    }
+    let standing = standing_on(game, dimension, pos);
     if standing.is_empty() {
         return Shown::Idle("plate_empty");
     }
-    // W3: worn armour and both hands, each in turn.
-    use horizon_world::player_inventory::EquipmentSlot as E;
-    let mut offer = energy(game, pos).min(Util::ChargePlate.spec().draw);
+    // Slice 18 (guide `charge_plate`): 128 E/s for each player on it, from its buffer.
+    let secs = every as f64 / 20.0;
+    let mut buffer = energy(game, pos);
     let mut used = 0.0;
+    let mut needs = false;
     for uuid in standing {
-        for slot in [E::Head, E::Chest, E::Legs, E::Feet, E::MainHand, E::OffHand] {
-            let Some(st) = game.native_player_equipment(uuid, slot) else { continue };
-            let Some(b) = battery_of(game, &st) else { continue };
-            let (after, took) = b.fill(offer);
-            if took > 0.0 {
-                crate::game::rustcraft_gear::charge(&st, after.charge);
-                offer -= took;
-                used += took;
-            }
-        }
+        let offer = charging::plate_offer(buffer, secs);
+        let (took, wanted) = charge_worn(game, uuid, offer);
+        buffer -= took;
+        used += took;
+        needs |= wanted;
     }
     spend(game, pos, used);
-    if used > 0.0 { Shown::Working } else { Shown::Idle("plate_full") }
+    match charging::charged(true, needs, used) {
+        charging::Charged::Working => Shown::Working,
+        charging::Charged::NoEnergy => Shown::NoEnergy,
+        _ => Shown::Idle("plate_full"),
+    }
 }
 
 // ---- The repair stand ----

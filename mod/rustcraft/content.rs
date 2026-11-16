@@ -398,6 +398,8 @@ impl Machine {
 
 /// The solar panel's outline and collision: the guide's panel on its post, 6.5 pixels high.
 const SOLAR_BOX: [f64; 6] = [0.0, 0.0, 0.0, 1.0, 0.40625, 1.0];
+/// Slice 18, stream 3: the charge plate's outline and collision: its model, 1.15 pixels high.
+const PLATE_BOX: [f64; 6] = [0.0, 0.0, 0.0, 1.0, 0.071875, 1.0];
 /// The crystal's outline and collision: the staged model's cluster, 2..14 across, 15 high.
 const CRYSTAL_BOX: [f64; 6] = [0.125, 0.0, 0.125, 0.875, 0.9375, 0.875];
 pub const ITEM_CHANNEL: &str = "rustcraft:item_channel";
@@ -654,15 +656,21 @@ fn declare_slice7(blocks: &mut Vec<Block>) {
     for machine in Machine::all().filter(|m| m.owned()) {
         // E19: the solar panel is a thin plate that lets the light through, so there is no
         // shadow under it; the turret's head and the windmill's mast reach past their cells.
+        // Slice 18, stream 3: the charge plate is thin, as a pressure plate (guide `charge_plate`).
         let open = matches!(
             machine,
             Machine::Turret | Machine::Windmill | Machine::Solar
-        );
-        let plate = (machine == Machine::Solar).then(|| BlockShapes {
+        ) || machine == Machine::Util(Util::ChargePlate);
+        let thin = match machine {
+            Machine::Solar => Some(SOLAR_BOX),
+            Machine::Util(Util::ChargePlate) => Some(PLATE_BOX),
+            _ => None,
+        };
+        let plate = thin.map(|b| BlockShapes {
             property: String::new(),
             properties: Vec::new(),
             values: BTreeMap::new(),
-            default: Some(vec![SOLAR_BOX]),
+            default: Some(vec![b]),
         });
         blocks.push(Block {
             id: machine.block().into(),
