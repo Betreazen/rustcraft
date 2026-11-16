@@ -144,7 +144,7 @@
 - [x] done 8e38c52 (machines.rs: Butcher gets a buffer, flagged; looting as the tables add it (0..level a drop), fire aspect sets the animal alight and the bonus cooked; blade spends 25 E a strike; recipe key s lists the iron sword and the blades; slice11 butcher scenarios get a full buffer; self-test `butcher18_energy_and_kill_xp`; try pending)
 
 ### Task 17: Shearer — built-in shears, milking into a tank (cows, mooshrooms, goats), «Некуда сливать молоко», window rows and milk bar
-- [ ] done
+- [x] done (slots: 9 wool; milk 1000 mB a milking into the touching tank, fluid `rustcraft:milk`; slice12 `util_shearer_shears`/`util_shearer_milks` updated; try pending)
 
 ### Task 18: Apiary — choice honey / combs in the window, «Нет пустых бутылок», hive rows
 - [ ] done
