@@ -103,7 +103,7 @@ fn scenes_show_known_items(o: Pos, _: &Tuning) -> Scenario {
                 .iter()
                 .filter_map(|l| match *l {
                     scene::Look::Item(id) => Some(id),
-                    scene::Look::Tint(_) => None,
+                    scene::Look::Tint(_) | scene::Look::Drop(_) => None,
                 })
                 .filter(|i| !b.item_known(i))
                 .collect();

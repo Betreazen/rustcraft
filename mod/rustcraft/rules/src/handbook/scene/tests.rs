@@ -23,6 +23,7 @@ const STILL: Step = Step {
     flows: &[],
     beams: &[],
     tint: 0,
+    labels: &[],
 };
 
 fn scene_of(steps: &'static [Step]) -> Scene {
@@ -88,7 +89,7 @@ fn every_look_is_an_item_the_mapping_knows() {
                     );
                 }
             }
-            Look::Tint(argb) => assert!(argb >> 24 > 0, "an invisible tint"),
+            Look::Tint(argb) | Look::Drop(argb) => assert!(argb >> 24 > 0, "an invisible tint"),
         }
     }
     for s in SCENES {
@@ -449,4 +450,95 @@ fn the_scene_sheets_parts_fit_and_keep_clear_of_the_bottom_row() {
     // A step button press leaves the page where it is.
     let v = hb::View::Page { page: 0, sheet: 0 };
     assert_eq!(hb::press(v, Part::StepOn, 2), v);
+}
+
+const RUN: &[[f32; 3]] = &[[0.0, 0.0, 0.0], [4.0, 0.0, 0.0]];
+
+#[test]
+fn labels_follow_their_mover_and_stand_on_their_point() {
+    const STEP: Step = Step {
+        dur: 5.0,
+        blocks: &[],
+        movers: &[Mover {
+            look: 0,
+            path: RUN,
+            speed: 1.0,
+            mode: Mode::Once,
+            since: 0.0,
+        }],
+        flows: &[],
+        beams: &[],
+        tint: 0,
+        labels: &[
+            Label {
+                at: End::Mover(0),
+                lift: 1.45,
+                tone: Tone::Tag,
+            },
+            Label {
+                at: End::Point([2.5, 0.5, 2.15]),
+                lift: 0.0,
+                tone: Tone::Bad,
+            },
+            Label {
+                at: End::Mover(3),
+                lift: 1.0,
+                tone: Tone::Info,
+            },
+        ],
+    };
+    let at = labels_at(&STEP, 2.0);
+    // The label on a mover that does not exist is left out.
+    assert_eq!(at, vec![(0, [2.5, 0.5, 1.45]), (1, [2.5, 0.5, 2.15])]);
+    let scene = scene_of(&[STEP]);
+    assert_eq!(
+        scene.label_key(0, 1),
+        "rustcraft.handbook.scene.test.0.label.1"
+    );
+    // The badge's point is in the scene's bounds: the panel keeps room for it.
+    assert!(
+        cells(&scene)
+            .iter()
+            .any(|c| c[0] == 2.0 && c[1] == 0.0 && (c[2] - 1.65).abs() < 1e-5)
+    );
+}
+
+#[test]
+fn label_box_stays_in_the_panel() {
+    let size = [100.0, 50.0];
+    let b = label_box([50.0, 30.0], 40.0, size);
+    assert_eq!(b[2], 40.0 * LABEL_SCALE + 2.0 * LABEL_PAD);
+    assert!((b[0] + b[2] / 2.0 - 50.0).abs() <= 0.5 && b[1] + b[3] <= 30.0 + 0.5);
+    let edge = label_box([2.0, 1.0], 40.0, size);
+    assert_eq!((edge[0], edge[1]), (0.0, 0.0));
+    let far = label_box([99.0, 49.0], 40.0, size);
+    assert!(far[0] + far[2] <= size[0] + 0.5);
+}
+
+#[test]
+fn label_colours_by_tone() {
+    let (bad, back) = tone_colours(Tone::Bad);
+    assert_eq!(bad, crate::machines::style::colour::BAD_TEXT);
+    assert_eq!(back >> 24, 0xFF);
+    for t in [Tone::Warn, Tone::Ok, Tone::Info, Tone::Tag] {
+        let (text, back) = tone_colours(t);
+        assert_eq!(text >> 24, 0, "{t:?}: text colours are RGB");
+        assert!(back >> 24 > 0, "{t:?}: a visible plate");
+    }
+}
+
+#[test]
+fn every_label_has_its_text_in_russian() {
+    let ru = lang("ru_ru");
+    for s in SCENES {
+        for (n, st) in s.steps.iter().enumerate() {
+            for k in 0..st.labels.len() {
+                assert!(
+                    ru.contains_key(&s.label_key(n, k)),
+                    "{} step {n} label {k}",
+                    s.id
+                );
+            }
+        }
+    }
 }

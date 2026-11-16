@@ -36,7 +36,9 @@
 //   `HudBatch::scale_since`, horizon-client-render hud.rs:1889-1894), water, lava and the ghost as
 //   tinted cubes (`native_quad`, API 111, native_hooks.rs:11020-11023), flows and beams as dots
 //   (`native_fill`, native_hooks.rs:10842-10846), everything cut to the panel
-//   (`HudBatch::clip_since`, hud.rs:1895). The scene moves by the window's own clock and goes on
+//   (`HudBatch::clip_since`, hud.rs:1895). The guide's badges and name tags are small plates of
+//   text above their points (the text scaled down with `HudBatch::scale_since`), a dropped item a
+//   little cube of its colour. The scene moves by the window's own clock and goes on
 //   to its next step by itself; the step buttons in the bottom row step it by hand. A block
 //   under the mouse names its item (`native_gui_tooltip`, native_client_services.rs:472-474).
 use crate::game::{
@@ -559,6 +561,7 @@ fn scene_part(game: &Game<'_>, batch: &mut HudBatch, o: [f32; 2], page: usize, s
         let r = [c[0] - side / 2.0, c[1] - side / 2.0, side, side];
         game.native_fill(batch, r, 0xFF00_0000 | dot.rgb);
     }
+    labels(game, batch, at, s, step, t, &fit);
     batch.clip_since(start, at[0], at[1], at[0] + panel[2], at[1] + panel[3]);
     let measure = |x: &str| game.native_text_width(x);
     if let Some(caption) = lookup(&s.caption_key(step)) {
@@ -599,6 +602,46 @@ fn look(game: &Game<'_>, batch: &mut HudBatch, at: [f32; 2], d: &scene::Drawn, f
                 game.native_quad(batch, corners, scene::shaded(argb, light));
             }
         }
+        Look::Drop(argb) => {
+            for (corners, light) in scene::cube_faces(c, fit.scale * scene::DROP) {
+                game.native_quad(batch, corners, scene::shaded(argb, light));
+            }
+        }
+    }
+}
+
+/// The step's badges and name tags: each a plate with its text, scaled down, above its point.
+fn labels(
+    game: &Game<'_>,
+    batch: &mut HudBatch,
+    at: [f32; 2],
+    s: &Scene,
+    step: usize,
+    t: f32,
+    fit: &scene::Fit,
+) {
+    let st = &s.steps[step];
+    let size = [scene::PANEL[2], scene::PANEL[3]];
+    for (k, p) in scene::labels_at(st, t) {
+        let Some(words) = lookup(&s.label_key(step, k)) else {
+            continue;
+        };
+        let (rgb, back) = scene::tone_colours(st.labels[k].tone);
+        let b = scene::label_box(fit.place(p), game.native_text_width(&words), size);
+        game.native_fill(batch, [at[0] + b[0], at[1] + b[1], b[2], b[3]], back);
+        let corner = [
+            at[0] + b[0] + scene::LABEL_PAD,
+            at[1] + b[1] + scene::LABEL_PAD,
+        ];
+        let start = batch.vertices.len();
+        game.native_text(batch, &words, corner, rgb, false);
+        batch.scale_since(
+            start,
+            corner[0],
+            corner[1],
+            scene::LABEL_SCALE,
+            scene::LABEL_SCALE,
+        );
     }
 }
 

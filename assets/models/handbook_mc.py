@@ -284,7 +284,7 @@ def main():
         len(rows), len(sections), len(ru), len(en), ('; rewrote ' + ', '.join(changed)) if changed else ''))
     dropped = ', '.join('%s x%d' % kv for kv in sorted(done['dropped'].items())) or 'nothing'
     print('%d scenes, %d steps, %d looks, %d block lists (at most %d blocks a step); dropped: %s; '
-          '%d badges not carried; %d captions have digits (H4)' % (
+          '%d labels (badges and name tags); %d captions have digits (H4)' % (
               done['scenes'], done['steps'], done['looks'], done['lists'], done['most'], dropped,
               done['badges'], done['numbers']))
 

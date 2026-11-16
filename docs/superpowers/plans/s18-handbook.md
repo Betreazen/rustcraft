@@ -73,9 +73,9 @@
 
 **Files:** `scenes_mc.py` (снимок `badges` и `tags`, `drop` → тонированный малый куб, сущности → головы, где у игры есть голова), `rules/src/handbook/scene.rs` (`Label`, `labels_at`), `handbook.rs` (рисование табличек в панели), lang `rustcraft.handbook.scene.<id>.<n>.label.<k>`.
 
-- [ ] RED: `labels_follow_their_mover`, `labels_stand_above_their_point`, `label_colours_by_kind`.
-- [ ] GREEN; таблички рисуются уменьшенным текстом (`HudBatch::scale_since`) на тёмной плашке, цвет по виду (`bad`, `warn`, `ok`, `info`, `tag`); названия блоков (`tags`) — как в HTML, включены.
-- [ ] Коммит.
+- [x] RED: `labels_follow_their_mover`, `labels_stand_above_their_point`, `label_colours_by_kind`.
+- [x] GREEN; таблички рисуются уменьшенным текстом (`HudBatch::scale_since`) на тёмной плашке, цвет по виду (`bad`, `warn`, `ok`, `info`, `tag`); названия блоков (`tags`) — как в HTML, включены.
+- [x] Коммит.
 
 ### Task 5: Окно блока картинкой
 
