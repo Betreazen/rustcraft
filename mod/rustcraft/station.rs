@@ -481,7 +481,11 @@ fn scheme(
         };
         (d.station, d.name.as_str(), fill)
     }));
-    for (pos, name, fill) in dots {
+    // Slice 18: the floors of a lift share a dot; their names (and near stations' names) are
+    // set apart, the lowest floor first (rustcraft_rules::monorail::window::place_labels).
+    dots.sort_by_key(|d| d.0[1]);
+    let mut labels = Vec::with_capacity(dots.len());
+    for &(pos, name, fill) in &dots {
         let c = p.at(win::column(pos));
         let at = [o[0] + c[0], o[1] + c[1]];
         game.native_fill(batch, [at[0] - 3.0, at[1] - 3.0, 7.0, 7.0], DOT_EDGE);
@@ -492,10 +496,13 @@ fn scheme(
             name.chars().take(MAP_LABEL).collect()
         };
         let w = game.native_text_width(&label);
-        let x = (at[0] - w / 2.0).clamp(r[0] + 2.0, r[0] + r[2] - w - 2.0);
-        let y = (at[1] - 12.0).max(r[1] + 2.0);
-        game.native_text(batch, &label, [x, y], MAP_TEXT, false);
+        labels.push((label, at, w));
     }
+    let spots: Vec<([f32; 2], f32)> = labels.iter().map(|(_, at, w)| (*at, *w)).collect();
+    for ((label, _, _), xy) in labels.iter().zip(win::place_labels(&spots, r)) {
+        game.native_text(batch, label, xy, MAP_TEXT, false);
+    }
+
 }
 
 /// Slice 18 (guide `tool_map`): the cartographers' finds near the network, a square for a

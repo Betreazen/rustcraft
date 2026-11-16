@@ -189,3 +189,52 @@ mod tests {
         assert!(inside(SCHEME, one));
     }
 }
+
+/// Slice 18 (T7, guide `station`: names by the dots, a lift's floors told apart): where each
+/// label goes. `labels` are each dot's point and its label's width; a label sits centred over its
+/// dot, and one that would cover a label already placed (two floors of a lift share a dot, names
+/// of near stations run into each other) moves under its dot, then further up or down by a line,
+/// within `bounds` (x, y, width, height). Its top-left corners, in the order given.
+pub fn place_labels(labels: &[([f32; 2], f32)], bounds: Rect) -> Vec<[f32; 2]> {
+    const LINE: f32 = 9.0;
+    const OVER: f32 = 12.0;
+    let mut placed: Vec<Rect> = Vec::new();
+    let mut out = Vec::with_capacity(labels.len());
+    for &(at, w) in labels {
+        let x = (at[0] - w / 2.0).clamp(bounds[0] + 2.0, bounds[0] + bounds[2] - w - 2.0);
+        let tries = [-OVER, 4.0, -OVER - LINE, 4.0 + LINE, -OVER - 2.0 * LINE, 4.0 + 2.0 * LINE];
+        let fit = |dy: f32| {
+            let y = (at[1] + dy).clamp(bounds[1] + 2.0, bounds[1] + bounds[3] - LINE);
+            [x, y, w, LINE - 1.0]
+        };
+        let overlaps = |r: &Rect| {
+            placed.iter().any(|p| {
+                r[0] < p[0] + p[2] && p[0] < r[0] + r[2] && r[1] < p[1] + p[3] && p[1] < r[1] + r[3]
+            })
+        };
+        let r = tries.iter().map(|&dy| fit(dy)).find(|r| !overlaps(r)).unwrap_or_else(|| fit(-OVER));
+        placed.push(r);
+        out.push([r[0], r[1]]);
+    }
+    out
+}
+
+#[cfg(test)]
+mod label_tests {
+    use super::*;
+
+    #[test]
+    fn lift_floors_and_near_names_do_not_overlap() {
+        let bounds = [0.0, 0.0, 200.0, 100.0];
+        // Three floors of a lift on one dot, and a station far off.
+        let labels = [([100.0, 50.0], 30.0), ([100.0, 50.0], 30.0), ([100.0, 50.0], 40.0), ([20.0, 50.0], 20.0)];
+        let at = place_labels(&labels, bounds);
+        assert_eq!(at[0], [85.0, 38.0], "the first over its dot");
+        let rows: Vec<f32> = at[..3].iter().map(|p| p[1]).collect();
+        assert!(rows[0] != rows[1] && rows[1] != rows[2] && rows[0] != rows[2], "{rows:?}");
+        assert_eq!(at[3][1], 38.0, "a lone name keeps its place");
+        for p in &at {
+            assert!(p[0] >= 2.0 && p[1] >= 2.0);
+        }
+    }
+}

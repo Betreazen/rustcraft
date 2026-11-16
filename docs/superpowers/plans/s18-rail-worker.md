@@ -133,7 +133,8 @@ Audit lines: chassis «Ставится на монорельс», «Ездит 
 
 ### Task 14: Monorail shape, cabin room, scheme labels and lift floors
 
-- [ ] Tests: `a_climb_cell_can_fork`, `a_floor_rail_under_a_wall_rail_shows_its_half_up`, `the_cabin_needs_every_cell_it_touches`, `labels_do_not_overlap`, `lift_floors_are_apart_on_the_scheme`.
+- [x] Scheme labels set apart, lift floors told apart: `window::place_labels`, test `lift_floors_and_near_names_do_not_overlap`.
+- [ ] Left: a climb cell with a fork and the floor rail's half up under a wall rail (both need new `shape` states and rail models from export_mc.py); the cabin's room checked over every cell it touches and the capsule's 2.5× scale (capsule.rs). Not started for want of time in this run.
 - [ ] Commit.
 
 ### Task 15: Hand-off
