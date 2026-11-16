@@ -12,6 +12,7 @@ use crate::geom::Pos;
 pub mod keys;
 pub mod moves;
 pub mod shot;
+pub mod window;
 
 /// A piece of technical armour.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
