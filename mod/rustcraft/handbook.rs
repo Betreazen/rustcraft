@@ -839,20 +839,18 @@ fn role_colour(role: Role) -> u32 {
 /// arrow (the machine over it) and what it makes; a slot under the mouse names its item.
 fn recipe(game: &Game<'_>, batch: &mut HudBatch, o: [f32; 2], at: [f32; 2], r: &Shown) {
     let mut named: Option<Text> = None;
-    let mut cell = |batch: &mut HudBatch, p: [f32; 2], it: &str, count: u32| {
+    let cell = |batch: &mut HudBatch, p: [f32; 2], it: &str, count: u32| {
         let p = [at[0] + p[0], at[1] + p[1]];
         slot(game, batch, o, p);
         item(game, batch, o, p, it, count);
-        if kit::hovered(game, o, style::slot_rect(p)) {
-            named = Some(item_name(game, it));
-        }
+        kit::hovered(game, o, style::slot_rect(p)).then(|| item_name(game, it))
     };
     let (arrow, result) = match &r.made {
         Made::Grid(grid) => {
             for (i, c) in grid.iter().enumerate() {
                 let p = recipes::grid_cell(i);
                 match c {
-                    Some(it) => cell(batch, p, it, 1),
+                    Some(it) => named = cell(batch, p, it, 1).or(named),
                     None => slot(game, batch, o, [at[0] + p[0], at[1] + p[1]]),
                 }
             }
@@ -860,7 +858,7 @@ fn recipe(game: &Game<'_>, batch: &mut HudBatch, o: [f32; 2], at: [f32; 2], r: &
         }
         Made::Machine { machine, inputs } => {
             for (k, (it, n)) in inputs.iter().take(recipes::INPUTS).enumerate() {
-                cell(batch, recipes::input_at(k), it, *n);
+                named = cell(batch, recipes::input_at(k), it, *n).or(named);
             }
             let m = [
                 at[0] + recipes::MACHINE_ICON[0],
@@ -881,7 +879,7 @@ fn recipe(game: &Game<'_>, batch: &mut HudBatch, o: [f32; 2], at: [f32; 2], r: &
         1.0,
     );
     match &r.out {
-        Out::Item(it, n) => cell(batch, result, it, *n),
+        Out::Item(it, n) => named = cell(batch, result, it, *n).or(named),
         Out::Fluid(fluid, mb) => {
             let p = [at[0] + result[0], at[1] + result[1]];
             slot(game, batch, o, p);
