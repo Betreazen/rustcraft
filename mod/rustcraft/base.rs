@@ -1657,12 +1657,12 @@ fn dock_sheet(
         _ => Machine::DockUnload,
     };
     let text = workers::dock_text(game, dimension, pos, machine);
+    // Slice 18, stream 6: the docks' lines of the guide's windows.
+    for row in workers::dock_rows(game, pos, machine) {
+        s.rows.push(v(&row));
+    }
     if machine == Machine::DockLoad {
-        s.rows.push(v(&line(
-            "rustcraft.dock.load_info",
-            "Loads a cargo worker standing by it",
-            &[],
-        )));
+
         let empty = crate::game::rustcraft_machines::entity(game, pos).is_none_or(|e| {
             e.items
                 .iter()

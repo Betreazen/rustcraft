@@ -639,6 +639,7 @@ pub(super) fn tick(game: &mut Game<'_>, dimension: &str, net_level: &LevelNet, t
     if level.ticks.is_multiple_of(DOCK_PUSH_EVERY) {
         push_docks(game, dimension, &unload);
         push_docks(game, dimension, &portal);
+        pull_into_load_docks(game, dimension, &load);
     }
     unload.extend(portal.iter().copied());
     if !level.fleet.workers.is_empty() {
@@ -1218,6 +1219,9 @@ fn unload_into(game: &mut Game<'_>, w: &mut Worker, dock: Pos, t: &Tuning) {
         w.hold.take(&item, put);
         moved += put;
     }
+    if moved > 0 {
+        dock_log().received.push((dock, std::time::Instant::now(), moved));
+    }
     if w.unloaded() {
         w.back_to_work();
     } else if moved == 0 {
@@ -1275,6 +1279,10 @@ fn charge_from(game: &mut Game<'_>, w: &mut Worker, dock: Pos, t: &Tuning) {
     if give > 0.0 {
         machines::set_buffer_energy(game, dock, buffer - give);
         w.charge += give;
+        let share = w.charge / cap.max(1.0);
+        dock_log()
+            .charging
+            .insert(dock, (w.tool, share, std::time::Instant::now()));
         w.note = Note::Charging;
     } else if w.charge < cap {
         w.note = Note::DockEmpty;
@@ -1285,8 +1293,107 @@ fn charge_from(game: &mut Game<'_>, w: &mut Worker, dock: Pos, t: &Tuning) {
     }
 }
 
+/// Slice 18 (guide `dock_load`: «предметами из магистрали или соседнего сундука»): each load dock
+/// takes items from a container beside it (a chest, a barrel; never a RustCraft block).
+fn pull_into_load_docks(game: &mut Game<'_>, dimension: &str, docks: &BTreeSet<Pos>) {
+    for &dock in docks {
+        for f in Face::ALL {
+            let n = step(dock, f);
+            let block = game.native_block(n);
+            if block == AIR || server::is_ours(&block) {
+                continue;
+            }
+            game.native_move_items(
+                dimension,
+                n,
+                transport::direction(f.opposite()),
+                dock,
+                transport::direction(f),
+                None,
+                DOCK_PUSH,
+            );
+        }
+    }
+}
+
+/// What the docks did lately, for their windows' lines (guide `ui.js` docks).
+#[derive(Default)]
+struct DockLog {
+    /// Items an unload dock took from workers: dock, when, how many.
+    received: Vec<(Pos, std::time::Instant, u32)>,
+    /// The worker a charge dock charges: its tool, its charge 0..1, when last.
+    charging: HashMap<Pos, (Option<Tool>, f64, std::time::Instant)>,
+}
+
+static DOCK_LOG: LazyLock<Mutex<DockLog>> = LazyLock::new(Mutex::default);
+
+fn dock_log() -> MutexGuard<'static, DockLog> {
+    let mut log = DOCK_LOG.lock().unwrap_or_else(PoisonError::into_inner);
+    let hour = std::time::Duration::from_secs(3600);
+    log.received.retain(|(_, at, _)| at.elapsed() < hour);
+    log
+}
+
+/// The lines a dock's window shows over its slots (guide `ui.js`: «Отдаёт груз · в магистраль»,
+/// «Принято за час · 312 предметов»; «Берёт груз · из сундука рядом», «Грузит · всё подряд»;
+/// «Заряжает · Лесоруб · 46%»).
+pub(super) fn dock_rows(game: &Game<'_>, pos: Pos, machine: Machine) -> Vec<Text> {
+    let beside = |pick: &dyn Fn(&str) -> bool| {
+        Face::ALL
+            .into_iter()
+            .any(|f| pick(&game.native_block(step(pos, f))))
+    };
+    let chest = beside(&|b: &str| b != AIR && !server::is_ours(b));
+    let magistral = beside(&|b: &str| b == content::HOUSING);
+    match machine {
+        Machine::DockCharge => {
+            let now = dock_log().charging.get(&pos).copied();
+            match now.filter(|(_, _, at)| at.elapsed().as_secs() < 2) {
+                Some((tool, share, _)) => {
+                    let mut who = tool_name(tool);
+                    who.push(Text::literal(format!(" · {:.0}%", share * 100.0)));
+                    vec![line("rustcraft.dock.charging", "Charges · %s", &[who])]
+                }
+                None => vec![line("rustcraft.dock.charging_none", "Charges · nobody now", &[])],
+            }
+        }
+        Machine::DockLoad => {
+            let from = if chest {
+                line("rustcraft.dock.takes_chest", "Takes cargo · from the chest beside it", &[])
+            } else {
+                line("rustcraft.dock.takes_net", "Takes cargo · from the magistral", &[])
+            };
+            vec![from, line("rustcraft.dock.loads_all", "Loads · everything", &[])]
+        }
+        _ => {
+            let to = if magistral {
+                line("rustcraft.dock.gives_net", "Gives cargo · to the magistral", &[])
+            } else if chest {
+                line("rustcraft.dock.gives_chest", "Gives cargo · to the chest beside it", &[])
+            } else {
+                line("rustcraft.dock.gives_none", "Gives cargo · nowhere yet", &[])
+            };
+            let hour: u32 = dock_log()
+                .received
+                .iter()
+                .filter(|(p, _, _)| *p == pos)
+                .map(|(_, _, n)| n)
+                .sum();
+            vec![
+                to,
+                line(
+                    "rustcraft.dock.per_hour",
+                    "Taken in an hour · %s items",
+                    &[Text::literal(hour.to_string())],
+                ),
+            ]
+        }
+    }
+}
+
 /// Each unload dock hands its load on to a container beside it (W6: «или соседний сундук»); the
 /// magistral takes it like any machine's products.
+
 fn push_docks(game: &mut Game<'_>, dimension: &str, docks: &BTreeSet<Pos>) {
     for &dock in docks {
         for f in Face::ALL {

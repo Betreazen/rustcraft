@@ -121,9 +121,9 @@ Audit lines: chassis «Ставится на монорельс», «Ездит 
 
 ### Task 12: Dock windows' lines, dock_load takes from the chest beside it
 
-- [ ] «Отдаёт груз · в магистраль/в сундук», «Принято за час», «Берёт груз · из сундука рядом», «Грузит · всё подряд», «Заряжает · Лесоруб · 46%».
-- [ ] Load dock pulls from a container beside it. Self-test `worker_load_dock_takes_from_a_chest`.
-- [ ] Commit.
+- [x] «Отдаёт груз · в магистраль/в сундук», «Принято за час», «Берёт груз · из сундука рядом», «Грузит · всё подряд», «Заряжает · Лесоруб · 46%».
+- [x] Load dock pulls from a container beside it. Self-test `worker_load_dock_takes_from_a_chest`.
+- [x] Commit.
 
 ### Task 13: The bore: height module, tier 2–4 rails; the guard shoots while it stands; shooter recipe
 

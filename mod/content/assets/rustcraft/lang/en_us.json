@@ -1034,5 +1034,14 @@
   "rustcraft.worker.hold_slots": "%s of %s slots",
   "rustcraft.worker.all_mapped": "Everything round the way is mapped",
   "rustcraft.station.charted": "Charted: %s chunks",
-  "rustcraft.util.dock_full": "The dock's buffer is full"
+  "rustcraft.util.dock_full": "The dock's buffer is full",
+  "rustcraft.dock.charging": "Charges · %s",
+  "rustcraft.dock.charging_none": "Charges · nobody now",
+  "rustcraft.dock.takes_chest": "Takes cargo · from the chest beside it",
+  "rustcraft.dock.takes_net": "Takes cargo · from the magistral",
+  "rustcraft.dock.loads_all": "Loads · everything",
+  "rustcraft.dock.gives_net": "Gives cargo · to the magistral",
+  "rustcraft.dock.gives_chest": "Gives cargo · to the chest beside it",
+  "rustcraft.dock.gives_none": "Gives cargo · nowhere yet",
+  "rustcraft.dock.per_hour": "Taken in an hour · %s items"
 }

@@ -3682,5 +3682,14 @@
   "rustcraft.worker.hold_slots": "%s из %s слотов",
   "rustcraft.worker.all_mapped": "Вокруг пути всё нанесено",
   "rustcraft.station.charted": "Нанесено чанков: %s",
-  "rustcraft.util.dock_full": "Буфер дока полон"
+  "rustcraft.util.dock_full": "Буфер дока полон",
+  "rustcraft.dock.charging": "Заряжает · %s",
+  "rustcraft.dock.charging_none": "Заряжает · сейчас никого",
+  "rustcraft.dock.takes_chest": "Берёт груз · из сундука рядом",
+  "rustcraft.dock.takes_net": "Берёт груз · из магистрали",
+  "rustcraft.dock.loads_all": "Грузит · всё подряд",
+  "rustcraft.dock.gives_net": "Отдаёт груз · в магистраль",
+  "rustcraft.dock.gives_chest": "Отдаёт груз · в сундук рядом",
+  "rustcraft.dock.gives_none": "Отдаёт груз · пока некуда",
+  "rustcraft.dock.per_hour": "Принято за час · %s предметов"
 }

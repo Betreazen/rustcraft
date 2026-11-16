@@ -8,7 +8,9 @@ use crate::monorail::shape;
 use crate::tuning::Tuning;
 use crate::worker::{Errand, Tool, Worker};
 
-pub const ALL: [Build; 11] = [
+pub const ALL: [Build; 12] = [
+    load_dock_takes_from_a_chest,
+
     unloads_into_a_portal_dock,
 
     map_says_all_mapped,
@@ -389,5 +391,29 @@ fn unloads_into_a_portal_dock(o: Pos, t: &Tuning) -> Scenario {
         })
         .until("the dock takes its load", RIDE, move |b, _| {
             Ok(count_of(&b.items(dock), "minecraft:wooden_shovel") >= 18)
+        })
+}
+
+fn load_dock_takes_from_a_chest(o: Pos, _: &Tuning) -> Scenario {
+    // Guide `dock_load`: the load dock takes cargo from the chest beside it and loads the cargo
+    // worker standing at it.
+    let dock = at(o, [0, 1, 1]);
+    let chest = at(o, [0, 1, 2]);
+    Scenario::new("worker_load_dock_takes_from_a_chest", plot_area(o))
+        .then("a track, a load dock with a chest of cobblestone", move |b, _| {
+            floor(b, o, -1..=7, -2..=3)?;
+            for x in 0..=6 {
+                rail(b, at(o, [x, 1, 0]), Face::YNeg)?;
+            }
+            b.place(dock, "rustcraft:dock_load", &[])?;
+            b.place(chest, "minecraft:chest", &[])?;
+            b.put(chest, 0, "minecraft:cobblestone", 32)
+        })
+        .then("a cargo worker", move |b, m| {
+            spawn(b, m, at(o, [3, 1, 0]), Tool::Hold, &[])
+        })
+        .until("the chest's cobblestone reaches its hold", RIDE, |b, m| {
+            // It rides off with what the dock had; the dock takes 8 at a time from the chest.
+            Ok(count_of(&worker_of(b, m)?.hold.slots, "minecraft:cobblestone") >= 1)
         })
 }
