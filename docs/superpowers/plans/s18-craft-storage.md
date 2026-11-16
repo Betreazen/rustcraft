@@ -153,10 +153,10 @@
 - [ ] done
 
 ### Task 20: Experience condenser — 30 970 points, give 1 / 10 / all, take 1 / 10 / all, 2 E/s while moving, «Конденсатор полон», bar «Хранит», condenser keeps its points when broken
-- [ ] done
+- [x] done df07e2f (2 E a press from its buffer; points kept on break is not in the handbook: left out; slice12 window test: six buttons and the bar)
 
 ### Task 21: Enchanter — level 1–30 chosen (− / + buttons), cost 1/2/3 by level, condenser must hold ≥ level levels, 10 s; archeo — the table of where the block lay (the toggle row becomes a line «Расчищает: …»), 10 s
-- [ ] done
+- [x] done (level buttons −10/−1/+1/+10, `apply_enchantment` at the chosen level and its row; a block that remembers no place brushes by `found::default_table`; try pending)
 
 ## Part D — the projector and the builder
 
