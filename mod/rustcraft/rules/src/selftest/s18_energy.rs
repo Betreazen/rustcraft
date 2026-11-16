@@ -296,7 +296,7 @@ fn structure_cube(o: crate::geom::Pos, t: &Tuning) -> Scenario {
 /// ui.js `gen_lava`, `battery`: the lava generator's window has its output bar and its circuit's
 /// balance with the battery beside the furnace it feeds; the battery's says «Отдаёт X из Y».
 fn generator_windows(o: crate::geom::Pos, _t: &Tuning) -> Scenario {
-    let gen = at(o, [2, 0, 2]);
+    let lava_gen = at(o, [2, 0, 2]);
     let tank = at(o, [1, 0, 2]);
     let oven = at(o, [3, 0, 2]);
     let battery = at(o, [2, 0, 3]);
@@ -304,12 +304,12 @@ fn generator_windows(o: crate::geom::Pos, _t: &Tuning) -> Scenario {
         .then("a lava generator on a tank of lava, a furnace and a battery by it", move |b, _| {
             b.place(tank, TANK, &[])?;
             b.set_tank(tank, "minecraft:lava", 8000)?;
-            b.place(gen, "rustcraft:gen_lava", &[])?;
+            b.place(lava_gen, "rustcraft:gen_lava", &[])?;
             b.place(battery, "rustcraft:battery", &[])?;
             b.place(oven, "rustcraft:furnace", &[])
         })
         .until("the lava generator's window: lava and output bars, the balance", LIMIT, move |b, _| {
-            let Some(s) = b.sheet(gen) else { return Ok(false) };
+            let Some(s) = b.sheet(lava_gen) else { return Ok(false) };
             let rows: Vec<String> = s.rows.iter().map(|r| r.to_string()).collect();
             Ok(s.bars.len() == 2
                 && rows.len() == 3
