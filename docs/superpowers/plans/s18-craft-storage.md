@@ -77,9 +77,9 @@
 - Order queue: each order's steps (`OrderLine.steps: Vec<(kind, done, of)>`, current highlighted) drawn as a chain under the status.
 - State `Full` («Склад полон») when used == total; order wait `NoFreeCrafter` («Нет свободного автокрафтера») when a crafter exists but all are busy.
 - [x] rules: count row, limits rows, OrderStep chain in the wire tail (ecc342b)
-- [ ] orders: `Order.chain` filled by `Queue::round`, `orders.rs` sends it
-- [ ] client: count row, limits rows, chain line, «Склад полон», busy texts per kind; lang
-- [ ] self-test, commit
+- [x] orders: `Order.chain` filled by `Queue::round`, `orders.rs` sends it
+- [x] client: count row, limits rows, chain line, «Склад полон», busy texts per kind; lang
+- [x] self-test `storage18_full_says_so`, commits ce3946d f5613fd 828ef3a (try pending)
 
 ### Task 6: Tablet: drawn window (API 111), deposit, search, tabs, limits
 
