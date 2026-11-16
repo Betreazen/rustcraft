@@ -231,11 +231,14 @@ Audit: turret «Цели чипами», «Окно поддержки: Игро
 Audit: zipline «Перед установкой виден контур якоря» DIFFERS.
 
 - [x] Checked SRC: `native_world_primitives` (`docs/native-mods.md` «World primitives», `native_hooks.rs:3001`, no trait gate at `world_primitives.rs:43`) draws translucent filled boxes. Not a limit: the ghost is the anchor model's three boxes in translucent green (`traversal::ghost_boxes`, test), drawn with the outline. Not a textured model: primitives are coloured boxes, lines, beams and text only.
-- [ ] `mod/README.md` «Что проверить в игре: срез 18 — база и снаряжение».
+- [x] `mod/README.md` «Что проверить в игре: срез 18 — база и снаряжение» (20dc394).
 - [ ] Final `try`; report.
 
 ## Left to other streams
 
 - Turret slowness step and support drain (stream 4, module effects).
 - Handbook text contradictions (`pmodules` two sockets, armour scene, key M, anvil scene, harpoon caption) and the guide's scenes (stream 8, `docs/showcase/js/*`).
-- The stack module item `mod_stack` for the backpack socket (stream 4's module list).
+- The stack module item `mod_stack` for the backpack socket (stream 4's module list). Not done here: the backpack's module socket and stacks up to 1024 wait for that item, and a stack above 99 cannot sit in the game's chest window (the item stack size component is 1..99), so it needs the backpack's own drawn screen (API 111) — left open, see the report.
+- The scout compass counting a structure kind as visited (audit: DIFFERS, small) is `explore.rs`' rule (stream 6).
+- The energy shield that runs dry while held up keeps blocking (audit: DONE with a caveat) — not changed.
+- Whether the anvil lets vanilla Unbreaking and Mending onto gear (audit: unconfirmed) — not checked in game.
