@@ -781,6 +781,10 @@ impl Bench for GameBench<'_, '_> {
         crate::game::rustcraft_handbook::recipe_of(self.game, item).map(|(grid, _)| grid)
     }
 
+    fn handbook_recipes(&self, page: usize) -> Vec<rustcraft_rules::handbook::recipes::Shown> {
+        crate::game::rustcraft_handbook::page_recipes(self.game, page)
+    }
+
     fn set_brush_loot(&mut self, pos: Pos, table: &str) -> Result<(), String> {
         crate::game::rustcraft_utility::set_brush_loot(self.game, pos, table)
             .then_some(())

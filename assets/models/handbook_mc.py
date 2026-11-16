@@ -83,12 +83,28 @@ ITEM = {
     'enchants': 'book_capacity', 'alloys': 'coppersteel', 'dusts': 'dust_iron',
 }
 
+# What a page's recipes make beyond its item, where the guide's entry shows the recipes of several
+# items (game ids without the namespace; every tier of each counts, as `_<n>` names it). A page
+# whose entry has no recipes shows none; one with recipes shows those of its item and these.
+MAKES = {
+    'alloys': ['coppersteel', 'sparksteel', 'crystallite', 'starsteel'],
+    'dusts': ['dust_iron', 'dust_copper', 'dust_gold'],
+    'fluids': ['#fluid'],
+    'armor': ['tech_helmet_2', 'tech_chestplate_2', 'tech_leggings_2', 'tech_boots_2'],
+    'pmodules': ['pm_dash', 'pm_run', 'pm_jump', 'pm_absorber', 'pm_capacity', 'pm_night',
+                 'pm_magnet', 'pm_damper'],
+    'upgrades': ['upgrade_battery', 'upgrade_speed'],
+    'enchants': ['book_capacity', 'book_thrift'],
+}
+ANY_FLUID = '#fluid'
+
 # The window's own words.
 UI = {
     'title': ('Справочник инженера', "Engineer's Handbook"),
     'contents': ('Содержание', 'Contents'),
     'sections': ('Разделы', 'Sections'),
     'recipe': ('Рецепт', 'Recipe'),
+    'recipes': ('Рецепты', 'Recipes'),
     'diagnoses': ('Диагнозы', 'Diagnoses'),
     'window': ('Окно блока', "The block's window"),
     'sheet': ('%s / %s', '%s / %s'),
@@ -112,7 +128,8 @@ for (const [id, w] of Object.entries(RC.UI)) ui[id] = { title: w.title, parts: w
 process.stdout.write(JSON.stringify({
   cats: RC.CATS, tiers: RC.TIERS, tierTable: RC.TIER_TABLE, fix: RC.DIAG_FIX, glossary: RC.GLOSSARY, ui,
   entries: RC.ENTRIES.map((e) => ({ id: e.id, cat: e.cat, tier: e.tier || 0, name: e.name, sum: e.sum || '',
-    text: e.text || [], stats: e.stats || [], diag: e.diag || [], page: e.page || '' })),
+    text: e.text || [], stats: e.stats || [], diag: e.diag || [], page: e.page || '',
+    recipes: (e.recipes || []).length })),
 }));
 """
 
@@ -177,8 +194,9 @@ def table(rows, sections):
     lines = []
     for r in rows:
         item = 'Some(%s)' % rust_str('rustcraft:' + r['item']) if r['item'] else 'None'
-        lines.append('    Page { id: %s, section: %d, tier: %d, item: %s, text: %d, stats: %d, diagnoses: %d, parts: %d },'
-                     % ((rust_str(r['id']), r['section'], r['tier'], item) + r['counts']))
+        makes = ', '.join(rust_str(m if m == ANY_FLUID else 'rustcraft:' + m) for m in r['makes'])
+        lines.append('    Page { id: %s, section: %d, tier: %d, item: %s, text: %d, stats: %d, diagnoses: %d, parts: %d, makes: &[%s] },'
+                     % ((rust_str(r['id']), r['section'], r['tier'], item) + r['counts'] + (makes,)))
     return ('//! The handbook\'s pages, written by assets/models/handbook_mc.py from the guide\n'
             '//! (docs/showcase/js/data.js, ui.js): do not edit by hand, run the script.\n\n'
             'use super::Page;\n\n'
@@ -227,8 +245,14 @@ def main():
         item = ITEM.get(e['id'])
         if item and item != HANDBOOK and not (CONTENT / 'items' / (item + '.json')).exists():
             sys.exit('handbook_mc.py: the page %s names %s, which the content mod has no item for' % (e['id'], item))
+        makes = []
+        if e['recipes']:
+            makes = MAKES.get(e['id'], []) + ([item] if item else [])
+        for m in makes:
+            if m != ANY_FLUID and m != HANDBOOK and not (CONTENT / 'items' / (m + '.json')).exists():
+                sys.exit('handbook_mc.py: the page %s makes %s, which the content mod has no item for' % (e['id'], m))
         rows.append({'id': e['id'], 'section': sections.index(e['cat']), 'tier': e['tier'],
-                     'item': item, 'counts': counts})
+                     'item': item, 'counts': counts, 'makes': list(dict.fromkeys(makes))})
     TABLE.parent.mkdir(parents=True, exist_ok=True)
     text = table(rows, sections).encode('utf-8')
     if not TABLE.exists() or TABLE.read_bytes() != text:

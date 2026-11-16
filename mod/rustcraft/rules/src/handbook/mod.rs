@@ -10,12 +10,14 @@
 //!   right) and a page. A page's texts become `Piece`s (`pieces`), are wrapped by the client's own
 //!   text width into `Row`s (`lay_out`) and cut into sheets that fit the window (`sheets`);
 //!   `part_at` and `press` turn a click into the next `View`.
-//! - `recipe_grid`: a crafting recipe's cells as the 3 × 3 grid a page draws.
+//! - `recipe_grid`: a crafting recipe's cells as the 3 × 3 grid a page draws; `recipes`: every
+//!   recipe a page shows (the crafting table's, the transmuting ones, the machines'), two to a row.
 //! - `scene` (H3, H4): a page whose guide entry has an animated scene has one sheet more, its
 //!   last, which plays the scene (`scenes`, written by assets/models/scenes_mc.py from the
 //!   guide's scenes.js): `scene_sheet` says which sheet that is.
 
 pub mod pages;
+pub mod recipes;
 pub mod scene;
 pub mod scenes;
 
@@ -56,6 +58,9 @@ pub struct Page {
     pub stats: usize,
     pub diagnoses: usize,
     pub parts: usize,
+    /// What the guide entry's recipes make (game ids; `recipes::ANY_FLUID` for every fluid):
+    /// the page shows the game's recipes of these, every tier of each (`recipes::for_page`).
+    pub makes: &'static [&'static str],
 }
 
 impl Page {
@@ -159,12 +164,6 @@ pub const LINE: f32 = 10.0;
 /// What a key and value line keeps between them, and what a line under a heading is set in.
 pub const PAIR_GAP: f32 = 8.0;
 pub const INDENT: f32 = 12.0;
-/// The recipe's block: the 3 × 3 grid, the arrow and the result, its icons' corners from the
-/// block's top left.
-pub const RECIPE_HEIGHT: f32 = 58.0;
-pub const RECIPE_GRID: [f32; 2] = [1.0, 2.0];
-pub const RECIPE_ARROW: Rect = [62.0, 25.0, 22.0, 6.0];
-pub const RECIPE_RESULT: [f32; 2] = [98.0, 20.0];
 /// A part's number: a brass square at the line's left.
 pub const NUMBER: [f32; 2] = [9.0, 9.0];
 /// A sheet asked for by its end: the window takes the last one.
@@ -200,14 +199,6 @@ pub fn entry_rect(row: usize) -> Rect {
 pub fn entry_icon(row: usize) -> [f32; 2] {
     let r = entry_rect(row);
     [r[0] + 1.0, r[1] + 1.0]
-}
-
-/// Where the recipe's cell `i` (row by row) goes, from the block's top `y`.
-pub fn recipe_cell(y: f32, i: usize) -> [f32; 2] {
-    [
-        BODY_X + RECIPE_GRID[0] + 18.0 * (i % 3) as f32,
-        y + RECIPE_GRID[1] + 18.0 * (i / 3) as f32,
-    ]
 }
 
 /// What the window shows.
@@ -385,8 +376,8 @@ pub enum Piece {
     Lead(String),
     /// A part's heading: «Рецепт», «Диагнозы», «Окно блока».
     Heading(String),
-    /// The crafting recipe's grid.
-    Recipe,
+    /// The recipes, by the height of each one's block (`recipes::Shown::height`).
+    Recipes(Vec<f32>),
     Paragraph(String),
     Stat {
         key: String,
@@ -404,21 +395,25 @@ pub enum Piece {
     },
 }
 
-/// A page's pieces: the summary, the recipe when `recipe` (the game has one for its item), the
-/// paragraphs, the stats, the diagnoses and the window's parts. `lookup` gives a lang key's line,
-/// None (or empty) where the reader's language has none, which leaves that piece out.
-pub fn pieces(page: &Page, recipe: bool, lookup: &dyn Fn(&str) -> Option<String>) -> Vec<Piece> {
+/// A page's pieces: the summary, the recipes (`recipes`: each one's block height, as the game's
+/// recipes give them), the paragraphs, the stats, the diagnoses and the window's parts. `lookup`
+/// gives a lang key's line, None (or empty) where the reader's language has none, which leaves
+/// that piece out.
+pub fn pieces(page: &Page, recipes: &[f32], lookup: &dyn Fn(&str) -> Option<String>) -> Vec<Piece> {
     let get = |rest: &str| lookup(&page.key(rest)).filter(|s| !s.trim().is_empty());
     let word = |rest: &str| lookup(&key(rest)).filter(|s| !s.trim().is_empty());
     let mut out = Vec::new();
     if let Some(sum) = get("sum") {
         out.push(Piece::Lead(sum));
     }
-    if recipe {
-        out.push(Piece::Heading(
-            word("recipe").unwrap_or_else(|| "Recipe".into()),
-        ));
-        out.push(Piece::Recipe);
+    if !recipes.is_empty() {
+        let (w, fallback) = if recipes.len() > 1 {
+            ("recipes", "Recipes")
+        } else {
+            ("recipe", "Recipe")
+        };
+        out.push(Piece::Heading(word(w).unwrap_or_else(|| fallback.into())));
+        out.push(Piece::Recipes(recipes.to_vec()));
     }
     for i in 0..page.text {
         if let Some(t) = get(&format!("text.{i}")) {
@@ -499,8 +494,12 @@ pub enum Row {
         text: String,
         role: Role,
     },
-    /// The recipe's block.
-    Recipe,
+    /// A row of recipe blocks: `n` (1 or 2) of the page's recipes from `first`, side by side.
+    Recipes {
+        first: usize,
+        n: usize,
+        height: f32,
+    },
     /// A little space between pieces.
     Gap,
 }
@@ -508,7 +507,7 @@ pub enum Row {
 impl Row {
     pub fn height(&self) -> f32 {
         match self {
-            Row::Recipe => RECIPE_HEIGHT,
+            Row::Recipes { height, .. } => *height,
             Row::Gap => 4.0,
             _ => LINE,
         }
@@ -598,7 +597,15 @@ pub fn lay_out(pieces: &[Piece], width: f32, measure: &dyn Fn(&str) -> f32) -> V
                 text: t.to_uppercase(),
                 role: Role::Heading,
             }),
-            Piece::Recipe => out.push(Row::Recipe),
+            Piece::Recipes(heights) => {
+                for (row, pair) in heights.chunks(2).enumerate() {
+                    out.push(Row::Recipes {
+                        first: row * 2,
+                        n: pair.len(),
+                        height: pair.iter().copied().fold(0.0, f32::max),
+                    });
+                }
+            }
             Piece::Paragraph(t) => lines(&mut out, t, 0.0, width, Role::Text, measure),
             Piece::Stat { key, value } => {
                 if measure(key) + PAIR_GAP + measure(value) <= width {

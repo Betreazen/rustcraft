@@ -19,8 +19,12 @@
 // - `native_screen_render_post` (API 78, native_hooks.rs:3779-3803) draws it over the world in
 //   the «Кузня душ» style (docs/design/04-window-style.md): the contents, a section's pages, a
 //   page with its item's icon (`native_gui_draw_item_with`, native_client_services.rs:529-539),
-//   its texts from the content mod's lang files, and the item's crafting recipe as a 3 × 3 grid
-//   read from the game's own recipes (`Game::recipes`, world_entry.rs:175-180).
+//   its texts from the content mod's lang files, and its recipes read from the game's own
+//   (rustcraft_rules::handbook::recipes picks and lays them out): the crafting table's, shaped,
+//   shapeless and transmuting (`Game::recipes`, world_entry.rs:175-180; `Special::Transmute`,
+//   horizon-client crafting.rs:426-433), smelting (`Recipes::cooking`) and the machines' own types
+//   (`native_recipes_of_type`, API 36, native_hooks.rs:11351-11356: a client sees the content
+//   mod's recipes, which is where the mod's are), two to a row, a machine's over its arrow.
 // - A left click (`native_screen_mouse_button_pressed_pre`, API 80, native_hooks.rs:3804-3838),
 //   the wheel (`native_screen_mouse_scrolled_pre`, API 93, native_hooks.rs:3893-3933) and the
 //   arrow keys (`native_screen_key_pressed_pre`, API 104) turn its sheets; Escape closes it.
@@ -41,7 +45,7 @@ use crate::game::{
     rustcraft_server::line,
 };
 use horizon_client::{
-    crafting::{Ingredient, Recipe},
+    crafting::{Ingredient, Recipe, Special, Template},
     hud::HudBatch,
     items::ItemStack,
     mod_api::NativeScreenView,
@@ -50,6 +54,7 @@ use horizon_client::{
 use rustcraft_rules::{
     handbook::{
         self as rules, Given, PAGES, Part, Piece, Role, Row, View,
+        recipes::{self, Made, Out, Shown},
         scene::{self, Look, Playback, Scene},
     },
     machines::style::{self, colour},
@@ -252,15 +257,88 @@ pub(super) fn recipe_of(game: &Game<'_>, item: &str) -> Option<(Grid, u32)> {
     None
 }
 
+/// Every recipe of the game as a page shows it: the crafting table's (shaped, shapeless,
+/// transmuting), smelting and the machines' own types.
+fn all_recipes(game: &Game<'_>) -> Vec<Shown> {
+    let mut out = Vec::new();
+    let book = game.recipes();
+    let grid = |width: usize, cells: Vec<Option<String>>, result: &Template| {
+        rules::recipe_grid(width, &cells)
+            .zip(result.item.as_deref().map(str::to_owned))
+            .map(|(g, it)| Shown {
+                made: Made::Grid(g),
+                out: Out::Item(it, result.count.max(1)),
+            })
+    };
+    for (_, recipe) in &book.crafting {
+        let made = match recipe {
+            Recipe::Shaped {
+                width,
+                cells,
+                result,
+                ..
+            } => grid(
+                *width,
+                cells.iter().map(|c| c.as_ref().and_then(shown)).collect(),
+                result,
+            ),
+            Recipe::Shapeless {
+                ingredients,
+                result,
+            } => grid(3, ingredients.iter().map(shown).collect(), result),
+            Recipe::Special(Special::Transmute {
+                input,
+                material,
+                min,
+                result,
+                ..
+            }) => shown(input)
+                .zip(shown(material))
+                .zip(result.item.as_deref().map(str::to_owned))
+                .map(|((i, m), it)| recipes::transmute(i, m, *min, it, result.count)),
+            Recipe::Special(_) => None,
+        };
+        out.extend(made);
+    }
+    for c in &book.cooking {
+        if c.kind == recipes::SMELTING
+            && let Some(i) = shown(&c.ingredient)
+        {
+            out.push(recipes::smelting(
+                i,
+                c.result.item.to_string(),
+                c.result.count,
+            ));
+        }
+    }
+    let resolve = |id: &str| {
+        game.native_recipe_ingredient(&serde_json::Value::String(id.to_owned()))
+            .and_then(|i| shown(&i))
+    };
+    for kind in recipes::MACHINE_TYPES {
+        for r in game.native_recipes_of_type(kind) {
+            out.extend(recipes::custom(kind, &r.json, &resolve));
+        }
+    }
+    out
+}
+
+/// The recipes page `page` shows (rustcraft_rules::handbook::recipes::for_page).
+pub(super) fn page_recipes(game: &Game<'_>, page: usize) -> Vec<Shown> {
+    match PAGES.get(page) {
+        Some(p) if !p.makes.is_empty() => recipes::for_page(p, all_recipes(game)),
+        _ => Vec::new(),
+    }
+}
+
 // ---- The client: the window ----
 
 /// The window asked for by the server, opened at the window's next tick.
 static ASKED: AtomicBool = AtomicBool::new(false);
 /// Where the window is: kept while it is closed, so it opens again where it was.
 static VIEW: LazyLock<Mutex<View>> = LazyLock::new(Mutex::default);
-/// The recipes the window has looked up since it opened, by item.
-static RECIPES: LazyLock<Mutex<HashMap<&'static str, Option<(Grid, u32)>>>> =
-    LazyLock::new(Mutex::default);
+/// The recipes the window has looked up since it opened, by page.
+static RECIPES: LazyLock<Mutex<HashMap<&'static str, Vec<Shown>>>> = LazyLock::new(Mutex::default);
 
 /// The scene on screen: its page, step and since when (`clock`); None off a scene's sheet.
 static PLAYING: LazyLock<Mutex<Option<Playback>>> = LazyLock::new(Mutex::default);
@@ -279,7 +357,7 @@ fn view() -> MutexGuard<'static, View> {
     VIEW.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
-fn recipes() -> MutexGuard<'static, HashMap<&'static str, Option<(Grid, u32)>>> {
+fn recipes() -> MutexGuard<'static, HashMap<&'static str, Vec<Shown>>> {
     RECIPES.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
@@ -314,37 +392,36 @@ fn lookup(key: &str) -> Option<String> {
     horizon_client::lang::has(key).then(|| horizon_client::lang::get_or(key, ""))
 }
 
-/// A page's recipe, looked up once while the window is open.
-fn recipe_for(game: &Game<'_>, item: &'static str) -> Option<(Grid, u32)> {
-    if let Some(r) = recipes().get(item) {
+/// A page's recipes, looked up once while the window is open.
+fn recipes_for(game: &Game<'_>, page: usize) -> Vec<Shown> {
+    let id = PAGES[page].id;
+    if let Some(r) = recipes().get(id) {
         return r.clone();
     }
-    let r = recipe_of(game, item);
-    recipes().insert(item, r.clone());
+    let r = page_recipes(game, page);
+    recipes().insert(id, r.clone());
     r
 }
 
-/// A page laid out in the reader's language: its rows, its sheets and its recipe.
+/// A page laid out in the reader's language: its rows, its sheets and its recipes.
 struct Laid {
     rows: Vec<Row>,
     sheets: Vec<Range<usize>>,
-    /// The page's item and its recipe.
-    item: Option<&'static str>,
-    recipe: Option<(Grid, u32)>,
+    recipes: Vec<Shown>,
 }
 
 fn laid(game: &Game<'_>, page: usize) -> Laid {
     let p = &PAGES[page];
-    let recipe = p.item.and_then(|item| recipe_for(game, item));
-    let pieces: Vec<Piece> = rules::pieces(p, recipe.is_some(), &lookup);
+    let recipes = recipes_for(game, page);
+    let heights: Vec<f32> = recipes.iter().map(Shown::height).collect();
+    let pieces: Vec<Piece> = rules::pieces(p, &heights, &lookup);
     let measure = |s: &str| game.native_text_width(s);
     let rows = rules::lay_out(&pieces, rules::BODY_WIDTH, &measure);
     let sheets = rules::sheets(&rows);
     Laid {
         rows,
         sheets,
-        item: p.item,
-        recipe,
+        recipes,
     }
 }
 
@@ -630,7 +707,14 @@ fn body(game: &Game<'_>, batch: &mut HudBatch, o: [f32; 2], laid: &Laid, sheet: 
                     role_colour(*role),
                 );
             }
-            Row::Recipe => recipe(game, batch, o, y, laid),
+            Row::Recipes { first, n, .. } => {
+                for k in 0..*n {
+                    if let Some(r) = laid.recipes.get(first + k) {
+                        let at = [x + recipes::column_x(k), y];
+                        recipe(game, batch, o, at, r);
+                    }
+                }
+            }
             Row::Gap => {}
         }
         y += row.height();
@@ -646,40 +730,80 @@ fn role_colour(role: Role) -> u32 {
     }
 }
 
-/// The recipe's block at `y`: the grid, the arrow and what it makes; a cell under the mouse
-/// names its item.
-fn recipe(game: &Game<'_>, batch: &mut HudBatch, o: [f32; 2], y: f32, laid: &Laid) {
-    let (Some((grid, count)), Some(made)) = (laid.recipe.as_ref(), laid.item) else {
-        return;
-    };
-    let mut named: Option<&str> = None;
-    for (i, cell) in grid.iter().enumerate() {
-        let p = rules::recipe_cell(y, i);
+/// A recipe's block with its corner at `at` (window pixels): a grid or a machine's inputs, the
+/// arrow (the machine over it) and what it makes; a slot under the mouse names its item.
+fn recipe(game: &Game<'_>, batch: &mut HudBatch, o: [f32; 2], at: [f32; 2], r: &Shown) {
+    let mut named: Option<Text> = None;
+    let mut cell = |batch: &mut HudBatch, p: [f32; 2], it: &str, count: u32| {
+        let p = [at[0] + p[0], at[1] + p[1]];
         slot(game, batch, o, p);
-        if let Some(it) = cell {
-            item(game, batch, o, p, it, 1);
-            if kit::hovered(game, o, style::slot_rect(p)) {
-                named = Some(it.as_str());
-            }
+        item(game, batch, o, p, it, count);
+        if kit::hovered(game, o, style::slot_rect(p)) {
+            named = Some(item_name(game, it));
         }
-    }
-    let a = rules::RECIPE_ARROW;
+    };
+    let (arrow, result) = match &r.made {
+        Made::Grid(grid) => {
+            for (i, c) in grid.iter().enumerate() {
+                let p = recipes::grid_cell(i);
+                match c {
+                    Some(it) => cell(batch, p, it, 1),
+                    None => slot(game, batch, o, [at[0] + p[0], at[1] + p[1]]),
+                }
+            }
+            (recipes::GRID_ARROW, recipes::GRID_RESULT)
+        }
+        Made::Machine { machine, inputs } => {
+            for (k, (it, n)) in inputs.iter().take(recipes::INPUTS).enumerate() {
+                cell(batch, recipes::input_at(k), it, *n);
+            }
+            let m = [
+                at[0] + recipes::MACHINE_ICON[0],
+                at[1] + recipes::MACHINE_ICON[1],
+            ];
+            item(game, batch, o, m, machine, 1);
+            if kit::hovered(game, o, [m[0], m[1], 16.0, 16.0]) {
+                named = Some(item_name(game, machine));
+            }
+            (recipes::MACHINE_ARROW, recipes::MACHINE_RESULT)
+        }
+    };
     kit::arrow(
         game,
         batch,
         o,
-        [rules::BODY_X + a[0], y + a[1], a[2], a[3]],
+        [at[0] + arrow[0], at[1] + arrow[1], arrow[2], arrow[3]],
         1.0,
     );
-    let res = [
-        rules::BODY_X + rules::RECIPE_RESULT[0],
-        y + rules::RECIPE_RESULT[1],
-    ];
-    slot(game, batch, o, res);
-    item(game, batch, o, res, made, *count);
-    if let Some(it) = named {
-        game.native_gui_tooltip(batch, &[item_name(game, it)], game.native_cursor());
+    match &r.out {
+        Out::Item(it, n) => cell(batch, result, it, *n),
+        Out::Fluid(fluid, mb) => {
+            let p = [at[0] + result[0], at[1] + result[1]];
+            slot(game, batch, o, p);
+            let c = [o[0] + p[0] + 1.0, o[1] + p[1] + 1.0, 16.0, 16.0];
+            game.native_fill(batch, c, recipes::fluid_colour(fluid));
+            if *mb != recipes::BUCKET_MB {
+                let n = mb.div_ceil(recipes::BUCKET_MB).to_string();
+                kit::text_right(game, batch, &n, o, p[0] + 17.0, p[1] + 9.0, VALUE);
+            }
+            if kit::hovered(game, o, style::slot_rect(p)) {
+                named = Some(fluid_name(fluid));
+            }
+        }
     }
+    if let Some(name) = named {
+        game.native_gui_tooltip(batch, &[name], game.native_cursor());
+    }
+}
+
+/// A fluid's name, as the mod's windows name it (`rustcraft.fluid.<name>.name`).
+fn fluid_name(id: &str) -> Text {
+    let (space, name) = id.split_once(':').unwrap_or(("minecraft", id));
+    if space == "minecraft" {
+        let key = format!("block.minecraft.{name}");
+        return Text::translate_with_fallback(&key, name, &[]);
+    }
+    Text::translate_with_fallback(&format!("{space}.fluid.{name}.name"), name, &[])
 }
 
 fn item(game: &Game<'_>, batch: &mut HudBatch, o: [f32; 2], p: [f32; 2], id: &str, count: u32) {

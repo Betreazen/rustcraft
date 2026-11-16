@@ -117,7 +117,11 @@ fn every_page_lays_out_into_sheets_that_fit() {
     let ru = lang("ru_ru");
     let lookup = |k: &str| ru.get(k).cloned();
     for p in PAGES {
-        let rows = lay_out(&pieces(p, p.item.is_some(), &lookup), BODY_WIDTH, &measure);
+        let rows = lay_out(
+            &pieces(p, &[recipes::GRID_HEIGHT; 3], &lookup),
+            BODY_WIDTH,
+            &measure,
+        );
         assert!(!rows.is_empty(), "{}", p.id);
         let all = sheets(&rows);
         assert_eq!(all.first().unwrap().start, 0);
@@ -157,16 +161,16 @@ fn an_english_page_is_its_name_and_summary() {
         (key("recipe"), "Recipe".to_owned()),
     ]
     .into();
-    let got = pieces(page, true, &|k| en.get(k).cloned());
+    let got = pieces(page, &[recipes::GRID_HEIGHT], &|k| en.get(k).cloned());
     assert_eq!(
         got,
         vec![
             Piece::Lead("Smelts fast.".into()),
             Piece::Heading("Recipe".into()),
-            Piece::Recipe
+            Piece::Recipes(vec![recipes::GRID_HEIGHT])
         ]
     );
-    assert_eq!(pieces(page, false, &|_| None), Vec::<Piece>::new());
+    assert_eq!(pieces(page, &[], &|_| None), Vec::<Piece>::new());
 }
 
 #[test]
@@ -180,6 +184,7 @@ fn pieces_keep_the_pages_order() {
         stats: 1,
         diagnoses: 1,
         parts: 2,
+        makes: &[],
     };
     let lines: BTreeMap<String, String> = [
         ("sum", "Sum"),
@@ -199,7 +204,7 @@ fn pieces_keep_the_pages_order() {
         (key("window"), "W".to_owned()),
     ])
     .collect();
-    let got = pieces(&page, false, &|k| lines.get(k).cloned());
+    let got = pieces(&page, &[], &|k| lines.get(k).cloned());
     assert_eq!(
         got,
         vec![
@@ -461,8 +466,11 @@ fn the_window_fits_a_small_screen_and_its_parts_fit_the_window() {
     assert!(section_rect(SECTIONS.len() - 1)[1] + SECTION_SIZE[1] <= BODY_BOTTOM);
     assert!(entry_rect(ENTRIES - 1)[1] + ENTRY_SIZE[1] <= BODY_BOTTOM);
     const { assert!(BODY_BOTTOM <= PREV[1]) };
-    assert!(recipe_cell(0.0, 8)[1] + 17.0 <= RECIPE_HEIGHT);
-    const { assert!(BODY_X + RECIPE_RESULT[0] + 17.0 <= WIDTH) };
+    assert!(recipes::grid_cell(8)[1] + 17.0 <= recipes::GRID_HEIGHT);
+    assert!(recipes::input_at(recipes::INPUTS - 1)[1] + 17.0 <= recipes::MACHINE_HEIGHT);
+    const { assert!(BODY_X + recipes::CELL + recipes::GRID_RESULT[0] + 17.0 <= WIDTH) };
+    const { assert!(BODY_X + recipes::CELL + recipes::MACHINE_RESULT[0] + 17.0 <= WIDTH) };
+    assert!(recipes::input_at(recipes::INPUTS - 1)[0] + 17.0 <= recipes::MACHINE_ARROW[0]);
     assert_eq!(origin([480.0, 270.0]), [80.0, 30.0]);
     assert_eq!(origin([200.0, 100.0]), [0.0, 0.0]);
 }

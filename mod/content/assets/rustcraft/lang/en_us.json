@@ -757,6 +757,7 @@
   "rustcraft.handbook.contents": "Contents",
   "rustcraft.handbook.sections": "Sections",
   "rustcraft.handbook.recipe": "Recipe",
+  "rustcraft.handbook.recipes": "Recipes",
   "rustcraft.handbook.diagnoses": "Diagnoses",
   "rustcraft.handbook.window": "The block's window",
   "rustcraft.handbook.sheet": "%s / %s",

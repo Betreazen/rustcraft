@@ -306,6 +306,9 @@ pub trait Bench {
     fn item_known(&self, item: &str) -> bool;
     /// The 3 × 3 grid of the first crafting recipe of `item`, as the handbook's page reads it.
     fn recipe_grid(&self, item: &str) -> Option<[Option<String>; 9]>;
+    /// The recipes the handbook's page `page` (an index into PAGES) shows, as its window reads
+    /// them from the game (slice 18: machines' and transmuting recipes too).
+    fn handbook_recipes(&self, page: usize) -> Vec<crate::handbook::recipes::Shown>;
     // Spec 26: the wrench lifts suspicious blocks.
     /// The loot table of the suspicious block at `pos`, as a structure leaves it in its block
     /// entity.
