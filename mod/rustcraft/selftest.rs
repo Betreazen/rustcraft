@@ -816,6 +816,11 @@ impl Bench for GameBench<'_, '_> {
         workers::swap_for_selftest(DIMENSION, id, item)
     }
 
+    fn worker_room(&self, owner: u128, limit: u32) -> bool {
+        workers::may_place_for_selftest(owner, limit)
+    }
+
+
 
     fn anim(&self, pos: Pos) -> Option<rustcraft_rules::anim::Shown> {
         self.game

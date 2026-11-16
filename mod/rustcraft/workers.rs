@@ -259,6 +259,20 @@ pub(super) fn on_use_item_on(
         );
         return;
     }
+    // W8: the server's limit of workers per player.
+    let limit = config();
+    if !limit.may_add(owned(player.uuid)) {
+        tell(
+            game,
+            player.uuid,
+            line(
+                "rustcraft.worker.limit",
+                "Worker limit reached: %s per player",
+                &[Text::literal(limit.workers_per_player.to_string())],
+            ),
+        );
+        return;
+    }
     let packed = packed_of(stack);
     if player.game_mode != 1 {
         if packed.is_some() {
@@ -270,6 +284,56 @@ pub(super) fn on_use_item_on(
     state()
         .placing
         .push((player.uuid, player.dimension.clone(), pos, packed, tier));
+}
+
+// ---- The server settings file (W8, API 397) ----
+
+static CONFIG: Mutex<Option<rustcraft_rules::worker::config::ServerConfig>> = Mutex::new(None);
+
+/// The server's settings as last read; the defaults before the file is read.
+fn config() -> rustcraft_rules::worker::config::ServerConfig {
+    CONFIG
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .unwrap_or_default()
+}
+
+/// `native_register_configs`: RustCraft's server settings, `config/rustcraft-server.toml`.
+pub(super) fn register_configs(configs: &mut Vec<crate::game::NativeConfig>) {
+    use rustcraft_rules::worker::config;
+    configs.push(crate::game::NativeConfig::new(
+        "rustcraft",
+        crate::game::NativeConfigKind::Server,
+        config::DEFAULT_TEXT,
+    ));
+}
+
+/// `native_config_loading` and `_reloading`: RustCraft's server settings read again.
+pub(super) fn config_read(file: &crate::game::NativeConfigFile) {
+    use rustcraft_rules::worker::config;
+    if file.mod_id != "rustcraft" || file.kind != crate::game::NativeConfigKind::Server {
+        return;
+    }
+    let (read, bad) = config::parse(&file.text);
+    for key in bad {
+        log::warn!(
+            "rustcraft: {} does not read its `{key}`; it stays as it was by default",
+            file.path.display()
+        );
+    }
+    log::info!(
+        "rustcraft: server settings from {}: {} workers a player",
+        file.path.display(),
+        read.workers_per_player
+    );
+    *CONFIG.lock().unwrap_or_else(PoisonError::into_inner) = Some(read);
+}
+
+/// W8: the workers `owner` has on the server, those being placed included.
+fn owned(owner: u128) -> usize {
+    let s = state();
+    s.levels.values().map(|l| l.fleet.owned_by(owner)).sum::<usize>()
+        + s.placing.iter().filter(|p| p.0 == owner).count()
 }
 
 /// W3: custom data under which a chassis item carries the worker taken away with it.
@@ -1775,7 +1839,16 @@ pub(super) fn swap_for_selftest(dimension: &str, id: u64, item: &str) -> Result<
     Ok(old.to_owned())
 }
 
+/// W8 for the self-test: whether `owner` may place one more worker under a limit of `limit`.
+pub(super) fn may_place_for_selftest(owner: u128, limit: u32) -> bool {
+    rustcraft_rules::worker::config::ServerConfig {
+        workers_per_player: limit,
+    }
+    .may_add(owned(owner))
+}
+
 /// A worker as the server holds it now.
+
 
 pub(super) fn worker_for_selftest(dimension: &str, id: u64) -> Option<Worker> {
     state()

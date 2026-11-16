@@ -328,7 +328,10 @@ pub trait Bench {
     fn worker_as_item(&mut self, id: u64, cell: Pos) -> Result<u64, String>;
     /// U4: chassis `item` clicked on worker `id`; the old chassis's item it gives back.
     fn swap_chassis(&mut self, id: u64, item: &str) -> Result<String, String>;
+    /// W8: whether `owner` may place one more worker under a server limit of `limit`.
+    fn worker_room(&self, owner: u128, limit: u32) -> bool;
 }
+
 
 
 /// A mob as the self-test reads it.

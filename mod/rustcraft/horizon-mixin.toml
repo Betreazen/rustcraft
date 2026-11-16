@@ -1020,3 +1020,40 @@ bindings = [
   { name = "scroll", ty = "[f64; 2]", value = "scroll" },
   { name = "canceled", ty = "&mut bool", value = "&mut *canceled" },
 ]
+
+# ---- Slice 18, stream 6 (rail and workers) ----
+
+# RustCraft's server settings file, config/rustcraft-server.toml or the world's serverconfig/ copy
+# (API 397, game/native_configs.rs): the worker limit per player (W8). register_configs is asked
+# from native_configs_load (native_configs.rs:255) and config_loading fires right after it
+# (native_configs.rs:261), config_reloading from native_configs_poll (native_configs.rs:306) on the
+# server's tick (levels.rs:503); all three by their named hook's HEAD, whatever mods() holds.
+[[injection]]
+id = "register_configs"
+hook = "register_configs"
+hook_version = 1
+kind = "HEAD"
+helper = "hook_register_configs.rs"
+bindings = [
+  { name = "configs", ty = "&mut Vec<crate::game::NativeConfig>", value = "&mut *configs" },
+]
+
+[[injection]]
+id = "config_loading"
+hook = "config_loading"
+hook_version = 1
+kind = "HEAD"
+helper = "hook_config_loading.rs"
+bindings = [
+  { name = "config", ty = "&crate::game::NativeConfigFile", value = "config" },
+]
+
+[[injection]]
+id = "config_reloading"
+hook = "config_reloading"
+hook_version = 1
+kind = "HEAD"
+helper = "hook_config_reloading.rs"
+bindings = [
+  { name = "config", ty = "&crate::game::NativeConfigFile", value = "config" },
+]

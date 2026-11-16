@@ -306,6 +306,10 @@ impl Bench for Fake {
     fn swap_chassis(&mut self, _: u64, _: &str) -> Result<String, String> {
         Ok(String::new())
     }
+    fn worker_room(&self, _: u128, _: u32) -> bool {
+        true
+    }
+
 
 }
 

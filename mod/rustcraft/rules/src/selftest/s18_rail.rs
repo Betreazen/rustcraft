@@ -8,8 +8,10 @@ use crate::monorail::shape;
 use crate::tuning::Tuning;
 use crate::worker::{Errand, Tool, Worker};
 
-pub const ALL: [Build; 6] = [
+pub const ALL: [Build; 7] = [
     chassis_swaps_up,
+    limit_per_player,
+
 
     reaper_climbs_a_trunk,
     reaper_hangs_over_kelp,
@@ -251,5 +253,29 @@ fn chassis_swaps_up(o: Pos, _: &Tuning) -> Scenario {
                 Err(_) => same("tier", worker_of(b, m)?.tier, 3),
                 Ok(old) => Err(format!("it swapped down and gave back {old}")),
             }
+        })
+}
+
+/// An owner of its own for the limit's scenario: no other scenario's workers count for it.
+const LIMIT_OWNER: u128 = 0x5e1f_7e57_0000_0000_0000_0000_0018_0006;
+
+fn limit_per_player(o: Pos, _: &Tuning) -> Scenario {
+    // W8: with two workers, a limit of 2 refuses a third, 3 lets it, 0 is no limit.
+    Scenario::new("worker_limit_per_player", plot_area(o))
+        .then("a track and two workers of one owner", move |b, _| {
+            floor(b, o, -1..=7, -2..=2)?;
+            for x in 0..=6 {
+                rail(b, at(o, [x, 1, 0]), Face::YNeg)?;
+            }
+            for x in [0, 6] {
+                b.spawn_worker(at(o, [x, 1, 0]), LIMIT_OWNER, Some(Tool::Hold), &[], None)?;
+            }
+            Ok(())
+        })
+        .check("the server's limit decides", |b, _| {
+            same("limit 2", b.worker_room(LIMIT_OWNER, 2), false)?;
+            same("limit 3", b.worker_room(LIMIT_OWNER, 3), true)?;
+            same("no limit", b.worker_room(LIMIT_OWNER, 0), true)?;
+            same("another owner", b.worker_room(LIMIT_OWNER + 1, 1), true)
         })
 }

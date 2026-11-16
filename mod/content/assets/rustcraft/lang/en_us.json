@@ -1022,5 +1022,6 @@
   "rustcraft.worker.window_3": "Worker chassis · starsteel",
   "rustcraft.worker.swapped": "Chassis replaced: %s sockets, tool and load kept",
   "rustcraft.worker.not_higher": "That chassis has no more sockets than this one",
-  "rustcraft.worker.socket_locked": "A socket of a crystallite or starsteel chassis"
+  "rustcraft.worker.socket_locked": "A socket of a crystallite or starsteel chassis",
+  "rustcraft.worker.limit": "Worker limit reached: %s per player"
 }

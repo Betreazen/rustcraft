@@ -3670,5 +3670,6 @@
   "rustcraft.worker.window_3": "Шасси работника · из звёздной стали",
   "rustcraft.worker.swapped": "Шасси заменено: гнёзд %s, инструмент и груз остались",
   "rustcraft.worker.not_higher": "У этого шасси гнёзд не больше, чем у нынешнего",
-  "rustcraft.worker.socket_locked": "Гнездо шасси из кристаллита или звёздной стали"
+  "rustcraft.worker.socket_locked": "Гнездо шасси из кристаллита или звёздной стали",
+  "rustcraft.worker.limit": "Достигнут предел работников: %s на игрока"
 }

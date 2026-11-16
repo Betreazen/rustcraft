@@ -12,6 +12,7 @@
 //! between floors. Its tool's zone grows away from the block its rail hangs on (`zone_cells`).
 
 pub mod chassis;
+pub mod config;
 pub mod digging;
 pub mod bore;
 pub mod hold;
@@ -671,6 +672,11 @@ impl Fleet {
         id
     }
 
+    /// W8: how many workers `owner` has in this level.
+    pub fn owned_by(&self, owner: u128) -> usize {
+        self.workers.iter().filter(|w| w.owner == owner).count()
+    }
+
     /// W3: a worker taken away as one item set on rail `cell` again for `owner`, with all it
     /// carried; its new id. None when `packed` does not read.
     pub fn put_back(&mut self, owner: u128, cell: Pos, packed: &str, t: &Tuning) -> Option<u64> {
@@ -1058,7 +1064,25 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn the_limit_refuses_one_more() {
+        let t = Tuning::default();
+        let mut f = Fleet::default();
+        let limit = config::ServerConfig {
+            workers_per_player: 2,
+        };
+        for _ in 0..2 {
+            assert!(limit.may_add(f.owned_by(7)));
+            f.add(7, [0, 0, 0], &t);
+        }
+        f.add(8, [0, 0, 0], &t);
+        assert_eq!(f.owned_by(7), 2);
+        assert!(!limit.may_add(f.owned_by(7)));
+        assert!(limit.may_add(f.owned_by(8)));
+    }
+
+    #[test]
     fn a_worker_packs_into_its_chassis_and_back() {
+
         let t = Tuning::default();
         let mut f = Fleet::default();
         let id = f.add(7, [1, 2, 3], &t);
