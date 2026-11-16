@@ -186,6 +186,17 @@ impl Util {
         )
     }
 
+    /// Slice 18 (guide SLOTS_FROM): the tier a machine opens at; a block of it saves its tier under
+    /// `tier` once stream 3's swap makes higher ones, and this is the tier of one that saved none.
+    pub fn opening_tier(self) -> u8 {
+        match self {
+            Util::Brewer | Util::XpTank | Util::Archeo | Util::Projector | Util::Builder => 3,
+            Util::Enchanter | Util::ChargePlate | Util::PortalDock => 4,
+            Util::Charger | Util::Disintegrator | Util::Vein => 3,
+            _ => 2,
+        }
+    }
+
     /// A machine that works on the animals or the world round it (radius module, K1-style).
     pub fn has_radius(self) -> bool {
         matches!(self, Util::Feeder | Util::Shearer | Util::Apiary)
@@ -273,6 +284,12 @@ pub fn step_energy(u: Util) -> f64 {
     }
 }
 
+/// Slice 18 (guide SLOTS_BY_TIER, `modules`): module sockets of a machine of `tier`: three on the
+/// first and second, four on the third and fourth.
+pub fn sockets_for_tier(tier: u8) -> usize {
+    if tier >= 3 { 4 } else { 3 }
+}
+
 /// (ticks between steps, energy a step) after the work mode and the modules: speed modules halve
 /// the wait and cost ×2.5 each, economy ×0.6 each (A7, A9); the mode's speed divides the wait
 /// and its energy factor multiplies the cost (guide MODES). A machine without modes works in
@@ -326,6 +343,14 @@ mod tests {
             assert_eq!(Util::of(u.spec().block), Some(u));
             assert!(u.spec().buffer > 0.0 && u.spec().draw > 0.0);
         }
+    }
+
+    #[test]
+    fn sockets_grow_with_the_tier() {
+        assert_eq!(sockets_for_tier(Util::Repair.opening_tier()), 3);
+        assert_eq!(sockets_for_tier(Util::Brewer.opening_tier()), 4);
+        assert_eq!(sockets_for_tier(Util::Enchanter.opening_tier()), 4);
+        assert_eq!(sockets_for_tier(2), 3);
     }
 
     #[test]
