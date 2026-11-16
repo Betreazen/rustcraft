@@ -544,6 +544,8 @@ fn rescan(game: &mut Game<'_>, dimension: &str, level: &mut LevelNet) {
             (p, port)
         }))
         .collect();
+    // The machines may have changed: every idle one looks at its slots again.
+    level.power.idle.clear();
     level.power.circuits = machines::circuits(
         &level.topology,
         &level.layout,

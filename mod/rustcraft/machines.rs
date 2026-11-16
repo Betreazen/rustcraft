@@ -75,7 +75,13 @@ pub const FALLBACK_STACK: u32 = 64;
 pub struct Power {
     pub circuits: Vec<Circuit>,
     pub status: HashMap<Pos, Status>,
+    /// Furnaces and crushers with nothing to do (no input, or no room for the result), and the
+    /// tick they look again: an idle machine is read every IDLE_EVERY ticks, not every tick.
+    pub idle: HashMap<Pos, u64>,
 }
+
+/// How often a furnace or a crusher with nothing to do looks at its slots again, ticks.
+const IDLE_EVERY: u64 = 10;
 
 #[derive(Clone, Copy, Debug)]
 pub struct Status {
@@ -349,10 +355,20 @@ pub(super) fn tick(game: &mut Game<'_>, level: &mut LevelNet, tuning: &Tuning) {
         return;
     }
     power::before_tick(game, level, tuning);
+    let ticks = level.ticks;
+    // The idle machines that rest this tick keep what they showed.
+    let resting: HashMap<Pos, Status> = level
+        .power
+        .idle
+        .iter()
+        .filter(|&(_, &until)| ticks < until)
+        .filter_map(|(p, _)| level.power.status.get(p).map(|s| (*p, *s)))
+        .collect();
     let units: Vec<(Pos, Machine, Unit)> = level
         .machines
         .clone()
         .into_iter()
+        .filter(|(pos, _)| !resting.contains_key(pos))
         .filter_map(|(pos, machine)| {
             let unit = match machine.kind() {
                 Kind::Processor => {
@@ -436,13 +452,9 @@ pub(super) fn tick(game: &mut Game<'_>, level: &mut LevelNet, tuning: &Tuning) {
         1.0 / tuning.ticks_per_second,
     );
     power::settle(game, &mut level.sources, &report, tuning);
-    let request_of = |pos: &Pos| {
-        consumers
-            .iter()
-            .find(|c| c.block == *pos)
-            .map_or(0.0, |c| c.request)
-    };
-    let mut status = HashMap::new();
+    let requests: HashMap<Pos, f64> = consumers.iter().map(|c| (c.block, c.request)).collect();
+    let request_of = |pos: &Pos| requests.get(pos).copied().unwrap_or(0.0);
+    let mut status = resting;
     for (pos, machine, unit) in units {
         let request = request_of(&pos);
         let received = report.got.get(&pos).copied().unwrap_or(0.0);
@@ -463,7 +475,14 @@ pub(super) fn tick(game: &mut Game<'_>, level: &mut LevelNet, tuning: &Tuning) {
             level.anim.insert(pos, on);
         }
         let shown = match unit {
-            Unit::Processor(h) => run(game, pos, h, share, request, tuning),
+            Unit::Processor(h) => {
+                if request > 0.0 {
+                    level.power.idle.remove(&pos);
+                } else {
+                    level.power.idle.insert(pos, ticks + IDLE_EVERY);
+                }
+                run(game, pos, h, share, request, tuning)
+            }
             Unit::Generator(h) => {
                 let used = report.used.get(&pos).copied().unwrap_or(0.0);
                 let members = group_of(pos, &consumers, circuits);

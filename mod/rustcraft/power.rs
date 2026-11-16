@@ -368,16 +368,23 @@ pub(super) fn settle(game: &mut Game<'_>, s: &mut Sources, shared: &Shared, t: &
             s.views.insert(p, view);
         }
     }
-    for g in s.crystals.clone() {
-        let solution = solution_of(game, &g);
-        let form = rules::form(&g);
+    // A lone crystal drinks nothing and its window reads its view: once a second is enough
+    // (a view it has not had yet is made at once).
+    let views_due = s.ticks % REFRESH_EVERY == 1;
+    for g in &s.crystals {
+        let lone = g.len() == 1;
+        if lone && !views_due && g.iter().all(|p| s.views.contains_key(p)) {
+            continue;
+        }
+        let solution = solution_of(game, g);
+        let form = rules::form(g);
         let fed = g.len() > 1 && solution > 0.0;
         let total = rules::structure_output(g.len(), form, fed, t);
         let mut left = solution;
         if fed && matches!(form, Form::Box(_)) {
             left = (solution - rules::solution_per_second(g.len(), t) * dt).max(0.0);
-            let anchor = rules::anchor(&g);
-            for &p in &g {
+            let anchor = rules::anchor(g);
+            for &p in g {
                 let want = if p == anchor { left } else { 0.0 };
                 if (read_key(game, p, SOLUTION_KEY) - want).abs() > 1e-9 {
                     write_key(game, p, SOLUTION_KEY, want);
@@ -392,7 +399,7 @@ pub(super) fn settle(game: &mut Game<'_>, s: &mut Sources, shared: &Shared, t: &
             capacity: 0.0,
             fluid: left,
         };
-        for &p in &g {
+        for &p in g {
             s.views.insert(p, view);
         }
     }
