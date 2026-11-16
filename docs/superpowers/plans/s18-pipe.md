@@ -1,6 +1,6 @@
 # Срез 18, поток 1 «Магистраль» — план
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** every MISSING / DIFFERS line of `docs/design/06-audit/pipe.md` (sections start, pipe, mat) becomes DONE in the game or a recorded engine limit.
 
@@ -30,50 +30,50 @@
 
 ### Task 1: Recipes of the housing, the node and the wrench
 Files: `mod/content/data/rustcraft/recipe/{housing,node,wrench}.json`; `rules/src/selftest/pipe18.rs` (new), `selftest/mod.rs` (+2 lines).
-- [ ] housing `aga/g g/aga` (coppersteel, glass) → 8; node `aca/csc/aca` (coppersteel, copper ingot, amethyst shard) → 1; wrench `a a/ a / a ` (coppersteel) → 1.
-- [ ] rules test: `pipe18::tests::recipes_match_the_handbook` reads the three JSON files (`include_str!`) and checks pattern, keys and count.
-- [ ] self-test `pipe_recipes_craft`: `Bench::craft` of each grid gives the item and count.
-- [ ] commit.
+- [x] housing `aga/g g/aga` (coppersteel, glass) → 8; node `aca/csc/aca` (coppersteel, copper ingot, amethyst shard) → 1; wrench `a a/ a / a ` (coppersteel) → 1.
+- [x] rules test: `pipe18::tests::recipes_match_the_handbook` reads the three JSON files (`include_str!`) and checks pattern, keys and count.
+- [x] self-test `pipe_recipes_craft`: `Bench::craft` of each grid gives the item and count.
+- [x] commit.
 
 ### Task 2: Node tiers 2–4 (items, recipes, loot, swap)
 Files: `rules/src/net/node_tier.rs` (new), `rules/src/net/mod.rs`; `content.rs` (items `rustcraft:node_2..4` with `place_block: NODE`, `NODE_ITEMS`), `transport.rs` or new bundle part `pipe18.rs` (placement tier, swap), `hook_state_for_placement.rs` (+1 line); content: `recipe/node_{2,3,4}.json`, `loot_table/blocks/node.json` by tier, `items/node_{2,3,4}.json`, lang.
-- [ ] RED/GREEN: `node_tier` tests — item ↔ tier, swap only to a higher tier, gives back the old tier's item.
-- [ ] placement sets `tier` from the item (as `monorail::state_for_placement`).
-- [ ] right click with a higher node item on a node: state tier changes in place (block entity and facade kept), old item to the hand / inventory, message.
-- [ ] loot: `minecraft:alternatives` by `tier` like `loot_table/blocks/monorail.json`.
-- [ ] self-test `pipe_node_tiers`: craft grids of tiers 2–4, a `node[tier=3]` serves 128 blocks; swap through testkit.
-- [ ] commit.
+- [x] RED/GREEN: `node_tier` tests — item ↔ tier, swap only to a higher tier, gives back the old tier's item.
+- [x] placement sets `tier` from the item (as `monorail::state_for_placement`).
+- [x] right click with a higher node item on a node: state tier changes in place (block entity and facade kept), old item to the hand / inventory, message.
+- [x] loot: `minecraft:alternatives` by `tier` like `loot_table/blocks/monorail.json`.
+- [x] self-test `pipe_node_tiers`: craft grids of tiers 2–4, a `node[tier=3]` serves 128 blocks; swap through testkit.
+- [x] commit.
 
 ### Task 3: Tier-4 channels
 Files: `content.rs` (`CHANNEL_ITEMS` 9 → 12), `recipe/{item,fluid,energy}_channel_4.json` (starsteel), `items/*_channel_4.json`, lang.
-- [ ] rules test (tuning already has tier 4): `channel_item(kind, 4)` names `_4`.
-- [ ] self-test `pipe_channels_tier4`: crafts; a tier-4 item net carries 256/s (net min_tier 4 → `items_of(4)`).
-- [ ] commit.
+- [x] rules test (tuning already has tier 4): `channel_item(kind, 4)` names `_4`.
+- [x] self-test `pipe_channels_tier4`: crafts; a tier-4 item net carries 256/s (net min_tier 4 → `items_of(4)`).
+- [x] commit.
 
 ### Task 4: Chests work both ways by default (quickstart 5)
 Files: `rules/src/net/items.rs` (`Joint.auto`), `joints.rs` (`item_joints(.., auto: &BTreeSet<Pos>)`), `fluids.rs`/`stock.rs` constructors, `transport.rs` (vanilla container with no slice-2 mode → `Mode::Both` + auto).
-- [ ] RED: `an_auto_chest_feeds_a_machine_and_takes_its_products`, `auto_chests_never_trade_between_themselves`, `auto_chest_is_the_last_receiver`.
-- [ ] GREEN in `items::tick`.
-- [ ] self-test `pipe_chest_to_furnace`: chest → furnace → chest moves ore and ingots without any setting.
-- [ ] commit.
+- [x] RED: `an_auto_chest_feeds_a_machine_and_takes_its_products`, `auto_chests_never_trade_between_themselves`, `auto_chest_is_the_last_receiver`.
+- [x] GREEN in `items::tick`.
+- [x] self-test `pipe_chest_to_furnace`: chest → furnace → chest moves ore and ingots without any setting.
+- [x] commit.
 
 ### Task 5: Texts — glossary modes, energy diagnosis, «Под фальш-панелью»
 Files: lang `ru_ru.json`/`en_us.json` (mode names «в машину / из машины / в обе стороны / выключен»; `rustcraft.machine.slowed` «Не хватает энергии: машины замедлены на %s»), `server.rs` facade diagnosis line.
-- [ ] diagnosis: a housing or node under a facade shows «Под фальш-панелью · …» first.
-- [ ] commit.
+- [x] diagnosis: a housing or node under a facade shows «Под фальш-панелью · …» first.
+- [x] commit.
 
 ### Task 6: Facade — kept on break, F4 collision, sneaking wrench then takes the housing
 Files: `content.rs` (housing `covered` state property + `collision_shapes` for `covered=true` = full block), `builder.rs` facade part (set/clear `covered`), `server.rs` (on break: give facade + look), `server.rs` take_channel order.
-- [ ] rules: `rules/src/housing.rs::wrench_takes(covered, channels)` → Facade | Channel | Housing; tests.
-- [ ] self-test `pipe_facade_keeps`: covered housing has `covered=true`; property clears on wrench.
-- [ ] commit.
+- [x] rules: `rules/src/housing.rs::wrench_takes(covered, channels)` → Facade | Channel | Housing; tests.
+- [x] self-test `pipe_facade_keeps`: covered housing has `covered=true`; property clears on wrench.
+- [x] commit.
 
 ### Task 7: Node window (sheet) + line boost
 Files: `rules/src/net/node_window.rs` (rows of the window from topology: axis lines, housings count, farthest N of M, throughput with boost, balance), `rules/src/net/line_boost.rs`, sheet kind wiring, `content.rs` (node → furnace template? see Пределы), transport.rs throughput × boost.
-- [ ] RED/GREEN: `farthest_housing_of_a_node_line`, `boost_raises_the_net_throughput`, `a_net_takes_the_weakest_sections_boost`.
-- [ ] window: line choice (3 toggles / one on a hub), balance, rows, 3 sockets, status.
-- [ ] self-test `pipe_node_window`, `pipe_line_boost`.
-- [ ] commit.
+- [x] RED/GREEN: `farthest_housing_of_a_node_line`, `boost_raises_the_net_throughput`, `a_net_takes_the_weakest_sections_boost`.
+- [x] window: line choice (3 toggles / one on a hub), balance, rows, 3 sockets, status.
+- [x] self-test `pipe_node_window`, `pipe_line_boost`.
+- [x] commit.
 
 ### Task 8: Wrench on machines — rotate; sneaking lifts with contents
 Files: `rules/src/net/wrench.rs` (`rotate(facing) -> facing`, what a click does), `transport.rs` right-click path.
@@ -111,4 +111,9 @@ Files: `window.rs` (rows «Гнездо / Канал / Направление / 
 
 ## Status log
 
-(each finished task: commit hash)
+- Task 1–3: 6a24db4 (recipes, node tiers 2–4 with swap and loot, tier-4 channels)
+- Task 4: ee1cb8f (auto chests)
+- Task 5: 9f124a6 (mode names, slowed text, «Под фальш-панелью»)
+- Task 6: 0b98a41 (covered/F4, facade back on break, sneaking wrench takes the housing)
+- Task 7: bfa1030 (node window, own mod screen ; line boost on item nets)
+- try: not run yet (bench maintenance.txt of the pack session holds it)
