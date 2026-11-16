@@ -10,6 +10,7 @@ pub mod disassembly;
 pub mod farm;
 pub mod found;
 pub mod grown;
+pub mod kitchen;
 pub mod plan;
 pub mod repair;
 pub mod transit;
@@ -122,7 +123,8 @@ impl Util {
             Util::Charger => s("rustcraft:charger", 1000.0, 128.0, 0, 2),
             Util::ChargePlate => s("rustcraft:charge_plate", 1000.0, 256.0, 0, 2),
             Util::Repair => s("rustcraft:repair", 400.0, 32.0, 0, 2),
-            Util::Kitchen => s("rustcraft:kitchen", 400.0, 16.0, KITCHEN_RECIPES.len(), 2),
+            // Slice 18: a toggle a page, its rows (what, the step, the page's dish).
+            Util::Kitchen => s("rustcraft:kitchen", 400.0, 16.0, kitchen::PAGES_MAX, 3),
             Util::Fishery => s("rustcraft:fishery", 200.0, 8.0, 0, 2),
             Util::Feeder => s("rustcraft:feeder", 200.0, 8.0, 0, 2),
             Util::Shearer => s("rustcraft:shearer", 200.0, 8.0, 0, 2),
@@ -265,16 +267,16 @@ pub fn has_capacity(u: Util) -> bool {
 
 /// The kitchen's recipes (spec 22: stews, soups, bread, pies and cakes), by result: each needs a
 /// crafting recipe of the game with that result; its toggle in the window turns it on.
-pub const KITCHEN_RECIPES: [&str; 9] = [
+/// Slice 18: the handbook's dishes only (bread, cookies, pumpkin pie, cake, the soups and the
+/// rabbit stew); a page chooses one.
+pub const KITCHEN_RECIPES: [&str; 7] = [
     "minecraft:bread",
-    "minecraft:cake",
-    "minecraft:pumpkin_pie",
     "minecraft:cookie",
+    "minecraft:pumpkin_pie",
+    "minecraft:cake",
     "minecraft:mushroom_stew",
-    "minecraft:rabbit_stew",
     "minecraft:beetroot_soup",
-    "minecraft:golden_carrot",
-    "minecraft:golden_apple",
+    "minecraft:rabbit_stew",
 ];
 
 /// The archaeology table's loot tables (spec 24, ST2), one a toggle.
@@ -292,7 +294,8 @@ pub fn step_ticks(u: Util) -> u64 {
     match u {
         Util::Trash => 20,
         Util::Disintegrator | Util::Repair | Util::Archeo | Util::Enchanter => 100,
-        Util::Kitchen => 200,
+        // Slice 18 (guide `kitchen`): 4 s a dish.
+        Util::Kitchen => 80,
         Util::Brewer => 400,
         Util::Feeder | Util::Shearer | Util::Apiary => 100,
         Util::Builder => 20,

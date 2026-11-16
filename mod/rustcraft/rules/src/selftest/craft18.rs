@@ -9,6 +9,7 @@
 //! - An order for bread runs through a kitchen on the storage's line (guide `kitchen`).
 //! - The repair stand's window switches its work mode; the feeder's has none (guide MODES).
 //! - The repair stand mends a fishing rod with string (guide `repair`).
+//! - The kitchen bakes a cake with milk from the tank it touches and leaves no bucket.
 
 use super::transport::{chest, fill, item_line, joint};
 use super::{Bench, Build, Scenario, at, plot_area, same};
@@ -18,7 +19,8 @@ use crate::storage::modules::{FILTER, SOCKET_FILTER, SOCKET_STACK, STACK_MODULES
 use crate::storage::terminal::{self, Press};
 use crate::tuning::Tuning;
 
-pub const ALL: [Build; 9] = [
+pub const ALL: [Build; 10] = [
+    kitchen_cake_with_milk_from_a_tank,
     repair_mends_a_rod_with_string,
     util_work_mode_switch,
     order_bread_through_the_kitchen,
@@ -231,5 +233,37 @@ fn repair_mends_a_rod_with_string(o: Pos, _: &Tuning) -> Scenario {
         })
         .check("both string went into it", move |b, _| {
             same("string", super::count_of(&b.items(p), "minecraft:string"), 0)
+        })
+}
+
+fn kitchen_cake_with_milk_from_a_tank(o: Pos, _: &Tuning) -> Scenario {
+    use crate::machines::sheet::Press as SheetPress;
+    let p = at(o, [3, 1, 0]);
+    let tank = at(o, [4, 1, 0]);
+    Scenario::new("kitchen18_cake_with_milk_from_a_tank", plot_area(o))
+        .then("a kitchen with cake's dry parts beside a tank of milk", move |b, _| {
+            for x in 2..=5 {
+                b.place(at(o, [x, 0, 0]), "minecraft:stone", &[])?;
+            }
+            b.place(p, "rustcraft:kitchen", &[])?;
+            b.set_buffer(p, 400.0)?;
+            b.place(tank, "rustcraft:tank", &[])?;
+            b.set_tank(tank, "rustcraft:milk", 3000)?;
+            b.put(p, 0, "minecraft:sugar", 2)?;
+            b.put(p, 1, "minecraft:egg", 1)?;
+            b.put(p, 2, "minecraft:wheat", 3)
+        })
+        .then("the first page set to cake", move |b, _| {
+            for _ in 0..4 {
+                b.press_cursor(p, SheetPress::Toggle(0).id(), None)?;
+            }
+            Ok(())
+        })
+        .until("a cake in its output", 400, move |b, _| {
+            Ok(b.items(p).iter().skip(9).flatten().any(|s| s.0 == "minecraft:cake"))
+        })
+        .check("the milk came from the tank and no bucket is left", move |b, _| {
+            same("milk", b.tank(tank).map(|g| g.amount), Some(0))?;
+            same("buckets", super::count_of(&b.items(p), "minecraft:bucket"), 0)
         })
 }

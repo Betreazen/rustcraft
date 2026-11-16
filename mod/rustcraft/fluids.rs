@@ -860,6 +860,49 @@ pub(super) fn reachable(
     in_tanks + own
 }
 
+// ---- Slice 18 (stream 5): the kitchen and the shearer use the tank they touch ----
+
+/// The tank group touching `pos` that holds `fluid` or is empty (for `fill`), and its index.
+fn touching_group(game: &Game<'_>, level: &LevelNet, pos: Pos, fluid: &str, fill: bool, tuning: &Tuning) -> Option<(Vec<TankGroup>, usize)> {
+    let per_block = tuning.tank_buckets * BUCKET;
+    let groups = read_groups(game, &level.fluids.tanks, per_block);
+    let near: BTreeSet<Pos> = Face::ALL.into_iter().map(|f| step(pos, f)).collect();
+    let i = groups.iter().position(|g| {
+        g.blocks.iter().any(|b| near.contains(b))
+            && (g.fluid.as_deref() == Some(fluid) || (fill && g.fluid.is_none()))
+    })?;
+    Some((groups, i))
+}
+
+/// How much `fluid` (mB) the tanks touching `pos` hold, and their room for it.
+pub(super) fn touching_amount(game: &Game<'_>, level: &LevelNet, pos: Pos, fluid: &str, tuning: &Tuning) -> (u64, u64) {
+    let held = touching_group(game, level, pos, fluid, false, tuning).map_or(0, |(g, i)| g[i].amount);
+    let room = touching_group(game, level, pos, fluid, true, tuning).map_or(0, |(g, i)| g[i].room_for(fluid));
+    (held, room)
+}
+
+/// Takes up to `amount` of `fluid` from a tank touching `pos`: how much it took.
+pub(super) fn take_touching(game: &mut Game<'_>, level: &LevelNet, pos: Pos, fluid: &str, amount: u64, tuning: &Tuning) -> u64 {
+    let Some((before, i)) = touching_group(game, level, pos, fluid, false, tuning) else {
+        return 0;
+    };
+    let mut after = before.clone();
+    let took = after[i].take(fluid, amount);
+    write_back(game, &before, &after, tuning.tank_buckets * BUCKET);
+    took
+}
+
+/// Puts up to `amount` of `fluid` into a tank touching `pos`: how much went in.
+pub(super) fn put_touching(game: &mut Game<'_>, level: &LevelNet, pos: Pos, fluid: &str, amount: u64, tuning: &Tuning) -> u64 {
+    let Some((before, i)) = touching_group(game, level, pos, fluid, true, tuning) else {
+        return 0;
+    };
+    let mut after = before.clone();
+    let went = after[i].put(fluid, amount);
+    write_back(game, &before, &after, tuning.tank_buckets * BUCKET);
+    went
+}
+
 /// A tank's diagnosis: «Бак: вода, 20 из 32 вёдер», its joints and its note.
 pub(super) fn tank_text(game: &Game<'_>, level: &LevelNet, pos: Pos, tuning: &Tuning) -> Text {
     let Some(g) = group_at(game, level, pos, tuning) else {
