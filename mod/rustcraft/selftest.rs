@@ -857,6 +857,17 @@ impl Bench for GameBench<'_, '_> {
         Ok(count - left.min(count))
     }
 
+    fn int_array(&self, pos: Pos, key: &str) -> Vec<i32> {
+        match self
+            .game
+            .native_mod_block_entity(pos)
+            .and_then(|e| e.nbt.get(&horizon_world::nbt::JavaString::from(key)).cloned())
+        {
+            Some(Tag::IntArray(v)) => v,
+            _ => Vec::new(),
+        }
+    }
+
     fn storage_diagnosis(&self, pos: Pos) -> Option<String> {
         let block = self.game.native_block(pos);
         let text = storage::diagnosis(self.game, DIMENSION, pos, &block)?;

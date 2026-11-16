@@ -420,11 +420,29 @@ pub(super) fn rescan(
         .collect();
     level.found = found;
     level.cell_of = cell_of;
+    let holes: Vec<(Pos, Vec<Pos>)> = level
+        .terminals
+        .iter()
+        .map(|(&t, id)| {
+            let h = id
+                .and_then(|id| level.found.get(&id))
+                .map(|f| match &f.shape {
+                    Shape::Solid => Vec::new(),
+                    Shape::Holes(h) => h.iter().copied().take(HOLES_SHOWN).collect(),
+                })
+                .unwrap_or_default();
+            (t, h)
+        })
+        .collect();
     let ids: Vec<u32> = level.found.keys().copied().collect();
     storages().levels.insert(dimension.to_owned(), level);
     // S3: each storage's stack from its terminals' stack modules.
     for id in ids {
         refresh_stack_module(game, dimension, id, None);
+    }
+    // S8: each terminal shows its storage's missing cells in the world.
+    for (t, h) in holes {
+        write_holes(game, t, &h);
     }
     save(game, dimension);
 }
@@ -467,6 +485,94 @@ pub(super) fn link_far_terminals(
     // S3: a far terminal's stack module counts too.
     for id in linked {
         refresh_stack_module(game, dimension, id, None);
+    }
+}
+
+// ---- Slice 18 (S8): the missing cells drawn in the world from the terminal ----
+
+/// A terminal's compound keeps its storage's missing cells, as offsets from it, under this key
+/// (three ints a cell); clients draw red glass there.
+const HOLES_KEY: &str = "holes";
+/// The most missing cells a terminal draws.
+const HOLES_SHOWN: usize = 64;
+
+/// The missing cells into the terminal at `t`, and the clients told when they changed.
+fn write_holes(game: &mut Game<'_>, t: Pos, holes: &[Pos]) {
+    let flat: Vec<i32> = holes
+        .iter()
+        .flat_map(|h| [h[0] - t[0], h[1] - t[1], h[2] - t[2]])
+        .collect();
+    let changed = game
+        .native_with_mod_block_entity(t, |e| {
+            let key = JavaString::from(HOLES_KEY);
+            let old = match e.nbt.get(&key) {
+                Some(Tag::IntArray(v)) => v.clone(),
+                _ => Vec::new(),
+            };
+            if old == flat {
+                return false;
+            }
+            if flat.is_empty() {
+                e.nbt.remove(&key);
+            } else {
+                e.nbt.insert(key, Tag::IntArray(flat.clone()));
+            }
+            true
+        })
+        .unwrap_or(false);
+    if changed {
+        game.native_block_entity_sync(t);
+    }
+}
+
+fn holes_of(entity: &ModBlockEntity) -> Vec<[i32; 3]> {
+    match entity.nbt.get(&JavaString::from(HOLES_KEY)) {
+        Some(Tag::IntArray(v)) => v.chunks_exact(3).map(|c| [c[0], c[1], c[2]]).collect(),
+        _ => Vec::new(),
+    }
+}
+
+/// `native_block_entity_update_tag`: clients get a terminal's missing cells.
+pub(super) fn update_tag(entity: &ModBlockEntity, tag: &mut Option<Compound>) {
+    if entity.id != content::TERMINAL {
+        return;
+    }
+    if let Some(v) = entity.nbt.get(&JavaString::from(HOLES_KEY)) {
+        tag.get_or_insert_with(Compound::new)
+            .insert(JavaString::from(HOLES_KEY), v.clone());
+    }
+}
+
+/// On a client: red glass in each missing cell of the terminal's storage, a little smaller than
+/// a block, where the world has air.
+pub(super) fn draw_holes(
+    game: &Game<'_>,
+    pos: Pos,
+    entity: &ModBlockEntity,
+    draw: &mut crate::game::native_block_entity_draw::BlockEntityDraw,
+) {
+    const SCALE: f32 = 0.9;
+    for h in holes_of(entity) {
+        let at = [pos[0] + h[0], pos[1] + h[1], pos[2] + h[2]];
+        if !matches!(game.native_block(at).as_str(), "minecraft:air" | "minecraft:cave_air") {
+            continue;
+        }
+        draw.push();
+        let k = (1.0 - SCALE) / 2.0;
+        draw.translate([h[0] as f32 + k, h[1] as f32 + k, h[2] as f32 + k]);
+        draw.scale([SCALE; 3]);
+        game.native_draw_block(draw, "minecraft:red_stained_glass", &[]);
+        draw.pop();
+    }
+}
+
+/// The terminal's culling box takes in its missing cells.
+pub(super) fn hole_bounds(entity: &ModBlockEntity, bounds: &mut [f32; 6]) {
+    for h in holes_of(entity) {
+        for k in 0..3 {
+            bounds[k] = bounds[k].min(h[k] as f32);
+            bounds[k + 3] = bounds[k + 3].max(h[k] as f32 + 1.0);
+        }
     }
 }
 

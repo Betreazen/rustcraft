@@ -5,6 +5,7 @@
 //!   filter module goes into its own socket and comes back out.
 //! - An extra terminal anywhere on the storage's magistral shows the storage (S6).
 //! - A full storage says «Склад полон».
+//! - A storage with a missing cell has its terminal keep the cell for clients to draw (S8).
 
 use super::transport::{chest, fill, item_line, joint};
 use super::{Bench, Build, Scenario, at, plot_area, same};
@@ -14,7 +15,8 @@ use crate::storage::modules::{FILTER, SOCKET_FILTER, SOCKET_STACK, STACK_MODULES
 use crate::storage::terminal::{self, Press};
 use crate::tuning::Tuning;
 
-pub const ALL: [Build; 5] = [
+pub const ALL: [Build; 6] = [
+    storage_terminal_keeps_its_holes,
     storage_full_says_so,
     storage_far_terminal,
     storage_keeps_component_stacks,
@@ -143,5 +145,22 @@ fn storage_full_says_so(o: Pos, _: &Tuning) -> Scenario {
         })
         .until("the storage says it is full", 200, move |b, _| {
             Ok(b.storage_diagnosis(cell).as_deref() == Some("rustcraft.storage.full_at"))
+        })
+}
+
+fn storage_terminal_keeps_its_holes(o: Pos, _: &Tuning) -> Scenario {
+    let t = at(o, [5, 0, 1]);
+    let gone = at(o, [3, 0, 2]);
+    Scenario::new("storage18_terminal_keeps_its_holes", plot_area(o))
+        .then("a storage of four cells in a 2x2 box", move |b, _| {
+            storage_on_a_net(b, o)?;
+            b.place(at(o, [4, 0, 2]), CELL, &[])?;
+            b.place(gone, CELL, &[])
+        })
+        .wait(20)
+        .check("no hole yet", move |b, _| same("holes", b.int_array(t, "holes"), Vec::new()))
+        .then("a corner cell taken away", move |b, _| b.place(gone, "minecraft:air", &[]))
+        .until("the terminal keeps the hole, as an offset from it", 60, move |b, _| {
+            Ok(b.int_array(t, "holes") == vec![gone[0] - t[0], gone[1] - t[1], gone[2] - t[2]])
         })
 }

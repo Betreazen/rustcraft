@@ -309,6 +309,9 @@ impl Bench for Fake {
     fn storage_diagnosis(&self, _: Pos) -> Option<String> {
         None
     }
+    fn int_array(&self, _: Pos, _: &str) -> Vec<i32> {
+        Vec::new()
+    }
 }
 
 const PLOT: Area = Area {

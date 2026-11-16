@@ -332,6 +332,8 @@ pub trait Bench {
     fn stored_stacks(&self, pos: Pos) -> Vec<String>;
     /// The translation key of what a player looking at the cell or terminal at `pos` reads.
     fn storage_diagnosis(&self, pos: Pos) -> Option<String>;
+    /// The int array under `key` in the saved compound of the mod block entity at `pos`.
+    fn int_array(&self, pos: Pos, key: &str) -> Vec<i32>;
 }
 
 /// A mob as the self-test reads it.
