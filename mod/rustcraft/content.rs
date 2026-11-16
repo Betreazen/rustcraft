@@ -810,13 +810,12 @@ pub fn declare_items(items: &mut Vec<Item>) {
             ..Item::default()
         });
     }
-    // The alloys and the capacity module: plain items, as an iron ingot is.
+    // The alloys: plain items, as an iron ingot is (the capacity module is one of the modules' ITEMS since slice 18).
     for id in [
         COPPERSTEEL,
         SPARKSTEEL,
         CRYSTALLITE,
         STARSTEEL,
-        MODULE_CAPACITY,
     ] {
         items.push(Item {
             id: id.into(),

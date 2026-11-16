@@ -1015,5 +1015,10 @@
   "rustcraft.handbook.page.dusts.name": "Ore dust",
   "rustcraft.handbook.page.dusts.sum": "Iron, copper and gold dust from the crusher. Smelts into an ingot.",
   "rustcraft.handbook.page.fluids.name": "Solution and catalysts",
-  "rustcraft.handbook.page.fluids.sum": "Fluids from the mixer. Nutrient solution feeds crystal structures; catalysts boost machines."
+  "rustcraft.handbook.page.fluids.sum": "Fluids from the mixer. Nutrient solution feeds crystal structures; catalysts boost machines.",
+  "item.rustcraft.module_stack": "Stack Module (Sparksteel)",
+  "item.rustcraft.module_stack_2": "Stack Module (Crystallite)",
+  "item.rustcraft.module_stack_3": "Stack Module (Starsteel)",
+  "item.rustcraft.module_yield": "Yield Module",
+  "item.rustcraft.module_line": "Line Boost Module"
 }
