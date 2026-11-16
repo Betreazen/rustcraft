@@ -61,7 +61,8 @@ fn pages_name_known_items(o: Pos, _: &Tuning) -> Scenario {
             let unknown: Vec<&str> = PAGES
                 .iter()
                 .filter_map(|p| p.item)
-                .filter(|i| !b.item_known(i))
+                .chain(PAGES.iter().flat_map(|p| p.makes.iter().copied()))
+                .filter(|i| *i != crate::handbook::recipes::ANY_FLUID && !b.item_known(i))
                 .collect();
             if !unknown.is_empty() {
                 return Err(format!(

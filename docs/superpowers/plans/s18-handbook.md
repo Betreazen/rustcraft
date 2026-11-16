@@ -39,9 +39,9 @@
 
 **Files:** `docs/showcase/js/data.js` (pmodules :1235–1236, backpack :1305), `ui.js` (:291, :293), `scenes.js` (:1346, :1358, :1389, :1397, :1491), `info.js` (:96–99, наковальня), `models.js` (модель `anvil`), `assets/models/scenes_mc.py` (`anvil` → `minecraft:anvil`), перегенерация `pages.rs`, `scenes.rs`, lang.
 
-- [ ] Тексты: «1 / 2 / 2» вместо «по два гнезда» (pmodules, сцены armor/pmodules, info.js, заметка окна брони); окно брони — `['Ёмкость костюма', 'батарея костюма +50%']`, `['Магнит', 'включён · клавиша Z']`; ночное зрение «;», магнит Z, рюкзак B там, где справочник говорит «клавишей»; подпись гарпуна без «пока проверяется»; сцена чар — наковальня (`s.put('an', 'anvil', …)`), модель `M.anvil` из коробок, карточка `anvil` в info.js.
-- [ ] `py -3 assets/models/handbook_mc.py`; `cargo test --release -q` в `mod/rustcraft/rules` — зелёный.
-- [ ] Коммит `docs: settle the handbook's contradictions (sockets 1/2/2, suit capacity, keys, anvil, harpoon)`.
+- [x] Тексты: «1 / 2 / 2» вместо «по два гнезда» (pmodules, сцены armor/pmodules, info.js, заметка окна брони); окно брони — `['Ёмкость костюма', 'батарея костюма +50%']`, `['Магнит', 'включён · клавиша Z']`; ночное зрение «;», магнит Z, рюкзак B там, где справочник говорит «клавишей»; подпись гарпуна без «пока проверяется»; сцена чар — наковальня (`s.put('an', 'anvil', …)`), модель `M.anvil` из коробок, карточка `anvil` в info.js.
+- [x] `py -3 assets/models/handbook_mc.py`; `cargo test --release -q` в `mod/rustcraft/rules` — зелёный.
+- [x] Коммит `docs: settle the handbook's contradictions (sockets 1/2/2, suit capacity, keys, anvil, harpoon)`.
 
 ### Task 2: Все рецепты страницы — верстак, превращения, машины
 
@@ -56,18 +56,18 @@
 - `recipes::for_page(page, all: Vec<Shown>) -> Vec<Shown>` — те, что делают предметы страницы, без повторов, по ступени.
 - Раскладка: по два рецепта в ряд (`RECIPE_CELL` 150 точек), высота ряда — сетка 58, машина 40.
 
-- [ ] RED: тесты `custom_crushing_reads_ingredient_and_result`, `custom_mixing_reads_water_and_fluid`, `custom_alloying_keeps_counts`, `transmute_puts_input_in_the_middle`, `page_makes_its_tiers_and_extras`, `for_page_orders_by_tier_and_drops_repeats`, `recipes_lay_out_two_to_a_row`.
-- [ ] GREEN; бандл: `recipes_of(game, page)` собирает `crafting` (форма, без формы, `Special::Transmute`), `cooking` (`smelting`) и `native_recipes_of_type` трёх типов мода; рисует сетку или входы, машину над стрелкой, жидкость — цветным квадратом; подсказка по наведению.
-- [ ] Самотест `handbook_pages_show_machine_recipes`: страница `alloys` находит 1 верстачный + 3 рецепта плавильни, `dusts` — дробилку, `fluids` — смеситель, `blade` — превращения ступеней 3 и 4.
-- [ ] Коммит.
+- [x] RED: тесты `custom_crushing_reads_ingredient_and_result`, `custom_mixing_reads_water_and_fluid`, `custom_alloying_keeps_counts`, `transmute_puts_input_in_the_middle`, `page_makes_its_tiers_and_extras`, `for_page_orders_by_tier_and_drops_repeats`, `recipes_lay_out_two_to_a_row`.
+- [x] GREEN; бандл: `recipes_of(game, page)` собирает `crafting` (форма, без формы, `Special::Transmute`), `cooking` (`smelting`) и `native_recipes_of_type` трёх типов мода; рисует сетку или входы, машину над стрелкой, жидкость — цветным квадратом; подсказка по наведению.
+- [x] Самотест `handbook_pages_show_machine_recipes`: страница `alloys` находит 1 верстачный + 3 рецепта плавильни, `dusts` — дробилку, `fluids` — смеситель, `blade` — превращения ступеней 3 и 4.
+- [x] Коммит.
 
 ### Task 3: Таблицы и «см. также»
 
 **Files:** `rules/src/handbook/mod.rs` (`Page.tables: &[[usize; 2]]`, `Page.see: &[&str]`, `Piece::Table`, `Piece::See`, `Row::Cells`, `Row::Links`, `columns`, `link_at`), `handbook_mc.py` (ключи `page.<id>.table.<t>.title|note|head.<c>|row.<r>.<c>`, `see`), `handbook.rs` (рисование, клик и наведение по ссылке).
 
-- [ ] RED: `columns_fit_natural_widths`, `columns_share_what_is_left`, `table_cells_wrap_inside_their_column`, `see_links_two_to_a_row`, `link_at_finds_the_page_under_the_mouse`, `see_skips_unknown_pages`.
-- [ ] GREEN, генератор, рисование: заголовок таблицы, заметка, шапка цветом подписи, ячейки по колонкам; ссылки — иконка страницы и имя, клик открывает страницу.
-- [ ] Коммит.
+- [x] RED: `columns_fit_natural_widths`, `columns_share_what_is_left`, `table_cells_wrap_inside_their_column`, `see_links_two_to_a_row`, `link_at_finds_the_page_under_the_mouse`, `see_skips_unknown_pages`.
+- [x] GREEN, генератор, рисование: заголовок таблицы, заметка, шапка цветом подписи, ячейки по колонкам; ссылки — иконка страницы и имя, клик открывает страницу.
+- [x] Коммит.
 
 ### Task 4: Таблички, названия, выпавшие предметы и сущности в сценах
 

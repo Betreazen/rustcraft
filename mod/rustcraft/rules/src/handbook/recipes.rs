@@ -280,6 +280,8 @@ mod tests {
             diagnoses: 0,
             parts: 0,
             makes,
+            tables: &[],
+            see: &[],
         }
     }
 

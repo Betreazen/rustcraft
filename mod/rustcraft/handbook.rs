@@ -25,6 +25,8 @@
 //   horizon-client crafting.rs:426-433), smelting (`Recipes::cooking`) and the machines' own types
 //   (`native_recipes_of_type`, API 36, native_hooks.rs:11351-11356: a client sees the content
 //   mod's recipes, which is where the mod's are), two to a row, a machine's over its arrow.
+//   A table of the guide's (the turret's) is drawn in columns, and «см. также» is a row of page
+//   icons and names: a click opens that page.
 // - A left click (`native_screen_mouse_button_pressed_pre`, API 80, native_hooks.rs:3804-3838),
 //   the wheel (`native_screen_mouse_scrolled_pre`, API 93, native_hooks.rs:3893-3933) and the
 //   arrow keys (`native_screen_key_pressed_pre`, API 104) turn its sheets; Escape closes it.
@@ -715,10 +717,44 @@ fn body(game: &Game<'_>, batch: &mut HudBatch, o: [f32; 2], laid: &Laid, sheet: 
                     }
                 }
             }
+            Row::Cells { cells, role } => {
+                for (dx, t) in cells {
+                    text(game, batch, t, o, [x + dx, y + 1.0], role_colour(*role));
+                }
+            }
+            Row::Links(pages) => {
+                for (col, page) in pages.iter().enumerate() {
+                    if let Some(&p) = page.as_ref() {
+                        link(game, batch, o, y, col, p);
+                    }
+                }
+            }
             Row::Gap => {}
         }
         y += row.height();
     }
+}
+
+/// A «см. также» link: the page's icon in a slot and its name, lit under the mouse.
+fn link(game: &Game<'_>, batch: &mut HudBatch, o: [f32; 2], y: f32, col: usize, page: usize) {
+    let p = &PAGES[page];
+    let r = rules::link_rect(y, col);
+    let icon = [r[0] + 1.0, r[1] + 1.0];
+    slot(game, batch, o, icon);
+    item(game, batch, o, icon, p.icon(), 1);
+    let measure = |s: &str| game.native_text_width(s);
+    let name = rules::clip(&tr(&p.key("name"), p.id), r[2] - 22.0, &measure);
+    let hot = kit::hovered(game, o, r);
+    let ty = r[1] + ((r[3] - FONT_HEIGHT) / 2.0).round();
+    text(
+        game,
+        batch,
+        &name,
+        o,
+        [r[0] + 21.0, ty],
+        if hot { VALUE } else { TEXT },
+    );
+    kit::hover(game, batch, o, r);
 }
 
 fn role_colour(role: Role) -> u32 {
@@ -860,6 +896,17 @@ pub(super) fn on_mouse(
             p.go(s, part == Part::StepOn, clock());
         }
         return;
+    }
+    if let View::Page { page, sheet } = v.clamped(sheets_of(game, v))
+        && page < PAGES.len()
+    {
+        let laid = laid(game, page);
+        if let Some(range) = laid.sheets.get(sheet)
+            && let Some(to) = rules::link_at(&laid.rows, range.clone(), sheet, at)
+        {
+            *view() = View::Page { page: to, sheet: 0 };
+            return;
+        }
     }
     let Some(part) = rules::part_at(v, at) else {
         return;

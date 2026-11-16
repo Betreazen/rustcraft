@@ -105,6 +105,7 @@ UI = {
     'sections': ('Разделы', 'Sections'),
     'recipe': ('Рецепт', 'Recipe'),
     'recipes': ('Рецепты', 'Recipes'),
+    'see': ('См. также', 'See also'),
     'diagnoses': ('Диагнозы', 'Diagnoses'),
     'window': ('Окно блока', "The block's window"),
     'sheet': ('%s / %s', '%s / %s'),
@@ -129,7 +130,8 @@ process.stdout.write(JSON.stringify({
   cats: RC.CATS, tiers: RC.TIERS, tierTable: RC.TIER_TABLE, fix: RC.DIAG_FIX, glossary: RC.GLOSSARY, ui,
   entries: RC.ENTRIES.map((e) => ({ id: e.id, cat: e.cat, tier: e.tier || 0, name: e.name, sum: e.sum || '',
     text: e.text || [], stats: e.stats || [], diag: e.diag || [], page: e.page || '',
-    recipes: (e.recipes || []).length })),
+    recipes: (e.recipes || []).length, see: e.see || [],
+    tables: (e.tables || []).map((t) => ({ title: t.title, note: t.note || '', head: t.head, rows: t.rows })) })),
 }));
 """
 
@@ -182,6 +184,15 @@ def page_lines(e, g):
         if plain(lab):
             ru['%s.part.%d.label' % (p, i)] = plain(lab)
         ru['%s.part.%d' % (p, i)] = plain(note)
+    for t, tab in enumerate(e['tables']):
+        ru['%s.table.%d.title' % (p, t)] = plain(tab['title'])
+        if plain(tab['note']):
+            ru['%s.table.%d.note' % (p, t)] = plain(tab['note'])
+        for c, h in enumerate(tab['head']):
+            ru['%s.table.%d.head.%d' % (p, t, c)] = plain(h)
+        for r, row in enumerate(tab['rows']):
+            for c, v in enumerate(row):
+                ru['%s.table.%d.row.%d.%d' % (p, t, r, c)] = plain(v)
     counts = (len(text), len(stats), len(e['diag']), len(parts))
     return ru, counts
 
@@ -195,8 +206,10 @@ def table(rows, sections):
     for r in rows:
         item = 'Some(%s)' % rust_str('rustcraft:' + r['item']) if r['item'] else 'None'
         makes = ', '.join(rust_str(m if m == ANY_FLUID else 'rustcraft:' + m) for m in r['makes'])
-        lines.append('    Page { id: %s, section: %d, tier: %d, item: %s, text: %d, stats: %d, diagnoses: %d, parts: %d, makes: &[%s] },'
-                     % ((rust_str(r['id']), r['section'], r['tier'], item) + r['counts'] + (makes,)))
+        tables = ', '.join('[%d, %d]' % t for t in r['tables'])
+        see = ', '.join(rust_str(x) for x in r['see'])
+        lines.append('    Page { id: %s, section: %d, tier: %d, item: %s, text: %d, stats: %d, diagnoses: %d, parts: %d, makes: &[%s], tables: &[%s], see: &[%s] },'
+                     % ((rust_str(r['id']), r['section'], r['tier'], item) + r['counts'] + (makes, tables, see)))
     return ('//! The handbook\'s pages, written by assets/models/handbook_mc.py from the guide\n'
             '//! (docs/showcase/js/data.js, ui.js): do not edit by hand, run the script.\n\n'
             'use super::Page;\n\n'
@@ -227,6 +240,7 @@ def main():
     if missing:
         sys.exit('handbook_mc.py: handbook_en.py has no English for ' + ', '.join(missing))
     ru, en, rows = {}, {}, []
+    ids = {e['id'] for e in g['entries']}
     for key, (r, e) in UI.items():
         ru[PREFIX + key], en[PREFIX + key] = r, e
     for t, tier in enumerate(g['tiers']):
@@ -252,7 +266,10 @@ def main():
             if m != ANY_FLUID and m != HANDBOOK and not (CONTENT / 'items' / (m + '.json')).exists():
                 sys.exit('handbook_mc.py: the page %s makes %s, which the content mod has no item for' % (e['id'], m))
         rows.append({'id': e['id'], 'section': sections.index(e['cat']), 'tier': e['tier'],
-                     'item': item, 'counts': counts, 'makes': list(dict.fromkeys(makes))})
+                     'item': item, 'counts': counts, 'makes': list(dict.fromkeys(makes)),
+                     'tables': [(max(len(t['head']), max((len(x) for x in t['rows']), default=0)), len(t['rows']))
+                                for t in e['tables']],
+                     'see': [x for x in e['see'] if x in ids]})
     TABLE.parent.mkdir(parents=True, exist_ok=True)
     text = table(rows, sections).encode('utf-8')
     if not TABLE.exists() or TABLE.read_bytes() != text:

@@ -148,6 +148,11 @@ fn every_page_lays_out_into_sheets_that_fit() {
             if let Row::Text { x, text, .. } = row {
                 assert!(x + measure(text) <= BODY_WIDTH, "{}: {text}", p.id);
             }
+            if let Row::Cells { cells, .. } = row {
+                for (x, text) in cells {
+                    assert!(x + measure(text) <= BODY_WIDTH + 0.01, "{}: {text}", p.id);
+                }
+            }
         }
     }
 }
@@ -167,10 +172,15 @@ fn an_english_page_is_its_name_and_summary() {
         vec![
             Piece::Lead("Smelts fast.".into()),
             Piece::Heading("Recipe".into()),
-            Piece::Recipes(vec![recipes::GRID_HEIGHT])
+            Piece::Recipes(vec![recipes::GRID_HEIGHT]),
+            Piece::Heading("See also".into()),
+            Piece::See(page.see.iter().filter_map(|id| page_index(id)).collect()),
         ]
     );
-    assert_eq!(pieces(page, &[], &|_| None), Vec::<Piece>::new());
+    assert!(matches!(
+        pieces(page, &[], &|_| None)[..],
+        [Piece::Heading(_), Piece::See(_)]
+    ));
 }
 
 #[test]
@@ -185,6 +195,8 @@ fn pieces_keep_the_pages_order() {
         diagnoses: 1,
         parts: 2,
         makes: &[],
+        tables: &[],
+        see: &[],
     };
     let lines: BTreeMap<String, String> = [
         ("sum", "Sum"),
@@ -509,4 +521,131 @@ fn a_recipe_goes_into_the_grid_by_its_width() {
     assert_eq!(recipe_grid(4, &[s("a")]), None);
     assert_eq!(recipe_grid(1, &[s("a"), s("b"), s("c"), s("d")]), None);
     assert_eq!(recipe_grid(3, &[None]), None);
+}
+
+#[test]
+fn columns_fit_natural_widths() {
+    let w = columns(&[20.0, 30.0], 100.0);
+    assert_eq!(w, vec![20.0, 100.0 - COLUMN_GAP - 20.0]);
+}
+
+#[test]
+fn columns_share_what_is_left() {
+    // The narrow column keeps its width; the two wide ones share the rest.
+    let w = columns(&[10.0, 500.0, 400.0], 200.0);
+    let room = 200.0 - 2.0 * COLUMN_GAP;
+    assert_eq!(w[0], 10.0);
+    assert_eq!(w[1], (room - 10.0) / 2.0);
+    assert_eq!(w[2], (room - 10.0) / 2.0);
+    assert!(columns(&[], 100.0).is_empty());
+}
+
+#[test]
+fn table_cells_wrap_inside_their_column() {
+    let head = vec!["Who".to_owned(), "What".to_owned()];
+    let rows = vec![vec![
+        "Undead".to_owned(),
+        "poison does nothing at all here".to_owned(),
+    ]];
+    let pieces = vec![Piece::Table { head, rows }];
+    let got = lay_out(&pieces, 100.0, &measure);
+    // Natural widths 36 and 186: "Who"/"Undead" keeps 36, the second gets 100 - 6 - 36 = 58.
+    assert_eq!(
+        got[0],
+        Row::Cells {
+            cells: vec![(0.0, "Who".into()), (42.0, "What".into())],
+            role: Role::Key
+        }
+    );
+    assert_eq!(got[1], Row::Gap);
+    assert_eq!(
+        got[2],
+        Row::Cells {
+            cells: vec![(0.0, "Undead".into()), (42.0, "poison".into())],
+            role: Role::Text
+        }
+    );
+    for row in &got[3..] {
+        let Row::Cells { cells, .. } = row else {
+            panic!("{row:?}")
+        };
+        assert_eq!(cells.len(), 1);
+        assert!(
+            cells[0].0 == 42.0 && measure(&cells[0].1) <= 58.0,
+            "{row:?}"
+        );
+    }
+}
+
+#[test]
+fn see_links_two_to_a_row_and_skip_unknown_pages() {
+    let page = Page {
+        id: "x",
+        section: 0,
+        tier: 0,
+        item: None,
+        text: 0,
+        stats: 0,
+        diagnoses: 0,
+        parts: 0,
+        makes: &[],
+        tables: &[],
+        see: &["housing", "no_such_page", "node", "wrench"],
+    };
+    let got = pieces(&page, &[], &|k| {
+        (k == key("see")).then(|| "См. также".to_owned())
+    });
+    let ids = |v: &[usize]| v.iter().map(|&i| PAGES[i].id).collect::<Vec<_>>();
+    let Some(Piece::See(pages)) = got.last() else {
+        panic!("{got:?}")
+    };
+    assert_eq!(ids(pages), ["housing", "node", "wrench"]);
+    assert_eq!(got[got.len() - 2], Piece::Heading("См. также".into()));
+    let rows = lay_out(&got, BODY_WIDTH, &measure);
+    let links: Vec<&Row> = rows.iter().filter(|r| matches!(r, Row::Links(_))).collect();
+    assert_eq!(links.len(), 2);
+    assert_eq!(*links[1], Row::Links([Some(pages[2]), None]));
+}
+
+#[test]
+fn link_at_finds_the_page_under_the_mouse() {
+    let rows = vec![
+        Row::Text {
+            x: 0.0,
+            text: "SEE".into(),
+            role: Role::Heading,
+        },
+        Row::Links([Some(7), Some(9)]),
+    ];
+    let y = sheet_top(1) + LINE + 2.0;
+    assert_eq!(link_at(&rows, 0..2, 1, [BODY_X + 3.0, y]), Some(7));
+    assert_eq!(
+        link_at(&rows, 0..2, 1, [BODY_X + LINK_WIDTH + 3.0, y]),
+        Some(9)
+    );
+    assert_eq!(
+        link_at(&rows, 0..2, 1, [BODY_X + 3.0, sheet_top(1) + 1.0]),
+        None
+    );
+    assert_eq!(link_at(&rows, 0..1, 1, [BODY_X + 3.0, y]), None);
+    let r = link_rect(0.0, 1);
+    assert!(r[0] + r[2] <= BODY_X + BODY_WIDTH);
+}
+
+#[test]
+fn the_turrets_tables_come_from_the_guide() {
+    let ru = lang("ru_ru");
+    let page = PAGES.iter().find(|p| p.id == "turret").unwrap();
+    assert_eq!(page.tables, &[[4, 7], [2, 3]]);
+    let got = pieces(page, &[], &|k| ru.get(k).cloned());
+    let tables: Vec<&Piece> = got
+        .iter()
+        .filter(|p| matches!(p, Piece::Table { .. }))
+        .collect();
+    assert_eq!(tables.len(), 2);
+    let Piece::Table { head, rows } = tables[0] else {
+        unreachable!()
+    };
+    assert_eq!(head[0], "Модуль");
+    assert_eq!(rows[0][0], "Кровотечение");
 }
