@@ -8,8 +8,10 @@
 //   backpack's way): its module sockets, then the Capacity and the Thrift book slots. Closing it
 //   keeps the modules of its piece and up to three books each; the rest goes back to the player.
 // - Twice a second, for each player of the level: the worn pieces' modules work on their charge —
-//   night vision, jump boost and speed as the game's effects, the magnet picks up what lies within
-//   6 blocks, the jetpack lets the player fly while the chestplate holds charge
+//   night vision (switched by its key) and jump boost as the game's effects, the run module +50 %
+//   speed for 5 s from the start of a sprint (an attribute modifier), the magnet (switched by its
+//   key) pulls what lies within 6 blocks toward the player every 2 ticks for the game's pickup
+//   (slice 18), the jetpack lets the player fly while the chestplate holds charge
 //   (`native_set_flight`). What the damage hook needs is noted for it (it runs inside the hit,
 //   with no game): the blade in hand, the damper, the shock absorber.
 // - The damage hook: a charged blade strikes and pays 25 E (the fourth tier one point harder), an
@@ -95,6 +97,14 @@ struct State {
     input: HashMap<u128, (i32, u64)>,
     /// Players holding up a charged energy shield, by entity id: the shield's number.
     blocking: HashMap<i32, u64>,
+    /// Slice 18: the tick each player began to sprint (the run module's burst), the players
+    /// whose burst modifier is on, and the players whose magnet pulls.
+    sprint: HashMap<u128, u64>,
+    running: HashSet<u128>,
+    magnets: HashSet<u128>,
+    /// Players whose leftover burst modifier (from a logout or a restart mid-burst) was taken
+    /// off since they came on.
+    cleaned: HashSet<u128>,
 }
 
 /// The client's side of the dash: a push the server asked for, applied at the window's next tick.
@@ -499,6 +509,10 @@ pub(super) fn on_logout(uuid: u128) {
     let mut s = state();
     s.open.remove(&uuid);
     s.flying.remove(&uuid);
+    s.sprint.remove(&uuid);
+    s.running.remove(&uuid);
+    s.magnets.remove(&uuid);
+    s.cleaned.remove(&uuid);
 }
 
 // ---- The dash ----
@@ -510,6 +524,11 @@ pub(super) fn on_player_input(game: &mut Game<'_>, player: u128, flags: i32) {
         let mut s = state();
         let now = s.now;
         let (before, last) = s.input.get(&player).copied().unwrap_or((0, 0));
+        if rules::moves::sprint_started(before, flags) {
+            s.sprint.insert(player, now);
+        } else if flags & rules::moves::SPRINT == 0 {
+            s.sprint.remove(&player);
+        }
         let pressed = rules::forward_pressed(before, flags);
         let twice = pressed && last > 0 && now.saturating_sub(last) <= rules::DASH_WINDOW_TICKS;
         s.input.insert(player, (flags, if pressed && !twice { now } else if twice { 0 } else { last }));
@@ -664,6 +683,9 @@ pub(super) fn tick(game: &mut Game<'_>, dimension: &str) {
     };
     open_windows(game);
     keys(game);
+    if now.is_multiple_of(rules::moves::MAGNET_EVERY) {
+        pull(game, dimension);
+    }
     if !now.is_multiple_of(EVERY) {
         return;
     }
@@ -691,6 +713,50 @@ pub(super) fn tick(game: &mut Game<'_>, dimension: &str) {
         save(&mut state());
         crate::game::rustcraft_explore::save(game);
         crate::game::rustcraft_utility::save_grown(game);
+    }
+}
+
+// ---- Slice 18: the magnet's pull and the run burst ----
+
+const RUN_MODIFIER: &str = "rustcraft:pm_run";
+
+/// The run module's burst: +50 % speed as a movement-speed modifier while it holds.
+fn run_burst(game: &mut Game<'_>, p: &horizon_client::mod_api::NativeServerPlayer, on: bool) {
+    let (had, clean) = {
+        let mut s = state();
+        (s.running.contains(&p.uuid), s.cleaned.insert(p.uuid))
+    };
+    if clean && !had {
+        game.native_run_command(&format!("attribute {} minecraft:movement_speed modifier remove {RUN_MODIFIER}", p.name));
+    }
+    if on == had {
+        return;
+    }
+    let name = &p.name;
+    if on {
+        game.native_run_command(&format!(
+            "attribute {name} minecraft:movement_speed modifier add {RUN_MODIFIER} {} add_multiplied_total",
+            rules::moves::RUN_BOOST
+        ));
+        state().running.insert(p.uuid);
+    } else {
+        game.native_run_command(&format!("attribute {name} minecraft:movement_speed modifier remove {RUN_MODIFIER}"));
+        state().running.remove(&p.uuid);
+    }
+}
+
+/// Each `MAGNET_EVERY` ticks: the items in a working magnet's reach come a step nearer its
+/// player; the game's own pickup takes them when they arrive.
+fn pull(game: &mut Game<'_>, dimension: &str) {
+    if state().magnets.is_empty() {
+        return;
+    }
+    for p in game.native_server_players() {
+        if p.dimension != dimension || !state().magnets.contains(&p.uuid) {
+            continue;
+        }
+        let to = [p.position[0], p.position[1] + 0.5, p.position[2]];
+        game.native_run_command(&rules::moves::pull_command(dimension, to, rules::MAGNET_REACH));
     }
 }
 
@@ -746,6 +812,7 @@ fn player_tick(game: &mut Game<'_>, p: &horizon_client::mod_api::NativeServerPla
     });
     let mut view = View::default();
     let mut wants_flight = false;
+    let (mut wants_run, mut wants_magnet) = (false, false);
     for (slot, id, g, h) in &pieces {
         let h = h.clone();
         if matches!(g.kind, Kind::Armor(_)) && h.suit != suit {
@@ -777,13 +844,15 @@ fn player_tick(game: &mut Game<'_>, p: &horizon_client::mod_api::NativeServerPla
                     drain += need;
                 }
                 Module::Run => {
-                    effect(game, p.uuid, "minecraft:speed", 1);
-                    drain += need;
-                }
-                Module::Magnet => {
-                    if magnet(game, p) {
+                    let s = state();
+                    if rules::moves::run_boost(s.sprint.get(&p.uuid).copied(), s.now) {
+                        wants_run = true;
                         drain += need;
                     }
+                }
+                Module::Magnet => {
+                    wants_magnet = true;
+                    drain += need;
                 }
                 Module::Jetpack => {
                     wants_flight = true;
@@ -804,6 +873,12 @@ fn player_tick(game: &mut Game<'_>, p: &horizon_client::mod_api::NativeServerPla
         }
     }
     state().views.insert(p.entity_id, view);
+    run_burst(game, p, wants_run);
+    if wants_magnet {
+        state().magnets.insert(p.uuid);
+    } else {
+        state().magnets.remove(&p.uuid);
+    }
     // The jetpack: flight while the chestplate holds charge, outside creative and spectator.
     let survival = matches!(p.game_mode, 0 | 2);
     let had = state().flying.contains(&p.uuid);
@@ -816,29 +891,6 @@ fn player_tick(game: &mut Game<'_>, p: &horizon_client::mod_api::NativeServerPla
         game.native_set_flying_speed(p.uuid, None);
         state().flying.remove(&p.uuid);
     }
-}
-
-/// The magnet: what lies within reach goes into the player's inventory. True when it took any.
-fn magnet(game: &mut Game<'_>, p: &horizon_client::mod_api::NativeServerPlayer) -> bool {
-    let r = rules::MAGNET_REACH;
-    let at = p.position;
-    let items = game.native_item_entities(&p.dimension, [at[0] - r, at[1] - r, at[2] - r], [at[0] + r, at[1] + r, at[2] + r]);
-    let mut took = false;
-    for e in items {
-        if e.pickup_delay > 0 {
-            continue;
-        }
-        let left = game.native_give_stack(p.uuid, e.stack.clone());
-        let left_count = left.as_ref().map_or(0, |l| l.count);
-        if left_count == e.stack.count {
-            continue;
-        }
-        let mut rest = e.stack.clone();
-        rest.count = left_count;
-        game.native_set_item_entity(&p.dimension, e.id, rest);
-        took = true;
-    }
-    took
 }
 
 /// The windows asked for open: a piece's modules and books.

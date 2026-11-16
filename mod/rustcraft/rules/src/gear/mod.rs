@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 use crate::geom::Pos;
 
 pub mod keys;
+pub mod moves;
 pub mod shot;
 
 /// A piece of technical armour.

@@ -121,14 +121,14 @@ Audit: pmodules «Ночное зрение … клавишей» DIFFERS, «М
 
 Audit: pmodules «Магнит … притягивает» DIFFERS, «Бег +50% на 5 с» DIFFERS.
 
-**Files:** rules `gear/mod.rs`, `gear.rs`.
+**Files:** rules `gear/moves.rs`, `gear.rs`.
 
-**Interfaces:** `pub fn pull_step(item: [f64;3], player: [f64;3], step: f64) -> [f64;3]`; `pub const RUN_TICKS: u64 = 100`, `pub const RUN_BOOST: f64 = 0.5`; `pub fn run_boost(sprint_since: Option<u64>, now: u64) -> bool`.
+**Interfaces:** `rules/src/gear/moves.rs` (new): `pub fn pull_command(dimension, to, reach) -> String`; `pub const RUN_TICKS: u64 = 100`, `pub const RUN_BOOST: f64 = 0.5`; `pub fn run_boost(sprint_since: Option<u64>, now: u64) -> bool`.
 
-- [ ] Tests: a step never overshoots; boost true at 0..100 ticks of sprint, false after and when not sprinting.
-- [ ] GREEN; wiring: items within 6 blocks move toward the player each 2 ticks (`execute … as @e[type=item,distance=..6] at @s facing … run tp @s ^ ^ ^0.4`), the game's pickup takes them; the run boost is a movement-speed attribute modifier `rustcraft:pm_run` +0.5 `add_multiplied_total` for 5 s from sprint start, charged 6 E/s while on.
-- [ ] Self-test `gear_magnet_rule` none (needs a player); unit tests cover the rule.
-- [ ] Commit.
+- [x] Tests: a step never overshoots; boost true at 0..100 ticks of sprint, false after and when not sprinting.
+- [x] GREEN; wiring: items within 6 blocks move toward the player each 2 ticks (`execute … as @e[type=item,distance=..6] at @s facing … run tp @s ^ ^ ^0.4`), the game's pickup takes them; the run boost is a movement-speed attribute modifier `rustcraft:pm_run` +0.5 `add_multiplied_total` for 5 s from sprint start, charged 6 E/s while on.
+- [x] Self-test `gear_magnet_rule` none (needs a player); unit tests cover the rule.
+- [x] Commit.
 
 ### Task 8: The armour window shows its charge and its modules
 
