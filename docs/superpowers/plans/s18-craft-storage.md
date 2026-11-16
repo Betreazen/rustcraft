@@ -122,7 +122,7 @@
 ### Task 11: Levels on models (feeder food, shearer milk, apiary honey, brewer brew)
 
 **Files:** `utility.rs`, `farm.rs` — `anim::show_level` each step.
-- [ ] done
+- [x] done in tasks 15, 17, 18, 19 (`show_level_cached`)
 
 ## Part C — the craft machines, one by one (windows per ui.js through the sheet: rows, bars, toggles)
 
@@ -150,7 +150,7 @@
 - [x] done (choice toggles, `farm::harvest_of`; levels on the model for the feeder, shearer and apiary (task 11 except the brewer: task 19); try pending)
 
 ### Task 19: Brewer — pages: potion + kind; automatic steps (nether wart → effect ingredient → redstone / glowstone / gunpowder / dragon breath); capacity pages; steps and fuel bar in the window
-- [ ] done
+- [x] done 27ab28c (rules `utility::brew`: pages, chain, `next_step`; slots 3 bottles / 4 ingredients / powder / 3 out; window: 4 page buttons + 5 kind buttons, rows page and fuel (no room for a bar in 240 px); bottles on the model; self-test `brewer18_brews_through_the_chain`; stack module in machines: not made (a slot of 256 needs per-slot max stack in content menus, stream 4/3); try pending)
 
 ### Task 20: Experience condenser — 30 970 points, give 1 / 10 / all, take 1 / 10 / all, 2 E/s while moving, «Конденсатор полон», bar «Хранит», condenser keeps its points when broken
 - [x] done df07e2f (2 E a press from its buffer; points kept on break is not in the handbook: left out; slice12 window test: six buttons and the bar)
