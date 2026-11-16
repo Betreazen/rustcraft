@@ -11,6 +11,8 @@ pub mod panel;
 pub mod processor;
 pub mod pump;
 pub mod sheet;
+pub mod queue;
 pub mod slots;
+pub mod sockets;
 pub mod style;
 pub mod windows;
