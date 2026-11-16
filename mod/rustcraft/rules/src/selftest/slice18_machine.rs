@@ -4,15 +4,19 @@
 //!   tier's item comes back, and a tier that is not higher replaces nothing.
 //! - The crusher takes the ore blocks too, two dusts each (guide `crusher`).
 //! - A water bucket pours into a tank and an empty bucket takes it back; the solution stays.
+//! - Two capacity modules give a furnace two queue cells behind its input; a stack module one
+//!   cell of 256 (guide `mod_cap`, `mod_stack`).
 
 use super::{Bench, Build, Scenario, at, count_of, plot_area, same};
 use crate::geom::Pos;
 use crate::tuning::Tuning;
 
-pub const ALL: [Build; 3] = [
+pub const ALL: [Build; 5] = [
     tier_swap_keeps_contents,
     crusher_takes_ore_blocks,
     bucket_fills_and_empties_a_tank,
+    furnace_capacity_queue,
+    furnace_stack_cell,
 ];
 
 const STONE: &str = "minecraft:stone";
@@ -111,4 +115,45 @@ fn bucket_fills_and_empties_a_tank(o: Pos, _: &Tuning) -> Scenario {
             Err(_) => Ok(()),
             Ok(left) => Err(format!("a bucket took the solution: {left}")),
         })
+}
+
+/// How many raw iron the input slot of the machine at `p` holds.
+fn input_count(b: &dyn Bench, p: Pos) -> u32 {
+    b.items(p).first().cloned().flatten().filter(|(i, _)| i == RAW_IRON).map_or(0, |(_, n)| n)
+}
+
+/// A furnace with no energy and `modules`, then `stacks` stacks of 64 raw iron put into its
+/// input one after another, each taken into its queue; the next one stays in the input.
+fn queue_scenario(o: Pos, name: &'static str, modules: &'static [&'static str], stacks: u32) -> Scenario {
+    let p = at(o, [3, 1, 0]);
+    let mut s = Scenario::new(name, plot_area(o)).then("a furnace with its modules", move |b, _| {
+        floor(b, o)?;
+        b.place(p, FURNACE, &[])?;
+        b.set_modules(p, modules)?;
+        b.refresh();
+        Ok(())
+    });
+    for _ in 0..stacks {
+        s = s
+            .then("64 raw iron into its input", move |b, _| b.put(p, 0, RAW_IRON, 64))
+            .until("the queue took them", 80, move |b, _| Ok(input_count(b, p) == 0));
+    }
+    s.then("one stack more", move |b, _| b.put(p, 0, RAW_IRON, 64))
+        .wait(40)
+        .check("the queue is full: it stays in the input", move |b, _| {
+            same("raw iron in the input", input_count(b, p), 64)
+        })
+}
+
+fn furnace_capacity_queue(o: Pos, _: &Tuning) -> Scenario {
+    queue_scenario(
+        o,
+        "furnace_capacity_queue",
+        &["rustcraft:module_capacity", "rustcraft:module_capacity"],
+        4,
+    )
+}
+
+fn furnace_stack_cell(o: Pos, _: &Tuning) -> Scenario {
+    queue_scenario(o, "furnace_stack_cell", &["rustcraft:module_stack"], 4)
 }
