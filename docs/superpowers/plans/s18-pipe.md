@@ -99,12 +99,24 @@ Files: `window.rs` (rows «Гнездо / Канал / Направление / 
 - [ ] commit.
 
 ### Task 12: Housing channels drop on explosion; XP reports; catalysts
-- [ ] channels of a housing broken by an explosion drop (rescan finds it gone).
+- [x] channels of a housing broken by an explosion drop (rescan finds it gone) — 2b3ae75.
 - [ ] furnace/alloy/crafter `Report::Craft`/`smelt` to Path-of-craft-tree (stream 3 files — additive block only).
 - [ ] catalysts in alloy smelter / mixer (stream 3 files — additive).
 - [ ] commit.
 
 ### Task 13: README «Что проверить в игре: срез 18» (поток 1), last try, report.
+- [x] README section (325d069).
+- [ ] last try green.
+
+### Left (resume here)
+
+- [ ] Joint window as the drawn ui.js table (L): an own mod screen like the node's (`node_window.rs` is the pattern: view message, client tick sends presses), rows «Гнездо / Канал / Направление / Фильтр / Приоритет», «Скопировать / Вставить». The server chest menu stays until then.
+- [ ] XP reports of the electric furnace (кузнец; повар for food), alloy smelter and autocrafter to Path-of-craft-tree (machines.rs / alloy.rs / crafter.rs are stream 3's: additive block, `Report::Craft` pattern of utility.rs:745).
+- [ ] Catalysts in every machine where they make sense (machines.rs:652, rules machines/catalyst.rs: stream 3's files).
+- [ ] Orders: autocrafter asks the storage itself; O11 straight to the next machine; O12 water; all machines; items seen in the housings (M each, orders.rs is stream 5's).
+- [ ] Line boost on fluid and energy nets (fluids.rs stream 3, net/energy.rs stream 2): `node_window::net_boost` is ready.
+- [ ] Facade F2: only whole blocks give a look.
+- [ ] Workers lifted whole by the wrench (stream 6, workers.rs).
 
 ## Противоречия справочника (for the integrator / stream 8)
 
@@ -124,4 +136,5 @@ Files: `window.rs` (rows «Гнездо / Канал / Направление / 
 - Task 7: bfa1030 (node window, own mod screen `rustcraft:node`; line boost on item nets)
 - Task 8: 05285c2 (wrench turns machines, lifts them with contents; workers stay stream 6)
 - Task 9–10: 9e8346e (strips, bottleneck frame, F5; facades no longer kept: perf note for the integrator)
+- 7d65877 joint window closes when walked away; 1f3b98c node 2–4 recipe + fluid filter/priority; 2b3ae75 lost housing drops channels; 36f0d89 orders texts
 - try 1 (staged at 6a24db4): build OK; RC 144/145 (pipe_recipes_craft: node_2 = mod_output grid, fixed 1f3b98c), PCT 42/42, SC 87/87
