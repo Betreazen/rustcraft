@@ -3672,5 +3672,6 @@
   "item.rustcraft.energy_channel_4": "Энергетический канал, ступень 4",
   "rustcraft.node.not_higher": "Заменить узел можно только узлом старшей ступени",
   "rustcraft.node.swapped": "Узел ступени %s встал на место узла ступени %s",
-  "rustcraft.facade.covered": "Под фальш-панелью"
+  "rustcraft.facade.covered": "Под фальш-панелью",
+  "rustcraft.housing.lifted": "Корпус снят"
 }

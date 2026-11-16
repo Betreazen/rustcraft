@@ -297,7 +297,7 @@ pub(super) fn rescan_now(game: &mut Game<'_>, dimension: &str) {
 }
 
 /// `native_use_item_on`: a channel clicked on a housing goes into its first free slot (M2) and
-/// leaves the hand; the wrench with sneaking takes the last channel out and gives it back.
+/// leaves the hand; the wrench with sneaking takes the housing off with its channels (s18/pipe).
 pub(super) fn on_use_item_on(
     game: &mut Game<'_>,
     stack: &ItemStack,
@@ -347,8 +347,10 @@ pub(super) fn on_use_item_on(
         *claimed = true;
         put_channel(game, &player, pos, channel);
     } else if item == content::WRENCH && player.sneaking {
+        // s18/pipe (guide `facade`): after the facade, the sneaking wrench takes the housing itself,
+        // its channels with it; it no longer takes one channel out.
         *claimed = true;
-        take_channel(game, &player, pos);
+        crate::game::rustcraft_pipe18::lift_housing(game, &player, pos);
     }
 }
 
@@ -487,6 +489,12 @@ pub(super) fn on_destroy_block(game: &mut Game<'_>, pos: [i32; 3]) {
         let item = content::channel_item(channel.kind, channel.tier);
         if game.native_give_items(item, 1) == 0 {
             drop_item(game, &player.dimension, pos, item);
+        }
+    }
+    // s18/pipe: the facade and the block of its look come back too (guide `facade`).
+    for item in crate::game::rustcraft_pipe18::facade_items(game, pos) {
+        if game.native_give_items(&item, 1) == 0 {
+            drop_item(game, &player.dimension, pos, &item);
         }
     }
 }
@@ -658,45 +666,6 @@ fn put_channel(game: &mut Game<'_>, player: &NativeServerPlayer, pos: Pos, chann
             tell(game, player.uuid, text);
         }
     }
-}
-
-fn take_channel(game: &mut Game<'_>, player: &NativeServerPlayer, pos: Pos) {
-    let Some(held) =
-        crate::game::rustcraft_machines::entity(game, pos).map(|entity| read_slots(&entity.nbt))
-    else {
-        return;
-    };
-    let Some((_, _, last)) = housing::remove_last(held) else {
-        let text = line("rustcraft.housing.empty", "The housing has no channel", &[]);
-        tell(game, player.uuid, text);
-        return;
-    };
-    // Check the room first, so a full inventory leaves the channel where it is.
-    let item = content::channel_item(last.kind, last.tier);
-    if game.native_room_for(item) == 0 {
-        let text = line("rustcraft.housing.no_room", "No room for the channel", &[]);
-        tell(game, player.uuid, text);
-        return;
-    }
-    let taken = game
-        .native_with_mod_block_entity(pos, |entity| {
-            let (next, slot, channel) = housing::remove_last(read_slots(&entity.nbt))?;
-            write_slots(&mut entity.nbt, &next);
-            window::forget_slot(&mut entity.nbt, slot);
-            Some((slot, channel))
-        })
-        .flatten();
-    let Some((slot, channel)) = taken else {
-        return;
-    };
-    game.native_give_items(content::channel_item(channel.kind, channel.tier), 1);
-    mark_stale(&player.dimension);
-    let text = line(
-        "rustcraft.housing.channel_taken",
-        "%s taken from slot %s",
-        &[kind_name(channel.kind), number(slot + 1)],
-    );
-    tell(game, player.uuid, text);
 }
 
 /// s18/pipe: `drop_item` for the other modules.

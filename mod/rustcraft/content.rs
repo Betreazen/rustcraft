@@ -474,6 +474,19 @@ pub fn declare_blocks(blocks: &mut Vec<Block>) {
         },
         connects_to: Some(JOINS.into()),
         thickness: Some(HOUSING_THICKNESS),
+        // s18/pipe, F4: a facade makes the housing a whole block (`covered`, set by
+        // rustcraft_builder); open, its outline and collision are the pipe's, as `thickness`
+        // builds them. 64 states become 128.
+        state_properties: BTreeMap::from([(
+            rustcraft_rules::housing::COVERED.to_owned(),
+            StateProperty::Boolean,
+        )]),
+        default_state: BTreeMap::from([(
+            rustcraft_rules::housing::COVERED.to_owned(),
+            "false".to_owned(),
+        )]),
+        shapes: Some(housing_shapes()),
+        collision_shapes: Some(housing_shapes()),
         item: true,
         ..Block::default()
     });
@@ -501,6 +514,20 @@ pub fn declare_blocks(blocks: &mut Vec<Block>) {
     declare_storage_and_tanks(blocks);
     declare_monorail(blocks);
     declare_zip_anchor(blocks);
+}
+
+/// s18/pipe, F4: the housing's outline and collision by `covered` and its six sides.
+fn housing_shapes() -> BlockShapes {
+    let mut properties = vec![rustcraft_rules::housing::COVERED.to_owned()];
+    properties.extend(rustcraft_rules::housing::SIDES.map(str::to_owned));
+    BlockShapes {
+        property: String::new(),
+        properties,
+        values: rustcraft_rules::housing::covered_shapes(f64::from(HOUSING_THICKNESS))
+            .into_iter()
+            .collect(),
+        default: None,
+    }
 }
 
 /// The zipline's anchor (12.5 Z2, rustcraft_zipline): a stake with a ring a rope is tied to. It

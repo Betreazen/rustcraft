@@ -148,6 +148,62 @@ pub fn diagnose(topology: &Topology, layout: &Layout, pos: Pos) -> Option<Diagno
     })
 }
 
+// ---- Slice 18: the facade's whole block (F4) ----
+
+/// The chorus plant's side properties, in the order `covered_shapes` writes a state's values.
+pub const SIDES: [&str; 6] = ["north", "east", "south", "west", "up", "down"];
+/// The housing's state property that says a facade hides it (guide `facade`, F4).
+pub const COVERED: &str = "covered";
+
+/// A box in blocks: min x, y, z, max x, y, z.
+pub type Box6 = [f64; 6];
+
+/// The boxes `PipeBlock` builds for a pipe `thickness` pixels across with the sides `joined`
+/// (in `SIDES` order): a core and an arm to each joined side.
+pub fn pipe_boxes(thickness: f64, joined: [bool; 6]) -> Vec<Box6> {
+    let lo = (16.0 - thickness) / 32.0;
+    let hi = 1.0 - lo;
+    let mut out = vec![[lo, lo, lo, hi, hi, hi]];
+    for (i, side) in SIDES.iter().enumerate() {
+        if !joined[i] {
+            continue;
+        }
+        out.push(match *side {
+            "north" => [lo, lo, 0.0, hi, hi, lo],
+            "south" => [lo, lo, hi, hi, hi, 1.0],
+            "west" => [0.0, lo, lo, lo, hi, hi],
+            "east" => [hi, lo, lo, 1.0, hi, hi],
+            "up" => [lo, hi, lo, hi, 1.0, hi],
+            _ => [lo, 0.0, lo, hi, lo, hi],
+        });
+    }
+    out
+}
+
+/// F4: the housing's shapes by state, keyed as the content mod's `shapes` table keys them
+/// (`covered` then `SIDES`, values joined by commas): a hidden housing is a whole block, an open
+/// one the pipe `thickness` pixels across.
+pub fn covered_shapes(thickness: f64) -> Vec<(String, Vec<Box6>)> {
+    let mut out = Vec::new();
+    for covered in [false, true] {
+        for bits in 0..64u8 {
+            let joined: [bool; 6] = std::array::from_fn(|i| bits & (1 << i) != 0);
+            let mut key = covered.to_string();
+            for j in joined {
+                key.push(',');
+                key.push_str(if j { "true" } else { "false" });
+            }
+            let boxes = if covered {
+                vec![[0.0, 0.0, 0.0, 1.0, 1.0, 1.0]]
+            } else {
+                pipe_boxes(thickness, joined)
+            };
+            out.push((key, boxes));
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -318,5 +374,32 @@ mod tests {
             }
         );
         assert_eq!(slots[1], SlotState::Empty);
+    }
+
+    #[test]
+    fn an_open_housing_is_a_core_and_its_arms() {
+        let boxes = pipe_boxes(6.5, [true, false, false, false, false, true]);
+        assert_eq!(boxes.len(), 3);
+        let lo = 4.75 / 16.0;
+        assert_eq!(boxes[0], [lo, lo, lo, 1.0 - lo, 1.0 - lo, 1.0 - lo]);
+        assert_eq!(boxes[1][2], 0.0, "north arm reaches z 0");
+        assert_eq!(boxes[2][1], 0.0, "down arm reaches y 0");
+    }
+
+    #[test]
+    fn a_hidden_housing_is_a_whole_block_in_every_state() {
+        // F4: «скрытый корпус держит форму целого блока».
+        let shapes = covered_shapes(6.5);
+        assert_eq!(shapes.len(), 128);
+        let keys: std::collections::BTreeSet<_> = shapes.iter().map(|(k, _)| k.clone()).collect();
+        assert_eq!(keys.len(), 128);
+        for (key, boxes) in &shapes {
+            assert_eq!(key.split(',').count(), 7);
+            if key.starts_with("true") {
+                assert_eq!(boxes, &vec![[0.0, 0.0, 0.0, 1.0, 1.0, 1.0]]);
+            } else {
+                assert!(boxes.len() >= 1 && boxes[0][0] > 0.0);
+            }
+        }
     }
 }

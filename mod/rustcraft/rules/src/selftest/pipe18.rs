@@ -12,7 +12,7 @@ use crate::net::topology::ChannelKind;
 use crate::geom::Pos;
 use crate::tuning::Tuning;
 
-pub const ALL: [Build; 3] = [recipes_craft, node_tiers, chests_work_both_ways];
+pub const ALL: [Build; 4] = [recipes_craft, node_tiers, chests_work_both_ways, facade_and_lift];
 
 /// A handbook recipe: its three rows, what each letter is, what it makes and how many.
 pub struct Recipe {
@@ -172,6 +172,40 @@ fn chests_work_both_ways(o: Pos, _t: &Tuning) -> Scenario {
         .check("the left chest gave its ore", move |b, _| {
             let n = count_of(&b.items(left), "minecraft:raw_iron");
             if n == 0 { Ok(()) } else { Err(format!("{n} ore left in the left chest")) }
+        })
+}
+
+/// Guide `facade`: a hidden housing is a whole block (F4, `covered`); the facade and its look's
+/// block come back with it; the sneaking wrench then takes the housing itself, channels and all.
+fn facade_and_lift(o: Pos, _t: &Tuning) -> Scenario {
+    let h = at(o, [1, 0, 0]);
+    Scenario::new("pipe_facade_whole_block_and_lift", plot_area(o))
+        .then("a node and a housing with two channels, hidden as bricks", move |b, _| {
+            line(b, o, 1, 1, [channel(ChannelKind::Item, 2), channel(ChannelKind::Energy, 1), None, None])?;
+            b.pipe("cover:minecraft:bricks", h).map(|_| ())
+        })
+        .check("the hidden housing is a whole block and keeps its facade", move |b, _| {
+            if b.property(h, crate::housing::COVERED).as_deref() != Some("true") {
+                return Err(format!("covered = {:?}", b.property(h, crate::housing::COVERED)));
+            }
+            let items = b.pipe("facade_items", h)?;
+            if items != "rustcraft:facade,minecraft:bricks" {
+                return Err(format!("the facade gives back {items:?}"));
+            }
+            Ok(())
+        })
+        .then("the sneaking wrench takes the housing", move |b, m| {
+            let items = b.pipe("lift_housing", h)?;
+            let want = "rustcraft:housing,rustcraft:facade,minecraft:bricks,rustcraft:item_channel_2,rustcraft:energy_channel";
+            if items != want {
+                return Err(format!("{items:?} came back, {want:?} expected"));
+            }
+            m.mark("lifted", 1.0);
+            Ok(())
+        })
+        .check("the housing is gone", move |b, _| {
+            let block = b.block(h);
+            if block == "minecraft:air" { Ok(()) } else { Err(format!("{block} stayed")) }
         })
 }
 

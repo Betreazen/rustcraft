@@ -172,12 +172,6 @@ pub(super) fn write_joints(nbt: &mut Compound, joints: &HousingJoints) {
     nbt.insert(key, Tag::List(list));
 }
 
-/// The saved compound of a housing without any setting of `slot`: its channel was taken out.
-pub(super) fn forget_slot(nbt: &mut Compound, slot: usize) {
-    let joints = read_joints(nbt).without_slot(slot);
-    write_joints(nbt, &joints);
-}
-
 // ---- Hooks ----
 
 /// The wrench asked for the window of `housing`, on `preferred` if that face is a joint.

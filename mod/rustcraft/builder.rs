@@ -370,7 +370,7 @@ pub(super) fn has_facade(nbt: &Compound) -> bool {
     read_i64(nbt, FACADE_KEY) != 0
 }
 
-fn look(nbt: &Compound) -> Option<String> {
+pub(super) fn look(nbt: &Compound) -> Option<String> {
     match nbt.get(&JavaString::from(LOOK_KEY)) {
         Some(Tag::String(s)) => Some(s.to_string_lossy()).filter(|s| !s.is_empty()),
         _ => None,
@@ -391,6 +391,8 @@ pub(super) fn on_use_item_on(game: &mut Game<'_>, player: u128, sneaking: bool, 
     if item == FACADE && !covered {
         game.native_with_mod_block_entity(pos, |e| write_i64(&mut e.nbt, FACADE_KEY, 1));
         game.native_take_items(FACADE, 1);
+        // s18/pipe, F4: the hidden housing is a whole block (the node is one already).
+        game.native_set_block_property(pos, rustcraft_rules::housing::COVERED, "true");
     } else if item == content::WRENCH && sneaking && covered {
         let old = look(&entity.nbt);
         game.native_with_mod_block_entity(pos, |e| {
@@ -401,6 +403,7 @@ pub(super) fn on_use_item_on(game: &mut Game<'_>, player: u128, sneaking: bool, 
         if let Some(o) = old {
             give(game, player, &o);
         }
+        game.native_set_block_property(pos, rustcraft_rules::housing::COVERED, "false");
     } else if covered && game.items().get(item).is_some_and(|i| i.block.is_some()) && !crate::game::rustcraft_server::is_ours(item) {
         let old = look(&entity.nbt);
         game.native_with_mod_block_entity(pos, |e| {

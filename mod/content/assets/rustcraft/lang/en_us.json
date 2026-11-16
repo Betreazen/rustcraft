@@ -1024,5 +1024,6 @@
   "item.rustcraft.energy_channel_4": "Energy Channel, Tier 4",
   "rustcraft.node.not_higher": "Only a node of a higher tier takes its place",
   "rustcraft.node.swapped": "Node of tier %s took the place of tier %s",
-  "rustcraft.facade.covered": "Under a facade"
+  "rustcraft.facade.covered": "Under a facade",
+  "rustcraft.housing.lifted": "The housing taken off"
 }

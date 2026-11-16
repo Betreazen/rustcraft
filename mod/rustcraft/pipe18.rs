@@ -12,7 +12,7 @@ use crate::game::{
     rustcraft_content as content,
     rustcraft_server::{self as server},
 };
-use horizon_client::{items::ItemStack, text::Text};
+use horizon_client::{items::ItemStack, mod_api::NativeServerPlayer, text::Text};
 use rustcraft_rules::{geom::Pos, net::node_tier};
 
 /// `NativeServerPlayer::game_mode` of creative.
@@ -115,6 +115,81 @@ pub(super) fn covered_diagnosis(
     Some(text)
 }
 
+/// The facade of the housing or node at `pos` and the block of its look, as items: what comes
+/// back when it is broken or lifted.
+pub(super) fn facade_items(game: &Game<'_>, pos: Pos) -> Vec<String> {
+    let Some(entity) = game.native_mod_block_entity(pos) else {
+        return Vec::new();
+    };
+    if !crate::game::rustcraft_builder::has_facade(&entity.nbt) {
+        return Vec::new();
+    }
+    let mut out = vec![crate::game::rustcraft_builder::FACADE.to_owned()];
+    out.extend(crate::game::rustcraft_builder::look(&entity.nbt));
+    out
+}
+
+/// The sneaking wrench on an open housing (guide `facade`: «следующий клик — сам корпус»): the
+/// housing comes off as an item, its channels with it; what has no room drops.
+pub(super) fn lift_housing(game: &mut Game<'_>, player: &NativeServerPlayer, pos: Pos) {
+    let Some(mut items) = take_housing(game, &player.dimension, pos) else {
+        return;
+    };
+    if player.game_mode == CREATIVE {
+        items.retain(|i| i != content::HOUSING);
+    }
+    for item in &items {
+        if game.native_give_items(item, 1) == 0 {
+            server::drop_one(game, &player.dimension, pos, item);
+        }
+    }
+    server::mark_level_stale(&player.dimension);
+    let text = server::line("rustcraft.housing.lifted", "The housing taken off", &[]);
+    server::tell(game, player.uuid, text);
+}
+
+/// The housing at `pos` taken out of the world: the items it gives back (itself, its facade and
+/// the block of its look, its channels); none when nothing was taken.
+fn take_housing(game: &mut Game<'_>, dimension: &str, pos: Pos) -> Option<Vec<String>> {
+    if game.native_block(pos) != content::HOUSING {
+        return None;
+    }
+    let entity = game.native_mod_block_entity(pos)?;
+    let held = server::read_slots(&entity.nbt);
+    let air = game.native_default_state("minecraft:air")?;
+    let mut items = vec![content::HOUSING.to_owned()];
+    items.extend(facade_items(game, pos));
+    items.extend(
+        held.slots
+            .into_iter()
+            .flatten()
+            .map(|c| content::channel_item(c.kind, c.tier).to_owned()),
+    );
+    // Flags 3: neighbours hear it and the players see it.
+    game.native_set_block(dimension, pos, air, 3).then_some(items)
+}
+
+/// The facade set on the housing or node at `pos` with the look `look` (none: smooth stone), as
+/// a click with it does (rustcraft_builder).
+fn cover(game: &mut Game<'_>, pos: Pos, look: Option<&str>) -> bool {
+    use horizon_world::nbt::{JavaString, Tag};
+    let set = game.native_with_mod_block_entity(pos, |e| {
+        e.nbt.insert(JavaString::from(crate::game::rustcraft_builder::FACADE_KEY), Tag::Long(1));
+        if let Some(look) = look {
+            e.nbt.insert(
+                JavaString::from(crate::game::rustcraft_builder::LOOK_KEY),
+                Tag::String(JavaString::from(look)),
+            );
+        }
+    });
+    if set.is_none() {
+        return false;
+    }
+    game.native_set_block_property(pos, rustcraft_rules::housing::COVERED, "true");
+    game.native_block_entity_sync(pos);
+    true
+}
+
 // ---- The self-test's actions (rustcraft_rules::selftest::Bench::pipe) ----
 
 /// One action of stream 1's self-test on the block at `pos`: `swap_node:<tier>`.
@@ -127,6 +202,16 @@ pub(super) fn bench(game: &mut Game<'_>, action: &str, pos: Pos) -> Result<Strin
                 .map(|back| back.to_string())
                 .ok_or_else(|| format!("no swap to tier {held} at {pos:?}"))
         }
+        "cover" => cover(game, pos, (!arg.is_empty()).then_some(arg))
+            .then(String::new)
+            .ok_or_else(|| format!("no facade block entity at {pos:?}")),
+        "lift_housing" => {
+            let dimension = game.native_dimension().to_owned();
+            take_housing(game, &dimension, pos)
+                .map(|items| items.join(","))
+                .ok_or_else(|| format!("no housing taken at {pos:?}"))
+        }
+        "facade_items" => Ok(facade_items(game, pos).join(",")),
         _ => Err(format!("no action {name}")),
     }
 }
