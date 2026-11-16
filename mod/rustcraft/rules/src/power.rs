@@ -51,6 +51,8 @@ pub struct PowerView {
     pub capacity: f64,
     /// The fluid it holds, mB: a lava generator's lava, a crystal structure's solution.
     pub fluid: f64,
+    /// Slice 18: the most a battery structure gives, E/s (ui.js «отдаёт 0 из 192»).
+    pub max_out: f64,
 }
 
 // ---- Structures ----
@@ -134,6 +136,44 @@ pub fn structure_shown(n: usize, form: Form, fed: bool, t: &Tuning) -> Shown {
         Form::Broken => Shown::BrokenShape(out),
         Form::Box(_) if fed => Shown::Gives(out),
         Form::Box(_) => Shown::NoSolution(out),
+    }
+}
+
+/// E9 (guide `structure`): what holds a crystal structure back now.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Limit {
+    /// Only its size: more crystals would give more.
+    Size,
+    /// No solution: it gives one crystal's output.
+    Solution,
+    /// The energy channels it is on let through less than it gives: this many E/s.
+    Channel(f64),
+    /// Not an allowed box: one crystal's output.
+    Shape,
+}
+
+/// E9: what limits a group of `n` crystals of form `form`; `channel` is what the energy nets it is
+/// on let through together, E/s (none when it is on no net).
+pub fn structure_limit(n: usize, form: Form, fed: bool, channel: Option<f64>, t: &Tuning) -> Limit {
+    match form {
+        Form::Broken => return Limit::Shape,
+        Form::Box(_) if !fed => return Limit::Solution,
+        _ => {}
+    }
+    let out = structure_output(n, form, fed, t);
+    match channel {
+        Some(cap) if cap + 1e-9 < out => Limit::Channel(cap),
+        _ => Limit::Size,
+    }
+}
+
+/// The size of a box form as the window names it, «2×2», «3×3×3»; none for a single crystal or a
+/// broken form.
+pub fn form_name(form: Form) -> Option<String> {
+    match form {
+        Form::Box([a, b, c]) if a == 1 => Some(format!("{c}×{b}")),
+        Form::Box([a, b, c]) => Some(format!("{c}×{b}×{a}")),
+        _ => None,
     }
 }
 
@@ -390,6 +430,25 @@ mod tests {
         assert_eq!(structure_shown(4, b, false, &t), Shown::NoSolution(4.0));
         // 0.1 bucket a minute a crystal: a 2×2 drinks 400 mB a minute.
         assert!(close(solution_per_second(4, &t) * 60.0, 400.0));
+    }
+
+    #[test]
+    fn a_structure_names_what_holds_it_back() {
+        // E9: size, solution, channel or shape.
+        let t = Tuning::default();
+        let square = Form::Box([1, 2, 2]);
+        assert_eq!(structure_limit(4, square, true, None, &t), Limit::Size);
+        assert_eq!(structure_limit(4, square, false, None, &t), Limit::Solution);
+        // A tier-1 channel (32 E/s) under a 3×3 (108 E/s) holds it back; a wider one does not.
+        let nine = Form::Box([1, 3, 3]);
+        assert_eq!(structure_limit(9, nine, true, Some(32.0), &t), Limit::Channel(32.0));
+        assert_eq!(structure_limit(9, nine, true, Some(512.0), &t), Limit::Size);
+        assert_eq!(structure_limit(3, Form::Broken, true, Some(1.0), &t), Limit::Shape);
+        assert_eq!(structure_limit(1, Form::Single, false, None, &t), Limit::Size);
+        assert_eq!(form_name(square).as_deref(), Some("2×2"));
+        assert_eq!(form_name(Form::Box([1, 1, 2])).as_deref(), Some("2×1"));
+        assert_eq!(form_name(Form::Box([3, 3, 3])).as_deref(), Some("3×3×3"));
+        assert_eq!(form_name(Form::Broken), None);
     }
 
     #[test]
