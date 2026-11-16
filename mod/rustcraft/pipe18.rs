@@ -212,6 +212,19 @@ pub(super) fn bench(game: &mut Game<'_>, action: &str, pos: Pos) -> Result<Strin
                 .ok_or_else(|| format!("no housing taken at {pos:?}"))
         }
         "facade_items" => Ok(facade_items(game, pos).join(",")),
+        "node_view" => {
+            let axis: usize = arg.parse().unwrap_or(0);
+            let dimension = game.native_dimension().to_owned();
+            crate::game::rustcraft_node_window::view_at(game, &dimension, pos, axis)
+                .map(|v| String::from_utf8_lossy(&rustcraft_rules::net::node_window::encode(&v)).into_owned())
+                .ok_or_else(|| format!("no node window at {pos:?}"))
+        }
+        "socket" => {
+            let i: u8 = arg.parse().map_err(|_| format!("socket {arg:?}"))?;
+            crate::game::rustcraft_node_window::socket(game, 0, pos, i)
+                .map(|n| n.to_string())
+                .ok_or_else(|| format!("socket {i} at {pos:?} did nothing"))
+        }
         _ => Err(format!("no action {name}")),
     }
 }

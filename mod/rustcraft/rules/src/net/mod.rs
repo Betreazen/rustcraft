@@ -9,4 +9,5 @@ pub mod settings;
 pub mod stock;
 pub mod tanks;
 pub mod node_tier;
+pub mod node_window;
 pub mod topology;

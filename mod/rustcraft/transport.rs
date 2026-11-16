@@ -199,6 +199,8 @@ fn block_side(joint: &Joint) -> Direction {
 /// housings' settings.
 pub(super) fn rebuild(game: &mut Game<'_>, dimension: &str, level: &mut LevelNet, tuning: &Tuning) {
     let saved = load_modes(game);
+    // s18/pipe: the nodes' line-boost modules raise their sections' throughput.
+    let boosts = crate::game::rustcraft_node_window::node_modules(game, level.layout.nodes.keys().copied());
     let mut inventories: BTreeMap<Pos, Mode> = BTreeMap::new();
     let mut checked: BTreeSet<Pos> = BTreeSet::new();
     // Slice 18: the vanilla containers on their default, auto joints unless a housing sets them.
@@ -247,7 +249,12 @@ pub(super) fn rebuild(game: &mut Game<'_>, dimension: &str, level: &mut LevelNet
             (!joints.is_empty()).then(|| ItemNet {
                 key: (net.slot, first),
                 joints,
-                per_second: tuning.items_of(net.min_tier),
+                per_second: tuning.items_of(net.min_tier)
+                    * rustcraft_rules::net::node_window::net_boost(
+                        &net.housings,
+                        &level.topology.reach,
+                        &boosts,
+                    ),
                 housings: net.housings.clone(),
                 tier: net.min_tier,
             })

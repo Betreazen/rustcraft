@@ -88,6 +88,9 @@ pub struct LevelNet {
     pub anim: BTreeMap<Pos, bool>,
     /// Slice 15 (O4): the autocrafters' temporary pages from orders (rustcraft_orders).
     pub temp_pages: BTreeMap<Pos, crate::game::rustcraft_crafter::TempPage>,
+    /// s18/pipe: the energy ledger and what each consumer got, as the machines' tick last noted
+    /// them once a second, for the node's window (rustcraft_node_window).
+    pub pipe18_energy: Option<(rustcraft_rules::net::energy::Ledger, BTreeMap<Pos, f64>)>,
 }
 
 impl LevelNet {
@@ -107,6 +110,7 @@ impl LevelNet {
             ticks: 0,
             anim: BTreeMap::new(),
             temp_pages: BTreeMap::new(),
+            pipe18_energy: None,
         }
     }
 }
@@ -267,6 +271,8 @@ pub(super) fn on_level_tick(game: &mut Game<'_>, dimension: &str) {
     }
     if second {
         show_diagnoses(game, dimension);
+        // s18/pipe: the node windows' presses and views.
+        crate::game::rustcraft_node_window::tick(game, dimension);
         // H2: the first alloy a player carries brings them the engineer's handbook.
         handbook::tick(game, dimension);
     }
@@ -363,6 +369,8 @@ pub(super) fn on_right_click_block(
     canceled: &mut bool,
 ) {
     zipline::on_right_click_block(game, pos, canceled);
+    // s18/pipe: an empty hand opens the node's window.
+    crate::game::rustcraft_node_window::on_right_click_block(game, pos, face, canceled);
     base::on_right_click_block(game, pos, canceled);
     transport::on_right_click_block(game, pos, face, canceled);
 }

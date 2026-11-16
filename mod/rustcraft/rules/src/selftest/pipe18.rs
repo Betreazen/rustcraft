@@ -5,14 +5,20 @@
 //!   медностали берётся сплав этой ступени»).
 
 use super::magistral::{channel, line};
-use super::transport::{chest, fill, item_line};
+use super::transport::{COBBLE, chest, fill, item_line, joint};
 use super::{Bench, Build, Scenario, at, count_of, plot_area};
 use crate::housing::Diagnosis;
 use crate::net::topology::ChannelKind;
 use crate::geom::Pos;
 use crate::tuning::Tuning;
 
-pub const ALL: [Build; 4] = [recipes_craft, node_tiers, chests_work_both_ways, facade_and_lift];
+pub const ALL: [Build; 5] = [
+    recipes_craft,
+    node_tiers,
+    chests_work_both_ways,
+    facade_and_lift,
+    node_window_and_boost,
+];
 
 /// A handbook recipe: its three rows, what each letter is, what it makes and how many.
 pub struct Recipe {
@@ -206,6 +212,53 @@ fn facade_and_lift(o: Pos, _t: &Tuning) -> Scenario {
         .check("the housing is gone", move |b, _| {
             let block = b.block(h);
             if block == "minecraft:air" { Ok(()) } else { Err(format!("{block} stayed")) }
+        })
+}
+
+/// The window ticks and measures over this many ticks.
+const BOOST_WINDOW: u64 = 40;
+
+/// Guide `node`, `mod_line`: the node's window counts the line's housings and the farthest one
+/// it serves; a line-boost module in its socket raises the item channel's throughput by half.
+fn node_window_and_boost(o: Pos, t: &Tuning) -> Scenario {
+    let base = super::expect::items_in(t, 1, BOOST_WINDOW);
+    let (a, bb) = (chest(o, 1), chest(o, 4));
+    Scenario::new("pipe_node_window_and_line_boost", plot_area(o))
+        .then("a tier-1 node, 4 housings, a chest giving and a chest taking", move |b, _| {
+            item_line(b, o, 1, 4, &[1, 4])?;
+            joint(b, o, 1, crate::net::items::Mode::From, 0)?;
+            fill(b, a, COBBLE, 27 * 64)
+        })
+        .until("the window shows 4 housings, the farthest 4 of 32", 100, move |b, _| {
+            let json = b.pipe("node_view:0", o)?;
+            let v = crate::net::node_window::decode(json.as_bytes()).ok_or("the view does not read")?;
+            Ok(v.housings == 4 && v.farthest == 4 && v.limit == 32 && v.items == Some((4.0, 4.0)))
+        })
+        .then("a line-boost module into the first socket", move |b, _| {
+            let n = b.pipe("socket:0", o)?;
+            if n != "1" {
+                return Err(format!("{n} modules after the press"));
+            }
+            b.refresh();
+            Ok(())
+        })
+        .wait(40)
+        .then("count what the taking chest has", move |b, m| {
+            m.mark("start", f64::from(count_of(&b.items(bb), COBBLE)));
+            m.mark("at", m.elapsed as f64);
+            Ok(())
+        })
+        .wait(BOOST_WINDOW)
+        .check("the boosted net carries half as much again", move |b, m| {
+            let moved = f64::from(count_of(&b.items(bb), COBBLE)) - m.get("start");
+            let want = base * crate::net::node_window::boost(1);
+            // One move's worth either way, as the plain rate scenarios allow.
+            let tolerance = 1.0 + super::expect::items_in(&Tuning::default(), 1, 4) * 1.5;
+            if (moved - want).abs() <= tolerance {
+                Ok(())
+            } else {
+                Err(format!("{moved} moved in {BOOST_WINDOW} ticks, {want} expected"))
+            }
         })
 }
 

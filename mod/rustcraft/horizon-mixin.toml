@@ -315,6 +315,13 @@ file = "crates/horizon-client/src/game.rs"
 name = "rustcraft_pipe18"
 source = "pipe18.rs"
 
+# s18/pipe: the node's window (a screen of the mod's own) and the line-boost module.
+[[module]]
+id = "node_window"
+file = "crates/horizon-client/src/game.rs"
+name = "rustcraft_node_window"
+source = "node_window.rs"
+
 # The fall handling lives in the client library, below the game crate, so the list of riders
 # whose falls do no damage must live there too.
 [[module]]

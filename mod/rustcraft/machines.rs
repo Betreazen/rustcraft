@@ -522,6 +522,10 @@ pub(super) fn tick(game: &mut Game<'_>, level: &mut LevelNet, tuning: &Tuning) {
         1.0 / tuning.ticks_per_second,
     );
     power::settle(game, &mut level.sources, &report, tuning);
+    // s18/pipe: the node's window shows the balance of its line's circuits (rustcraft_node_window).
+    if level.ticks.is_multiple_of(20) {
+        level.pipe18_energy = Some((Ledger::new(&producers, &consumers), report.got.clone()));
+    }
     let requests: HashMap<Pos, f64> = consumers.iter().map(|c| (c.block, c.request)).collect();
     let request_of = |pos: &Pos| requests.get(pos).copied().unwrap_or(0.0);
     let mut status = resting;
