@@ -60,14 +60,14 @@ Audit: pmodules «Ёмкость костюма» DIFFERS (bug), zipline «16 з
 
 Audit: turret «Сцена: поворачивает голову и дуло» MISSING, «луч выстрела и луч лечения» MISSING.
 
-**Files:** `rules/src/turret.rs` (aim math only), `base.rs` (attack/support: write aim, send particles), `anim.rs` (one call for the turret's two aim parts).
+**Files:** `rules/src/aim.rs` (new, the aim math), `base.rs` (attack/support: write aim, send particles), `anim.rs` (one call for the turret's two aim parts).
 
 **Interfaces — Produces:** `pub fn aim(from: [f64;3], to: [f64;3]) -> (f32, f32)` (yaw about +y from +x counter-clockwise seen from above, pitch up, degrees); `pub fn aim_changed(old: (f32,f32), new: (f32,f32)) -> bool` (≥ 4°); `pub fn beam(from, to, step) -> Vec<[f64;3]>`. Block entity keys `aim_y`, `aim_p` (Short, degrees) in the update tag.
 
-- [ ] Tests: east target → yaw 0; north (−z) → 90; above → pitch > 0; `aim_changed` thresholds; a beam of 6 blocks at step 0.5 has 12 points ending at the target.
-- [ ] GREEN; base.rs writes the aim when changed (`native_block_entity_sync`), particles `minecraft:electric_spark` along the shot, `minecraft:happy_villager` along the heal; anim.rs turns `turret__aim_yaw` (and its carried pitch part) by `aim_y − facing`, the pitch part about z by `aim_p`.
-- [ ] Self-test `turret_aims_at_its_target`: attack turret, zombie east of it; until the block entity's `aim_y` is within 10° of the expected angle.
-- [ ] Commit.
+- [x] Tests: east target → yaw 0; north (−z) → 90; above → pitch > 0; `aim_changed` thresholds; a beam of 6 blocks at step 0.5 has 12 points ending at the target.
+- [x] GREEN; base.rs writes the aim when changed (`native_block_entity_sync`), particles `minecraft:electric_spark` along the shot, `minecraft:happy_villager` along the heal; anim.rs turns `turret__aim_yaw` (and its carried pitch part) by `aim_y − facing`, the pitch part about z by `aim_p`.
+- [x] Self-test `turret_aims_at_its_target`: attack turret, zombie east of it; until the block entity's `aim_y` is within 10° of the expected angle.
+- [x] Commit.
 
 ### Task 3: A turret kill is the owner's kill
 

@@ -35,6 +35,7 @@ use horizon_client::{
 };
 use horizon_world::nbt::{Compound, JavaString, Tag};
 use rustcraft_rules::{
+    aim,
     anchor::{self, Anchor, State as AnchorState},
     geom::Pos,
     machines::{
@@ -693,6 +694,13 @@ fn attack(
     };
     ts.target = Some(kind.clone());
     ts.target_id = Some(id);
+    // Slice 18: the head follows the target between shots too.
+    let mob_at = game.mobs.iter().find(|m| m.id == id).map(|m| {
+        [m.position.x, m.position.y + f64::from(m.height()) * 0.6, m.position.z]
+    });
+    if let Some(to) = mob_at {
+        aim_and_beam(game, pos, to, None);
+    }
     let cost = l.shot_energy(t);
     if energy < cost {
         return turret::shown(l, false, Shown::NoEnergy);
@@ -741,8 +749,74 @@ fn attack(
             }
         }
     }
+    if let Some(to) = mob_at {
+        aim_and_beam(game, pos, to, Some(SHOT_BEAM));
+    }
     game.native_hurt_entity(dimension, id, t.turret_damage as f32, SHOT_TYPE, None);
     turret::shown(l, true, Shown::Shooting(kind))
+}
+
+// ---- Slice 18: the head turns to its target, the shot and the heal are beams ----
+
+/// The block entity keys of the turret's aim (degrees), in its update tag for clients.
+pub(super) const AIM_KEYS: [&str; 2] = ["aim_y", "aim_p"];
+const SHOT_BEAM: &str = "minecraft:electric_spark";
+const HEAL_BEAM: &str = "minecraft:happy_villager";
+/// The head's middle above the block's corner: the barrel's pivot height.
+const HEAD: [f64; 3] = [0.5, 0.6, 0.5];
+
+fn short(nbt: &Compound, key: &str) -> f32 {
+    match nbt.get(&JavaString::from(key)) {
+        Some(Tag::Short(v)) => f32::from(*v),
+        _ => 0.0,
+    }
+}
+
+/// The turret's aim on a client: (yaw, pitch) in degrees, world frame.
+pub(super) fn aim_of(nbt: &Compound) -> (f32, f32) {
+    (short(nbt, AIM_KEYS[0]), short(nbt, AIM_KEYS[1]))
+}
+
+/// On a client, inside the turret's frame (already turned by `facing` degrees): turns its head
+/// part `model`, and the barrel riding on it, to the aim the server sent.
+pub(super) fn turn_to_aim(nbt: &Compound, model: &str, facing: f32, draw: &mut crate::game::native_block_entity_draw::BlockEntityDraw) {
+    let (yaw, pitch) = aim_of(nbt);
+    let turn = |draw: &mut crate::game::native_block_entity_draw::BlockEntityDraw| {
+        draw.rotate_about([0.0, 1.0, 0.0], yaw - facing, [0.5, 0.40625, 0.5]);
+    };
+    match model {
+        "rustcraft:block/turret__aim_yaw" => turn(draw),
+        "rustcraft:block/turret__aim_pitch" => {
+            turn(draw);
+            draw.rotate_about([0.0, 0.0, 1.0], pitch, [0.8125, 0.59375, 0.5]);
+        }
+        _ => {}
+    }
+}
+
+/// Points the turret at `to` (clients told when it turned enough) and draws a beam of
+/// `particle` from its barrel there.
+fn aim_and_beam(game: &mut Game<'_>, pos: Pos, to: [f64; 3], particle: Option<&str>) {
+    let from = [f64::from(pos[0]) + HEAD[0], f64::from(pos[1]) + HEAD[1], f64::from(pos[2]) + HEAD[2]];
+    let new = aim::aim(from, to);
+    let turned = game
+        .native_with_mod_block_entity(pos, |e| {
+            if !aim::aim_changed(aim_of(&e.nbt), new) && e.nbt.contains_key(&JavaString::from(AIM_KEYS[0])) {
+                return false;
+            }
+            e.nbt.insert(JavaString::from(AIM_KEYS[0]), Tag::Short(new.0.round() as i16));
+            e.nbt.insert(JavaString::from(AIM_KEYS[1]), Tag::Short(new.1.round() as i16));
+            true
+        })
+        .unwrap_or(false);
+    if turned {
+        game.native_block_entity_sync(pos);
+    }
+    let Some(particle) = particle else { return };
+    let options = horizon_client::particles::ParticleOptions::named(particle.to_owned());
+    for p in aim::beam(from, to, 0.5) {
+        game.with_level(|_, level, _| level.native_send_particles(&options, None, p, [0.0; 3], 0.0, 1));
+    }
 }
 
 /// The turret's own bleeding: its damage once a second while it lasts.
@@ -922,6 +996,11 @@ fn support(
                     .find(|p| p.uuid == who)
                     .map_or(0.0, |p| p.health);
                 game.native_set_player_status(who, Some(health + b.heal as f32), None, None);
+                // Slice 18: the heal is a beam to the one healed.
+                if let Some(p) = players.iter().find(|p| p.uuid == who) {
+                    let to = [p.position[0], p.position[1] + 1.0, p.position[2]];
+                    aim_and_beam(game, pos, to, Some(HEAL_BEAM));
+                }
             }
             doing = Shown::Healing(name);
         }

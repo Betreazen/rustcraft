@@ -333,6 +333,10 @@ pub trait Bench {
     fn gear_held(&self, _pos: Pos, _slot: usize) -> Option<crate::gear::Held> {
         None
     }
+    /// The aim a turret's block entity tells clients: (yaw, pitch) in degrees, None before any.
+    fn turret_aim(&self, _pos: Pos) -> Option<(f32, f32)> {
+        None
+    }
 }
 
 /// A mob as the self-test reads it.

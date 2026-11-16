@@ -861,6 +861,13 @@ impl Bench for GameBench<'_, '_> {
         let stack = self.game.native_mod_block_entity(pos)?.items.get(slot).cloned().flatten()?;
         crate::game::rustcraft_gear::held(&stack)
     }
+
+    fn turret_aim(&self, pos: Pos) -> Option<(f32, f32)> {
+        let e = self.game.native_mod_block_entity(pos)?;
+        e.nbt
+            .contains_key(&horizon_world::nbt::JavaString::from(base::AIM_KEYS[0]))
+            .then(|| base::aim_of(&e.nbt))
+    }
 }
 
 /// The slice-7 half of the bench.
