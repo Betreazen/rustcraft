@@ -1039,5 +1039,13 @@
   "rustcraft.structure.single": "one crystal",
   "rustcraft.structure.broken": "broken",
   "rustcraft.structure.solution": "Solution",
-  "rustcraft.structure.solution_line": "%s of %s mB · %s buckets a minute"
+  "rustcraft.structure.solution_line": "%s of %s mB · %s buckets a minute",
+  "rustcraft.miner.found_left": "Ore found %s · left %s",
+  "rustcraft.miner.counting": "counting…",
+  "rustcraft.miner.outlet": "Puts it: ",
+  "rustcraft.miner.outlet.chest": "chest beside",
+  "rustcraft.miner.outlet.magistral": "magistral",
+  "rustcraft.miner.outlet.dock": "load dock",
+  "rustcraft.miner.outlet_hint": "It picks in order: a chest beside it, else the magistral, else a load dock by the monorail",
+  "rustcraft.miner.energy": "%s of %s E/s"
 }

@@ -198,6 +198,19 @@ fn miner_fills_a_load_dock(o: crate::geom::Pos, _t: &Tuning) -> Scenario {
             b.place(ores[0], "minecraft:iron_ore", &[])
         })
         .until("the raw iron went into the load dock", 600, move |b, _| Ok(raw(b, dock) >= 1))
+        .until(
+            "its window: one ore found, none left, the load dock marked",
+            200,
+            move |b, _| {
+                let s = b.sheet(m).ok_or("no sheet for the miner")?;
+                let rows: Vec<String> = s.rows.iter().map(|r| r.to_string()).collect();
+                Ok(rows.len() == 2
+                    && rows[0].contains("rustcraft.miner.found_left")
+                    && !rows[0].contains("rustcraft.miner.counting")
+                    && rows[1].contains("\"[\"")
+                    && rows[1].contains("rustcraft.miner.outlet.dock"))
+            },
+        )
         .then("a chest beside it too, another ore, the miner set anew", move |b, m2| {
             m2.mark("dock", f64::from(raw(b, dock)));
             b.place(chest, "minecraft:chest", &[])?;

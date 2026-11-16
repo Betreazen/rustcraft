@@ -3687,5 +3687,13 @@
   "rustcraft.structure.single": "один кристалл",
   "rustcraft.structure.broken": "нарушена",
   "rustcraft.structure.solution": "Раствор",
-  "rustcraft.structure.solution_line": "%s из %s мВ · %s ведра в минуту"
+  "rustcraft.structure.solution_line": "%s из %s мВ · %s ведра в минуту",
+  "rustcraft.miner.found_left": "Найдено руды %s · осталось %s",
+  "rustcraft.miner.counting": "считаю…",
+  "rustcraft.miner.outlet": "Куда складывает: ",
+  "rustcraft.miner.outlet.chest": "сундук рядом",
+  "rustcraft.miner.outlet.magistral": "магистраль",
+  "rustcraft.miner.outlet.dock": "блок погрузки",
+  "rustcraft.miner.outlet_hint": "Сам выбирает по порядку: сундук вплотную, иначе магистраль, иначе блок погрузки у монорельса",
+  "rustcraft.miner.energy": "%s из %s Е/с"
 }

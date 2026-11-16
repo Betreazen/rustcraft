@@ -296,6 +296,56 @@ impl Miner {
     }
 }
 
+/// Slice 18 (ui.js `miner`: «Найдено руды», «Осталось»): a count of the wanted ores the miner has
+/// not reached yet, made a few cells at a time from where its scan stood when the count began.
+/// Once done it goes down by one for each ore dug; it starts again when the ores switched off or
+/// the square change.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Survey {
+    /// The next cell to look at, and the ores found from the start.
+    pub next: u64,
+    pub ores: u64,
+    pub done: bool,
+    /// What it counts for: the ores switched off and the square's cells.
+    pub off: u16,
+    pub total: u64,
+}
+
+impl Survey {
+    /// A count from the miner's scan cursor `cursor`.
+    pub fn new(cursor: u64, off: u16, total: u64) -> Survey {
+        Survey {
+            next: cursor,
+            ores: 0,
+            done: cursor >= total,
+            off,
+            total,
+        }
+    }
+
+    /// Whether it still counts for `off` and `total`.
+    pub fn fits(&self, off: u16, total: u64) -> bool {
+        self.off == off && self.total == total
+    }
+
+    /// Looks at up to `budget` more cells: `wanted` says which hold an ore to take.
+    pub fn step(&mut self, budget: u64, mut wanted: impl FnMut(u64) -> bool) {
+        let end = (self.next + budget).min(self.total);
+        while self.next < end {
+            if wanted(self.next) {
+                self.ores += 1;
+            }
+            self.next += 1;
+        }
+        self.done = self.next >= self.total;
+    }
+
+    /// An ore was dug.
+    pub fn dug(&mut self) {
+        self.ores = self.ores.saturating_sub(1);
+    }
+}
+
 /// Ticks a miner at `share`, `work` and `scout` takes to reach and dig the `index`th cell, from a
 /// fresh start: what the self-test waits for.
 pub fn ticks_to_dig(index: u64, share: f64, work: f64, scout: f64, t: &Tuning) -> u64 {
@@ -618,6 +668,21 @@ mod tests {
         assert_eq!(fired, 2);
         assert_eq!(Shown::working(0.5), Shown::Slowed(50));
         assert_eq!(Shown::working(0.0), Shown::NoEnergy);
+    }
+
+    #[test]
+    fn a_survey_counts_the_ores_ahead_a_few_cells_at_a_time() {
+        let ores = [3u64, 7, 8, 40];
+        let mut s = Survey::new(5, 0, 50);
+        s.step(10, |i| ores.contains(&i));
+        assert_eq!((s.next, s.ores, s.done), (15, 2, false));
+        s.step(100, |i| ores.contains(&i));
+        assert_eq!((s.ores, s.done), (3, true));
+        s.dug();
+        assert_eq!(s.ores, 2);
+        assert!(s.fits(0, 50));
+        assert!(!s.fits(Ore::Coal.bit(), 50));
+        assert!(Survey::new(50, 0, 50).done);
     }
 
     #[test]

@@ -28,7 +28,7 @@ use rustcraft_rules::{
         },
         style::Severity,
     },
-    mining::{self as rules, Cycle, Miner, Ore, Outlet, Shown, Step},
+    mining::{self as rules, Cycle, Miner, Ore, Outlet, Shown, Step, Survey},
     reports::Report,
     tuning::Tuning,
 };
@@ -43,6 +43,10 @@ const DIG_KEY: &str = "dig";
 const CARRY_KEY: &str = "carry";
 const OFF_KEY: &str = "ores_off";
 const PROGRESS_KEY: &str = "progress";
+/// Slice 18: the ores a miner has dug («Найдено руды»).
+const FOUND_KEY: &str = "found";
+/// Cells of its square a miner's open window counts ahead each time it is looked at.
+const SURVEY_BUDGET: u64 = 2048;
 /// MN1: what a miner or a breaker holds goes to a container beside it this often, this many.
 const PUSH_EVERY: u64 = 8;
 const PUSH: u32 = 16;
@@ -53,8 +57,11 @@ const PUSH_TO_CHEST: u32 = 27 * 64;
 struct State {
     ticks: u64,
     shown: HashMap<(String, Pos), Shown>,
-    /// Slice 18: where each miner and breaker puts what it dug (MN1).
+    /// Slice 18: where each miner and breaker puts what it dug (MN1), what it got and asked, E/s,
+    /// and each miner's count of the ores ahead (its window's «Осталось»).
     outlets: HashMap<(String, Pos), Outlet>,
+    energy: HashMap<(String, Pos), (f64, f64)>,
+    surveys: HashMap<(String, Pos), Survey>,
 }
 
 static STATE: LazyLock<Mutex<State>> = LazyLock::new(Mutex::default);
@@ -328,6 +335,7 @@ pub(super) fn run(
         let mut s = state();
         s.ticks += 1;
         s.shown.insert((dimension.clone(), pos), shown);
+        s.energy.insert((dimension.clone(), pos), (share * request, request));
         s.ticks.is_multiple_of(PUSH_EVERY)
     };
     if push && machine != Machine::Placer {
@@ -370,6 +378,14 @@ fn dig(
     }
     if let Some(state) = game.native_default_state(rock) {
         game.native_set_block(dimension, p, state, 3);
+    }
+    // Slice 18: one more found, one fewer ahead.
+    game.native_with_mod_block_entity(miner, |e| {
+        let n = read_long(&e.nbt, FOUND_KEY) + 1;
+        e.nbt.insert(JavaString::from(FOUND_KEY), Tag::Long(n as i64));
+    });
+    if let Some(s) = self::state().surveys.get_mut(&(dimension.to_owned(), miner)) {
+        s.dug();
     }
     if let Some(owner) = base::owner_at(game, miner) {
         base::report(Report::Break {
@@ -635,26 +651,65 @@ pub(super) fn sheet(
         let m = read_miner(&entity.nbt);
         let layer = m.cursor / (side as u64).pow(2);
         let size = Text::literal(format!("{side}×{side}"));
-        s.rows.push(base::v(&line(
-            "rustcraft.miner.area",
-            "Area %s down to y %s",
-            &[size, Text::literal(min_y.to_string())],
-        )));
-        s.rows.push(base::v(&line(
-            "rustcraft.miner.scanned",
-            "Scanned %s of %s cells, layer y %s",
-            &[
-                Text::literal(m.cursor.min(total).to_string()),
-                Text::literal(total.to_string()),
-                Text::literal((pos[1] - 1 - layer as i32).max(min_y).to_string()),
-            ],
-        )));
-        s.hints = vec![vec![base::v(&line(
-            "rustcraft.miner.area_hint",
-            "An area module: 22×22, two: 33×33",
-            &[],
-        ))]];
         let off = read_int(&entity.nbt, OFF_KEY).map_or(0, |v| v as u16);
+        // Slice 18 (ui.js `miner`): «Найдено руды» and «Осталось», counted ahead a little each
+        // time the window is looked at.
+        let left = survey(game, dimension, pos, &m, side, min_y, off, total);
+        let found = read_long(&entity.nbt, FOUND_KEY);
+        let left_text = match left {
+            Some(n) => Text::literal(n.to_string()),
+            None => line("rustcraft.miner.counting", "counting…", &[]),
+        };
+        s.rows.push(base::v(&line(
+            "rustcraft.miner.found_left",
+            "Ore found %s · left %s",
+            &[Text::literal(found.to_string()), left_text],
+        )));
+        // «Куда складывает»: the guide's three places, the one it uses now marked.
+        let now = outlet_at(dimension, pos);
+        let mut places = line("rustcraft.miner.outlet", "Puts it: ", &[]);
+        for (i, o) in Outlet::ORDER.into_iter().enumerate() {
+            if i > 0 {
+                places.push(Text::literal(" · "));
+            }
+            let name = line(&format!("rustcraft.miner.outlet.{}", o.key()), o.key(), &[]);
+            if now == Some(o) {
+                places.push(Text::literal("["));
+                places.push(name);
+                places.push(Text::literal("]"));
+            } else {
+                places.push(name);
+            }
+        }
+        s.rows.push(base::v(&places));
+        s.hints = vec![
+            vec![
+                base::v(&line(
+                    "rustcraft.miner.area",
+                    "Area %s down to y %s",
+                    &[size, Text::literal(min_y.to_string())],
+                )),
+                base::v(&line(
+                    "rustcraft.miner.scanned",
+                    "Scanned %s of %s cells, layer y %s",
+                    &[
+                        Text::literal(m.cursor.min(total).to_string()),
+                        Text::literal(total.to_string()),
+                        Text::literal((pos[1] - 1 - layer as i32).max(min_y).to_string()),
+                    ],
+                )),
+                base::v(&line(
+                    "rustcraft.miner.area_hint",
+                    "An area module: 22×22, two: 33×33",
+                    &[],
+                )),
+            ],
+            vec![base::v(&line(
+                "rustcraft.miner.outlet_hint",
+                "A chest beside it first, else the magistral, else a load dock",
+                &[],
+            ))],
+        ];
         s.toggles = Ore::LISTED
             .iter()
             .map(|ore| {
@@ -719,17 +774,62 @@ pub(super) fn sheet(
         Some(Shown::NoEnergy) => Severity::Bad,
         _ => Severity::Warn,
     };
-    let text = shown.map_or_else(|| Text::literal("…"), shown_text);
+    let mut text = shown.map_or_else(|| Text::literal("…"), shown_text);
+    // Slice 18 (ui.js `energy`): what it gets of what it asks.
+    if let Some((got, asked)) = state().energy.get(&(dimension.to_owned(), pos)).copied()
+        && asked > 0.0
+    {
+        text.push(Text::literal(" · "));
+        text.push(line(
+            "rustcraft.miner.energy",
+            "%s of %s E/s",
+            &[
+                Text::literal(format!("{got:.0}")),
+                Text::literal(format!("{asked:.0}")),
+            ],
+        ));
+    }
     s.status = Some(SheetStatus {
         severity: severity_code(severity),
         text: base::v(&text),
     });
 }
 
+/// The miner's count of the wanted ores ahead of its scan, `SURVEY_BUDGET` more cells a call;
+/// none while it still counts.
+#[allow(clippy::too_many_arguments)]
+fn survey(
+    game: &Game<'_>,
+    dimension: &str,
+    pos: Pos,
+    m: &Miner,
+    side: i32,
+    min_y: i32,
+    off: u16,
+    total: u64,
+) -> Option<u64> {
+    let key = (dimension.to_owned(), pos);
+    let mut s = state()
+        .surveys
+        .get(&key)
+        .copied()
+        .filter(|s| s.fits(off, total))
+        .unwrap_or_else(|| Survey::new(m.cursor, off, total));
+    if !s.done {
+        s.step(SURVEY_BUDGET, |i| {
+            rules::cell(pos, side, min_y, i).is_some_and(|p| rules::wanted(&game.native_block(p), off))
+        });
+    }
+    state().surveys.insert(key, s);
+    s.done.then_some(s.ores)
+}
+
 /// The self-test's plot cleared: what it showed goes.
 pub(super) fn forget_area(dimension: &str, min: Pos, max: Pos) {
     let inside = |p: Pos| (0..3).all(|k| p[k] >= min[k] && p[k] <= max[k]);
-    state()
-        .shown
-        .retain(|(d, p), _| d != dimension || !inside(*p));
+    let mut s = state();
+    s.shown.retain(|(d, p), _| d != dimension || !inside(*p));
+    s.outlets.retain(|(d, p), _| d != dimension || !inside(*p));
+    s.energy.retain(|(d, p), _| d != dimension || !inside(*p));
+    s.surveys.retain(|(d, p), _| d != dimension || !inside(*p));
 }
