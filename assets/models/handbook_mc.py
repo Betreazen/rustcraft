@@ -37,6 +37,7 @@ from pathlib import Path
 sys.dont_write_bytecode = True
 import handbook_en  # noqa: E402
 import scenes_mc  # noqa: E402
+import windows_mc  # noqa: E402
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent.parent
@@ -125,7 +126,7 @@ const ctx = vm.createContext({ RC });
 for (const f of ['data.js', 'ui.js']) vm.runInContext(fs.readFileSync(path.join(dir, f), 'utf8'), ctx, { filename: f });
 const label = (h) => { const m = /<label>([\s\S]*?)<\/label>/.exec(h || ''); return m ? m[1] : ''; };
 const ui = {};
-for (const [id, w] of Object.entries(RC.UI)) ui[id] = { title: w.title, parts: w.parts.map((p) => [label(p.html), p.note || '']) };
+for (const [id, w] of Object.entries(RC.UI)) ui[id] = { title: w.title, parts: w.parts.map((p) => [label(p.html), p.note || '']), html: w.parts.map((p) => p.html) };
 process.stdout.write(JSON.stringify({
   cats: RC.CATS, tiers: RC.TIERS, tierTable: RC.TIER_TABLE, fix: RC.DIAG_FIX, glossary: RC.GLOSSARY, ui,
   entries: RC.ENTRIES.map((e) => ({ id: e.id, cat: e.cat, tier: e.tier || 0, name: e.name, sum: e.sum || '',
@@ -279,6 +280,12 @@ def main():
     ru.update(scene_ru)
     en.update(scene_en)
     scenes_mc.write(scene_table)
+    ids = {e['id'] for e in g['entries']}
+    shown = {pid: {'title': w['title'], 'parts': [{'html': h} for h in w['html']]}
+             for pid, w in g['ui'].items() if pid in ids}
+    window_table, window_ru = windows_mc.build(shown)
+    ru.update(window_ru)
+    windows_mc.write(window_table)
     changed = [n for n, d in (('ru_ru.json', ru), ('en_us.json', en)) if write_lang(n, d)]
     print('%d pages in %d sections; %d Russian and %d English lines%s' % (
         len(rows), len(sections), len(ru), len(en), ('; rewrote ' + ', '.join(changed)) if changed else ''))

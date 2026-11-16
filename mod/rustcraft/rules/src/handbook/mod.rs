@@ -20,6 +20,8 @@ pub mod pages;
 pub mod recipes;
 pub mod scene;
 pub mod scenes;
+pub mod window;
+pub mod windows;
 
 use crate::machines::panel::{Rect, inside};
 use std::collections::BTreeSet;
@@ -405,6 +407,53 @@ pub enum Piece {
     },
     /// «См. также»: the pages it links, as indices into PAGES.
     See(Vec<usize>),
+    /// The block's window as a picture (`window`): its title and its parts, before the legend.
+    Window {
+        title: String,
+        parts: Vec<WindowPart>,
+    },
+}
+
+/// A part of the window's picture: its number, its label, its widget and the words it shows.
+#[derive(Clone, Debug, PartialEq)]
+pub struct WindowPart {
+    pub n: usize,
+    pub label: String,
+    pub widget: &'static window::Widget,
+    pub words: Vec<String>,
+}
+
+/// How many words a widget shows.
+fn word_count(w: &window::Widget) -> usize {
+    use window::Widget;
+    match *w {
+        Widget::Mode { .. } => 3,
+        Widget::Bar { .. } | Widget::Tank { .. } | Widget::Status { .. } | Widget::Text => 1,
+        Widget::Rows { n } => 2 * usize::from(n),
+        Widget::Chips { on, note } => on.len() + usize::from(note),
+        Widget::Map { n } => usize::from(n),
+        _ => 0,
+    }
+}
+
+/// The page's window as a picture, when its guide entry has one and the reader's language has
+/// its title.
+fn window_piece(page: &Page, get: &dyn Fn(&str) -> Option<String>) -> Option<Piece> {
+    let widgets = window::window_of(page.id)?;
+    let title = get("window")?;
+    let parts = widgets
+        .iter()
+        .enumerate()
+        .map(|(i, widget)| WindowPart {
+            n: i + 1,
+            label: get(&format!("part.{i}.label")).unwrap_or_default(),
+            widget,
+            words: (0..word_count(widget))
+                .map(|k| get(&format!("part.{i}.w.{k}")).unwrap_or_default())
+                .collect(),
+        })
+        .collect();
+    Some(Piece::Window { title, parts })
 }
 
 /// A page's pieces: the summary, the recipes (`recipes`: each one's block height, as the game's
@@ -469,6 +518,7 @@ pub fn pieces(page: &Page, recipes: &[f32], lookup: &dyn Fn(&str) -> Option<Stri
         out.push(Piece::Heading(
             word("window").unwrap_or_else(|| "Window".into()),
         ));
+        out.extend(window_piece(page, &get));
         out.extend(parts);
     }
     let see: Vec<usize> = page.see.iter().filter_map(|id| page_index(id)).collect();
@@ -555,6 +605,16 @@ pub enum Row {
     },
     /// A row of «см. также» links: up to two pages (indices into PAGES).
     Links([Option<usize>; 2]),
+    /// The window picture's title strip.
+    WindowTitle(String),
+    /// A part of the window picture, `height` tall.
+    Widget {
+        n: usize,
+        label: String,
+        widget: &'static window::Widget,
+        words: Vec<String>,
+        height: f32,
+    },
 }
 
 impl Row {
@@ -563,6 +623,8 @@ impl Row {
             Row::Recipes { height, .. } => *height,
             Row::Gap => 4.0,
             Row::Links(_) => LINK_HEIGHT,
+            Row::WindowTitle(_) => window::TITLE_HEIGHT,
+            Row::Widget { height, .. } => *height,
             _ => LINE,
         }
     }
@@ -652,6 +714,25 @@ pub fn lay_out(pieces: &[Piece], width: f32, measure: &dyn Fn(&str) -> f32) -> V
                 role: Role::Heading,
             }),
             Piece::Table { head, rows } => table(&mut out, head, rows, width, measure),
+            Piece::Window { title, parts } => {
+                out.push(Row::WindowTitle(title.clone()));
+                for p in parts {
+                    let height = window::part_height(
+                        p.widget,
+                        !p.label.is_empty(),
+                        &p.words,
+                        width,
+                        measure,
+                    );
+                    out.push(Row::Widget {
+                        n: p.n,
+                        label: p.label.clone(),
+                        widget: p.widget,
+                        words: p.words.clone(),
+                        height,
+                    });
+                }
+            }
             Piece::See(pages) => {
                 for pair in pages.chunks(2) {
                     out.push(Row::Links([pair.first().copied(), pair.get(1).copied()]));

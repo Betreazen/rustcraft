@@ -81,9 +81,9 @@
 
 **Files:** `handbook_mc.py` (вид части из `ui.js`: slots, work, energy, gives, mode, modules, tank, gauge, status, rows, прочее), `rules/src/handbook/window.rs` (раскладка частей столбиком с номерами), `handbook.rs` (рисование частей стилем окон).
 
-- [ ] RED: `window_parts_stack_with_numbers`, `window_sheet_fits_the_body`.
-- [ ] GREEN; лист «Окно блока» перед списком частей: схема окна с номерами частей, под ней тот же нумерованный список.
-- [ ] Коммит.
+- [x] RED: `window_parts_stack_with_numbers`, `window_sheet_fits_the_body`.
+- [x] GREEN; лист «Окно блока» перед списком частей: схема окна с номерами частей, под ней тот же нумерованный список.
+- [x] Коммит.
 
 ### Task 6: Позы моделей в сценах
 

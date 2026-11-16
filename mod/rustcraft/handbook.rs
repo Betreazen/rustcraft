@@ -26,7 +26,9 @@
 //   (`native_recipes_of_type`, API 36, native_hooks.rs:11351-11356: a client sees the content
 //   mod's recipes, which is where the mod's are), two to a row, a machine's over its arrow.
 //   A table of the guide's (the turret's) is drawn in columns, and «см. также» is a row of page
-//   icons and names: a click opens that page.
+//   icons and names: a click opens that page. A block's window is drawn as a picture before its
+//   numbered legend (rustcraft_rules::handbook::window): each part's number, label and widget
+//   (slots, bars, the mode switch, sockets, the status line, rows, chips) in the windows' style.
 // - A left click (`native_screen_mouse_button_pressed_pre`, API 80, native_hooks.rs:3804-3838),
 //   the wheel (`native_screen_mouse_scrolled_pre`, API 93, native_hooks.rs:3893-3933) and the
 //   arrow keys (`native_screen_key_pressed_pre`, API 104) turn its sheets; Escape closes it.
@@ -60,6 +62,7 @@ use rustcraft_rules::{
         self as rules, Given, PAGES, Part, Piece, Role, Row, View,
         recipes::{self, Made, Out, Shown},
         scene::{self, Look, Playback, Scene},
+        window::{self, Cell, Widget},
     },
     machines::style::{self, colour},
 };
@@ -772,6 +775,14 @@ fn body(game: &Game<'_>, batch: &mut HudBatch, o: [f32; 2], laid: &Laid, sheet: 
                     }
                 }
             }
+            Row::WindowTitle(title) => window_title(game, batch, o, y, title),
+            Row::Widget {
+                n,
+                label,
+                widget: w,
+                words,
+                height,
+            } => widget_part(game, batch, o, y, (*n, label, w, words, *height)),
             Row::Gap => {}
         }
         y += row.height();
@@ -913,6 +924,222 @@ fn bottom(
     );
     let place = if on_scene { scene::SHEET } else { rules::SHEET };
     kit::centred(game, batch, o, place, &n, LABEL);
+}
+
+// ---- The window's picture (rustcraft_rules::handbook::window) ----
+
+/// The picture's title strip: the window's name on a raised strip.
+fn window_title(game: &Game<'_>, batch: &mut HudBatch, o: [f32; 2], y: f32, title: &str) {
+    let r = [rules::BODY_X, y, rules::BODY_WIDTH, window::TITLE_HEIGHT];
+    kit::fills(game, batch, o, &style::raised(r));
+    let measure = |s: &str| game.native_text_width(s);
+    let t = rules::clip(title, r[2] - 8.0, &measure);
+    text(game, batch, &t, o, [r[0] + 4.0, y + 3.0], TEXT_ON);
+}
+
+/// One part of the picture: the dark panel behind it, its number and label, its widget.
+fn widget_part(
+    game: &Game<'_>,
+    batch: &mut HudBatch,
+    o: [f32; 2],
+    y: f32,
+    part: (usize, &str, &Widget, &[String], f32),
+) {
+    let (n, label, w, words, height) = part;
+    let x = rules::BODY_X;
+    game.native_fill(
+        batch,
+        [o[0] + x, o[1] + y, rules::BODY_WIDTH, height],
+        colour::WELL,
+    );
+    let square = [x + 2.0, y + 1.0, rules::NUMBER[0], rules::NUMBER[1]];
+    kit::fills(game, batch, o, &style::raised(square));
+    kit::centred(game, batch, o, square, &n.to_string(), TEXT_ON);
+    if !label.is_empty() {
+        text(
+            game,
+            batch,
+            &label.to_uppercase(),
+            o,
+            [x + rules::INDENT + 2.0, y + 1.0],
+            LABEL,
+        );
+    }
+    let at = window::widget_at(!label.is_empty());
+    let at = [x + at[0] + 2.0, y + at[1]];
+    let width = rules::BODY_WIDTH - rules::INDENT - 4.0;
+    widget(game, batch, o, at, width, w, words);
+}
+
+/// A mock-up slot: its frame, its item's colour, its count.
+fn mock_slot(game: &Game<'_>, batch: &mut HudBatch, o: [f32; 2], p: [f32; 2], c: &Cell) {
+    slot(game, batch, o, p);
+    if c.rgb != 0 {
+        let alpha = if c.ghost { 0x6000_0000 } else { 0xFF00_0000 };
+        let r = [o[0] + p[0] + 3.0, o[1] + p[1] + 3.0, 12.0, 12.0];
+        game.native_fill(batch, r, alpha | c.rgb);
+    }
+    if !c.count.is_empty() {
+        kit::text_right(game, batch, c.count, o, p[0] + 17.0, p[1] + 9.0, VALUE);
+    }
+}
+
+fn word(words: &[String], k: usize) -> &str {
+    words.get(k).map_or("", String::as_str)
+}
+
+/// A widget with its corner at `at` (window pixels), `width` wide.
+fn widget(
+    game: &Game<'_>,
+    batch: &mut HudBatch,
+    o: [f32; 2],
+    at: [f32; 2],
+    width: f32,
+    w: &Widget,
+    words: &[String],
+) {
+    let measure = |s: &str| game.native_text_width(s);
+    let bar = |batch: &mut HudBatch, pct: u8, rgb: u32| {
+        let r = [at[0], at[1] + 1.0, window::BAR[0], window::BAR[1]];
+        kit::fills(game, batch, o, &style::well(r));
+        let fill = (r[2] - 2.0) * f32::from(pct.min(100)) / 100.0;
+        let f = [o[0] + r[0] + 1.0, o[1] + r[1] + 1.0, fill, r[3] - 2.0];
+        game.native_fill(batch, f, 0xFF00_0000 | rgb);
+        let line = rules::clip(word(words, 0), width - r[2] - 6.0, &measure);
+        text(game, batch, &line, o, [at[0] + r[2] + 6.0, at[1]], LABEL);
+    };
+    match *w {
+        Widget::Slots { cols, cells } => {
+            let per = window::slot_cols(cols, width);
+            for (i, c) in cells.iter().enumerate() {
+                let p = [
+                    at[0] + window::SLOT * (i % per) as f32,
+                    at[1] + window::SLOT * (i / per) as f32,
+                ];
+                mock_slot(game, batch, o, p, c);
+            }
+        }
+        Widget::Work { pct } => {
+            let r = [at[0], at[1] + 1.0, 22.0, 6.0];
+            kit::arrow(game, batch, o, r, f64::from(pct) / 100.0);
+        }
+        Widget::Bar { pct, rgb } | Widget::Tank { pct, rgb } => bar(batch, pct, rgb),
+        Widget::Mode { active } => {
+            let each = (width / 3.0).min(70.0);
+            for k in 0..3 {
+                let r = [
+                    at[0] + each * k as f32,
+                    at[1],
+                    each - 2.0,
+                    window::MODE_HEIGHT,
+                ];
+                let t = rules::clip(word(words, k), r[2] - 4.0, &measure);
+                button(game, batch, o, r, &t, k == usize::from(active));
+            }
+        }
+        Widget::Sockets { filled } => {
+            for (k, &rgb) in filled.iter().enumerate() {
+                let c = Cell {
+                    rgb,
+                    count: "",
+                    ghost: false,
+                };
+                mock_slot(game, batch, o, [at[0] + window::SLOT * k as f32, at[1]], &c);
+            }
+        }
+        Widget::Status { tone } => {
+            let (rgb, back) = match tone {
+                0 => (colour::OK & 0xFF_FFFF, colour::OK_BACK),
+                1 => (colour::WARN & 0xFF_FFFF, colour::WARN_BACK),
+                _ => (colour::BAD_TEXT, colour::BAD_BACK),
+            };
+            let r = [o[0] + at[0], o[1] + at[1], width, window::STATUS_HEIGHT];
+            game.native_fill(batch, r, back);
+            let t = rules::clip(word(words, 0), width - 6.0, &measure);
+            text(game, batch, &t, o, [at[0] + 3.0, at[1] + 2.0], rgb);
+        }
+        Widget::Rows { n } => {
+            for k in 0..usize::from(n) {
+                let y = at[1] + rules::LINE * k as f32;
+                let value = word(words, 2 * k + 1);
+                let room = width - measure(value) - rules::PAIR_GAP;
+                let key = rules::clip(word(words, 2 * k), room.max(0.0), &measure);
+                text(game, batch, &key, o, [at[0], y], LABEL);
+                kit::text_right(game, batch, value, o, at[0] + width, y, VALUE);
+            }
+        }
+        Widget::Chips { on, note } => {
+            let rects = window::chip_rects(words, on.len(), width, &measure);
+            for (k, r) in rects.iter().enumerate() {
+                let r = [at[0] + r[0], at[1] + r[1], r[2], r[3]];
+                let lit = on.get(k).copied().unwrap_or(false);
+                let face = if lit {
+                    style::raised(r)
+                } else {
+                    style::well(r)
+                };
+                kit::fills(game, batch, o, &face);
+                let t = rules::clip(word(words, k), r[2] - 2.0, &measure);
+                kit::centred(game, batch, o, r, &t, if lit { TEXT_ON } else { TEXT });
+            }
+            if note {
+                let top = rects.last().map_or(0.0, |r| r[1] + r[3]) + 2.0;
+                for (i, l) in rules::wrap(word(words, on.len()), width, &measure)
+                    .iter()
+                    .enumerate()
+                {
+                    let y = at[1] + top + rules::LINE * i as f32;
+                    text(game, batch, l, o, [at[0], y], LABEL);
+                }
+            }
+        }
+        Widget::Craft { from, to } => {
+            for (k, c) in from.iter().enumerate() {
+                mock_slot(game, batch, o, [at[0] + window::SLOT * k as f32, at[1]], c);
+            }
+            let ax = at[0] + window::SLOT * from.len() as f32 + 4.0;
+            kit::arrow(
+                game,
+                batch,
+                o,
+                [ax, at[1] + 6.0, window::CRAFT_ARROW, 6.0],
+                1.0,
+            );
+            let ox = at[0] + window::craft_out_x(from.len());
+            for (k, c) in to.iter().enumerate() {
+                mock_slot(game, batch, o, [ox + window::SLOT * k as f32, at[1]], c);
+            }
+        }
+        Widget::Map { n } => {
+            let rows = usize::from(n).div_ceil(3).max(1);
+            let r = [at[0], at[1], width, rules::LINE * rows as f32 + 2.0];
+            kit::fills(game, batch, o, &style::well(r));
+            let col = width / 3.0;
+            for k in 0..usize::from(n) {
+                let t = rules::clip(word(words, k), col - 6.0, &measure);
+                let p = [
+                    at[0] + 3.0 + col * (k % 3) as f32,
+                    at[1] + 2.0 + rules::LINE * (k / 3) as f32,
+                ];
+                text(game, batch, &t, o, p, VALUE);
+            }
+        }
+        Widget::Text => {
+            for (i, l) in rules::wrap(word(words, 0), width, &measure)
+                .iter()
+                .enumerate()
+            {
+                text(
+                    game,
+                    batch,
+                    l,
+                    o,
+                    [at[0], at[1] + rules::LINE * i as f32],
+                    TEXT,
+                );
+            }
+        }
+    }
 }
 
 /// `native_screen_mouse_button_pressed_pre`: a left click on the window's parts.

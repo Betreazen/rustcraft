@@ -1,7 +1,9 @@
 //! The handbook's scenes, written by assets/models/scenes_mc.py (through handbook_mc.py)
 //! from the guide's docs/showcase/js/scenes.js: do not edit by hand, run the script.
 
-use super::scene::{Beam, Block, End, Flow, Kind, Label, Look, Mode, Mover, Scene, Step, Tone, b, bg};
+use super::scene::{
+    Beam, Block, End, Flow, Kind, Label, Look, Mode, Mover, Scene, Step, Tone, b, bg,
+};
 
 /// What the scenes' blocks look like, by `Block::look` and `Mover::look`.
 #[rustfmt::skip]
