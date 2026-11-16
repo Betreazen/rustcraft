@@ -176,6 +176,16 @@ impl Util {
         }
     }
 
+    /// Slice 18 (guide MODES): the machines with the «Экономный / Обычный / Форсаж» switch: the
+    /// repair stand, the kitchen, the brewer, the enchanting machine, the archaeology table and
+    /// the building machine. The farm machines' pace is the animals' or the water's.
+    pub fn has_modes(self) -> bool {
+        matches!(
+            self,
+            Util::Repair | Util::Kitchen | Util::Brewer | Util::Enchanter | Util::Archeo | Util::Builder
+        )
+    }
+
     /// A machine that works on the animals or the world round it (radius module, K1-style).
     pub fn has_radius(self) -> bool {
         matches!(self, Util::Feeder | Util::Shearer | Util::Apiary)
@@ -263,6 +273,18 @@ pub fn step_energy(u: Util) -> f64 {
     }
 }
 
+/// (ticks between steps, energy a step) after the work mode and the modules: speed modules halve
+/// the wait and cost ×2.5 each, economy ×0.6 each (A7, A9); the mode's speed divides the wait
+/// and its energy factor multiplies the cost (guide MODES). A machine without modes works in
+/// `Normal`.
+pub fn paced(u: Util, mode: crate::machines::processor::WorkMode, speed: u32, economy: u32) -> (u64, f64) {
+    let mode = if u.has_modes() { mode } else { crate::machines::processor::WorkMode::Normal };
+    let (fast, dear) = mode.factors();
+    let ticks = ((step_ticks(u) >> speed.min(4)) as f64 / fast).round().max(1.0) as u64;
+    let cost = step_energy(u) * 2.5f64.powi(speed as i32) * 0.6f64.powi(economy as i32) * dear;
+    (ticks, cost)
+}
+
 /// What a slice-12 machine shows in its status line.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Shown {
@@ -304,6 +326,22 @@ mod tests {
             assert_eq!(Util::of(u.spec().block), Some(u));
             assert!(u.spec().buffer > 0.0 && u.spec().draw > 0.0);
         }
+    }
+
+    #[test]
+    fn the_work_mode_paces_the_machines_that_have_one() {
+        use crate::machines::processor::WorkMode;
+        let (t, e) = paced(Util::Repair, WorkMode::Normal, 0, 0);
+        assert_eq!((t, e), (step_ticks(Util::Repair), step_energy(Util::Repair)));
+        let (t, e) = paced(Util::Repair, WorkMode::Boost, 0, 0);
+        assert_eq!(t, step_ticks(Util::Repair) / 2);
+        assert!((e - step_energy(Util::Repair) * 3.0).abs() < 1e-9);
+        let (t, e) = paced(Util::Repair, WorkMode::Economy, 0, 0);
+        assert_eq!(t, step_ticks(Util::Repair) * 2);
+        assert!((e - step_energy(Util::Repair) * 0.35).abs() < 1e-9);
+        // No modes: the feeder keeps its pace whatever is saved.
+        assert_eq!(paced(Util::Feeder, WorkMode::Boost, 0, 0).0, step_ticks(Util::Feeder));
+        assert!(Util::Builder.has_modes() && !Util::Fishery.has_modes());
     }
 
     #[test]

@@ -213,7 +213,8 @@ impl Kind {
                 let count = u.slots().count;
                 Shape {
                     sockets,
-                    mode: false,
+                    // Slice 18 (stream 5): the work mode switch of the machines that have one.
+                    mode: u.has_modes(),
                     rows: spec.rows,
                     bars: 1,
                     toggles: spec.toggles,

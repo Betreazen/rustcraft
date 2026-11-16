@@ -286,9 +286,12 @@ pub(super) fn paced(game: &Game<'_>, pos: Pos, u: Util) -> (u64, f64) {
     let slots = base::modules_at(game, pos);
     let speed = modules::count(&slots, Module::Speed);
     let eco = modules::count(&slots, Module::Economy);
-    let ticks = (rules::step_ticks(u) >> speed.min(4)).max(1);
-    let cost = rules::step_energy(u) * 2.5f64.powi(speed as i32) * 0.6f64.powi(eco as i32);
-    (ticks, cost)
+    // Slice 18: the work mode of the machines that have one.
+    let mode = game
+        .native_mod_block_entity(pos)
+        .map(|e| machines::read_work(&e.nbt))
+        .unwrap_or_default();
+    rules::paced(u, mode, speed, eco)
 }
 
 pub(super) fn show(game: &mut Game<'_>, dimension: &str, pos: Pos, shown: Shown) {
@@ -1258,6 +1261,14 @@ pub(super) fn sheet(game: &Game<'_>, dimension: &str, pos: Pos, u: Util, s: &mut
             &[Text::literal(format!("{:.1}", paced(game, pos, u).0 as f64 / 20.0))],
         ),
     }));
+    if u.has_modes() {
+        s.mode = Some(
+            game.native_mod_block_entity(pos)
+                .map(|e| machines::read_work(&e.nbt))
+                .unwrap_or_default()
+                .code(),
+        );
+    }
     let spec = u.spec();
     let e = energy(game, pos);
     s.bars.push(Bar {

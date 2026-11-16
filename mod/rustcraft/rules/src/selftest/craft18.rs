@@ -7,6 +7,7 @@
 //! - A full storage says «Склад полон».
 //! - A storage with a missing cell has its terminal keep the cell for clients to draw (S8).
 //! - An order for bread runs through a kitchen on the storage's line (guide `kitchen`).
+//! - The repair stand's window switches its work mode; the feeder's has none (guide MODES).
 
 use super::transport::{chest, fill, item_line, joint};
 use super::{Bench, Build, Scenario, at, plot_area, same};
@@ -16,7 +17,8 @@ use crate::storage::modules::{FILTER, SOCKET_FILTER, SOCKET_STACK, STACK_MODULES
 use crate::storage::terminal::{self, Press};
 use crate::tuning::Tuning;
 
-pub const ALL: [Build; 7] = [
+pub const ALL: [Build; 8] = [
+    util_work_mode_switch,
     order_bread_through_the_kitchen,
     storage_terminal_keeps_its_holes,
     storage_full_says_so,
@@ -186,5 +188,27 @@ fn order_bread_through_the_kitchen(o: Pos, _: &Tuning) -> Scenario {
         .check("the wheat went into it and the order is done", move |b, _| {
             same("wheat", held(b, o, WHEAT)?, 0)?;
             same("orders", b.orders(terminal_at(o)).len(), 0)
+        })
+}
+
+fn util_work_mode_switch(o: Pos, _: &Tuning) -> Scenario {
+    use crate::machines::processor::WorkMode;
+    use crate::machines::sheet::Press as SheetPress;
+    let p = at(o, [3, 1, 0]);
+    let f = at(o, [5, 1, 0]);
+    Scenario::new("util18_work_mode_switch", plot_area(o))
+        .then("a repair stand and a feeder", move |b, _| {
+            b.place(at(o, [3, 0, 0]), "minecraft:stone", &[])?;
+            b.place(at(o, [5, 0, 0]), "minecraft:stone", &[])?;
+            b.place(p, "rustcraft:repair", &[])?;
+            b.place(f, "rustcraft:feeder", &[])
+        })
+        .check("the stand works in the normal mode, the feeder has no switch", move |b, _| {
+            same("stand", b.sheet(p).and_then(|s| s.mode), Some(WorkMode::Normal.code()))?;
+            same("feeder", b.sheet(f).and_then(|s| s.mode), None)
+        })
+        .then("boost pressed", move |b, _| b.press(p, SheetPress::Mode(WorkMode::Boost).id(), None))
+        .check("the stand boosts", move |b, _| {
+            same("stand", b.sheet(p).and_then(|s| s.mode), Some(WorkMode::Boost.code()))
         })
 }
