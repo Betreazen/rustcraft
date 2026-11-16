@@ -86,7 +86,7 @@
 **Files:** `tablet.rs` (server: the list goes by mod message `rustcraft:tablet`, the presses come back by `native_net_send_to_server` → `native_net_from_client`), new `tablet_screen.rs` (client: `native_mod_screen_open`, draws with the terminal's drawing helpers, the player's inventory drawn by the screen, click on an inventory item = deposit), `rules/src/storage/tablet.rs` (press codec: take / deposit slot / limit), `hook_net_from_client.rs` (one added dispatch line).
 - rules tests: press codec round trip; deposit of a stack the storage has no room for leaves the rest.
 - self-test `tablet_deposit_puts_into_storage` (server function `tablet::deposit_from` called by the bench).
-- [ ] done
+- [x] done 4e8101f abc1059: screen id `rustcraft:tablet`, terminal drawing in a tablet context (`terminal::in_tablet`), presses on `rustcraft:tablet_press` (single player: straight into the server queue). No in-world self-test: deposit and take need a real player (`native_player_stacks`); bots must check it. Try pending.
 
 ### Task 7: Cell holes highlighted in the world (S8)
 
