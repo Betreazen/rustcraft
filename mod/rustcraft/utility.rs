@@ -296,6 +296,15 @@ pub(super) fn paced(game: &Game<'_>, pos: Pos, u: Util) -> (u64, f64) {
 
 pub(super) fn show(game: &mut Game<'_>, dimension: &str, pos: Pos, shown: Shown) {
     anim::show_on(game, pos, shown.working());
+    // Slice 18 (guide `charger`, `charge_plate`): they glow while they charge: their furnace
+    // template's `lit` gives the block light (no emissive pulse on a block model: a recorded
+    // limit, rustcraft_rules::anim has only moving parts).
+    if matches!(Util::of(&game.native_block(pos)), Some(Util::Charger | Util::ChargePlate)) {
+        let lit = if shown.working() { "true" } else { "false" };
+        if game.native_block_property(pos, "lit").as_deref() != Some(lit) {
+            game.native_set_block_property(pos, "lit", lit);
+        }
+    }
     state().shown.insert((dimension.to_owned(), pos), shown);
 }
 
