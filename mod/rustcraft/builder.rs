@@ -366,7 +366,7 @@ pub(super) fn wrench_dock(game: &mut Game<'_>, player: u128, pos: Pos) {
 
 // ---- The facade ----
 
-fn has_facade(nbt: &Compound) -> bool {
+pub(super) fn has_facade(nbt: &Compound) -> bool {
     read_i64(nbt, FACADE_KEY) != 0
 }
 

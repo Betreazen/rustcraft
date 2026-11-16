@@ -90,6 +90,31 @@ fn swap_node(game: &mut Game<'_>, pos: Pos, held: u8) -> Option<u8> {
         .then_some(back)
 }
 
+// ---- The facade ----
+
+/// The diagnosis of a housing or a node under a facade (guide `facade`): «Под фальш-панелью»,
+/// then what the block itself shows; none when it is not covered.
+pub(super) fn covered_diagnosis(
+    game: &Game<'_>,
+    pos: Pos,
+    block: &str,
+    own: impl FnOnce() -> Option<Text>,
+) -> Option<Text> {
+    if block != content::HOUSING && block != content::NODE {
+        return None;
+    }
+    let entity = game.native_mod_block_entity(pos)?;
+    if !crate::game::rustcraft_builder::has_facade(&entity.nbt) {
+        return None;
+    }
+    let mut text = server::line("rustcraft.facade.covered", "Under a facade", &[]);
+    if let Some(rest) = own() {
+        text.push(Text::literal(" · "));
+        text.push(rest);
+    }
+    Some(text)
+}
+
 // ---- The self-test's actions (rustcraft_rules::selftest::Bench::pipe) ----
 
 /// One action of stream 1's self-test on the block at `pos`: `swap_node:<tier>`.

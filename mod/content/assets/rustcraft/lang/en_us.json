@@ -26,14 +26,14 @@
   "rustcraft.slot.fluid": "fluid",
   "rustcraft.slot.energy": "energy",
   "rustcraft.machine.working": "Working",
-  "rustcraft.machine.slowed": "Not enough energy: %s",
+  "rustcraft.machine.slowed": "Not enough energy: machines slowed, getting %s",
   "rustcraft.machine.no_energy": "No energy",
   "rustcraft.machine.output_full": "No room for the product",
   "rustcraft.machine.idle": "Nothing to work on",
   "rustcraft.joint.mode": "Joint: %s",
   "rustcraft.joint.receiver_full": "Receiver full",
-  "rustcraft.mode.into": "into the block",
-  "rustcraft.mode.from": "out of the block",
+  "rustcraft.mode.into": "into the machine",
+  "rustcraft.mode.from": "out of the machine",
   "rustcraft.mode.both": "both ways",
   "rustcraft.mode.off": "off",
   "block.rustcraft.crusher": "Crusher",
@@ -1023,5 +1023,6 @@
   "item.rustcraft.fluid_channel_4": "Fluid Channel, Tier 4",
   "item.rustcraft.energy_channel_4": "Energy Channel, Tier 4",
   "rustcraft.node.not_higher": "Only a node of a higher tier takes its place",
-  "rustcraft.node.swapped": "Node of tier %s took the place of tier %s"
+  "rustcraft.node.swapped": "Node of tier %s took the place of tier %s",
+  "rustcraft.facade.covered": "Under a facade"
 }

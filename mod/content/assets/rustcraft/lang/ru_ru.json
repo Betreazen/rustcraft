@@ -26,14 +26,14 @@
   "rustcraft.slot.fluid": "жидкость",
   "rustcraft.slot.energy": "энергия",
   "rustcraft.machine.working": "Работает",
-  "rustcraft.machine.slowed": "Не хватает энергии: %s",
+  "rustcraft.machine.slowed": "Не хватает энергии: машины замедлены, получает %s",
   "rustcraft.machine.no_energy": "Нет энергии",
   "rustcraft.machine.output_full": "Готовое некуда отдать",
   "rustcraft.machine.idle": "Нет сырья",
   "rustcraft.joint.mode": "Стык: %s",
   "rustcraft.joint.receiver_full": "Приёмник полон",
-  "rustcraft.mode.into": "в блок",
-  "rustcraft.mode.from": "из блока",
+  "rustcraft.mode.into": "в машину",
+  "rustcraft.mode.from": "из машины",
   "rustcraft.mode.both": "в обе стороны",
   "rustcraft.mode.off": "выключен",
   "block.rustcraft.crusher": "Дробилка",
@@ -3671,5 +3671,6 @@
   "item.rustcraft.fluid_channel_4": "Жидкостный канал, ступень 4",
   "item.rustcraft.energy_channel_4": "Энергетический канал, ступень 4",
   "rustcraft.node.not_higher": "Заменить узел можно только узлом старшей ступени",
-  "rustcraft.node.swapped": "Узел ступени %s встал на место узла ступени %s"
+  "rustcraft.node.swapped": "Узел ступени %s встал на место узла ступени %s",
+  "rustcraft.facade.covered": "Под фальш-панелью"
 }

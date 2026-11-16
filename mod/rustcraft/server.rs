@@ -758,6 +758,12 @@ fn diagnosis_of(
     pos: Pos,
     block: &str,
 ) -> Option<Text> {
+    // s18/pipe: «Под фальш-панелью» first on a covered housing or node.
+    if let Some(text) = crate::game::rustcraft_pipe18::covered_diagnosis(game, pos, block, || {
+        housing::diagnose(&level.topology, &level.layout, pos).map(|d| diagnosis_text(&d))
+    }) {
+        return Some(text);
+    }
     if block == content::HOUSING {
         return housing::diagnose(&level.topology, &level.layout, pos).map(|d| diagnosis_text(&d));
     }
