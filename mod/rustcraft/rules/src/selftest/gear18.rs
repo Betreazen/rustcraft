@@ -3,13 +3,15 @@
 //! - The suit capacity module lets a charger fill its chestplate half again (G6).
 //! - The charger leaves a zipline's charges alone: they come back from string only.
 //! - A turret turns its head to the mob it shoots (the aim clients draw it by).
+//! - Armour of the next tier is made from the piece below and the new alloy, keeping the piece's
+//!   number: its charge, modules and enchantments.
 
 use super::{Bench, Build, Scenario, at, plot_area};
 use crate::gear::{Held, Module};
 use crate::geom::Pos;
 use crate::tuning::Tuning;
 
-pub const ALL: [Build; 3] = [charger_fills_the_suit_capacity, charger_skips_the_zipline, turret_aims_at_its_target];
+pub const ALL: [Build; 4] = [charger_fills_the_suit_capacity, charger_skips_the_zipline, turret_aims_at_its_target, armour_upgrade_keeps_the_piece];
 
 const STONE: &str = "minecraft:stone";
 const CHARGER: &str = "rustcraft:charger";
@@ -89,4 +91,28 @@ fn turret_aims_at_its_target(o: Pos, _: &Tuning) -> Scenario {
             let off = (yaw - want + 540.0).rem_euclid(360.0) - 180.0;
             Ok(off.abs() < 30.0)
         })
+}
+
+fn armour_upgrade_keeps_the_piece(o: Pos, _: &Tuning) -> Scenario {
+    Scenario::new("gear_armour_upgrade_keeps_the_piece", plot_area(o)).check(
+        "a piece and its alloy make the next tier with the same charge",
+        |b, _| {
+            for (piece, alloys) in [("helmet", 5), ("chestplate", 7), ("leggings", 7), ("boots", 4)] {
+                for (tier, alloy) in [(2, "rustcraft:crystallite"), (3, "rustcraft:starsteel")] {
+                    let from = format!("rustcraft:tech_{piece}_{tier}");
+                    let to = format!("rustcraft:tech_{piece}_{}", tier + 1);
+                    let mut grid: [Option<&str>; 9] = [None; 9];
+                    grid[0] = Some(from.as_str());
+                    for cell in grid.iter_mut().skip(1).take(alloys) {
+                        *cell = Some(alloy);
+                    }
+                    let (made, charge) = b.craft_gear(&grid, 777.0).ok_or(format!("{from} and {alloys} {alloy} make nothing"))?;
+                    if made != to || charge != Some(777.0) {
+                        return Err(format!("{from} made {made} with charge {charge:?}, not {to} with 777"));
+                    }
+                }
+            }
+            Ok(())
+        },
+    )
 }

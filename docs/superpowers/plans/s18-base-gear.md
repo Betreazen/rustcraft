@@ -99,10 +99,10 @@ Audit: armor «Заряд части виден игроку» MISSING.
 
 Audit: armor «Модули и чары при замене остаются» MISSING.
 
-**Files:** `mod/content/data/rustcraft/recipe/tech_{helmet,chestplate,leggings,boots}_{3,4}.json` → `minecraft:crafting_transmute` (input: the piece one tier below, material: the new alloy ×1 per recipe as the blade/shield do).
+**Files:** new `mod/content/data/rustcraft/recipe/tech_{helmet,chestplate,leggings,boots}_{3,4}_upgrade.json`, `minecraft:crafting_transmute`: the piece one tier below and as many of the new alloy as its shaped recipe takes (5 / 7 / 7 / 4). The shaped recipes stay for new armour.
 
-- [ ] Rules test: none (data); self-test `gear_armour_upgrade_keeps_the_piece`: `craft_gear` with a t2 helmet + crystallite → `tech_helmet_3` with the same charge.
-- [ ] Commit.
+- [x] Rules test: none (data); self-test `gear_armour_upgrade_keeps_the_piece`: `craft_gear` with each t2/t3 piece + its alloys → `tech_helmet_3` with the same charge.
+- [x] Commit.
 
 ### Task 6: Keys Z, B, ; as rebindable mod keys; night vision and magnet switched by key
 
