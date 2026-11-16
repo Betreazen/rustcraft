@@ -16,4 +16,5 @@ pub mod queue;
 pub mod slots;
 pub mod sockets;
 pub mod style;
+pub mod tiered;
 pub mod windows;

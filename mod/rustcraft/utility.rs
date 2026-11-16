@@ -50,6 +50,7 @@ use rustcraft_rules::{
     geom::{Face, Pos},
     machines::{
         sheet::{Bar, Kind as SheetKind, Press, Sheet, Status as SheetStatus, Toggle, severity_code},
+        tiered,
         style::Severity,
     },
     modules::{self, Module},
@@ -285,9 +286,12 @@ pub(super) fn spend(game: &mut Game<'_>, pos: Pos, cost: f64) -> bool {
 pub(super) fn paced(game: &Game<'_>, pos: Pos, u: Util) -> (u64, f64) {
     let slots = base::modules_at(game, pos);
     let t = crate::game::rustcraft_server::tuning();
-    let ticks = modules::paced_ticks(rules::step_ticks(u), &slots, t);
+    // Slice 18: its tier's step (the disintegrator's 5 / 3 s) and its work mode (UT7).
+    let tier = crate::game::rustcraft_tiers::tier_at(game, pos);
+    let ticks = modules::paced_ticks(tiered::step_ticks(u, tier), &slots, t);
     let cost = rules::step_energy(u) * modules::factors(&slots, t).1;
-    (ticks, cost)
+    let mode = machines::entity(game, pos).map_or(Default::default(), |e| machines::read_work(&e.nbt));
+    tiered::in_mode(ticks, cost, mode)
 }
 
 pub(super) fn show(game: &mut Game<'_>, dimension: &str, pos: Pos, shown: Shown) {
@@ -426,8 +430,9 @@ fn trash(game: &mut Game<'_>, pos: Pos, _t: &Tuning) -> Shown {
     if slots.iter().take(9).all(|s| s.as_ref().is_none_or(|s| s.count == 0)) {
         return Shown::Blocked("trash_no_filter");
     }
-    let speed = modules::count(&base::modules_at(game, pos), Module::Speed);
-    let mut batch = 8u32 << speed.min(3);
+    // Slice 18: 8 / 16 / 32 / 64 a second by tier; a speed module shortens the step (paced), so it
+    // doubles the rate once, not twice.
+    let mut batch = tiered::trash_batch(crate::game::rustcraft_tiers::tier_at(game, pos));
     let per = paced(game, pos, Util::Trash).1;
     let filter: Vec<&str> = slots.iter().take(9).flatten().map(|s| &*s.item).collect();
     let mut burned = 0;
@@ -1253,6 +1258,10 @@ pub(super) fn sheet(game: &Game<'_>, dimension: &str, pos: Pos, u: Util, s: &mut
             &[Text::literal(format!("{:.1}", paced(game, pos, u).0 as f64 / 20.0))],
         ),
     }));
+    // Slice 18 (UT7): its work mode, for the sheet's switch.
+    if SheetKind::Util(u).shape().mode {
+        s.mode = machines::entity(game, pos).map(|e| machines::read_work(&e.nbt).code());
+    }
     let spec = u.spec();
     let e = energy(game, pos);
     s.bars.push(Bar {

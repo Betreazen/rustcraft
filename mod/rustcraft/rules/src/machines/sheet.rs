@@ -216,7 +216,9 @@ impl Kind {
                 let count = u.slots().count;
                 Shape {
                     sockets,
-                    mode: false,
+                    // Slice 18 (UT7): every machine that works in steps has the three modes;
+                    // the ones whose pace is the animals' or the water's do not.
+                    mode: crate::modules::Holder::Util(u).takes(crate::modules::Module::Speed),
                     rows: spec.rows,
                     bars: 1,
                     toggles: spec.toggles,
