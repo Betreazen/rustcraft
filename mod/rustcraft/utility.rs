@@ -413,7 +413,7 @@ pub(super) fn tick(game: &mut Game<'_>, dimension: &str, level: &LevelNet, t: &T
                 farm::step(game, dimension, level, pos, u, cost, now, t)
             }
             Util::Projector | Util::Builder | Util::PortalDock => {
-                builder::step(game, dimension, pos, u, cost, now)
+                builder::step(game, dimension, level, pos, u, cost, now)
             }
             Util::Vein => grow(game, dimension, pos, cost),
         };
@@ -1493,7 +1493,7 @@ fn toggle_names(u: Util) -> Vec<(String, String)> {
             .iter()
             .map(|(k, i)| ((*k).to_owned(), (*i).to_owned()))
             .collect(),
-        Util::Projector => ["remember", "ghost", "clear"]
+        Util::Projector => crate::game::rustcraft_projector::TOGGLES
             .iter()
             .map(|k| ((*k).to_owned(), "minecraft:light_blue_stained_glass".to_owned()))
             .collect(),
@@ -1589,6 +1589,10 @@ fn craft_sheet(game: &Game<'_>, dimension: &str, pos: Pos, u: Util, s: &mut Shee
             });
         }
         Util::Kitchen => kitchen_sheet(game, pos, s),
+        Util::Projector => {
+            s.rows = crate::game::rustcraft_projector::projector_rows(game, dimension, pos).iter().map(base::v).collect();
+        }
+        Util::Builder => crate::game::rustcraft_projector::builder_sheet(game, pos, s),
         Util::Brewer => brew_sheet(game, pos, s),
         Util::Enchanter => {
             let level = enchant_level(game, pos);

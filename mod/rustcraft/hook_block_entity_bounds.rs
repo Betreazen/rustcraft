@@ -11,4 +11,7 @@ fn rustcraft_block_entity_bounds(
     if block == "rustcraft:terminal" {
         crate::game::rustcraft_storage::hole_bounds(entity, bounds);
     }
+    if block == "rustcraft:projector" {
+        crate::game::rustcraft_projector::ghost_bounds(entity, bounds);
+    }
 }

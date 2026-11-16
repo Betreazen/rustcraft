@@ -430,6 +430,8 @@ pub(super) fn on_place_block(game: &mut Game<'_>, stack: &ItemStack, pos: [i32; 
     // placed again; a lifted suspicious block gets its loot back (spec 26).
     crate::game::rustcraft_utility::forget_grown(game, &player.dimension, pos);
     crate::game::rustcraft_utility::on_place_suspicious(game, &player.dimension, stack, pos);
+    // Slice 18: a lifted projector's plan back into it.
+    crate::game::rustcraft_projector::on_place(game, stack, pos);
     if is_ours(&stack.item) || touches_magistral(&player.dimension, pos) {
         mark_stale(&player.dimension);
     }

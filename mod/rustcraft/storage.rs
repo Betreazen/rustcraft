@@ -1674,6 +1674,52 @@ pub(super) fn tablet_items(dimension: &str, id: u32) -> Vec<(ItemKey, u64)> {
     .unwrap_or_default()
 }
 
+// ---- Slice 18: the projector's and the building machine's storage ----
+
+/// The storage on the item net a housing beside the block at `pos` is on (S6's rule for
+/// terminals): the projector's «В руку», the building machine's blocks.
+pub(super) fn storage_by(dimension: &str, pos: Pos, topology: &rustcraft_rules::net::topology::Topology) -> Option<u32> {
+    with_level(dimension, |level| {
+        if let Some(id) = level.cell_of.get(&pos).copied().or_else(|| level.terminals.get(&pos).copied().flatten()) {
+            return Some(id);
+        }
+        let mut blocks: BTreeMap<u32, Vec<Pos>> = BTreeMap::new();
+        for (&c, &id) in &level.cell_of {
+            blocks.entry(id).or_default().push(c);
+        }
+        for (&t, id) in &level.terminals {
+            if let Some(id) = id {
+                blocks.entry(*id).or_default().push(t);
+            }
+        }
+        cells::terminal_on_net(pos, &blocks, topology).filter(|id| level.works(*id))
+    })
+    .flatten()
+}
+
+/// How many of `key` the storage `id` holds (none while it does not work).
+pub(super) fn stored_count(dimension: &str, id: u32, key: &str) -> u64 {
+    with_level(dimension, |level| {
+        level.works(id).then(|| level.stores.get(&id).map_or(0, |s| s.count(key)))
+    })
+    .flatten()
+    .unwrap_or(0)
+}
+
+/// Up to `count` of `key` from the storage `id` into the inventory of `player`; what does not
+/// fit stays in the storage. How many went.
+pub(super) fn give_from(game: &mut Game<'_>, dimension: &str, id: u32, key: &str, count: u32, player: u128) -> u32 {
+    let took = take_from(dimension, id, key, u64::from(count)) as u32;
+    if took == 0 {
+        return 0;
+    }
+    let rest = game
+        .native_give_stack(player, stack_of(key, took))
+        .map_or(0, |r| r.count.min(took));
+    restore_into(dimension, id, key, u64::from(rest));
+    took - rest
+}
+
 // ---- Slice 18: the tablet's drawn window ----
 
 /// The storage `id`'s change count: its list is sent again when it moves on.

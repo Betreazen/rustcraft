@@ -142,7 +142,8 @@ impl Util {
             Util::Enchanter => s("rustcraft:enchanter", 600.0, 32.0, xp::LEVEL_STEPS.len(), 2),
             // Slice 18: the table is the block's own place, a line not a choice.
             Util::Archeo => s("rustcraft:archeo", 200.0, 16.0, 0, 2),
-            Util::Projector => s("rustcraft:projector", 400.0, 16.0, 3, 2),
+            // Slice 18: remember, ghost, forget, turn, mirror, «В руку».
+            Util::Projector => s("rustcraft:projector", 400.0, 16.0, 6, 2),
             Util::Builder => s("rustcraft:builder", 400.0, 32.0, 0, 2),
             Util::PortalDock => s("rustcraft:portal_dock", 400.0, 32.0, 0, 2),
             Util::Vein => s("rustcraft:vein", 8000.0, 128.0, vein::PICKS.len(), 2),
@@ -326,7 +327,8 @@ pub fn step_ticks(u: Util) -> u64 {
         // Slice 18 (guide `feeder`): a pair every 20 s.
         Util::Feeder => 400,
         Util::Shearer | Util::Apiary => 100,
-        Util::Builder => 20,
+        // Slice 18 (guide `builder`): 2 blocks a second.
+        Util::Builder => 10,
         Util::PortalDock => 20,
         Util::Vein => vein::STEP_TICKS,
         Util::Charger | Util::ChargePlate | Util::XpTank | Util::Projector | Util::Fishery => 20,
@@ -344,11 +346,14 @@ pub fn step_energy(u: Util) -> f64 {
         Util::Archeo => 40.0,
         Util::Enchanter => 200.0,
         Util::Feeder | Util::Shearer | Util::Apiary => 10.0,
-        Util::Builder => 4.0,
+        // 16 E/s in the normal mode.
+        Util::Builder => 8.0,
         Util::PortalDock => 1.0,
         Util::Vein => vein::BLOCK_ENERGY,
         Util::Fishery => 20.0,
-        Util::Charger | Util::ChargePlate | Util::XpTank | Util::Projector => 0.0,
+        // Slice 18: the projector 4 E/s while its ghost shows (a step a second).
+        Util::Projector => 4.0,
+        Util::Charger | Util::ChargePlate | Util::XpTank => 0.0,
     }
 }
 

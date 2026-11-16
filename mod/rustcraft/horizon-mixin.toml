@@ -269,6 +269,14 @@ file = "crates/horizon-client/src/game.rs"
 name = "rustcraft_tablet"
 source = "tablet.rs"
 
+# Slice 18 (stream 5): the holo-projector's plan by two corners, its turn, «В руку», the ghost; the
+# building machine from the storage (rustcraft_rules::utility::plan).
+[[module]]
+id = "projector"
+file = "crates/horizon-client/src/game.rs"
+name = "rustcraft_projector"
+source = "projector.rs"
+
 # Slice 18 (stream 5): the filter module's window, a server chest (rustcraft_rules::storage::filter).
 [[module]]
 id = "filter"
