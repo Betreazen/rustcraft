@@ -925,38 +925,54 @@ fn set_xp(nbt: &mut Compound, points: u32) {
 fn xp_tank_shown(game: &mut Game<'_>, pos: Pos) -> Shown {
     let points = xp_of(game, pos);
     anim::show_level(game, pos, f64::from(points) / f64::from(xp::CAPACITY), 0);
-    if points > 0 { Shown::Working } else { Shown::Idle("xp_empty") }
+    if points >= xp::CAPACITY {
+        Shown::Blocked("xp_full")
+    } else if points > 0 {
+        Shown::Working
+    } else {
+        Shown::Idle("xp_empty")
+    }
 }
 
-/// A press in the condenser's window: give one level, give all, take one, take ten.
+/// A press in the condenser's window (slice 18): give or take one level, ten or all; 2 E each.
 fn xp_press(game: &mut Game<'_>, entity: &mut ModBlockEntity, i: usize) {
+    use rustcraft_rules::utility::xp::XpPress;
+    let Some(press) = xp::PRESSES.get(i).copied() else { return };
     let player = game.native_acting_id();
     let stored = read_i64(&entity.nbt, XP_KEY).clamp(0, i64::from(xp::CAPACITY)) as u32;
+    let energy = machines::read_f64(&entity.nbt, machines::BUFFER_KEY);
+    if energy + 1e-9 < xp::PRESS_ENERGY {
+        say(game, player, "rustcraft.util.no_energy", "No energy", &[]);
+        return;
+    }
     let mut level = 0u32;
     game.native_as_player(player, |g| level = g.experience.level.max(0) as u32);
-    match i {
-        0 | 1 => {
-            let levels = if i == 0 { 1 } else { level };
-            let room = xp::CAPACITY - stored;
-            let mut n = levels.min(level);
-            while n > 0 && xp::give(level, n) > room {
-                n -= 1;
-            }
+    let done = match press {
+        XpPress::Give(amount) => {
+            let (n, points) = xp::give_levels(level, amount, xp::CAPACITY - stored);
             if n == 0 {
+                if stored >= xp::CAPACITY {
+                    say(game, player, "rustcraft.util.xp_full", "The condenser is full", &[]);
+                }
                 return;
             }
-            let points = xp::give(level, n);
-            if game.native_give_levels(player, -(n as i32)) {
+            game.native_give_levels(player, -(n as i32)) && {
                 set_xp(&mut entity.nbt, stored + points);
+                true
             }
         }
-        _ => {
-            let want = if i == 2 { 1 } else { 10 };
-            let points = (level..level + want).map(xp::to_next).sum::<u32>().min(stored);
-            if points > 0 && game.native_give_experience(player, points) {
-                set_xp(&mut entity.nbt, stored - points);
-            }
+        XpPress::Take(amount) => {
+            let points = xp::take_points(level, amount, stored);
+            points > 0
+                && game.native_give_experience(player, points)
+                && {
+                    set_xp(&mut entity.nbt, stored - points);
+                    true
+                }
         }
+    };
+    if done {
+        machines::write_f64(&mut entity.nbt, machines::BUFFER_KEY, energy - xp::PRESS_ENERGY);
     }
 }
 
@@ -1335,7 +1351,7 @@ fn toggle_names(u: Util) -> Vec<(String, String)> {
             .map(|t| ((*t).to_owned(), "minecraft:suspicious_sand".to_owned()))
             .collect(),
         Util::Enchanter => (1..=3).map(|l| (format!("level{l}"), "minecraft:lapis_lazuli".to_owned())).collect(),
-        Util::XpTank => ["give1", "give_all", "take1", "take10"]
+        Util::XpTank => ["give1", "give10", "give_all", "take1", "take10", "take_all"]
             .iter()
             .map(|k| ((*k).to_owned(), "minecraft:experience_bottle".to_owned()))
             .collect(),
@@ -1443,6 +1459,33 @@ fn craft_sheet(game: &Game<'_>, dimension: &str, pos: Pos, u: Util, s: &mut Shee
             });
         }
         Util::Kitchen => kitchen_sheet(game, pos, s),
+        Util::XpTank => {
+            // «Хранит» as a bar; the row says whether an enchanting machine stands beside it.
+            let points = xp_of(game, pos);
+            s.bars.push(Bar {
+                label: base::v(&line("rustcraft.util.xp_tank.holds", "Holds", &[])),
+                value: base::v(&line(
+                    "rustcraft.util.xp_tank.points",
+                    "%s points of %s (%s levels from zero)",
+                    &[
+                        Text::literal(points.to_string()),
+                        Text::literal(xp::CAPACITY.to_string()),
+                        Text::literal(xp::levels_from(0, points).to_string()),
+                    ],
+                )),
+                share: f64::from(points) / f64::from(xp::CAPACITY),
+                energy: false,
+                colour: Some(0xFF7C_E05A),
+            });
+            let beside = neighbour_of(game, pos, Util::Enchanter.spec().block).is_some();
+            if let Some(r) = s.rows.get_mut(1) {
+                *r = base::v(&if beside {
+                    line("rustcraft.util.xp_tank.beside", "Beside it: an enchanting machine", &[])
+                } else {
+                    line("rustcraft.util.xp_tank.alone", "No enchanting machine beside it", &[])
+                });
+            }
+        }
         Util::Feeder => {
             if let Some(r) = s.rows.first_mut() {
                 *r = base::v(&farm::feeder_row(game, pos));

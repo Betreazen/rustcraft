@@ -618,7 +618,7 @@
   "rustcraft.util.xp_tank.toggle.give1": "Give a level",
   "rustcraft.util.xp_tank.toggle.give_all": "Give all levels",
   "rustcraft.util.xp_tank.toggle.take1": "Take a level",
-  "rustcraft.util.xp_tank.toggle.take10": "Take ten levels",
+  "rustcraft.util.xp_tank.toggle.take10": "Take 10 levels",
   "rustcraft.util.projector.toggle.remember": "Remember the building",
   "rustcraft.util.projector.toggle.ghost": "Show the ghost",
   "rustcraft.util.projector.toggle.clear": "Forget the building",
@@ -1064,5 +1064,12 @@
   "rustcraft.util.apiary.hives": "Hives in reach: %s, full: %s",
   "rustcraft.util.honey_no_bottles": "No empty bottles",
   "rustcraft.util.apiary.toggle.honey": "Take honey",
-  "rustcraft.util.apiary.toggle.combs": "Take combs"
+  "rustcraft.util.apiary.toggle.combs": "Take combs",
+  "rustcraft.util.xp_tank.holds": "Holds",
+  "rustcraft.util.xp_tank.points": "%s points of %s (%s levels from zero)",
+  "rustcraft.util.xp_tank.beside": "Beside it: an enchanting machine",
+  "rustcraft.util.xp_tank.alone": "No enchanting machine beside it",
+  "rustcraft.util.xp_full": "The condenser is full",
+  "rustcraft.util.xp_tank.toggle.give10": "Give 10 levels",
+  "rustcraft.util.xp_tank.toggle.take_all": "Take all"
 }

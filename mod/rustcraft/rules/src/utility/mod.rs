@@ -134,7 +134,8 @@ impl Util {
             // Slice 18 (guide `apiary`): «забирать: мёд / соты», a choice of two.
             Util::Apiary => s("rustcraft:apiary", 200.0, 8.0, 2, 2),
             Util::Brewer => s("rustcraft:brewer", 400.0, 16.0, 0, 2),
-            Util::XpTank => s("rustcraft:xp_tank", 100.0, 4.0, 4, 2),
+            // Slice 18: six buttons (give 1 / 10 / all, take 1 / 10 / all).
+            Util::XpTank => s("rustcraft:xp_tank", 100.0, 4.0, xp::PRESSES.len(), 2),
             Util::Enchanter => s("rustcraft:enchanter", 600.0, 32.0, 3, 2),
             Util::Archeo => s("rustcraft:archeo", 200.0, 16.0, ARCHEO_TABLES.len(), 2),
             Util::Projector => s("rustcraft:projector", 400.0, 16.0, 3, 2),

@@ -618,7 +618,7 @@
   "rustcraft.util.xp_tank.toggle.give1": "Сдать уровень",
   "rustcraft.util.xp_tank.toggle.give_all": "Сдать все уровни",
   "rustcraft.util.xp_tank.toggle.take1": "Забрать уровень",
-  "rustcraft.util.xp_tank.toggle.take10": "Забрать десять уровней",
+  "rustcraft.util.xp_tank.toggle.take10": "Забрать 10 уровней",
   "rustcraft.util.projector.toggle.remember": "Запомнить постройку",
   "rustcraft.util.projector.toggle.ghost": "Показывать призрак",
   "rustcraft.util.projector.toggle.clear": "Забыть постройку",
@@ -3712,5 +3712,12 @@
   "rustcraft.util.apiary.hives": "Ульев рядом: %s, полных: %s",
   "rustcraft.util.honey_no_bottles": "Нет пустых бутылок",
   "rustcraft.util.apiary.toggle.honey": "Забирать мёд",
-  "rustcraft.util.apiary.toggle.combs": "Забирать соты"
+  "rustcraft.util.apiary.toggle.combs": "Забирать соты",
+  "rustcraft.util.xp_tank.holds": "Хранит",
+  "rustcraft.util.xp_tank.points": "%s очков из %s (%s уровней с нуля)",
+  "rustcraft.util.xp_tank.beside": "Вплотную: зачаровательный автомат",
+  "rustcraft.util.xp_tank.alone": "Вплотную нет зачаровательного автомата",
+  "rustcraft.util.xp_full": "Конденсатор полон",
+  "rustcraft.util.xp_tank.toggle.give10": "Сдать 10 уровней",
+  "rustcraft.util.xp_tank.toggle.take_all": "Забрать всё"
 }

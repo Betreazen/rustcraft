@@ -265,7 +265,9 @@ fn xp_tank_window(o: Pos, _: &Tuning) -> Scenario {
             floor(b, o)?;
             machine(b, p, "rustcraft:xp_tank")
         })
-        .until("its window has four buttons", 60, move |b, _| Ok(b.sheet(p).is_some_and(|s| s.toggles.len() == 4)))
+        .until("its window has six buttons (slice 18) and the bar it holds", 60, move |b, _| {
+            Ok(b.sheet(p).is_some_and(|s| s.toggles.len() == 6 && s.bars.len() == 2))
+        })
 }
 
 fn enchanter_needs_a_condenser(o: Pos, _: &Tuning) -> Scenario {
