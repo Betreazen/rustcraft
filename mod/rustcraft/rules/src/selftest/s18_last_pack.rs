@@ -14,5 +14,5 @@ pub const ALL: [Build; 1] = [backpack_store_holds_past_99];
 
 fn backpack_store_holds_past_99(o: Pos, _: &Tuning) -> Scenario {
     Scenario::new("s18_backpack_store_holds_past_99", plot_area(o))
-        .check("the backpack's store keeps 1024 a slot with the stack module and reads back", |b, _| b.backpack_store())
+        .check("the backpack's store keeps 1024 a slot with the stack module and reads back; the key opens a worn one", |b, _| b.backpack_store())
 }

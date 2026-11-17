@@ -423,7 +423,10 @@ pub(super) fn on_menu_input_closed(_: u128, _: i32, _: &mut [Option<ItemStack>])
 /// Slice 18: the backpack key (B, rustcraft_gear_keys): the backpack on the back, else the first
 /// backpack in the player's inventory, opens at the next tick.
 pub(super) fn open_by_key(game: &mut Game<'_>, uuid: u128) {
-    if let Some(id) = state().worn.get(&uuid).copied() {
+    // The lock is let go before the branches: held in an `if let` scrutinee it lived through
+    // the block, and `state()` there locked it again and hung the server (in-game check w3).
+    let worn = state().worn.get(&uuid).copied();
+    if let Some(id) = worn {
         let sneaking = game.native_server_players().into_iter().any(|p| p.uuid == uuid && p.sneaking);
         if sneaking {
             take_off(game, uuid, id);
@@ -964,5 +967,24 @@ pub(super) fn on_mouse(game: &Game<'_>, screen: &NativeScreenView<'_>, button: i
     };
     if let Some(p) = press {
         queue(p);
+    }
+}
+
+/// The backpack key with a starsteel backpack on the back queues its window for the next tick
+/// (the key once hung the server: rustcraft_selftest `s18_backpack_store_holds_past_99`). A made-up
+/// player, taken out again; nothing is saved.
+pub(super) fn self_test_key(game: &mut Game<'_>) -> Result<(), String> {
+    const PLAYER: u128 = 0x7e57_bac4_0000_0000_0000_0000_0000_0018;
+    const ID: u64 = 0x7e57_0018;
+    state().worn.insert(PLAYER, ID);
+    open_by_key(game, PLAYER);
+    let mut s = state();
+    let queued = s.opening.iter().any(|(u, id, slots, _)| *u == PLAYER && *id == ID && *slots == rules::STAR_SLOTS);
+    s.opening.retain(|(u, ..)| *u != PLAYER);
+    s.worn.remove(&PLAYER);
+    if queued {
+        Ok(())
+    } else {
+        Err("the backpack key did not open the worn starsteel backpack".into())
     }
 }

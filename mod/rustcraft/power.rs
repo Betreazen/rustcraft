@@ -750,11 +750,8 @@ pub(super) fn sinks(game: &Game<'_>, s: &Sources, t: &Tuning) -> Vec<Sink> {
             blocks: vec![p],
             fluid: rules::SOLUTION,
             held: seed.solution.floor() as u64,
-            capacity: if seed.progress >= 1.0 {
-                0
-            } else {
-                grow::buffer(t) as u64
-            },
+            // Only what its growth still needs: a grown druse has drunk 4 buckets, not 5.
+            capacity: seed.room(t).ceil() as u64,
         }
     }));
     out
@@ -1202,35 +1199,39 @@ fn gives_bar(now: f64, most: f64) -> SheetBar {
 }
 
 /// ui.js `balance`: the circuit's production and demand, its batteries and whether it is enough.
+/// Four rows of `key\tvalue` (rules `sheet::BALANCE_ROWS`), the words of the fuel generator's
+/// drawn window (panels.rs), so every window says the balance the same way.
 fn balance_rows(b: &GroupBalance) -> Vec<serde_json::Value> {
+    let per_second = |v: f64| line("rustcraft.window.per_second", "%s E/s", &[e(v)]);
     let stored = if b.capacity > 0.0 {
         line(
-            "rustcraft.power.balance_stored",
-            "stored %s of %s E",
+            "rustcraft.window.stored.of",
+            "%s of %s E",
             &[e(b.stored.floor()), e(b.capacity)],
         )
     } else {
-        line("rustcraft.power.balance_no_store", "no batteries", &[])
+        line("rustcraft.window.stored.none", "no batteries", &[])
     };
     let enough = if b.enough() {
-        line("rustcraft.power.balance_enough", "enough", &[])
+        line("rustcraft.window.enough.yes", "yes", &[])
     } else {
         line(
-            "rustcraft.power.balance_short",
-            "machines slowed by %s",
+            "rustcraft.window.enough.no",
+            "no, machines slowed by %s",
             &[Text::literal(format!("{}%", b.slowdown_percent()))],
         )
     };
-    let mut second = stored;
-    second.push(Text::literal(" · "));
-    second.push(enough);
+    let kv = |key: &str, fallback: &str, value: Text| {
+        let mut row = line(key, fallback, &[]);
+        row.push(Text::literal("\t"));
+        row.push(value);
+        base::v(&row)
+    };
     vec![
-        base::v(&line(
-            "rustcraft.power.balance",
-            "Circuit: makes %s E/s, uses %s E/s",
-            &[e(b.produced), e(b.requested)],
-        )),
-        base::v(&second),
+        kv("rustcraft.window.produced", "Production", per_second(b.produced)),
+        kv("rustcraft.window.used", "Consumption", per_second(b.requested)),
+        kv("rustcraft.window.stored", "Stored", stored),
+        kv("rustcraft.window.enough", "Enough", enough),
     ]
 }
 
@@ -1296,8 +1297,9 @@ fn structure_sheet(level: &LevelNet, pos: Pos, v: &PowerView, t: &Tuning, s: &mu
         label: base::v(&line("rustcraft.structure.solution", "Solution", &[])),
         value: base::v(&line(
             "rustcraft.structure.solution_line",
-            "%s of %s mB · %s buckets a minute",
-            &[e(v.fluid.floor()), e(room), e(per_minute)],
+            // The rate first, as the guide's tank shows it (ui.js `structure`).
+            "%s buckets a minute · %s of %s mB",
+            &[e(per_minute), e(v.fluid.floor()), e(room)],
         )),
         share: if room > 0.0 { (v.fluid / room).min(1.0) } else { 0.0 },
         energy: false,
