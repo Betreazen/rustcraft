@@ -88,6 +88,9 @@ pub struct LevelNet {
     pub anim: BTreeMap<Pos, bool>,
     /// Slice 15 (O4): the autocrafters' temporary pages from orders (rustcraft_orders).
     pub temp_pages: BTreeMap<Pos, crate::game::rustcraft_crafter::TempPage>,
+    /// s18/pipe: the energy ledger and what each consumer got, as the machines' tick last noted
+    /// them once a second, for the node's window (rustcraft_node_window).
+    pub pipe18_energy: Option<(rustcraft_rules::net::energy::Ledger, BTreeMap<Pos, f64>)>,
 }
 
 impl LevelNet {
@@ -107,6 +110,7 @@ impl LevelNet {
             ticks: 0,
             anim: BTreeMap::new(),
             temp_pages: BTreeMap::new(),
+            pipe18_energy: None,
         }
     }
 }
@@ -267,6 +271,8 @@ pub(super) fn on_level_tick(game: &mut Game<'_>, dimension: &str) {
     }
     if second {
         show_diagnoses(game, dimension);
+        // s18/pipe: the node windows' presses and views.
+        crate::game::rustcraft_node_window::tick(game, dimension);
         // H2: the first alloy a player carries brings them the engineer's handbook.
         handbook::tick(game, dimension);
     }
@@ -297,13 +303,15 @@ pub(super) fn rescan_now(game: &mut Game<'_>, dimension: &str) {
 }
 
 /// `native_use_item_on`: a channel clicked on a housing goes into its first free slot (M2) and
-/// leaves the hand; the wrench with sneaking takes the last channel out and gives it back.
+/// leaves the hand; the wrench with sneaking takes the housing off with its channels (s18/pipe).
 pub(super) fn on_use_item_on(
     game: &mut Game<'_>,
     stack: &ItemStack,
     pos: [i32; 3],
     claimed: &mut bool,
 ) {
+    // s18/pipe: a node of a higher tier takes a node's place (U2).
+    crate::game::rustcraft_pipe18::on_use_item_on(game, stack, pos, claimed);
     workers::on_use_item_on(game, stack, pos, claimed);
     let item: &str = &stack.item;
     // Spec 26: the wrench with sneaking lifts suspicious sand or gravel (rustcraft_utility).
@@ -345,8 +353,10 @@ pub(super) fn on_use_item_on(
         *claimed = true;
         put_channel(game, &player, pos, channel);
     } else if item == content::WRENCH && player.sneaking {
+        // s18/pipe (guide `facade`): after the facade, the sneaking wrench takes the housing itself,
+        // its channels with it; it no longer takes one channel out.
         *claimed = true;
-        take_channel(game, &player, pos);
+        crate::game::rustcraft_pipe18::lift_housing(game, &player, pos);
     }
 }
 
@@ -359,6 +369,8 @@ pub(super) fn on_right_click_block(
     canceled: &mut bool,
 ) {
     zipline::on_right_click_block(game, pos, canceled);
+    // s18/pipe: an empty hand opens the node's window.
+    crate::game::rustcraft_node_window::on_right_click_block(game, pos, face, canceled);
     base::on_right_click_block(game, pos, canceled);
     transport::on_right_click_block(game, pos, face, canceled);
     crate::game::rustcraft_crystals::on_right_click_block(game, pos, face, canceled);
@@ -432,6 +444,8 @@ pub(super) fn on_place_block(game: &mut Game<'_>, stack: &ItemStack, pos: [i32; 
     base::on_place_block(game, stack, pos);
     // Slice 18, stream 3: a trash's joints start empty and last (guide `trash`).
     crate::game::rustcraft_utility::on_placed(game, pos);
+    // s18/pipe: a machine lifted by the wrench gets its contents back.
+    crate::game::rustcraft_pipe18::on_place_block(game, stack, pos);
     let Some(player) = game.native_acting_player() else {
         mark_all_stale();
         return;
@@ -491,6 +505,10 @@ pub(super) fn on_destroy_block(game: &mut Game<'_>, pos: [i32; 3]) {
         // Slice 18: and its stack and filter modules.
         storage::give_back_sockets(game, &player.dimension, pos, player.uuid);
     }
+    if block == content::HOUSING {
+        // s18/pipe: its channels are dealt with here, not as a loss at the next rescan.
+        crate::game::rustcraft_pipe18::housing_handled(&player.dimension, pos);
+    }
     if block != content::HOUSING || player.game_mode == CREATIVE {
         return;
     }
@@ -503,6 +521,12 @@ pub(super) fn on_destroy_block(game: &mut Game<'_>, pos: [i32; 3]) {
         let item = content::channel_item(channel.kind, channel.tier);
         if game.native_give_items(item, 1) == 0 {
             drop_item(game, &player.dimension, pos, item);
+        }
+    }
+    // s18/pipe: the facade and the block of its look come back too (guide `facade`).
+    for item in crate::game::rustcraft_pipe18::facade_items(game, pos) {
+        if game.native_give_items(&item, 1) == 0 {
+            drop_item(game, &player.dimension, pos, &item);
         }
     }
 }
@@ -531,7 +555,10 @@ fn mark_all_stale() {
 /// Reads the level's magistral, machines and recipes again and rebuilds its nets, circuits and
 /// joints.
 fn rescan(game: &mut Game<'_>, dimension: &str, level: &mut LevelNet) {
+    // s18/pipe: housings gone without a player drop their channels.
+    let before = std::mem::take(&mut level.layout.housings);
     let found = scan(game, dimension, level);
+    crate::game::rustcraft_pipe18::drop_lost(game, dimension, &before, &level.layout);
     storage::rescan(game, dimension, &found.cells, &found.terminals);
     let stations: Vec<Pos> = level
         .machines
@@ -573,6 +600,8 @@ fn rescan(game: &mut Game<'_>, dimension: &str, level: &mut LevelNet) {
     );
     power::rescan(level);
     transport::rebuild(game, dimension, level, &TUNING);
+    // s18/pipe: the wrench's bottlenecks, told to clients.
+    crate::game::rustcraft_pipe18::mark_weak(game, level);
     fluids::rebuild(game, level, found.tanks, &TUNING);
 }
 
@@ -681,43 +710,9 @@ fn put_channel(game: &mut Game<'_>, player: &NativeServerPlayer, pos: Pos, chann
     }
 }
 
-fn take_channel(game: &mut Game<'_>, player: &NativeServerPlayer, pos: Pos) {
-    let Some(held) =
-        crate::game::rustcraft_machines::entity(game, pos).map(|entity| read_slots(&entity.nbt))
-    else {
-        return;
-    };
-    let Some((_, _, last)) = housing::remove_last(held) else {
-        let text = line("rustcraft.housing.empty", "The housing has no channel", &[]);
-        tell(game, player.uuid, text);
-        return;
-    };
-    // Check the room first, so a full inventory leaves the channel where it is.
-    let item = content::channel_item(last.kind, last.tier);
-    if game.native_room_for(item) == 0 {
-        let text = line("rustcraft.housing.no_room", "No room for the channel", &[]);
-        tell(game, player.uuid, text);
-        return;
-    }
-    let taken = game
-        .native_with_mod_block_entity(pos, |entity| {
-            let (next, slot, channel) = housing::remove_last(read_slots(&entity.nbt))?;
-            write_slots(&mut entity.nbt, &next);
-            window::forget_slot(&mut entity.nbt, slot);
-            Some((slot, channel))
-        })
-        .flatten();
-    let Some((slot, channel)) = taken else {
-        return;
-    };
-    game.native_give_items(content::channel_item(channel.kind, channel.tier), 1);
-    mark_stale(&player.dimension);
-    let text = line(
-        "rustcraft.housing.channel_taken",
-        "%s taken from slot %s",
-        &[kind_name(channel.kind), number(slot + 1)],
-    );
-    tell(game, player.uuid, text);
+/// s18/pipe: `drop_item` for the other modules.
+pub(super) fn drop_one(game: &mut Game<'_>, dimension: &str, pos: Pos, item: &str) {
+    drop_item(game, dimension, pos, item);
 }
 
 /// An item entity of one `item` at the middle of the block at `pos` (`/summon`'s compound).
@@ -774,6 +769,12 @@ fn diagnosis_of(
     pos: Pos,
     block: &str,
 ) -> Option<Text> {
+    // s18/pipe: «Под фальш-панелью» first on a covered housing or node.
+    if let Some(text) = crate::game::rustcraft_pipe18::covered_diagnosis(game, pos, block, || {
+        housing::diagnose(&level.topology, &level.layout, pos).map(|d| diagnosis_text(&d))
+    }) {
+        return Some(text);
+    }
     if block == content::HOUSING {
         return housing::diagnose(&level.topology, &level.layout, pos).map(|d| diagnosis_text(&d));
     }

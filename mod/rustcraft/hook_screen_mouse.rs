@@ -6,4 +6,6 @@ fn rustcraft_screen_mouse(
 ) {
     crate::game::rustcraft_tablet::on_mouse(game, screen, button, canceled);
     crate::game::rustcraft_handbook::on_mouse(game, screen, button, canceled);
+    crate::game::rustcraft_node_window::on_mouse(game, screen, button, canceled);
+    crate::game::rustcraft_joint_screen::on_mouse(game, screen, button, canceled);
 }

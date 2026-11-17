@@ -23,6 +23,8 @@ pub mod miners;
 pub mod modules18;
 pub mod monorail;
 pub mod orders2;
+// s18/pipe
+pub mod pipe18;
 pub mod rest;
 pub mod run;
 pub mod s18_energy;
@@ -233,6 +235,9 @@ pub trait Bench {
     fn role(&self, pos: Pos) -> Option<String>;
     /// The console's `rustcraft_testkit` with these words after it; its answer.
     fn testkit(&mut self, args: &str) -> String;
+    // s18/pipe
+    /// Stream 1's actions on the block at `pos` (rustcraft_pipe18::bench), its answer.
+    fn pipe(&mut self, action: &str, pos: Pos) -> Result<String, String>;
 
     // ---- Slice 9 ----
 
@@ -605,6 +610,8 @@ pub fn catalog() -> Vec<Build> {
     // Slice 18, the module stream.
     all.extend(modules18::ALL);
     all.extend(craft18::ALL);
+    // s18/pipe
+    all.extend(pipe18::ALL);
     // Slice 18, cross-stream agent.
     all.extend(s18_cross::ALL);
     all
