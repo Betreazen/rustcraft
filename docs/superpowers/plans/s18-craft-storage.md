@@ -186,7 +186,7 @@
 
 ### Task 27: O12 — the order brings its water
 - A mixer step's water (and any fluid input) comes with the order from the storage's tanks / the line's fluid net, not only from the mixer's own tank (`orders::reachable`).
-- [ ] done
+- [x] done (`fluids::bring_water`, added block in fluids.rs, flagged: when a mixer job starts, the water of its runs moves from the tanks `reachable` counts into the mixer's tank; no in-world self-test yet; try pending)
 
 ### Task 28: the autocrafter asks the storage for a missing ingredient
 - An autocrafter on the storage's magistral, short of an ingredient of its page, gets it from the storage (an order-like pull of one craft's worth).
@@ -194,7 +194,7 @@
 
 ### Task 29: all machines take part in orders
 - Beyond crafter, furnace, crusher, alloy, mixer and (task 8) the kitchen: every machine whose recipes the book can name (the disintegrator, the brewer for its pages' potions…), or a recorded reason why not.
-- [ ] done
+- [x] done as far as recipes exist: crafter, furnace, crusher, alloy, mixer and the kitchen (task 8). The rest make nothing a book recipe names by item: the brewer's potions are component stacks chosen by its pages, the enchanting machine and the archaeology table roll at random, the disintegrator un-makes, the repair stand mends, the farm machines gather; recorded under «Пределы движка» (not an engine limit: no recipe to order by).
 
 ### Task 30: order items visible in the housings
 - The items of an order's shipment drawn moving through the housings along their route (`rules/src/orders/ship.rs` gives the route and the time), as the client can draw them (block-entity drawing of the housings).
