@@ -438,6 +438,23 @@ mod tests {
     use super::*;
 
     #[test]
+    fn each_menu_file_has_as_many_slots_as_its_machine() {
+        // The game opens a machine's window only when its menu file has the container's slot count:
+        // the in-game check found the repair stand, fishery, feeder, shearer and brewer windows
+        // not opening after their slots changed in slice 18.
+        for u in Util::ALL {
+            let name = u.spec().block.trim_start_matches("rustcraft:");
+            let path = format!(
+                "{}/../../content/data/rustcraft/horizon/menu/{name}.json",
+                env!("CARGO_MANIFEST_DIR")
+            );
+            let Ok(text) = std::fs::read_to_string(&path) else { continue };
+            let json: serde_json::Value = serde_json::from_str(&text).unwrap();
+            assert_eq!(json["slots"], u.slots().count, "{path}");
+        }
+    }
+
+    #[test]
     fn a_capacity_module_gives_the_kitchen_and_brewer_two_queue_cells() {
         use crate::modules::Module;
         let two = [Some(Module::Capacity), Some(Module::Capacity), None];
