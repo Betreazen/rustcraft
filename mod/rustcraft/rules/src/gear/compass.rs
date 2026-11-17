@@ -39,14 +39,14 @@ pub fn target(atlas: &Atlas, mode: Mode, player: u128, dimension: &str, at: [f64
                 .map(|(b, p)| (Place::Biome(b.clone()), *p))
                 .collect()
         }
+        // Wave 2: a place is visited, not a kind: another village of a kind seen still counts.
         Mode::Structures => {
-            let been = atlas.been.get(&player);
             atlas
                 .sites
                 .get(dimension)
                 .into_iter()
                 .flatten()
-                .filter(|(id, _)| been.is_none_or(|s| !s.contains(id)))
+                .filter(|(id, p)| !atlas.been_in_site(player, dimension, id, *p))
                 .map(|(id, p)| (Place::Structure(id.clone()), *p))
                 .collect()
         }
@@ -80,5 +80,27 @@ mod tests {
         assert_eq!(Mode::Structures.toggled(), Mode::Biomes);
         assert!(Mode::Biomes.takes(&Place::Biome("x".to_owned())));
         assert!(!Mode::Biomes.takes(&Place::Structure("x".to_owned())));
+    }
+}
+
+#[cfg(test)]
+mod wave2_tests {
+    use super::*;
+
+    #[test]
+    fn a_visited_village_leaves_the_other_villages_on_the_compass() {
+        const OVER: &str = "minecraft:overworld";
+        const VILLAGE: &str = "minecraft:village_plains";
+        let mut atlas = Atlas::default();
+        let me = 7;
+        atlas.mark_structure(me, OVER, VILLAGE, [40, 64, 0]);
+        atlas.mark_structure(me, OVER, VILLAGE, [600, 64, 0]);
+        let at = [0.0, 64.0, 0.0];
+        assert!(atlas.enter_at(me, OVER, VILLAGE, [45, 64, 5]), "the near village is new");
+        let t = target(&atlas, Mode::Structures, me, OVER, at).expect("the far village");
+        assert_eq!(t.at, [600, 64, 0]);
+        assert!(!atlas.enter_at(me, OVER, VILLAGE, [45, 64, 5]), "the same place twice is not new");
+        atlas.enter_at(me, OVER, VILLAGE, [600, 64, 10]);
+        assert_eq!(target(&atlas, Mode::Structures, me, OVER, at), None);
     }
 }
