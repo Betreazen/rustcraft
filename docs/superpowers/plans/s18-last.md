@@ -61,4 +61,6 @@
 
 ### Task 6: проверка
 
-- [ ] `cargo test --release -q` зелёный; после «bench free» — `joint.ps1 try` со снимка; README «Что проверить в игре».
+- [x] `cargo test --release -q` зелёный (705); README «Что проверить в игре: срез 18, последние остатки» и рюкзак; ветки `s18/last-pack`, `s18/last-orders` влиты в `s18/last`.
+- [x] Сборка бандла без стенда: `horizon-mixins apply` на чистый `7e4e421` и `cargo check -p horizon-client` (инструменты лаунчера, скрипт `scratchpad\chk-last.sh`) — без ошибок, на f293721. По пути исправлены две ошибки заимствования из 4541c8f (`alloy.rs`, `machines.rs`, 2c8fa6d), из-за которых не собиралась вся игра.
+- [ ] `joint.ps1 try` со снимка `scratchpad\snap-last` (f293721) — ждёт «bench free».
