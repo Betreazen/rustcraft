@@ -946,6 +946,12 @@ impl Bench for GameBench<'_, '_> {
             .map_err(|(_, why)| why.to_owned())
     }
 
+    // ---- Wave 2, w2-craft ----
+
+    fn pair_docks(&mut self, a: Pos, b: Pos) -> Result<(), String> {
+        crate::game::rustcraft_builder::pair_docks(self.game, a, b)
+    }
+
     // ---- Slice 18, stream 5 (craft and storage) ----
 
     fn insert_snbt(&mut self, pos: Pos, snbt: &str) -> Result<u32, String> {

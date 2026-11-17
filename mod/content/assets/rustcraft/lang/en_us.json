@@ -1364,5 +1364,14 @@
   "item.rustcraft.apiary_3": "Apiary Collector · tier 3",
   "item.rustcraft.apiary_4": "Apiary Collector · tier 4",
   "rustcraft.storage.extra": "The storage is no solid box: a cell sticks out at %s",
-  "rustcraft.terminal.extra_at": "A cell sticks out at %s"
+  "rustcraft.terminal.extra_at": "A cell sticks out at %s",
+  "rustcraft.util.portal_dock.paired_in": "Pair · a dock in %s · paired",
+  "rustcraft.util.portal_dock.world_loaded": "The other world · loaded",
+  "rustcraft.util.portal_dock.world_unloaded": "The other world · not loaded",
+  "rustcraft.util.portal_dock.world_none": "The other world · no pair",
+  "rustcraft.util.portal_dock.fluid": " · fluid %s of %s buckets",
+  "rustcraft.util.dock_holding": "Holding the load: the other world is not loaded",
+  "rustcraft.world.overworld": "the Overworld",
+  "rustcraft.world.the_nether": "the Nether",
+  "rustcraft.world.the_end": "the End"
 }

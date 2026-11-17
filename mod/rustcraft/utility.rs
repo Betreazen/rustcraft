@@ -2019,6 +2019,14 @@ fn craft_sheet(game: &Game<'_>, dimension: &str, pos: Pos, u: Util, s: &mut Shee
             let now = state().ticks.get(dimension).copied().unwrap_or(0);
             s.rows = farm::fishery_rows(game, dimension, pos, now).iter().map(base::v).collect();
         }
+        // Wave 2 (ui.js `portal_dock`): «Пара · док в Незере · связан», «Тот мир · выгружен» and
+        // its fluid buffer; its 27 slots are one buffer of what goes and what came.
+        Util::PortalDock => {
+            s.rows = vec![
+                base::v(&builder::row(game, pos, u)),
+                base::v(&builder::dock_world_row(game, pos)),
+            ];
+        }
         _ => {}
     }
 }

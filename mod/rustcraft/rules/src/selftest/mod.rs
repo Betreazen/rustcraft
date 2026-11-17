@@ -429,6 +429,13 @@ pub trait Bench {
     fn backpack_store(&mut self) -> Result<(), String> {
         Err("no backpack store on this bench".into())
     }
+
+    // ---- Wave 2, w2-craft ----
+
+    /// The portal docks at `a` and `b` paired, as two wrench clicks pair them.
+    fn pair_docks(&mut self, _a: Pos, _b: Pos) -> Result<(), String> {
+        Err("no portal docks on this bench".into())
+    }
 }
 
 /// A mob as the self-test reads it.

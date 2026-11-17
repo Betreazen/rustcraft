@@ -11,6 +11,8 @@
 //!   магистрали».
 //! - The kitchen bakes a cake with milk from a tank it does not touch, through a fluid channel.
 //! - A cell sticking out of the storage's box is the one the terminal marks (not two holes).
+//! - A portal dock sends a tank's water (behind a joint that gives) to its pair, which unloads it
+//!   into the tank it touches.
 
 use super::craft18::{basin, socket, status_key, storage_on_a_net};
 use crate::storage::modules::{SOCKET_STACK, STACK_MODULES};
@@ -18,7 +20,7 @@ use super::{Build, Scenario, at, plot_area, same};
 use crate::geom::Pos;
 use crate::tuning::Tuning;
 
-pub const ALL: [Build; 7] = [
+pub const ALL: [Build; 8] = [
     projector_is_not_turned_by_the_wrench,
     terminal_takes_the_crystallite_stack_module,
     two_fisheries_on_one_patch,
@@ -26,6 +28,7 @@ pub const ALL: [Build; 7] = [
     projector_says_no_storage,
     kitchen_milk_through_a_channel,
     terminal_marks_the_extra_cell,
+    portal_dock_sends_fluid_to_its_pair,
 ];
 
 fn projector_is_not_turned_by_the_wrench(o: Pos, _: &Tuning) -> Scenario {
@@ -182,5 +185,52 @@ fn terminal_marks_the_extra_cell(o: Pos, _: &Tuning) -> Scenario {
         .until("the terminal keeps the cell that sticks out, and no hole", 60, move |b, _| {
             Ok(b.int_array(t, "extras") == vec![extra[0] - t[0], extra[1] - t[1], extra[2] - t[2]]
                 && b.int_array(t, "holes").is_empty())
+        })
+}
+
+fn portal_dock_sends_fluid_to_its_pair(o: Pos, _: &Tuning) -> Scenario {
+    use super::magistral::{channel, line};
+    use crate::geom::Face;
+    use crate::net::items::Mode;
+    use crate::net::settings::JointSetting;
+    use crate::net::topology::ChannelKind;
+    const DOCK: &str = "rustcraft:portal_dock";
+    const TANK: &str = "rustcraft:tank";
+    const WATER: &str = "minecraft:water";
+    let (a, b2) = (at(o, [3, 1, -1]), at(o, [4, 1, 1]));
+    let (from, to) = (at(o, [0, 1, -2]), at(o, [4, 1, 2]));
+    Scenario::new("w2_portal_dock_sends_fluid_to_its_pair", plot_area(o))
+        .then("a nether portal with a dock on each side", move |b, _| {
+            for x in 2..=5 {
+                for y in 0..=4 {
+                    let edge = x == 2 || x == 5 || y == 0 || y == 4;
+                    if edge {
+                        b.place(at(o, [x, y, 0]), "minecraft:obsidian", &[])?;
+                    }
+                }
+            }
+            for x in 3..=4 {
+                for y in 1..=3 {
+                    b.place(at(o, [x, y, 0]), "minecraft:nether_portal", &[("axis", "x")])?;
+                }
+            }
+            for d in [a, b2] {
+                b.place(d, DOCK, &[])?;
+                b.set_buffer(d, 400.0)?;
+            }
+            b.pair_docks(a, b2)
+        })
+        .then("a tank of water behind a giving joint on the first dock's fluid line", move |b, _| {
+            line(b, at(o, [-1, 1, -1]), 1, 3, [channel(ChannelKind::Fluid, 1), None, None, None])?;
+            b.place(from, TANK, &[])?;
+            b.set_tank(from, WATER, 5000)?;
+            b.set_joint(at(o, [0, 1, -1]), Face::ZNeg, 0, JointSetting::of_mode(Mode::From))?;
+            b.place(to, TANK, &[])
+        })
+        .until("the water is in the tank by the other dock", 400, move |b, _| {
+            Ok(b.tank(to).is_some_and(|g| g.amount == 5000))
+        })
+        .check("and gone from the first tank", move |b, _| {
+            same("left", b.tank(from).map_or(0, |g| g.amount), 0)
         })
 }

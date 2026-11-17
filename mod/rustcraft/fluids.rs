@@ -977,9 +977,81 @@ fn craft_default_mode(block: &str) -> Option<Mode> {
         Some(Mode::Into)
     } else if block == Util::Shearer.spec().block {
         Some(Mode::From)
+    } else if block == Util::PortalDock.spec().block {
+        // Wave 2 (guide `portal_dock`): it takes fluid in and gives what came from its pair.
+        Some(Mode::Both)
     } else {
         None
     }
+}
+
+// ---- Wave 2: the portal dock's fluid (guide `portal_dock`: «предметы и жидкости», 16 вёдер) ----
+//
+// A dock sends the fluid of the tanks behind a joint that gives (From) on a fluid net it is a
+// joint of, and unloads what came from its pair into a tank it touches or one behind a joint that
+// takes (Into, Both) on such a net. A tank it only touches is not taken from, so two docks never
+// hand one tank's fluid back and forth.
+
+/// The blocks the dock at `pos` takes fluid from (`sink` false) or gives it to.
+fn dock_near(level: &LevelNet, pos: Pos, sink: bool) -> BTreeSet<Pos> {
+    let mut near: BTreeSet<Pos> = if sink {
+        Face::ALL.into_iter().map(|f| step(pos, f)).collect()
+    } else {
+        BTreeSet::new()
+    };
+    for net in &level.fluids.nets {
+        if !net.joints.iter().any(|j| j.block == pos && j.mode != Mode::Off) {
+            continue;
+        }
+        near.extend(
+            net.joints
+                .iter()
+                .filter(|j| j.block != pos)
+                .filter(|j| if sink { matches!(j.mode, Mode::Into | Mode::Both) } else { j.mode == Mode::From })
+                .map(|j| j.block),
+        );
+    }
+    near
+}
+
+/// Wave 2: the fluids (mB) the dock at `pos` may send now.
+pub(super) fn dock_offer(game: &Game<'_>, level: &LevelNet, pos: Pos, tuning: &Tuning) -> Vec<(String, u64)> {
+    let near = dock_near(level, pos, false);
+    if near.is_empty() {
+        return Vec::new();
+    }
+    read_groups(game, &level.fluids.tanks, tuning.tank_buckets * BUCKET)
+        .into_iter()
+        .filter(|g| g.blocks.iter().any(|b| near.contains(b)))
+        .filter_map(|g| Some((g.fluid.clone()?, g.amount)).filter(|(_, n)| *n > 0))
+        .collect()
+}
+
+/// Wave 2: the dock at `pos` takes up to `amount` of `fluid` from the tanks it sends from (or
+/// puts it into those it unloads to, `sink`): how much.
+pub(super) fn dock_move(game: &mut Game<'_>, level: &LevelNet, pos: Pos, fluid: &str, amount: u64, sink: bool, tuning: &Tuning) -> u64 {
+    let near = dock_near(level, pos, sink);
+    let per_block = tuning.tank_buckets * BUCKET;
+    let before = read_groups(game, &level.fluids.tanks, per_block);
+    let mut after = before.clone();
+    let mut done = 0;
+    for g in after.iter_mut().filter(|g| g.blocks.iter().any(|b| near.contains(b))) {
+        if done >= amount {
+            break;
+        }
+        done += if sink {
+            if g.fluid.as_deref().is_some_and(|f| f != fluid) {
+                continue;
+            }
+            g.put(fluid, amount - done)
+        } else {
+            g.take(fluid, amount - done)
+        };
+    }
+    if done > 0 {
+        write_back(game, &before, &after, per_block);
+    }
+    done
 }
 
 /// Wave 2: the blocks a craft machine at `pos` reaches on the fluid nets it is a joint of: to take

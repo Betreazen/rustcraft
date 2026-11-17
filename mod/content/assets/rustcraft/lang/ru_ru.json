@@ -6739,5 +6739,14 @@
   "item.rustcraft.apiary_3": "Пасечный сборщик · ступень 3",
   "item.rustcraft.apiary_4": "Пасечный сборщик · ступень 4",
   "rustcraft.storage.extra": "Нарушена форма склада: лишняя ячейка %s",
-  "rustcraft.terminal.extra_at": "Лишняя ячейка: %s"
+  "rustcraft.terminal.extra_at": "Лишняя ячейка: %s",
+  "rustcraft.util.portal_dock.paired_in": "Пара · док в %s · связан",
+  "rustcraft.util.portal_dock.world_loaded": "Тот мир · загружен",
+  "rustcraft.util.portal_dock.world_unloaded": "Тот мир · выгружен",
+  "rustcraft.util.portal_dock.world_none": "Тот мир · нет пары",
+  "rustcraft.util.portal_dock.fluid": " · жидкость %s из %s вёдер",
+  "rustcraft.util.dock_holding": "Копит груз: другой мир выгружен",
+  "rustcraft.world.overworld": "Верхнем мире",
+  "rustcraft.world.the_nether": "Незере",
+  "rustcraft.world.the_end": "Энде"
 }

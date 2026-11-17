@@ -63,7 +63,7 @@ pub(super) fn step(game: &mut Game<'_>, dimension: &str, level: &crate::game::ru
     match u {
         Util::Projector => crate::game::rustcraft_projector::projector_step(game, dimension, level, pos, cost),
         Util::Builder => crate::game::rustcraft_projector::build(game, dimension, level, pos, cost),
-        _ => dock(game, pos, cost),
+        _ => dock(game, dimension, level, pos, cost),
     }
 }
 
@@ -77,14 +77,59 @@ pub(super) fn row(game: &Game<'_>, pos: Pos, u: Util) -> Text {
         Util::Builder => util_line("rustcraft.util.builder.next", "Builds its projector's plan beside it", &[]),
         _ => {
             let id = dock_id(game, pos);
-            let paired = id.is_some_and(|id| state().transit.partner(id).is_some());
-            if paired {
-                util_line("rustcraft.util.portal_dock.paired", "Paired", &[])
-            } else {
-                util_line("rustcraft.util.portal_dock.unpaired", "No pair: click two docks with the wrench", &[])
+            let s = state();
+            let partner = id.and_then(|id| s.transit.partner(id));
+            match partner {
+                // Wave 2 (ui.js `portal_dock`): «Пара · док в Незере · связан».
+                Some(p) => {
+                    let world = s.transit.worlds.get(&p).cloned();
+                    drop(s);
+                    match world {
+                        Some(w) => util_line("rustcraft.util.portal_dock.paired_in", "Pair: a dock in %s · paired", &[world_name(&w)]),
+                        None => util_line("rustcraft.util.portal_dock.paired", "Paired", &[]),
+                    }
+                }
+                None => util_line("rustcraft.util.portal_dock.unpaired", "No pair: click two docks with the wrench", &[]),
             }
         }
     }
+}
+
+/// Wave 2: a world's name, «Незер», «Верхний мир», «Энд» (the game's own ids otherwise).
+fn world_name(world: &str) -> Text {
+    let key = format!("rustcraft.world.{}", world.rsplit(':').next().unwrap_or(world));
+    util_line(&key, world, &[])
+}
+
+/// Wave 2 (ui.js `portal_dock`): the dock's first row, «Тот мир · загружен / выгружен», with its
+/// fluid buffer «жидкость N из 16 вёдер» (a line: 27 slots leave no room for a bar in 240 px).
+pub(super) fn dock_world_row(game: &Game<'_>, pos: Pos) -> Text {
+    use rustcraft_rules::utility::transit::FLUID_ROOM;
+    let id = dock_id(game, pos);
+    let s = state();
+    let partner = id.and_then(|id| s.transit.partner(id));
+    let held = partner.map_or(0, |p| s.transit.fluid_held(p));
+    let loaded = partner.map(|p| s.transit.loaded(p, now_ms()));
+    drop(s);
+    let world = match loaded {
+        Some(true) => util_line("rustcraft.util.portal_dock.world_loaded", "The other world · loaded", &[]),
+        Some(false) => util_line("rustcraft.util.portal_dock.world_unloaded", "The other world · not loaded", &[]),
+        None => util_line("rustcraft.util.portal_dock.world_none", "The other world · no pair", &[]),
+    };
+    let buckets = |mb: u64| Text::literal(format!("{}", mb / 1000));
+    let mut row = world;
+    row.push(util_line(
+        "rustcraft.util.portal_dock.fluid",
+        " · fluid %s of %s buckets",
+        &[buckets(held), buckets(FLUID_ROOM)],
+    ));
+    row
+}
+
+fn now_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_millis() as u64)
 }
 
 fn util_line(key: &str, fallback: &str, args: &[Text]) -> Text {
@@ -175,11 +220,13 @@ fn by_portal(game: &Game<'_>, pos: Pos) -> bool {
     (-1..=1).any(|dx| (-1..=1).any(|dy| (-1..=1).any(|dz| game.native_block([pos[0] + dx, pos[1] + dy, pos[2] + dz]) == "minecraft:nether_portal")))
 }
 
-fn dock(game: &mut Game<'_>, pos: Pos, cost: f64) -> Shown {
+fn dock(game: &mut Game<'_>, dimension: &str, level: &crate::game::rustcraft_server::LevelNet, pos: Pos, cost: f64) -> Shown {
     let id = ensure_id(game, pos);
     let partner = {
         let mut s = state();
         load(game, &mut s);
+        // Wave 2: the other dock knows this one's world is loaded, and which world it is.
+        s.transit.saw(id, dimension, now_ms());
         s.transit.partner(id)
     };
     let Some(partner) = partner else {
@@ -188,7 +235,7 @@ fn dock(game: &mut Game<'_>, pos: Pos, cost: f64) -> Shown {
     if !by_portal(game, pos) {
         return Shown::Blocked("dock_no_portal");
     }
-    let mut moved = false;
+    let mut moved = dock_fluids(game, level, pos, id, partner, cost);
     // What waits for this dock comes in.
     let waiting = state().transit.take(id);
     let mut back = Vec::new();
@@ -232,14 +279,67 @@ fn dock(game: &mut Game<'_>, pos: Pos, cost: f64) -> Shown {
         });
         moved = true;
     }
-    if moved {
-        Shown::Working
-    } else if full {
+    // Wave 2: «Копит груз: другой мир выгружен».
+    let holding = {
+        let s = state();
+        !s.transit.loaded(partner, now_ms()) && s.transit.holds_for(partner)
+    };
+    if full {
         Shown::Blocked("dock_full")
+    } else if holding {
+        Shown::Idle("dock_holding")
+    } else if moved {
+        Shown::Working
     } else {
         Shown::Idle("dock_idle")
     }
+}
 
+/// Wave 2 (guide `portal_dock`: «предметы и жидкости», «16 вёдер», «1 Е за ведро»): what came
+/// from the pair goes into the tanks the dock unloads to; the fluid of the tanks it sends from
+/// goes to the pair's store, as far as its 16 buckets go, 1 E a bucket. Whether anything moved.
+fn dock_fluids(game: &mut Game<'_>, level: &crate::game::rustcraft_server::LevelNet, pos: Pos, id: u64, partner: u64, cost: f64) -> bool {
+    use crate::game::rustcraft_fluids as fluids;
+    let t = crate::game::rustcraft_server::tuning();
+    let mut moved = false;
+    let came = state().transit.take_fluids(id);
+    let mut left = Vec::new();
+    for (fluid, mb) in came {
+        let put = fluids::dock_move(game, level, pos, &fluid, mb, true, t);
+        moved |= put > 0;
+        left.push((fluid, mb - put));
+    }
+    {
+        let mut s = state();
+        s.transit.put_back_fluids(id, left);
+        s.dirty = true;
+    }
+    for (fluid, have) in fluids::dock_offer(game, level, pos, t) {
+        let room = state().transit.fluid_room(partner);
+        // Whole buckets, 1 E each.
+        let buckets = have.min(room) / 1000;
+        if buckets == 0 {
+            continue;
+        }
+        if !spend(game, pos, cost * buckets as f64) {
+            break;
+        }
+        let took = fluids::dock_move(game, level, pos, &fluid, buckets * 1000, false, t);
+        let sent = state().transit.send_fluid(partner, &fluid, took);
+        moved |= sent > 0;
+    }
+    moved
+}
+
+/// Wave 2 (the self-test's bench): the docks at `a` and `b` paired, as two wrench clicks pair
+/// them.
+pub(super) fn pair_docks(game: &mut Game<'_>, a: Pos, b: Pos) -> Result<(), String> {
+    let (ia, ib) = (ensure_id(game, a), ensure_id(game, b));
+    let mut s = state();
+    load(game, &mut s);
+    s.dirty = true;
+    s.transit.click(0, ia);
+    s.transit.click(0, ib).map(|_| ()).ok_or_else(|| "the docks did not pair".to_owned())
 }
 
 /// A wrench click on a portal dock: pairs it with the dock clicked before.
