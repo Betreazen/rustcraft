@@ -777,7 +777,7 @@
   "rustcraft.structure.single": "один кристалл",
   "rustcraft.structure.broken": "нарушена",
   "rustcraft.structure.solution": "Раствор",
-  "rustcraft.structure.solution_line": "%s из %s мВ · %s ведра в минуту",
+  "rustcraft.structure.solution_line": "%s ведра в минуту · %s из %s мВ",
   "rustcraft.miner.found_left": "Найдено руды %s · осталось %s",
   "rustcraft.miner.counting": "считаю…",
   "rustcraft.miner.outlet": "Куда складывает: ",

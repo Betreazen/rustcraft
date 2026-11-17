@@ -322,8 +322,13 @@ fn rows(game: &Game<'_>, batch: &mut HudBatch, o: [f32; 2], l: &Layout, s: &Shee
 
 fn bars(game: &Game<'_>, batch: &mut HudBatch, o: [f32; 2], l: &Layout, s: &Sheet) {
     for (b, (y, r)) in s.bars.iter().zip(&l.bars) {
-        label(game, batch, &read(&b.label), o, [r[0], *y]);
-        text_right(game, batch, &read(&b.value), o, r[0] + r[2], *y, VALUE);
+        let name = read(&b.label);
+        label(game, batch, &name, o, [r[0], *y]);
+        // The value never runs into the label (the structure's solution line did, in-game
+        // check w3): cut it with «…» to the room the label leaves; the tooltip has it whole.
+        let room = r[2] - game.native_text_width(&name.to_uppercase()) - 6.0;
+        let value = kit::fit(game, &read(&b.value), room.max(0.0));
+        text_right(game, batch, &value, o, r[0] + r[2], *y, VALUE);
         let fill = if b.energy {
             kit::ENERGY
         } else {

@@ -1293,8 +1293,9 @@ fn structure_sheet(level: &LevelNet, pos: Pos, v: &PowerView, t: &Tuning, s: &mu
         label: base::v(&line("rustcraft.structure.solution", "Solution", &[])),
         value: base::v(&line(
             "rustcraft.structure.solution_line",
-            "%s of %s mB · %s buckets a minute",
-            &[e(v.fluid.floor()), e(room), e(per_minute)],
+            // The rate first, as the guide's tank shows it (ui.js `structure`).
+            "%s buckets a minute · %s of %s mB",
+            &[e(per_minute), e(v.fluid.floor()), e(room)],
         )),
         share: if room > 0.0 { (v.fluid / room).min(1.0) } else { 0.0 },
         energy: false,

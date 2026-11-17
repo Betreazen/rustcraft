@@ -777,7 +777,7 @@
   "rustcraft.structure.single": "one crystal",
   "rustcraft.structure.broken": "broken",
   "rustcraft.structure.solution": "Solution",
-  "rustcraft.structure.solution_line": "%s of %s mB · %s buckets a minute",
+  "rustcraft.structure.solution_line": "%s buckets a minute · %s of %s mB",
   "rustcraft.miner.found_left": "Ore found %s · left %s",
   "rustcraft.miner.counting": "counting…",
   "rustcraft.miner.outlet": "Puts it: ",
