@@ -190,7 +190,7 @@
 
 ### Task 28: the autocrafter asks the storage for a missing ingredient
 - An autocrafter on the storage's magistral, short of an ingredient of its page, gets it from the storage (an order-like pull of one craft's worth).
-- [ ] done
+- [x] done 0eb4b03 (`orders::page_shortfall`, `orders.rs feed_crafters` each orders round, `crafter::pages_and_buffer` added to crafter.rs, flagged; straight into the buffer (no ride); self-test `orders18_crafter_asks_the_storage`; try pending)
 
 ### Task 29: all machines take part in orders
 - Beyond crafter, furnace, crusher, alloy, mixer and (task 8) the kitchen: every machine whose recipes the book can name (the disintegrator, the brewer for its pages' potions…), or a recorded reason why not.
