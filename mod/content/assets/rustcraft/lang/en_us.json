@@ -545,7 +545,7 @@
   "rustcraft.util.projector.cells": "Remembers %s blocks",
   "rustcraft.util.builder.next": "Builds its projector's plan beside it",
   "rustcraft.util.portal_dock.paired": "Paired",
-  "rustcraft.util.portal_dock.unpaired": "No pair: click two docks with the wrench",
+  "rustcraft.util.portal_dock.unpaired": "No pair: wrench two docks",
   "rustcraft.util.portal_dock.now_paired": "The docks are paired",
   "rustcraft.util.portal_dock.first": "Now click its pair with the wrench",
   "block.rustcraft.trash": "Trash",
@@ -1366,9 +1366,9 @@
   "rustcraft.storage.extra": "The storage is no solid box: a cell sticks out at %s",
   "rustcraft.terminal.extra_at": "A cell sticks out at %s",
   "rustcraft.util.portal_dock.paired_in": "Pair · a dock in %s · paired",
-  "rustcraft.util.portal_dock.world_loaded": "The other world · loaded",
-  "rustcraft.util.portal_dock.world_unloaded": "The other world · not loaded",
-  "rustcraft.util.portal_dock.world_none": "The other world · no pair",
+  "rustcraft.util.portal_dock.world_loaded": "The other world\tloaded",
+  "rustcraft.util.portal_dock.world_unloaded": "The other world\tnot loaded",
+  "rustcraft.util.portal_dock.world_none": "The other world\tno pair",
   "rustcraft.util.portal_dock.fluid": " · fluid %s of %s buckets",
   "rustcraft.util.dock_holding": "Holding the load: the other world is not loaded",
   "rustcraft.world.overworld": "the Overworld",
@@ -1453,5 +1453,6 @@
   "rustcraft.window.buckets.many": "%s buckets",
   "rustcraft.miner.outlet_row": "Puts it\t",
   "rustcraft.vein.grown_row": "Grown in all: %s",
-  "rustcraft.power.lava_bar": "%s of %s buckets"
+  "rustcraft.power.lava_bar": "%s of %s buckets",
+  "rustcraft.util.portal_dock.fluid_short": " · %s of %s buckets"
 }

@@ -545,7 +545,7 @@
   "rustcraft.util.projector.cells": "Помнит блоков: %s",
   "rustcraft.util.builder.next": "Строит постройку голопроектора рядом",
   "rustcraft.util.portal_dock.paired": "Пара связана",
-  "rustcraft.util.portal_dock.unpaired": "Нет пары: кликни ключом по двум докам",
+  "rustcraft.util.portal_dock.unpaired": "Нет пары: ключом по двум докам",
   "rustcraft.util.portal_dock.now_paired": "Доки связаны",
   "rustcraft.util.portal_dock.first": "Теперь кликни ключом по второму доку",
   "block.rustcraft.trash": "Утилизатор",
@@ -6737,9 +6737,9 @@
   "rustcraft.storage.extra": "Нарушена форма склада: лишняя ячейка %s",
   "rustcraft.terminal.extra_at": "Лишняя ячейка: %s",
   "rustcraft.util.portal_dock.paired_in": "Пара · док в %s · связан",
-  "rustcraft.util.portal_dock.world_loaded": "Тот мир · загружен",
-  "rustcraft.util.portal_dock.world_unloaded": "Тот мир · выгружен",
-  "rustcraft.util.portal_dock.world_none": "Тот мир · нет пары",
+  "rustcraft.util.portal_dock.world_loaded": "Тот мир\tзагружен",
+  "rustcraft.util.portal_dock.world_unloaded": "Тот мир\tвыгружен",
+  "rustcraft.util.portal_dock.world_none": "Тот мир\tнет пары",
   "rustcraft.util.portal_dock.fluid": " · жидкость %s из %s вёдер",
   "rustcraft.util.dock_holding": "Копит груз: другой мир выгружен",
   "rustcraft.world.overworld": "Верхнем мире",
@@ -6852,5 +6852,6 @@
   "rustcraft.window.buckets.many": "%s вёдер",
   "rustcraft.miner.outlet_row": "Куда складывает\t",
   "rustcraft.vein.grown_row": "Выращено всего: %s",
-  "rustcraft.power.lava_bar": "%s из %s вёдер"
+  "rustcraft.power.lava_bar": "%s из %s вёдер",
+  "rustcraft.util.portal_dock.fluid_short": " · %s из %s вёдер"
 }

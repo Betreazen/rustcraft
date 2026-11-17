@@ -429,7 +429,10 @@ pub(super) fn draw(
 /// the farthest, the item channel on the section).
 fn rows(v: &NodeView) -> Vec<(String, String)> {
     use crate::game::rustcraft_screens::{tr, tr_with};
-    let es = |x: f64| tr_with("rustcraft.node.window.eps", "%s E/s", &[format!("{x:.0}")]);
+    // In-game check w3: «-0 Е/с» on an idle line; energy_text reads a rounded −0 as 0.
+    let es = |x: f64| {
+        tr_with("rustcraft.node.window.eps", "%s E/s", &[rustcraft_rules::machines::panel::energy_text(x)])
+    };
     let enough = if v.used <= v.made {
         tr("rustcraft.node.window.yes", "yes")
     } else {

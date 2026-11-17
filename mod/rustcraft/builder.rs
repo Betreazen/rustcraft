@@ -116,13 +116,17 @@ pub(super) fn dock_world_row(game: &Game<'_>, pos: Pos) -> Text {
         Some(false) => util_line("rustcraft.util.portal_dock.world_unloaded", "The other world · not loaded", &[]),
         None => util_line("rustcraft.util.portal_dock.world_none", "The other world · no pair", &[]),
     };
+    // In-game check w3: the row was cut; as ui.js `rows` («Тот мир — выгружен»), the fluid only
+    // when the buffer holds some.
     let buckets = |mb: u64| Text::literal(format!("{}", mb / 1000));
     let mut row = world;
-    row.push(util_line(
-        "rustcraft.util.portal_dock.fluid",
-        " · fluid %s of %s buckets",
-        &[buckets(held), buckets(FLUID_ROOM)],
-    ));
+    if held > 0 {
+        row.push(util_line(
+            "rustcraft.util.portal_dock.fluid_short",
+            " · %s of %s buckets",
+            &[buckets(held), buckets(FLUID_ROOM)],
+        ));
+    }
     row
 }
 
