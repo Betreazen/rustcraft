@@ -6,7 +6,7 @@
 //!   1024.
 //! - Two fishing stations on one 5 × 5 of water: the second says the water is another's.
 //! - The craft machines of tier 2 go up to tier 4: a feeder swapped to tier 4 has four sockets
-//!   and its fourth takes a module; a kitchen of tier 4 cooks twice as fast as one of tier 2.
+//!   and its fourth takes a module; a repair stand of tier 4 works twice as fast as one of tier 2.
 //! - A projector showing its ghost with no storage on its magistral says «Нет склада на
 //!   магистрали».
 //! - The kitchen bakes a cake with milk from a tank it does not touch, through a fluid channel.
@@ -89,13 +89,13 @@ fn craft_machines_up_to_tier_four(o: Pos, _: &Tuning) -> Scenario {
     let high = at(o, [6, 1, 0]);
     const ECONOMY: &str = "rustcraft:module_economy";
     Scenario::new("w2_craft_machines_up_to_tier_four", plot_area(o))
-        .then("a feeder of tier 2, a kitchen of tier 2 and one of tier 4", move |b, _| {
+        .then("a feeder of tier 2, a repair stand of tier 2 and one of tier 4", move |b, _| {
             for p in [feeder, low, high] {
                 b.place(at(p, [0, -1, 0]), "minecraft:stone", &[])?;
             }
             b.place(feeder, "rustcraft:feeder", &[])?;
-            b.place(low, "rustcraft:kitchen", &[])?;
-            b.place(high, "rustcraft:kitchen", &[("tier", "4")])
+            b.place(low, "rustcraft:repair", &[])?;
+            b.place(high, "rustcraft:repair", &[("tier", "4")])
         })
         .then("the feeder swapped for tier 4", move |b, _| {
             same("given back", b.swap_tier(feeder, "rustcraft:feeder_4")?, "rustcraft:feeder".to_owned())
@@ -105,14 +105,15 @@ fn craft_machines_up_to_tier_four(o: Pos, _: &Tuning) -> Scenario {
             same("sockets", b.sheet(feeder).map(|s| s.modules.len()), Some(4))?;
             same("cursor", b.press_cursor(feeder, Press::Socket(3).id(), Some((ECONOMY, 1)))?, None)
         })
-        .check("the kitchen of tier 4 steps twice as often", move |b, _| {
+        // The stand's window keeps the step row (the kitchen's rows are its dish and its milk).
+        .check("the repair stand of tier 4 steps twice as often", move |b, _| {
             let step = |p| {
                 b.sheet(p)
                     .and_then(|s| s.rows.into_iter().map(|r| format!("{r:?}")).find(|r| r.contains("rustcraft.util.step")))
                     .unwrap_or_default()
             };
             let (l, h) = (step(low), step(high));
-            if l.contains("4.0") && h.contains("2.0") {
+            if l.contains("5.0") && h.contains("2.5") {
                 Ok(())
             } else {
                 Err(format!("tier 2 {l}, tier 4 {h}"))
