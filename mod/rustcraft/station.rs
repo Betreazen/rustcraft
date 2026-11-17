@@ -1146,10 +1146,11 @@ pub(super) fn draw_chassis(game: &Game<'_>, batch: &mut HudBatch, screen: &Nativ
     kit::background(game, batch, o, l.size);
     let (key, fallback) = worker_wire::window_key(v.tier);
     kit::title_line(game, batch, o, &tr(key, fallback), None, l.size[0]);
-    let w = worker_screen::WIDTH;
-    kit::label(game, batch, &tr("rustcraft.worker.tool_slot", "Tool"), o, [8.0, worker_screen::LABELS_Y]);
-    let sockets = fit(game, &tr("rustcraft.worker.sockets_title", "Upgrades and modules"), w - 52.0);
-    kit::label(game, batch, &sockets, o, [worker_screen::SOCKETS_AT[0], worker_screen::LABELS_Y]);
+    // In-game check w3: the panel right of the slots (rules worker::screen::PANEL_X).
+    let (px, pw) = (worker_screen::PANEL_X, worker_screen::PANEL_W);
+    kit::label(game, batch, &tr("rustcraft.worker.tool_slot", "Tool"), o, [px, worker_screen::LABELS_Y]);
+    let sockets = fit(game, &tr("rustcraft.worker.sockets_title", "Upgrades and modules"), pw);
+    kit::label(game, batch, &sockets, o, [px, worker_screen::SOCKETS_LABEL_Y]);
     kit::slot(game, batch, o, worker_screen::TOOL_AT);
     kit::hover(game, batch, o, style::slot_rect(worker_screen::TOOL_AT));
     if let Some(tool) = v.tool {
@@ -1163,23 +1164,23 @@ pub(super) fn draw_chassis(game: &Game<'_>, batch: &mut HudBatch, screen: &Nativ
             draw_stack(game, batch, o, at, m, 1);
         }
     }
-    // «Заряд» and «Трюм» side by side.
-    let half = (w - 24.0) / 2.0;
+    // «Заряд» and «Трюм», one under the other across the panel.
     let charge = format!("{:.0}%", 100.0 * v.charge);
     let hold = tr_with("rustcraft.worker.hold_slots", "%s of %s slots", &[v.hold.0.to_string(), v.hold.1.to_string()]);
     let hold_share = v.hold.0 as f64 / v.hold.1.max(1) as f64;
-    for (x, label, value, share, fill) in [
-        (8.0, tr("rustcraft.worker.charge_title", "Charge"), charge, v.charge, ENERGY),
-        (16.0 + half, tr("rustcraft.worker.hold_title", "Hold"), hold, hold_share, HOT),
+    for (y, label, value, share, fill) in [
+        (worker_screen::GAUGES_Y[0], tr("rustcraft.worker.charge_title", "Charge"), charge, v.charge, ENERGY),
+        (worker_screen::GAUGES_Y[1], tr("rustcraft.worker.hold_title", "Hold"), hold, hold_share, HOT),
     ] {
-        kit::label(game, batch, &label, o, [x, worker_screen::GAUGES_Y]);
-        kit::text_right(game, batch, &fit(game, &value, half - 30.0), o, x + half, worker_screen::GAUGES_Y, VALUE);
-        kit::bar(game, batch, [o[0] + x, o[1] + worker_screen::GAUGES_Y + 10.0, half, 6.0], share, fill);
+        let room = pw - game.native_text_width(&label.to_uppercase()) - 6.0;
+        kit::label(game, batch, &label, o, [px, y]);
+        kit::text_right(game, batch, &fit(game, &value, room.max(0.0)), o, px + pw, y, VALUE);
+        kit::bar(game, batch, [o[0] + px, o[1] + y + 10.0, pw, 6.0], share, fill);
     }
     kit::label(game, batch, &tr("rustcraft.worker.cargo_title", "Cargo"), o, [8.0, worker_screen::CARGO_LABEL_Y]);
     if v.hidden > 0 {
         let more = tr_with("rustcraft.worker.cargo_hidden", "+ %s more in the hold", &[v.hidden.to_string()]);
-        kit::text_right(game, batch, &more, o, w - 8.0, worker_screen::CARGO_LABEL_Y, LABEL);
+        kit::text_right(game, batch, &more, o, px - 10.0, worker_screen::CARGO_LABEL_Y, LABEL);
     }
     for (i, cell) in v.cargo.iter().enumerate() {
         let at = l.cargo_slot(i);
@@ -1195,9 +1196,9 @@ pub(super) fn draw_chassis(game: &Game<'_>, batch: &mut HudBatch, screen: &Nativ
         let names: Vec<String> = v.filter.iter().map(|f| item_name(f)).collect();
         tr_with("rustcraft.worker.filter", "Filter: %s", &[names.join(", ")])
     };
-    text(game, batch, &fit(game, &filter, w - 16.0), o, [8.0, l.filter_y], TEXT);
+    text(game, batch, &fit(game, &filter, pw), o, [px, l.filter_y], TEXT);
     if let (Some((set, _)), Some([down, value, up]), Some(y)) = (v.height, l.height_rects(), l.height_y) {
-        kit::label(game, batch, &tr("rustcraft.worker.height_title", "Height"), o, [8.0, y + 2.0]);
+        kit::label(game, batch, &tr("rustcraft.worker.height_title", "Height"), o, [px, y + 2.0]);
         button(game, batch, o, down, "−", false);
         button(game, batch, o, up, "+", false);
         let shown = set.map_or_else(|| tr("rustcraft.worker.height_level", "level"), |h| h.to_string());
@@ -1209,7 +1210,7 @@ pub(super) fn draw_chassis(game: &Game<'_>, batch: &mut HudBatch, screen: &Nativ
         worker_wire::Mood::Waiting => Severity::Warn,
         worker_wire::Mood::Stopped => Severity::Bad,
     };
-    kit::status_line(game, batch, o, [4.0, l.status_y, w - 8.0, 14.0], severity, &tr(key, fallback));
+    kit::status_line(game, batch, o, [px - 4.0, l.status_y, pw + 8.0, 14.0], severity, &tr(key, fallback));
     kit::inventory(game, batch, o, l.inventory, l.inventory_label_y);
     for i in 0..worker_screen::INVENTORY {
         let at = l.inventory_slot(i);

@@ -107,15 +107,27 @@ pub fn adjust_height(set: Option<i32>, y: i32, by: i32) -> Option<i32> {
 
 // ---- The layout (GUI pixels from the window's corner; items' top left corners) ----
 
+// In-game check w3: the window was 262 high (a hold of 27), so its title and hotbar fell off a
+// 1280×720 screen at GUI scale 3, and «Инструмент» ran into «Улучшения и модули». As README
+// item 7 says, the panel now stands right of the slots: the hold and the inventory on the left,
+// the tool, the sockets, «Заряд» and «Трюм», the filter and the status line on the right.
+
 const PITCH: f32 = 18.0;
 const COLUMNS: usize = 9;
-pub const WIDTH: f32 = 176.0;
-pub const TOOL_AT: [f32; 2] = [8.0, 28.0];
-pub const SOCKETS_AT: [f32; 2] = [44.0, 28.0];
+/// The right panel: its left edge and width (seven sockets fit in a row).
+pub const PANEL_X: f32 = 8.0 + COLUMNS as f32 * PITCH + 10.0;
+pub const PANEL_W: f32 = 128.0;
+pub const WIDTH: f32 = PANEL_X + PANEL_W + 8.0;
+/// A window must fit 240 GUI pixels: a 1280 × 720 screen at GUI scale 3.
+pub const MAX_HEIGHT: f32 = 240.0;
 pub const LABELS_Y: f32 = 17.0;
-pub const GAUGES_Y: f32 = 50.0;
-pub const CARGO_LABEL_Y: f32 = 72.0;
-pub const CARGO_AT: [f32; 2] = [8.0, 83.0];
+pub const TOOL_AT: [f32; 2] = [PANEL_X + 1.0, 28.0];
+pub const SOCKETS_LABEL_Y: f32 = 48.0;
+pub const SOCKETS_AT: [f32; 2] = [PANEL_X + 1.0, 59.0];
+/// «Заряд» and «Трюм», one under the other, each a label line and a bar.
+pub const GAUGES_Y: [f32; 2] = [80.0, 100.0];
+pub const CARGO_LABEL_Y: f32 = 17.0;
+pub const CARGO_AT: [f32; 2] = [8.0, 28.0];
 /// The −/+ buttons of the height field, from its row's top.
 pub const BUTTON: [f32; 2] = [14.0, 12.0];
 
@@ -151,17 +163,17 @@ pub fn layout(sockets: usize, cargo: usize, height: bool) -> Layout {
     let cargo = cargo.min(SHOWN);
     let rows = cargo.div_ceil(COLUMNS).max(1);
     let grid_bottom = CARGO_AT[1] + rows as f32 * PITCH - 1.0;
-    let filter_y = grid_bottom + 4.0;
-    let mut y = filter_y + 11.0;
+    let filter_y = GAUGES_Y[1] + 20.0;
+    let mut y = filter_y + 12.0;
     let height_y = height.then(|| {
         let at = y;
         y += 14.0;
         at
     });
     let status_y = y;
-    let inventory_label_y = status_y + 18.0;
+    let inventory_label_y = grid_bottom + 5.0;
     let inventory = [8.0, inventory_label_y + 11.0];
-    let bottom = inventory[1] + 58.0 + 17.0 + 7.0;
+    let bottom = (inventory[1] + 58.0 + 17.0 + 7.0).max(status_y + 14.0 + 6.0);
     Layout { sockets, cargo, filter_y, height_y, status_y, inventory_label_y, inventory, size: [WIDTH, bottom] }
 }
 
@@ -195,13 +207,13 @@ impl Layout {
 
     /// The filter's row: a click there clears it.
     pub fn filter_rect(&self) -> [f32; 4] {
-        [8.0, self.filter_y - 1.0, WIDTH - 16.0, 10.0]
+        [PANEL_X, self.filter_y - 1.0, PANEL_W, 10.0]
     }
 
     /// The height field's −, value and + boxes.
     pub fn height_rects(&self) -> Option<[[f32; 4]; 3]> {
         let y = self.height_y?;
-        let right = WIDTH - 8.0;
+        let right = PANEL_X + PANEL_W;
         let up = [right - BUTTON[0], y, BUTTON[0], BUTTON[1]];
         let value = [up[0] - 40.0, y, 38.0, BUTTON[1]];
         let down = [value[0] - BUTTON[0] - 2.0, y, BUTTON[0], BUTTON[1]];
@@ -275,17 +287,24 @@ mod tests {
         assert_eq!(l.at([down[0] + 1.0, down[1] + 1.0]), Some(Part::HeightDown));
         assert_eq!(l.at([up[0] + 1.0, up[1] + 1.0]), Some(Part::HeightUp));
         assert_eq!(press_of(l.at([value[0] + 1.0, value[1] + 1.0]).unwrap(), false), Some(Press::Height { by: 0 }));
-        assert_eq!(l.at([20.0, l.filter_y + 2.0]), Some(Part::Filter));
+        assert_eq!(l.at([PANEL_X + 12.0, l.filter_y + 2.0]), Some(Part::Filter));
         assert!(layout(3, 9, false).height_rects().is_none());
     }
 
     #[test]
     fn the_window_fits_a_hold_of_45_and_the_inventory() {
-        let l = layout(7, 45, true);
-        assert!(l.size[1] <= 330.0, "{l:?}");
-        let last = l.cargo_slot(44);
-        assert!(last[1] + 17.0 < l.filter_y);
-        assert!(l.inventory_slot(0)[1] + 17.0 < l.size[1]);
+        // In-game check w3: 240 high at most, the panel right of the slots, nothing overlapping.
+        for (sockets, cargo, height) in [(3, 27, false), (5, 27, true), (7, 45, true), (3, 9, false)] {
+            let l = layout(sockets, cargo, height);
+            assert!(l.size[1] <= MAX_HEIGHT, "{l:?}");
+            let last = l.cargo_slot(cargo - 1);
+            assert!(last[1] + 17.0 < l.inventory_label_y, "{l:?}");
+            assert!(last[0] + 17.0 < PANEL_X && l.inventory_slot(8)[0] + 17.0 < PANEL_X);
+            assert!(l.socket(sockets - 1)[0] + 17.0 <= PANEL_X + PANEL_W);
+            assert!(SOCKETS_LABEL_Y >= TOOL_AT[1] + 18.0 && SOCKETS_AT[1] + 18.0 <= GAUGES_Y[0]);
+            assert!(l.filter_y > GAUGES_Y[1] + 16.0 && l.status_y + 14.0 <= l.size[1]);
+            assert!(l.inventory_slot(0)[1] + 17.0 < l.size[1]);
+        }
     }
 
     #[test]
