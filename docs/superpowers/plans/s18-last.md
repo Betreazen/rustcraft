@@ -32,8 +32,8 @@
 
 **Files:** `rules/src/mining.rs` (`slots_of` без среза окном, `shown_slots`, `settle`), `rules/src/tuning.rs` (`miner_slots_max = 9 << MAX_SOCKETS`, `worker_hold_max = 27 << 7`), `rules/src/worker/hold.rs` (`settle`, `beyond`, хранение без хвоста пустых ячеек), `mod/rustcraft/mining.rs` (скрытые ячейки `miner_cells`, приём добычи, подача в видимые, строка окна), `mod/rustcraft/workers.rs` (строка окна, `settle` после взятия), `mod/rustcraft/machines.rs::on_destroyed` (свой блок: ячейки выпадают), lang, самотест `s18_miner_storage_beyond_the_window`.
 
-- [ ] RED: `mining` тест `storage_doubles_past_the_window` (0..4 модуля → 9, 18, 36, 72, 144; окно 27); `settle_moves_hidden_cells_into_free_slots`; `hold` тест `a_hold_bigger_than_its_window_moves_hidden_stacks_up`, `a_hold_saves_without_its_empty_tail`; `worker` тест `three_storage_modules_make_the_hold_216`.
-- [ ] GREEN, бандл, самотест: добытчик с 2 модулями хранилища без выхода, руда в зоне — в окне 27 ячеек, в NBT скрытые ячейки, в строке окна «ещё N в запасе». Коммит.
+- [x] RED: `mining` тест `storage_doubles_past_the_window` (0..4 модуля → 9, 18, 36, 72, 144; окно 27); `settle_moves_hidden_cells_into_free_slots`; `hold` тест `a_hold_bigger_than_its_window_moves_hidden_stacks_up`, `a_hold_saves_without_its_empty_tail`; `worker` тест `three_storage_modules_make_the_hold_216`.
+- [x] GREEN, бандл (`mining.rs`: `CELLS_KEY` = `miner_cells`, добыча сверх слотов окна — в скрытые ячейки, раз в 8 тиков после выдачи ячейки подают в слоты окна `settle_cells`, строка окна `rustcraft.miner.hidden`; `workers.rs`: `Hold::settle(45)` после взятия, строка `rustcraft.worker.hold_beyond`; трюм пишется без хвоста пустых ячеек, старые записи читаются), самотест `s18_miner_storage_beyond_the_window` (27 слотов окна полны, два модуля хранилища: руда выкопана, железа в слотах окна нет, «Некуда складывать» не горит). Коммит.
 
 ### Task 2: рюкзак — гнездо модуля стака и стаки до 1024 в своём экране (API 111)
 
@@ -45,7 +45,7 @@
 
 **Files:** `rules/src/machines/queue.rs` (`stash`: общий для кухни и куба), `rules/src/utility/kitchen.rs` (`stash` через него), `rules/src/utility/brew.rs` (`STASHED` — ячейки ингредиентов и топлива), `mod/rustcraft/utility.rs` (`brew_stash`, `brew_cells`, варка берёт из ячеек), `machines.rs::on_destroyed` (свой блок), самотест `s18_brewer_stack_module`.
 
-- [ ] RED: `a_stack_module_lets_the_brewers_reagents_and_powder_hold_256`; GREEN; бандл; самотест; коммит.
+- [x] RED: `a_stack_module_lets_the_brewers_reagents_and_powder_hold_256` (две группы ячеек `brew::STASH_GROUPS`: ингредиенты и порошок отдельно, ингредиент не попадает в слот порошка); `queue::stash` — общий для кухни и куба; GREEN; бандл (`utility::brew_stash`, ключи `brew_cells`, `brew_powder_cells`, варка берёт сначала из ячеек; при сломе ячейки выпадают — свой блок в `machines::on_destroyed`); самотест `s18_brewer_stack_module`; коммит.
 
 ### Task 4: O11 — продукт шага сразу в машину следующего шага
 

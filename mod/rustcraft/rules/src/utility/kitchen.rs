@@ -58,19 +58,8 @@ pub fn stash(
     size: impl Fn(&str) -> u32,
     max: impl Fn(&str) -> u32,
 ) {
-    use crate::machines::queue;
-    let open = if stacked { INPUTS } else { 0 };
-    if stacked {
-        for slot in visible.iter_mut() {
-            if let Some((item, _)) = slot.clone() {
-                queue::intake(slot, cells, open, size(&item));
-            }
-        }
-    } else {
-        for slot in visible.iter_mut() {
-            queue::spill(slot, cells, open, &max);
-        }
-    }
+    let n = visible.len().min(INPUTS);
+    crate::machines::queue::stash(&mut visible[..n], cells, stacked, size, max);
 }
 
 #[cfg(test)]

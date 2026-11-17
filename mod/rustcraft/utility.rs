@@ -412,6 +412,10 @@ pub(super) fn tick(game: &mut Game<'_>, dimension: &str, level: &LevelNet, t: &T
         if u == Util::Kitchen && now.is_multiple_of(KITCHEN_STASH_EVERY) {
             kitchen_stash(game, pos);
         }
+        // Slice 18 (last): the brewer's reagents and powder likewise.
+        if u == Util::Brewer && now.is_multiple_of(KITCHEN_STASH_EVERY) {
+            brew_stash(game, pos);
+        }
         let (every, cost) = paced(game, pos, u);
         if !now.is_multiple_of(every) {
             continue;
@@ -1079,12 +1083,87 @@ fn brew_press(entity: &mut ModBlockEntity, i: usize) {
     write_json(&mut entity.nbt, BREW_PAGES_KEY, &pages);
 }
 
+/// Slice 18 (last, guide `mod_stack`): the brewer's hidden cells, its saved compound's keys: the
+/// reagents' and, apart, the blaze powder's (rustcraft_rules::utility::brew::STASH_GROUPS).
+pub(super) const BREW_CELLS_KEY: &str = "brew_cells";
+pub(super) const BREW_POWDER_CELLS_KEY: &str = "brew_powder_cells";
+
+/// Slice 18 (last): the brewer's reagents and blaze powder moved into or out of their hidden
+/// cells as its stack module says (rustcraft_rules::machines::queue::stash, a group each),
+/// written back; the reagents' cells and the powder's after it. Only plain stacks go in.
+fn brew_stash(game: &mut Game<'_>, pos: Pos) -> [Vec<rustcraft_rules::machines::slots::Slot>; 2] {
+    use rustcraft_rules::machines::{queue, slots::Slot};
+    use rustcraft_rules::utility::brew::STASH_GROUPS;
+    let keys = [BREW_CELLS_KEY, BREW_POWDER_CELLS_KEY];
+    let Some(entity) = game.native_mod_block_entity(pos) else {
+        return [Vec::new(), Vec::new()];
+    };
+    let modules = base::modules_at(game, pos);
+    let stacked = rustcraft_rules::modules::stack_tier(&modules) > 0;
+    let before: [Vec<Slot>; 2] = keys.map(|k| read_json(&entity.nbt, k));
+    if !stacked && before.iter().all(|c| c.iter().all(Option::is_none)) {
+        return before;
+    }
+    let plain = |s: &ItemStack| s.damage == 0 && s.extra.is_none();
+    let visible_before: Vec<Vec<Slot>> = STASH_GROUPS
+        .iter()
+        .map(|g| {
+            g.clone()
+                .map(|k| entity.items.get(k).cloned().flatten().filter(|s| plain(s) && s.count > 0).map(|s| (s.item.to_string(), s.count)))
+                .collect()
+        })
+        .collect();
+    let mut visible = visible_before.clone();
+    let mut cells = before.clone();
+    let max = |i: &str| machines::max_stack(game, i);
+    for (v, c) in visible.iter_mut().zip(cells.iter_mut()) {
+        queue::stash(v, c, stacked, |i| rustcraft_rules::modules::machine_stack(&modules, max(i)), &max);
+    }
+    if visible == visible_before && cells == before {
+        return cells;
+    }
+    let written = cells.clone();
+    game.native_with_mod_block_entity(pos, move |e| {
+        for (g, (now, was)) in STASH_GROUPS.iter().zip(visible.iter().zip(&visible_before)) {
+            for (k, (n, w)) in g.clone().zip(now.iter().zip(was)) {
+                if n != w && let Some(slot) = e.items.get_mut(k) {
+                    *slot = n.as_ref().map(|(i, c)| ItemStack::new(i, *c));
+                }
+            }
+        }
+        for (key, c) in keys.iter().zip(&written) {
+            write_json(&mut e.nbt, key, c);
+        }
+    });
+    cells
+}
+
+/// Takes one of `item` from the first cell holding it; whether there was one.
+fn take_from_cells(cells: &mut [rustcraft_rules::machines::slots::Slot], item: &str) -> bool {
+    for cell in cells.iter_mut() {
+        if let Some((i, n)) = cell
+            && i == item
+            && *n > 0
+        {
+            *n -= 1;
+            if *n == 0 {
+                *cell = None;
+            }
+            return true;
+        }
+    }
+    false
+}
+
 fn brew(game: &mut Game<'_>, dimension: &str, pos: Pos, cost: f64) -> Shown {
     use rustcraft_rules::utility::{
         BREW_BOTTLES, BREW_FUEL, BREW_INGREDIENTS, BREW_OUT,
         brew::{self, Step},
     };
     let _ = dimension;
+    // Slice 18 (last): with a stack module the reagents and the powder hold 256, the rest in
+    // hidden cells.
+    let [reagent_cells, powder_cells] = brew_stash(game, pos);
     let slots = items(game, pos);
     let bottles: Vec<(usize, ItemStack)> = BREW_BOTTLES
         .clone()
@@ -1117,7 +1196,9 @@ fn brew(game: &mut Game<'_>, dimension: &str, pos: Pos, cost: f64) -> Shown {
         let r = ItemStack::new(i, 1);
         bottles.iter().any(|(_, b)| game.stations().brewing.find(b, &r).is_some())
     };
-    let has = |i: &str| count_of(&slots, BREW_INGREDIENTS, i) > 0;
+    let has = |i: &str| {
+        count_of(&slots, BREW_INGREDIENTS, i) > 0 || rustcraft_rules::machines::slots::count_in(&reagent_cells, i) > 0
+    };
     match brew::next_step(&chain, applies, has) {
         Step::Done => {
             let done: Vec<ItemStack> = bottles.iter().map(|(_, b)| b.clone()).collect();
@@ -1138,7 +1219,8 @@ fn brew(game: &mut Game<'_>, dimension: &str, pos: Pos, cost: f64) -> Shown {
         }
         Step::Missing(_) => Shown::Blocked("brew_no_reagent"),
         Step::Brew(ingredient) => {
-            let has_powder = slots.get(BREW_FUEL).cloned().flatten().is_some_and(|s| s.count > 0);
+            let has_powder = slots.get(BREW_FUEL).cloned().flatten().is_some_and(|s| s.count > 0)
+                || rustcraft_rules::machines::slots::count_in(&powder_cells, "minecraft:blaze_powder") > 0;
             if fuel <= 0 && !has_powder {
                 return Shown::Blocked("brew_no_fuel");
             }
@@ -1152,12 +1234,23 @@ fn brew(game: &mut Game<'_>, dimension: &str, pos: Pos, cost: f64) -> Shown {
                 .collect();
             game.native_with_mod_block_entity(pos, |e| {
                 let mut f = read_i64(&e.nbt, FUEL_KEY);
+                // Slice 18 (last): from the hidden cells first, then the slots.
                 if f <= 0 {
-                    take_one(&mut e.items, BREW_FUEL);
+                    let mut powder = powder_cells.clone();
+                    if take_from_cells(&mut powder, "minecraft:blaze_powder") {
+                        write_json(&mut e.nbt, BREW_POWDER_CELLS_KEY, &powder);
+                    } else {
+                        take_one(&mut e.items, BREW_FUEL);
+                    }
                     f = i64::from(BREWS_PER_POWDER);
                 }
                 write_i64(&mut e.nbt, FUEL_KEY, f - 1);
-                take(&mut e.items, BREW_INGREDIENTS, ingredient, 1);
+                let mut reagents = reagent_cells.clone();
+                if take_from_cells(&mut reagents, ingredient) {
+                    write_json(&mut e.nbt, BREW_CELLS_KEY, &reagents);
+                } else {
+                    take(&mut e.items, BREW_INGREDIENTS, ingredient, 1);
+                }
                 for (i, s) in &made {
                     e.items[*i] = Some(s.clone());
                 }

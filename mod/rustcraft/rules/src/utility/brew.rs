@@ -68,6 +68,12 @@ pub struct Page {
 /// The most pages: one and one a capacity module.
 pub const PAGES_MAX: usize = 4;
 
+/// Slice 18 (guide `mod_stack`: «Подходит: … варочный куб»): the brewer's slots a stack module
+/// makes hold 256, each with a hidden cell of its own: the four reagents, and apart from them the
+/// blaze powder (a cell gives back only into its own group's slots, so a reagent never lands in
+/// the powder's slot). The bottles stack to one and stay as they are.
+pub const STASH_GROUPS: [std::ops::Range<usize>; 2] = [super::BREW_INGREDIENTS, super::BREW_FUEL..super::BREW_FUEL + 1];
+
 pub fn pages(capacity: u32) -> usize {
     (1 + capacity as usize).min(PAGES_MAX)
 }
@@ -127,6 +133,31 @@ pub fn next_step(chain: &[&'static str], applies: impl Fn(&str) -> bool, has: im
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_stack_module_lets_the_brewers_reagents_and_powder_hold_256() {
+        use crate::machines::{queue, slots::{Slot, count_in}};
+        assert!(!STASH_GROUPS.iter().any(|g| g.clone().any(|i| super::super::BREW_BOTTLES.contains(&i))));
+        let (powder, sugar) = ("minecraft:blaze_powder", "minecraft:sugar");
+        let mut reagents: Vec<Slot> = vec![None; STASH_GROUPS[0].len()];
+        let mut fuel: Vec<Slot> = vec![None; STASH_GROUPS[1].len()];
+        let (mut reagent_cells, mut fuel_cells) = (Vec::new(), Vec::new());
+        for _ in 0..4 {
+            fuel[0] = Some((powder.into(), 64));
+            reagents[0] = Some((sugar.into(), 64));
+            queue::stash(&mut reagents, &mut reagent_cells, true, |_| 256, |_| 64);
+            queue::stash(&mut fuel, &mut fuel_cells, true, |_| 256, |_| 64);
+        }
+        assert_eq!((fuel[0].clone(), reagents[0].clone()), (None, None));
+        assert_eq!(count_in(&fuel_cells, powder), 256, "the powder's slot holds 256 with the module");
+        assert_eq!(count_in(&reagent_cells, sugar), 256);
+        // The module out: each group's cells give back into its own slots only.
+        queue::stash(&mut fuel, &mut fuel_cells, false, |_| 256, |_| 64);
+        queue::stash(&mut reagents, &mut reagent_cells, false, |_| 256, |_| 64);
+        assert_eq!(count_in(&fuel, sugar), 0);
+        assert_eq!(count_in(&fuel_cells, powder) + count_in(&fuel, powder), 256, "nothing lost");
+        assert_eq!(count_in(&reagents, sugar), 256, "four slots of 64");
+    }
 
     #[test]
     fn a_page_is_a_chain_of_ingredients() {

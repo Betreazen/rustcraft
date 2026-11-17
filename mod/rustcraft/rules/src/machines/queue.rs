@@ -83,6 +83,30 @@ pub fn spill(intake: &mut Slot, cells: &mut Vec<Slot>, open: usize, max: impl Fn
     }
 }
 
+/// Slice 18 (guide `mod_stack`): with a stack module (`stacked`) each of `visible` (a machine's
+/// input slots) has a hidden cell of `size(item)` (256 for what stacks to 64): what a slot holds
+/// moves into its cells, so the slot takes more; without one, the cells give back into the slots
+/// as far as they take (`spill`, `max` of an item a slot). What a slot and the cells hold together
+/// is what the machine works from.
+pub fn stash(
+    visible: &mut [Slot],
+    cells: &mut Vec<Slot>,
+    stacked: bool,
+    size: impl Fn(&str) -> u32,
+    max: impl Fn(&str) -> u32,
+) {
+    let open = if stacked { visible.len() } else { 0 };
+    for slot in visible.iter_mut() {
+        if stacked {
+            if let Some((item, _)) = slot.clone() {
+                intake(slot, cells, open, size(&item));
+            }
+        } else {
+            spill(slot, cells, open, &max);
+        }
+    }
+}
+
 /// The cell the machine works from: the first one holding an item `works` takes; none means the
 /// intake itself.
 pub fn front(cells: &[Slot], works: impl Fn(&str) -> bool) -> Option<usize> {

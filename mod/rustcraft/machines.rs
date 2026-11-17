@@ -1449,6 +1449,25 @@ pub(super) fn on_destroyed(game: &mut Game<'_>, dimension: &str, pos: Pos, creat
     if creative {
         return;
     }
+    // Slice 18 (last): the miner's hidden cells and the brewer's (sheets: their modules are
+    // rustcraft_base's).
+    let hidden: Vec<(String, u32)> = [
+        crate::game::rustcraft_mining::CELLS_KEY,
+        crate::game::rustcraft_utility::BREW_CELLS_KEY,
+        crate::game::rustcraft_utility::BREW_POWDER_CELLS_KEY,
+    ]
+        .into_iter()
+        .flat_map(|key| {
+            let cells: Vec<Slot> = crate::game::rustcraft_utility::read_json(&entity.nbt, key);
+            queue::spilled(&cells, |i| max_stack(game, i))
+        })
+        .collect();
+    for (item, count) in hidden {
+        drop_stack(game, dimension, pos, &item, count);
+    }
+    let Some(entity) = self::entity(game, pos) else {
+        return;
+    };
     // Slice 18 (cross): the kitchen's hidden input cells (a sheet: its modules are rustcraft_base's).
     let kitchen: Vec<Slot> = crate::game::rustcraft_utility::read_json(&entity.nbt, crate::game::rustcraft_utility::KITCHEN_CELLS_KEY);
     if !kitchen.is_empty() {
