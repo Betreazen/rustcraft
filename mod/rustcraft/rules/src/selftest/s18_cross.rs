@@ -79,7 +79,9 @@ fn pace_shown(b: &dyn super::Bench, pos: Pos, secs: &str) -> bool {
     b.sheet(pos).is_some_and(|s| {
         s.rows.iter().any(|r| {
             let r = r.to_string();
-            r.contains("rustcraft.placer.pace") && r.contains(&format!("\"{secs}\""))
+            // A whole number of seconds goes over the wire as a JSON number (`"with":[1,2]`).
+            r.contains("rustcraft.placer.pace")
+                && (r.contains(&format!("\"{secs}\"")) || r.contains(&format!("[{secs},")))
         })
     })
 }

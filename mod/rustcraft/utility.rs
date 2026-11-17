@@ -166,13 +166,33 @@ pub(super) fn is_grown(stack: &ItemStack) -> bool {
         .is_some_and(|d| d.get(&JavaString::from(grown::MARK)).is_some())
 }
 
-/// A stack of the item a worker's hold names `name`: a grown block's with its mark.
+/// Slice 18, wave 2: the find table a grown block's item carries (custom data
+/// `rustcraft:grown_table`).
+fn grown_table_of(stack: &ItemStack) -> Option<String> {
+    match stack.custom_data()?.get(&JavaString::from(grown::TABLE_KEY))? {
+        Tag::String(s) => Some(s.to_string_lossy()),
+        _ => None,
+    }
+}
+
+/// Slice 18, wave 2: the hold name a worker's grab keeps the grown block at `pos` under, with
+/// the find table its vein chose (`grown::hold_name_with`).
+pub(super) fn grown_hold_name(game: &Game<'_>, pos: Pos, block: &str) -> String {
+    let table = brushable_at(game, pos).and_then(|(t, _, _)| t);
+    grown::hold_name_with(block, table.as_deref())
+}
+
+/// A stack of the item a worker's hold names `name`: a grown block's with its mark (and its
+/// find table).
 pub(super) fn hold_stack(name: &str, count: u32) -> ItemStack {
-    let (item, marked) = grown::from_hold(name);
+    let (item, marked, table) = grown::from_hold_table(name);
     let mut stack = ItemStack::new(item, count);
     if marked {
         let mut data = stack.custom_data().cloned().unwrap_or_default();
         data.insert(JavaString::from(grown::MARK), Tag::Byte(1));
+        if let Some(t) = table {
+            data.insert(JavaString::from(grown::TABLE_KEY), Tag::String(JavaString::from(t)));
+        }
         stack
             .data_mut()
             .set_other(CUSTOM_DATA, Some(Tag::Compound(data)));
@@ -182,7 +202,10 @@ pub(super) fn hold_stack(name: &str, count: u32) -> ItemStack {
 
 /// The name a worker's hold keeps `stack` under: its item, marked when it was grown.
 pub(super) fn hold_name(stack: &ItemStack) -> String {
-    grown::hold_name(&stack.item, is_grown(stack))
+    if is_grown(stack) {
+        return grown::hold_name_with(&stack.item, grown_table_of(stack).as_deref());
+    }
+    grown::hold_name(&stack.item, false)
 }
 
 /// A random number 0..1 (xorshift; the machines' chances need no better).
@@ -1519,6 +1542,8 @@ fn brush(game: &mut Game<'_>, pos: Pos, cost: f64) -> Shown {
     let remembered = found_of(&block);
     let rolled = remembered.as_ref().and_then(|(_, item)| item.clone());
     let table = found::brush_table(remembered.as_ref().map(|(f, _)| f), table).to_owned();
+    // Slice 18, wave 2: a grown block brushes by the find table its vein chose.
+    let table = grown_table_of(&block).unwrap_or(table);
     let finds = match rolled {
         Some(item) => vec![item],
         None => game.sequence_loot(&table, &table, Some(&brush)),
@@ -1581,12 +1606,16 @@ pub(super) fn set_brush_loot(game: &mut Game<'_>, pos: Pos, table: &str) -> bool
 }
 
 /// The item a lift gives of the suspicious `block`: marked grown, or with where it was found.
-fn lifted_stack(block: &str, lift: &Lift, rolled: Option<&ItemStack>) -> ItemStack {
+fn lifted_stack(block: &str, lift: &Lift, rolled: Option<&ItemStack>, table: Option<&str>) -> ItemStack {
     let mut stack = ItemStack::new(block, 1);
     let mut data = Compound::default();
     match lift {
         Lift::Grown => {
             data.insert(JavaString::from(grown::MARK), Tag::Byte(1));
+            // Slice 18, wave 2 (guide `mod_stratum`): the find table the vein's window chose.
+            if let Some(t) = table.filter(|t| !t.is_empty()) {
+                data.insert(JavaString::from(grown::TABLE_KEY), Tag::String(JavaString::from(t)));
+            }
         }
         Lift::Found(f) => {
             let text = |s: &str| Tag::String(JavaString::from(s));
@@ -1662,13 +1691,14 @@ pub(super) fn lift(game: &mut Game<'_>, dimension: &str, pos: Pos) -> Option<(It
     }
     let (table, seed, rolled) = brushable_at(game, pos).unwrap_or_default();
     let was_grown = grown_at(game, dimension, pos);
+    let grown_table = table.clone();
     let lift = found::lift(dimension, pos, was_grown, table, seed, rolled.is_some());
     let air = game.native_default_state("minecraft:air")?;
     if !game.native_set_block(dimension, pos, air, 3) {
         return None;
     }
     forget_grown(game, dimension, pos);
-    Some((lifted_stack(&block, &lift, rolled.as_ref()), lift))
+    Some((lifted_stack(&block, &lift, rolled.as_ref(), grown_table.as_deref()), lift))
 }
 
 /// `native_use_item_on` of the wrench with sneaking on suspicious sand or gravel: the block is
@@ -1733,8 +1763,11 @@ fn grow(game: &mut Game<'_>, dimension: &str, pos: Pos, cost: f64) -> Shown {
     let slots = items(game, pos);
     let mods = base::modules_at(game, pos);
     let stratum = modules::count(&mods, Module::Stratum) > 0;
-    // Slice 18: the stratum takes the rock its window chose (sand or gravel).
-    let chosen_rock = vein::stratum_rock(choice(game, pos, vein::STRATUM_ROCKS.len()));
+    // Slice 18: the stratum takes the rock its window chose (sand or gravel); wave 2: and the find
+    // table its block gets.
+    let picked = toggles_at(game, pos, Util::Vein.spec().toggles);
+    let chosen_rock = vein::stratum_rock(vein::stratum_choice(&picked).0);
+    let chosen_table = vein::stratum_table(&picked);
     let wanted = |item: &str| if stratum { item == chosen_rock } else { vein::is_stone(item) };
     let Some(slot) = slots.iter().position(|s| s.as_ref().is_some_and(|s| s.count > 0 && wanted(&s.item))) else {
         return Shown::Idle("vein_no_rock");
@@ -1773,6 +1806,7 @@ fn grow(game: &mut Game<'_>, dimension: &str, pos: Pos, cost: f64) -> Shown {
     game.native_set_block(dimension, cell, state_id, 3);
     with_items(game, pos, |items| take_one(items, slot));
     if grown::is_suspicious(ore) {
+        set_brush_loot(game, cell, chosen_table);
         let mut g = grown_cells(game);
         g.cells.grew(dimension, cell);
         g.dirty = true;
@@ -1894,7 +1928,12 @@ pub(super) fn sheet(game: &Game<'_>, dimension: &str, pos: Pos, u: Util, s: &mut
     let names = if u == Util::Vein {
         let mods = base::modules_at(game, pos);
         if modules::count(&mods, Module::Stratum) > 0 {
-            rustcraft_rules::utility::vein::STRATUM_ROCKS.iter().map(|r| ((*r).to_owned(), (*r).to_owned())).collect()
+            use rustcraft_rules::utility::vein::{STRATUM_ROCKS, STRATUM_TABLES};
+            STRATUM_ROCKS
+                .iter()
+                .map(|r| ((*r).to_owned(), (*r).to_owned()))
+                .chain(STRATUM_TABLES.iter().map(|t| ((*t).to_owned(), "minecraft:brush".to_owned())))
+                .collect()
         } else if modules::count(&mods, Module::Pick) > 0 {
             toggle_names(u)
         } else {
@@ -1904,6 +1943,11 @@ pub(super) fn sheet(game: &Game<'_>, dimension: &str, pos: Pos, u: Util, s: &mut
         toggle_names(u)
     };
     let shown_n = names.len();
+    // Slice 18, wave 2: the stratum's two choices, a rock and a find table, one of each on.
+    let stratum_on = (u == Util::Vein && modules::count(&base::modules_at(game, pos), Module::Stratum) > 0).then(|| {
+        let (rock, table) = rustcraft_rules::utility::vein::stratum_choice(&on);
+        (rock, rustcraft_rules::utility::vein::STRATUM_ROCKS.len() + table)
+    });
     s.toggles = names
         .into_iter()
         .into_iter()
@@ -1911,8 +1955,10 @@ pub(super) fn sheet(game: &Game<'_>, dimension: &str, pos: Pos, u: Util, s: &mut
         .map(|(i, (key, icon))| Toggle {
             icon,
             name: base::v(&line(&format!("rustcraft.util.{short}.toggle.{}", key.replace([':', '/'], "_")), &key, &[])),
-            on: on.get(i).copied().unwrap_or(false)
+            on: stratum_on.map_or(false, |(r, t)| i == r || i == t)
+                || (stratum_on.is_none() && on.get(i).copied().unwrap_or(false))
                 || (matches!(u, Util::Archeo | Util::Enchanter | Util::Vein | Util::Apiary)
+                    && stratum_on.is_none()
                     && i == 0
                     && !on.iter().take(shown_n).any(|t| *t)),
             hint: base::v(&line(&format!("rustcraft.util.{short}.hint"), "Click to turn on or off", &[])),
@@ -2200,6 +2246,10 @@ pub(super) fn on_button(game: &mut Game<'_>, pos: Pos, entity: &mut ModBlockEnti
             let now = if now > 0 { now as u32 } else { xp::LEVEL_MAX };
             let by = xp::LEVEL_STEPS[i];
             write_i64(&mut entity.nbt, ENCHANT_LEVEL_KEY, i64::from(xp::step_level(now, by)));
+        }
+        Util::Vein if modules::count(&modules::read(&base::read_module_items(&entity.nbt)), Module::Stratum) > 0 => {
+            let t = rustcraft_rules::utility::vein::stratum_press(&toggles(&entity.nbt), i);
+            write_toggles(&mut entity.nbt, &t);
         }
         Util::Archeo | Util::Vein | Util::Apiary => {
             let mut t = vec![false; n];

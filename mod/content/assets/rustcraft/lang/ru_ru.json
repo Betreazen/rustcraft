@@ -6748,5 +6748,10 @@
   "rustcraft.util.charger.armour": "Броня",
   "rustcraft.mixer.pace": "Ведро за %s с",
   "rustcraft.window.module_slot.locked": "Закрыто: откроется на ступени %s",
-  "rustcraft.util.fishery.reserve": "ещё %s сверх окна"
+  "rustcraft.util.fishery.reserve": "ещё %s сверх окна",
+  "rustcraft.util.vein.toggle.minecraft_archaeology_desert_well": "Пустынный колодец",
+  "rustcraft.util.vein.toggle.minecraft_archaeology_desert_pyramid": "Пустынный храм",
+  "rustcraft.util.vein.toggle.minecraft_archaeology_ocean_ruin_warm": "Тёплые подводные руины",
+  "rustcraft.util.vein.toggle.minecraft_archaeology_ocean_ruin_cold": "Холодные подводные руины",
+  "rustcraft.util.vein.toggle.minecraft_archaeology_trail_ruins_common": "Руины троп"
 }

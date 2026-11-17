@@ -1373,5 +1373,10 @@
   "rustcraft.util.charger.armour": "Armour",
   "rustcraft.mixer.pace": "A bucket in %s s",
   "rustcraft.window.module_slot.locked": "Closed: opens on tier %s",
-  "rustcraft.util.fishery.reserve": "%s more past the window"
+  "rustcraft.util.fishery.reserve": "%s more past the window",
+  "rustcraft.util.vein.toggle.minecraft_archaeology_desert_well": "Desert well",
+  "rustcraft.util.vein.toggle.minecraft_archaeology_desert_pyramid": "Desert pyramid",
+  "rustcraft.util.vein.toggle.minecraft_archaeology_ocean_ruin_warm": "Warm ocean ruins",
+  "rustcraft.util.vein.toggle.minecraft_archaeology_ocean_ruin_cold": "Cold ocean ruins",
+  "rustcraft.util.vein.toggle.minecraft_archaeology_trail_ruins_common": "Trail ruins"
 }
