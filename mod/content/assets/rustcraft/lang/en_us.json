@@ -1457,5 +1457,7 @@
   "rustcraft.util.portal_dock.fluid_short": " · %s of %s buckets",
   "rustcraft.compass.target_counted": "%s · %s %s",
   "rustcraft.turret.range_counted": "Range: %s",
-  "rustcraft.monorail.look_counted": "Monorail · tier %s · %s a second"
+  "rustcraft.monorail.look_counted": "Monorail · tier %s · %s a second",
+  "rustcraft.handbook.page.mod_filter.name": "Filter Module",
+  "rustcraft.handbook.page.mod_filter.sum": "Sets the own tab of the storage terminal: only the items it marks."
 }

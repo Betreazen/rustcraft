@@ -72,6 +72,8 @@ ITEM = {
     'mod_power': 'module_power', 'mod_haste': 'module_haste', 'mod_recipes': 'module_recipes',
     # Slice 18 (cross): stream 4's stack, yield and line modules.
     'mod_stack': 'module_stack', 'mod_yield': 'module_yield', 'mod_line': 'module_line',
+    # Slice 18, final: the filter module (the owner kept its recipe aha|psp|aha).
+    'mod_filter': 'module_filter',
     'cell': 'cell', 'terminal': 'terminal', 'tablet': 'tablet',
     'monorail': 'monorail', 'lift': 'monorail', 'station': 'station',
     'chassis': 'chassis', 'dock_unload': 'dock_unload', 'dock_load': 'dock_load',

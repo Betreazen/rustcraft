@@ -6856,5 +6856,15 @@
   "rustcraft.util.portal_dock.fluid_short": " · %s из %s вёдер",
   "rustcraft.compass.target_counted": "%s · %s %s",
   "rustcraft.turret.range_counted": "Радиус: %s",
-  "rustcraft.monorail.look_counted": "Монорельс · ступень %s · %s в секунду"
+  "rustcraft.monorail.look_counted": "Монорельс · ступень %s · %s в секунду",
+  "rustcraft.handbook.page.mod_filter.name": "Модуль фильтра",
+  "rustcraft.handbook.page.mod_filter.sum": "Задаёт свою вкладку терминала склада: в ней только отмеченные предметы.",
+  "rustcraft.handbook.page.mod_filter.text.0": "Правый клик с модулем в руке открывает его окно. Возьми предмет из инвентаря и кликни им по окну, чтобы отметить. Клик по отмеченному предмету снимает отметку.",
+  "rustcraft.handbook.page.mod_filter.text.1": "Вставь модуль в гнездо фильтра в окне терминала. Вкладка «своя» покажет только отмеченные предметы. Список хранится в самом модуле, поэтому его можно переставить в другой терминал.",
+  "rustcraft.handbook.page.mod_filter.stat.0.key": "Предметов в списке",
+  "rustcraft.handbook.page.mod_filter.stat.0.value": "До 27",
+  "rustcraft.handbook.page.mod_filter.stat.1.key": "Ставится",
+  "rustcraft.handbook.page.mod_filter.stat.1.value": "В гнездо фильтра терминала склада",
+  "rustcraft.handbook.page.mod_filter.stat.2.key": "Подходит",
+  "rustcraft.handbook.page.mod_filter.stat.2.value": "Терминал склада"
 }

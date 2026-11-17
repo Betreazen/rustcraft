@@ -128,6 +128,7 @@ PAGES = {
     'mod_power': ('Strength Module', 'Players in a support turret\'s radius hit harder.'),
     'mod_haste': ('Swiftness Module', 'Players in a support turret\'s radius move faster.'),
     'mod_recipes': ('Recipe Book', 'A storage terminal module. Knows every recipe of the game and the mod and lets you order items.'),
+    'mod_filter': ('Filter Module', 'Sets the own tab of the storage terminal: only the items it marks.'),
     # ---- storage
     'cell': ('Storage Cell', 'A storage block. Cells make up a solid box of any size.'),
     'terminal': ('Storage Terminal',
