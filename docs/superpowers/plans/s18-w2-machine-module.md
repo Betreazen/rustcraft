@@ -147,7 +147,7 @@
 
 ## Итог волны 2
 
-Коммиты `2135414`…(последний) на `s18/w2-machine-module`. Тесты правил: 722 (было 705). Самотесты: новые `w2_trash_takes_by_joint_filter`, `w2_disintegrator_preview`, `w2_charger_keeps_charged_gear`; переписан `util_trash_burns_its_filter` (фильтр теперь на стыке), расширен `module_stratum_grows_the_chosen_rock` (выбор таблицы), исправлена проверка `s18_placer_and_breaker_by_tier` (целые секунды приходят числом JSON).
+Коммиты `41a14a3`…`6ab46b4` на `s18/w2-machine-module`. Последний try (снимок 6ab46b4): RC 226/227, PCT 42/42, SC 105/105; единственный провал `orders18_bread_through_the_kitchen` был и на базе 4fdd4f3 (комбайн, w2-craft). Тесты правил: 722 (было 705). Самотесты: новые `w2_trash_takes_by_joint_filter`, `w2_disintegrator_preview`, `w2_charger_keeps_charged_gear`; переписан `util_trash_burns_its_filter` (фильтр теперь на стыке), расширен `module_stratum_grows_the_chosen_rock` (выбор таблицы), исправлена проверка `s18_placer_and_breaker_by_tier` (целые секунды приходят числом JSON).
 
 Ещё передачи (сверх таблицы выше):
 
