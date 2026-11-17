@@ -19,6 +19,10 @@
 - Every 3–5 tasks: `pwsh -NoProfile -File "C:\Claude code projects\horizon-joint-dev\joint.ps1" try -Mod rustcraft -Path "C:\Claude code projects\rustcraft-s18\craft-storage" -Owner s18-craft-storage` — RC, PCT, SC self-tests all green. Rules tests any time: `cargo test --release -q` in `mod/rustcraft/rules`.
 - Numbers: where the handbook names a number, take it.
 
+## Try status
+
+- 2026-11-17, snapshot 1e5ccb6: the game built with this branch; self-tests PCT 42/42, SoulsCraft 87/87, RustCraft 157/158 — the one failure `storage18_keeps_component_stacks` checked before the net had brought all five stones (fixed in db6fee7, the scenario waits for them). Every other stream-5 scenario passed (`storage18_*`, `orders18_*`, `util18_*`, `kitchen18_*`, `repair18_*`, `fishery18_*`, `butcher18_*`, `brewer18_*`, `builder18_*`) and the updated slice-11/12/15 scenarios.
+
 ## Cross-stream contracts this plan relies on
 
 - **Module items (stream 4).** The stack and filter modules are stream 4's items. This stream recognises them by item id in ONE place, `rules/src/storage/modules.rs`: `STACK_MODULES = [("rustcraft:module_stack", 1), ("rustcraft:module_stack_1024", 2), ("rustcraft:module_stack_4096", 3)]`, `FILTER_MODULE = "rustcraft:module_filter"`, `CAPACITY_MODULE = "rustcraft:module_capacity"` (exists today). If stream 4 names them otherwise, the integrator edits that one file.
