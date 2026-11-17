@@ -7,10 +7,11 @@ use crate::net::topology::ChannelKind;
 use crate::geom::Pos;
 use crate::tuning::Tuning;
 
-pub const ALL: [Build; 3] = [
+pub const ALL: [Build; 4] = [
     wrench_lifts_a_tier_3_machine,
     energy_channel_caps_all_its_passes,
     windmill_blades_where_the_rotor_turns,
+    broken_node_gives_back,
 ];
 
 /// Guide `wrench`: a machine of a higher tier lifted by the wrench comes off as its tier's item
@@ -89,5 +90,23 @@ fn windmill_blades_where_the_rotor_turns(o: Pos, _t: &Tuning) -> Scenario {
         .until("the first is blocked, the second turns", 200, move |b, _| {
             Ok(shown(b, side) == Some(Shown::Blocked)
                 && matches!(shown(b, behind), Some(Shown::Gives(_))))
+        })
+}
+
+/// Guide `facade` («блок тратится и возвращается»), `mod_line`: a node broken in survival gives
+/// back its facade, the block of its look and its line-boost modules.
+fn broken_node_gives_back(o: Pos, _t: &Tuning) -> Scenario {
+    Scenario::new("w2_broken_node_gives_back_facade_look_and_modules", plot_area(o))
+        .then("a node with two line-boost modules, hidden as bricks", move |b, _| {
+            line(b, o, 1, 1, [channel(ChannelKind::Item, 1), None, None, None])?;
+            for i in 0..2 {
+                b.pipe(&format!("socket:{i}"), o)?;
+            }
+            b.pipe("cover:minecraft:bricks", o).map(|_| ())
+        })
+        .check("broken, it gives back the facade, the bricks and both modules", move |b, _| {
+            let items = b.pipe("node_returns", o)?;
+            let want = "rustcraft:facade,minecraft:bricks,rustcraft:module_line,rustcraft:module_line";
+            if items == want { Ok(()) } else { Err(format!("{items:?}, {want:?} expected")) }
         })
 }

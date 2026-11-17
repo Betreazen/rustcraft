@@ -509,6 +509,14 @@ pub(super) fn on_destroy_block(game: &mut Game<'_>, pos: [i32; 3]) {
         // s18/pipe: its channels are dealt with here, not as a loss at the next rescan.
         crate::game::rustcraft_pipe18::housing_handled(&player.dimension, pos);
     }
+    // Wave 2: a node broken in survival gives back its facade, its look and its line-boost modules.
+    if block == content::NODE && player.game_mode != CREATIVE {
+        for item in crate::game::rustcraft_node_window::node_returns(game, pos) {
+            if game.native_give_items(&item, 1) == 0 {
+                drop_item(game, &player.dimension, pos, &item);
+            }
+        }
+    }
     if block != content::HOUSING || player.game_mode == CREATIVE {
         return;
     }

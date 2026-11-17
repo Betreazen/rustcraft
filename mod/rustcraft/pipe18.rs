@@ -232,6 +232,8 @@ pub(super) fn bench(game: &mut Game<'_>, action: &str, pos: Pos) -> Result<Strin
                 .ok_or_else(|| format!("no housing taken at {pos:?}"))
         }
         "facade_items" => Ok(facade_items(game, pos).join(",")),
+        // Wave 2: what a broken node gives back (rustcraft_server::on_destroy_block).
+        "node_returns" => Ok(crate::game::rustcraft_node_window::node_returns(game, pos).join(",")),
         "weak" => Ok(game
             .native_mod_block_entity(pos)
             .and_then(|e| match e.nbt.get(&JavaString::from(WEAK_KEY)) {

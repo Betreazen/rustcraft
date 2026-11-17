@@ -62,6 +62,15 @@ pub(super) fn node_modules(game: &Game<'_>, nodes: impl Iterator<Item = Pos>) ->
         .collect()
 }
 
+/// Wave 2: what the node at `pos` gives back when it is broken, besides itself: its facade and
+/// the block of its look (guide `facade`: «блок тратится и возвращается») and its line-boost
+/// modules.
+pub(super) fn node_returns(game: &Game<'_>, pos: Pos) -> Vec<String> {
+    let mut out = crate::game::rustcraft_pipe18::facade_items(game, pos);
+    out.extend(nw::returned_modules(modules_of(game, pos)).into_iter().map(str::to_owned));
+    out
+}
+
 pub(super) fn set_modules(game: &mut Game<'_>, pos: Pos, n: u8) -> bool {
     game.native_with_mod_block_entity(pos, |e| {
         e.nbt.insert(JavaString::from(MODULES_KEY), Tag::Byte(n.min(nw::SOCKETS) as i8));

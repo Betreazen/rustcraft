@@ -35,6 +35,12 @@ pub fn boost(modules: u8) -> f64 {
     1.0 + BOOST_PER_MODULE * f64::from(modules.min(SOCKETS))
 }
 
+/// Wave 2: what a broken node with `modules` line-boost modules gives back of them: one item a
+/// module, no more than its sockets hold.
+pub fn returned_modules(modules: u8) -> Vec<&'static str> {
+    vec![LINE_MODULE; usize::from(modules.min(SOCKETS))]
+}
+
 /// The axes of a node of tiers 1–3, as the window names them: west–east, north–south, up–down.
 pub const AXES: [[Face; 2]; 3] = [
     [Face::XNeg, Face::XPos],
@@ -328,6 +334,13 @@ mod tests {
         assert_eq!(boost(0), 1.0);
         assert_eq!(boost(3), 2.5);
         assert_eq!(boost(9), 2.5, "no more than three sockets");
+    }
+
+    #[test]
+    fn a_broken_node_gives_back_one_item_a_module() {
+        assert!(returned_modules(0).is_empty());
+        assert_eq!(returned_modules(2), [LINE_MODULE, LINE_MODULE]);
+        assert_eq!(returned_modules(9).len(), 3, "no more than its sockets");
     }
 
     #[test]
