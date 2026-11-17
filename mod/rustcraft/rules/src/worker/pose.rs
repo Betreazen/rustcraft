@@ -273,3 +273,39 @@ mod tests {
         assert!(close(deg, PITCH_UP.to_degrees()));
     }
 }
+
+/// Wave 2 (poses.js `P.worker`: `glow: busy ? 0.2 + 0.2·pulse(t, 8) : 0.1 + 0.08·pulse(t, 2)`):
+/// the worker's glow at `t` seconds, 0 to 0.4.
+pub fn glow(busy: bool, t: f64) -> f64 {
+    if busy {
+        0.2 + 0.2 * pulse(t, 8.0)
+    } else {
+        0.1 + 0.08 * pulse(t, 2.0)
+    }
+}
+
+/// The packed light (16 × sky light in bits 0..8, 16 × block light in bits 8..16) a worker draws
+/// with at `t`: the glow lifts its block light, up to full at the busy pulse's top, never below
+/// the light it stands in. An idle worker's faint glow lifts it to at most a third.
+pub fn glow_light(light: u32, busy: bool, t: f64) -> u32 {
+    let level = (glow(busy, t) / 0.4 * 15.0).round().clamp(0.0, 15.0) as u32;
+    let block = ((light >> 8) & 0xFF) / 16;
+    let lifted = block.max(level);
+    (light & !0xFF00) | ((lifted * 16) << 8)
+}
+
+#[cfg(test)]
+mod wave2_glow_tests {
+    use super::*;
+
+    #[test]
+    fn a_working_worker_glows_and_an_idle_one_barely() {
+        let dark = 0x00F0; // sky 15, block 0
+        let top = std::f64::consts::FRAC_PI_2 / 8.0; // pulse(t, 8) = 1
+        assert_eq!(glow_light(dark, true, top), 0xF0F0, "full block light at the pulse's top");
+        let idle = glow_light(dark, false, 0.0);
+        assert!((idle >> 8) / 16 <= 7, "idle stays dim: {idle:#x}");
+        assert_eq!(glow_light(0xF0F0, false, 0.0), 0xF0F0, "never darker than where it stands");
+        assert_eq!(glow_light(dark, true, top) & 0xFF, 0xF0, "sky light kept");
+    }
+}

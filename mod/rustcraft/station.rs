@@ -1006,6 +1006,9 @@ pub(super) fn draw_worker(
         Some(worker_pose::point_in_model(rel, f64::from(yaw)))
     });
     let seconds = f64::from(mob.age) / 20.0;
+    // Wave 2 (poses.js `glow`): a working worker glows with its work's pulse, an idle one faintly.
+    let light = draw.light;
+    draw.light = worker_pose::glow_light(light, seat.busy, seconds);
     draw.push();
     draw.rotate_about([0.0, 1.0, 0.0], mob.body_yaw - yaw, [0.0; 3]);
     draw.rotate_about([0.0, 1.0, 0.0], -90.0, [0.0; 3]);
@@ -1040,6 +1043,7 @@ pub(super) fn draw_worker(
         }
     }
     draw.pop();
+    draw.light = light;
 }
 
 // ---- The chassis window ----
