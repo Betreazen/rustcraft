@@ -843,7 +843,7 @@ fn take_grown(game: &mut Game<'_>, dimension: &str, w: &mut Worker, zone: &[Pos]
             continue;
         }
         let max = machines::max_stack(game, &block);
-        let name = grown::hold_name(&block, true);
+        let name = util::grown_hold_name(game, p, &block);
         if w.hold.add(&name, 1, max) > 0 {
             break;
         }
