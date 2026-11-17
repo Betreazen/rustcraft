@@ -598,9 +598,11 @@ fn grown_block_reaches_the_archeology_table(o: Pos, t: &Tuning) -> Scenario {
 fn guard_kill_drops_where_the_mob_fell(o: Pos, _: &Tuning) -> Scenario {
     // Guide `tool_gun`: «Добыча падает на месте: её подбирает вагонетка с захватом или
     // магистраль рядом». A weak zoglin (rotten flesh 1 to 3, no condition) beside a guard's
-    // track: once shot dead its loot lies where it fell. Loot the base game gives only to a
-    // player's kill (`killed_by_player`: a spider's eye, a blaze's rod) does not drop, as the
-    // guard's shot has no attacker (base.rs, «Shots»); see the stream plan.
+    // track: once shot dead its loot lies where it fell. With the owner away (as here: the bench
+    // has no player) the shot has no attacker and loot the base game gives only to a player's
+    // kill (`killed_by_player`: a spider's eye, a blaze's rod) does not drop; with the owner in
+    // the level the killing shot is the owner's and it does (slice 18 cross, base.rs
+    // `guard_shot` → `owner_shot`, a bots' check).
     const ZOGLIN: &str = "minecraft:zoglin";
     let mob_at = [f64::from(o[0]) + 3.5, f64::from(o[1] + 1), f64::from(o[2]) + 2.5];
     Scenario::new("worker_guard_kill_drops_where_the_mob_fell", plot_area(o))

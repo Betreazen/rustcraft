@@ -1020,8 +1020,28 @@ pub(super) fn guard_shot(
         })
         .filter(|(_, _, d)| *d <= range)
         .min_by(|a, b| a.2.total_cmp(&b.2))?;
-    strike(game, dimension, id, damage as f32, owner, Striker::Guard);
+    // Slice 18 (cross): the killing shot is the owner's when they are in this level, as the
+    // turret's (owner_shot): the game drops the loot only a player's kill gets (a spider's eye, a
+    // blaze rod) «как если бы владелец убил его сам».
+    remember_hit(id, owner, Striker::Guard);
+    if !owner_shot(game, dimension, id, Some(owner), damage as f32) {
+        game.native_hurt_entity(dimension, id, damage as f32, SHOT_TYPE, None);
+    }
     Some(kind)
+}
+
+/// Mob `id` was struck by `owner`'s `by`, for its death.
+fn remember_hit(id: u32, owner: u128, by: Striker) {
+    let now = state().ticks;
+    state().hits.insert(
+        id,
+        Hit {
+            owner,
+            tick: now,
+            by,
+            by_owner: false,
+        },
+    );
 }
 
 /// Hurts mob `id` by `amount` with no attacker (see the module comment) and remembers who struck
