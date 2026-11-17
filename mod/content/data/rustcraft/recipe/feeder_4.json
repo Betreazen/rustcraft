@@ -1,0 +1,18 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    "bwb",
+    "bhb",
+    "bbb"
+  ],
+  "key": {
+    "b": "rustcraft:starsteel",
+    "w": "minecraft:wheat",
+    "h": "minecraft:hopper"
+  },
+  "result": {
+    "id": "rustcraft:feeder_4",
+    "count": 1
+  }
+}

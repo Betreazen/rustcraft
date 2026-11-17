@@ -236,6 +236,16 @@ pub struct Tuning {
     pub butcher_keep_default: u32,
     pub butcher_keep_min: u32,
     pub butcher_keep_max: u32,
+    // ---- Slice 18, energy stream ----
+    /// CR2 (guide `grow`): a seed on a tank of solution grows into a druse in this many minutes,
+    /// drinking this many buckets over its growth; it keeps at most `seed_buffer` buckets.
+    pub grow_minutes: f64,
+    pub grow_buckets: f64,
+    pub seed_buffer: f64,
+    // ---- Slice 18, stream 3 (machines) ----
+    /// A8: how much faster each tier above a machine's first works (guide `swap`: «работает
+    /// быстрее»; the guide names no number for most machines). **Proposal.**
+    pub tier_speed_step: f64,
 }
 
 impl Default for Tuning {
@@ -274,7 +284,9 @@ impl Default for Tuning {
             worker_energy_per_block: 0.5,
             worker_hold: 27,
             worker_hold_per_storage: 9,
-            worker_hold_max: 45,
+            // Slice 18 (guide `mod_storage`): ×2 a module, up to seven of them in a starsteel chassis;
+            // the window shows 45, the rest are counted in it.
+            worker_hold_max: 27 << 7,
             worker_upgrade_slots: 3,
             tool_side: [1, 2],
             tool_height: [3, 5],
@@ -343,7 +355,8 @@ impl Default for Tuning {
             miner_scan_per_tick: 64.0,
             miner_dig_ticks: 20.0,
             miner_slots: 9,
-            miner_slots_max: 27,
+            // Slice 18: ×2 a storage module in each of its four sockets; the window shows 27.
+            miner_slots_max: 9 << 4,
             miner_tool: "minecraft:diamond_pickaxe".to_owned(),
             placer_energy: 2.0,
             placer_ticks: 20.0,
@@ -356,7 +369,8 @@ impl Default for Tuning {
             ],
             mixer_energy: 8.0,
             mixer_ticks: 100.0,
-            mixer_buckets: 4,
+            // Slice 18: 16 buckets a tank, as the guide's window shows (`ui.js` mixer).
+            mixer_buckets: 16,
             cargo_hold: 45,
             load_dock_slots: 9,
             load_items_per_second: 32.0,
@@ -387,6 +401,11 @@ impl Default for Tuning {
             butcher_keep_default: 2,
             butcher_keep_min: 2,
             butcher_keep_max: 16,
+            grow_minutes: 10.0,
+            grow_buckets: 4.0,
+            seed_buffer: 1.0,
+            // Slice 18, stream 3 (machines).
+            tier_speed_step: 0.5,
         }
     }
 }

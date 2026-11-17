@@ -9,7 +9,7 @@
   "key": {
     "a": "rustcraft:crystallite",
     "x": "minecraft:glistering_melon_slice",
-    "s": "minecraft:amethyst_shard"
+    "s": "rustcraft:crystal_shard"
   },
   "result": {
     "id": "rustcraft:module_heal",

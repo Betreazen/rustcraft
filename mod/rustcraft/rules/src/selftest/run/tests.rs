@@ -213,6 +213,10 @@ impl Bench for Fake {
     fn testkit(&mut self, _: &str) -> String {
         String::new()
     }
+    // s18/pipe
+    fn pipe(&mut self, _: &str, _: Pos) -> Result<String, String> {
+        Err(String::new())
+    }
     fn sheet(&self, _: Pos) -> Option<crate::machines::sheet::Sheet> {
         None
     }
@@ -288,6 +292,9 @@ impl Bench for Fake {
     fn recipe_grid(&self, _: &str) -> Option<[Option<String>; 9]> {
         None
     }
+    fn handbook_recipes(&self, _: usize) -> Vec<crate::handbook::recipes::Shown> {
+        Vec::new()
+    }
     fn set_brush_loot(&mut self, _: Pos, _: &str) -> Result<(), String> {
         Ok(())
     }
@@ -298,6 +305,47 @@ impl Bench for Fake {
         _: usize,
     ) -> Result<crate::utility::found::Lift, String> {
         Ok(crate::utility::found::Lift::Grown)
+    }
+    fn break_block(&mut self, _: Pos, _: Option<&str>) -> Result<Vec<(String, u32)>, String> {
+        Ok(Vec::new())
+    }
+    fn seed(&self, _: Pos) -> Option<crate::grow::Seed> {
+        None
+    }
+    fn set_seed(&mut self, _: Pos, _: f64) -> Result<(), String> {
+        Ok(())
+    }
+    fn crystal_drawn(&self, _: Pos) -> Option<(Option<[i32; 3]>, bool, bool)> {
+        None
+    }
+    // ---- Slice 18, stream 6 (rail and workers) ----
+    fn worker_as_item(&mut self, id: u64, _: Pos) -> Result<u64, String> {
+        Ok(id)
+    }
+    fn swap_chassis(&mut self, _: u64, _: &str) -> Result<String, String> {
+        Ok(String::new())
+    }
+    fn worker_room(&self, _: u128, _: u32) -> bool {
+        true
+    }
+    fn set_worker_filter(&mut self, _: u64, _: &[&str]) -> Result<(), String> {
+        Ok(())
+    }
+    // Slice 18, stream 5.
+    fn insert_snbt(&mut self, _: Pos, _: &str) -> Result<u32, String> {
+        Ok(0)
+    }
+    fn stored_stacks(&self, _: Pos) -> Vec<String> {
+        Vec::new()
+    }
+    fn storage_diagnosis(&self, _: Pos) -> Option<String> {
+        None
+    }
+    fn int_array(&self, _: Pos, _: &str) -> Vec<i32> {
+        Vec::new()
+    }
+    fn long(&self, _: Pos, _: &str) -> i64 {
+        0
     }
 }
 

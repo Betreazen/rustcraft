@@ -186,10 +186,12 @@ fn layout_of(kind: Kind) -> Layout {
 pub(super) fn layout(block: &str) -> Option<NativeScreen> {
     let kind = Kind::of(block)?;
     let l = layout_of(kind);
-    let slots = if l.slots.is_empty() {
+    // Slice 18, wave 2: a hidden menu slot (the trash's old filter cells, the charger's output)
+    // has no place.
+    let slots = if l.menu_slots.is_empty() {
         vec![None]
     } else {
-        l.slots.iter().copied().map(Some).collect()
+        l.menu_slots.clone()
     };
     Some(NativeScreen {
         width: WIDTH,
@@ -220,7 +222,9 @@ pub(super) fn draw(game: &Game<'_>, block: &str, batch: &mut HudBatch, o: [f32; 
     };
     let l = layout_of(kind);
     kit::background(game, batch, o, [WIDTH, l.height]);
-    kit::title_line(game, batch, o, &block_name(block), None, WIDTH);
+    // Slice 18, stream 3: a tiered block's title says its tier, read from the block.
+    let tier = kit::tier_label(game, block);
+    kit::title_line(game, batch, o, &block_name(block), tier.as_deref(), WIDTH);
     let Some(s) = sheet_now(game) else {
         let waiting = tr("rustcraft.window.waiting", "Waiting for the server…");
         text(game, batch, &waiting, o, [8.0, 18.0], LABEL);
@@ -253,14 +257,50 @@ pub(super) fn draw(game: &Game<'_>, block: &str, batch: &mut HudBatch, o: [f32; 
             game.native_fill(batch, kit::at(o, slot_frame(*p)), UNUSED);
         }
     }
+    lead_row(game, batch, o, &l, &s);
     if let Some(st) = &s.status {
         kit::status_line(game, batch, o, l.status, st.severity(), &read(&st.text));
     }
     kit::inventory(game, batch, o, l.inventory, l.inventory_label_y);
 }
 
+/// Slice 18, wave 2: the lead row's label, its work arrow and the ghost cells of what comes out
+/// (`ui.js` `work`, the disintegrator's «Разборка»).
+fn lead_row(game: &Game<'_>, batch: &mut HudBatch, o: [f32; 2], l: &Layout, s: &Sheet) {
+    if let (Some(y), Some(t)) = (l.label_y, &s.label) {
+        label(game, batch, &read(t), o, [8.0, y]);
+    }
+    if let Some(r) = l.work {
+        let shaft = [r[0], r[1] + 2.0, r[2] - style::ARROW_HEAD[0], 8.0];
+        kit::arrow(game, batch, o, shaft, s.work.unwrap_or(0.0).clamp(0.0, 1.0));
+    }
+    for (p, (item, count)) in l.preview.iter().zip(&s.preview) {
+        slot(game, batch, o, *p);
+        let at = [o[0] + p[0], o[1] + p[1]];
+        if game.native_item(batch, item, at, 16.0) {
+            game.native_fill(batch, [at[0], at[1], 16.0, 16.0], colour::GHOST);
+        }
+        if !count.is_empty() {
+            let w = game.native_text_width(count);
+            game.native_text(batch, count, [at[0] + 17.0 - w, at[1] + 9.0], 0xFFFFFF, true);
+        }
+    }
+}
+
 fn sockets(game: &Game<'_>, batch: &mut HudBatch, o: [f32; 2], l: &Layout, s: &Sheet) {
+    // Slice 18, stream 3: the sockets its tier opens (A5: 3 / 3 / 4 / 4), and past them any that
+    // still holds a module (a block taken down a tier).
+    let open = game.native_screen_pos().map_or(sheet::SOCKETS, |pos| {
+        let block = game.native_block(pos);
+        rustcraft_rules::machines::sockets::open(
+            &block,
+            Some(i32::from(crate::game::rustcraft_tiers::tier_of(game, pos, &block))),
+        )
+    });
     for (k, p) in l.sockets.iter().enumerate() {
+        if k >= open && s.modules.get(k).cloned().flatten().is_none() {
+            continue;
+        }
         let module = s.modules.get(k).cloned().flatten();
         socket(game, batch, o, *p, module.is_none());
         if let Some(id) = module {
@@ -272,8 +312,17 @@ fn sockets(game: &Game<'_>, batch: &mut HudBatch, o: [f32; 2], l: &Layout, s: &S
 fn rows(game: &Game<'_>, batch: &mut HudBatch, o: [f32; 2], l: &Layout, s: &Sheet) {
     let shown = s.rows.len().min(l.rows.len());
     for (i, (v, y)) in s.rows.iter().zip(&l.rows).enumerate() {
-        let line = kit::fit(game, &read(v), WIDTH - 16.0);
-        text(game, batch, &line, o, [8.0, *y], TEXT);
+        let whole = read(v);
+        // A row of `key\tvalue` (the circuit balance, rules `sheet::BALANCE_ROWS`): the key on
+        // the left, the value on the right, as ui.js `rows` draws them.
+        if let Some((key, value)) = whole.split_once('\t') {
+            let value = kit::fit(game, value, WIDTH - 24.0 - game.native_text_width(key));
+            text(game, batch, key, o, [8.0, *y], LABEL);
+            text_right(game, batch, &value, o, WIDTH - 8.0, *y, VALUE);
+        } else {
+            let line = kit::fit(game, &whole, WIDTH - 16.0);
+            text(game, batch, &line, o, [8.0, *y], TEXT);
+        }
         if i + 1 < shown {
             kit::fills(game, batch, o, &[style::kv_rule(8.0, WIDTH - 8.0, y + 9.0)]);
         }
@@ -282,8 +331,13 @@ fn rows(game: &Game<'_>, batch: &mut HudBatch, o: [f32; 2], l: &Layout, s: &Shee
 
 fn bars(game: &Game<'_>, batch: &mut HudBatch, o: [f32; 2], l: &Layout, s: &Sheet) {
     for (b, (y, r)) in s.bars.iter().zip(&l.bars) {
-        label(game, batch, &read(&b.label), o, [r[0], *y]);
-        text_right(game, batch, &read(&b.value), o, r[0] + r[2], *y, VALUE);
+        let name = read(&b.label);
+        label(game, batch, &name, o, [r[0], *y]);
+        // The value never runs into the label (the structure's solution line did, in-game
+        // check w3): cut it with «…» to the room the label leaves; the tooltip has it whole.
+        let room = r[2] - game.native_text_width(&name.to_uppercase()) - 6.0;
+        let value = kit::fit(game, &read(&b.value), room.max(0.0));
+        text_right(game, batch, &value, o, r[0] + r[2], *y, VALUE);
         let fill = if b.energy {
             kit::ENERGY
         } else {
@@ -398,7 +452,7 @@ pub(super) fn tooltip(game: &Game<'_>, block: &str, at: [f32; 2], lines: &mut Ve
     }
     for (i, y) in l.rows.iter().enumerate().take(s.rows.len()) {
         if inside([8.0, *y, WIDTH - 16.0, 9.0], at) {
-            lines.push(read(&s.rows[i]));
+            lines.push(read(&s.rows[i]).replacen('\t', ": ", 1));
             for h in s.hints.get(i).into_iter().flatten() {
                 hint(lines, read(h));
             }
@@ -421,5 +475,23 @@ pub(super) fn tooltip(game: &Game<'_>, block: &str, at: [f32; 2], lines: &mut Ve
         && let Some(st) = &s.status
     {
         lines.push(read(&st.text));
+        return;
+    }
+    // Slice 18, wave 2: what comes out, by its ghost cell; the lead row's name over its cells.
+    if let Some((_, (item, count))) = l.preview.iter().zip(&s.preview).find(|(p, _)| inside(slot_frame(**p), at)) {
+        lines.push(format!("{} {count}", item_name(item)));
+        return;
+    }
+    if let Some(r) = l.work
+        && inside(r, at)
+    {
+        lines.push(format!("{:.0}%", s.work.unwrap_or(0.0).clamp(0.0, 1.0) * 100.0));
+        return;
+    }
+    if l.label_y.is_none()
+        && let Some(t) = &s.label
+        && l.slots.iter().any(|p| inside(slot_frame(*p), at))
+    {
+        lines.push(read(t));
     }
 }

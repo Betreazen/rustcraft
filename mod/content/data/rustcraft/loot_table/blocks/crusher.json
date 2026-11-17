@@ -2,8 +2,53 @@
   "type": "minecraft:block",
   "pools": [
     {
-      "condition": { "type": "minecraft:survives_explosion" },
-      "entries": [{ "type": "minecraft:item", "name": "rustcraft:crusher" }],
+      "condition": {
+        "type": "minecraft:survives_explosion"
+      },
+      "entries": [
+        {
+          "type": "minecraft:alternatives",
+          "children": [
+            {
+              "type": "minecraft:item",
+              "name": "rustcraft:crusher_2",
+              "condition": {
+                "type": "minecraft:match_block",
+                "blocks": "rustcraft:crusher",
+                "state": {
+                  "tier": "2"
+                }
+              }
+            },
+            {
+              "type": "minecraft:item",
+              "name": "rustcraft:crusher_3",
+              "condition": {
+                "type": "minecraft:match_block",
+                "blocks": "rustcraft:crusher",
+                "state": {
+                  "tier": "3"
+                }
+              }
+            },
+            {
+              "type": "minecraft:item",
+              "name": "rustcraft:crusher_4",
+              "condition": {
+                "type": "minecraft:match_block",
+                "blocks": "rustcraft:crusher",
+                "state": {
+                  "tier": "4"
+                }
+              }
+            },
+            {
+              "type": "minecraft:item",
+              "name": "rustcraft:crusher"
+            }
+          ]
+        }
+      ],
       "rolls": 1
     }
   ],

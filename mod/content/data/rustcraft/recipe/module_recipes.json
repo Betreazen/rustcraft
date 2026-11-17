@@ -3,13 +3,14 @@
   "category": "misc",
   "pattern": [
     "aba",
-    "bkb",
+    "tst",
     "aba"
   ],
   "key": {
     "a": "rustcraft:crystallite",
     "b": "minecraft:book",
-    "k": "minecraft:crafting_table"
+    "t": "minecraft:crafting_table",
+    "s": "rustcraft:crystal_shard"
   },
   "result": {
     "id": "rustcraft:module_recipes",

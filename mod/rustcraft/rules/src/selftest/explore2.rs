@@ -71,7 +71,8 @@ fn grab_takes_a_grown_block(o: Pos, _: &Tuning) -> Scenario {
         })
         .until("the grab holds it whole, marked as grown", RIDE, move |b, m| {
             let w = b.worker(m.get("worker") as u64).ok_or("the worker is gone")?;
-            Ok(w.hold.count(&grown::hold_name(SUSPICIOUS, true)) > 0)
+            // Wave 2: the hold name carries the vein's find table too (grown::hold_name_with).
+            Ok(w.hold.slots.iter().flatten().any(|(name, n)| *n > 0 && grown::from_hold(name) == (SUSPICIOUS, true)))
         })
 }
 

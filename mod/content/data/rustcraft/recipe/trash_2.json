@@ -1,0 +1,18 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    "aaa",
+    "afa",
+    "aba"
+  ],
+  "key": {
+    "a": "rustcraft:sparksteel",
+    "f": "minecraft:furnace",
+    "b": "minecraft:bucket"
+  },
+  "result": {
+    "id": "rustcraft:trash_2",
+    "count": 1
+  }
+}

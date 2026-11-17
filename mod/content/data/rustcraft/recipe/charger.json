@@ -9,7 +9,7 @@
   "key": {
     "c": "rustcraft:crystallite",
     "r": "minecraft:redstone",
-    "s": "minecraft:amethyst_shard"
+    "s": "rustcraft:crystal_shard"
   },
   "result": {
     "id": "rustcraft:charger",

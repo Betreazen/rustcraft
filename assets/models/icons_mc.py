@@ -160,6 +160,16 @@ for _name, _sign, _accent, _board in [
     ('module_lava', 'lava', '#ff7a2a', MACHINE_BOARD), ('module_build', 'build', '#d08060', MACHINE_BOARD),
 ]:
     ICONS[_name] = (MODULE, _board, _accent, [(4, 3, SIGN[_sign])])
+# Slice 18 (icons.js module('mod_stack' / 'mod_yield' / 'mod_line', …)): the stack module of each
+# alloy takes that alloy's tier colour.
+SIGN['stack'] = ['..gggg..', '..eeee..', '.gggggg.', '.eeeeee.', 'gggggggg', 'eeeeeeee', 'ffffffff', '........']
+SIGN['yield'] = ['...ee...', '...ee...', '.eeeeee.', '.eeeeee.', '...ee...', '...ee...', '......g.', '.....g.g']
+SIGN['line'] = ['....e...', '....ee..', 'e.e.eee.', 'e.e.eeee', 'e.e.eee.', '....ee..', '....e...', '........']
+for _name, _sign, _accent in [
+    ('module_stack', 'stack', TIER[2]), ('module_stack_2', 'stack', TIER[3]), ('module_stack_3', 'stack', TIER[4]),
+    ('module_yield', 'yield', '#7af0ff'), ('module_line', 'line', '#c58aff'),
+]:
+    ICONS[_name] = (MODULE, MACHINE_BOARD, _accent, [(4, 3, SIGN[_sign])])
 REAPER = [
     '', '',
     '...kkkkkkkkkk...',
@@ -538,3 +548,22 @@ ICONS['tablet'] = (['', '..kkkkkkkkkkkk..', '.kaaaaaaaaaaaak.', '.kaxxxxxxxxxxak
 ICONS['harpoon'] = (['..........kkkkk.', '...........kook.', '..........kmook.', '.........kmk.kk.', '........kak.....',
                      '.......kak......', '......kak.......', '.....kak........', '....kak.........', '..kkak..........',
                      '.khhk...........', 'khhhhk..........', 'khhhhk..........', '.kkkk...........'], TIER[3], TIER[3], [])
+
+
+# ---- Slice 18 (energy): the crystal shard, icons.js `shard` (S.shard, a '#56dbe2', e white).
+SHARD = [
+    '',
+    '..........kk....',
+    '.........kvuk...',
+    '........kvuujk..',
+    '.......kvuuujk..',
+    '......kvuuujk...',
+    '.....kvuuujk....',
+    '....kvuuujk.....',
+    '...kvuuujk......',
+    '..kuuuujk.......',
+    '..kjuujk........',
+    '...kjjk.........',
+    '....kk..........',
+]
+ICONS['crystal_shard'] = (SHARD, '#56dbe2', '#ffffff', dots([(3, 3), (13, 9), (6, 11)], 'w'))

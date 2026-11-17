@@ -8,7 +8,7 @@
   ],
   "key": {
     "g": "minecraft:glass_pane",
-    "s": "minecraft:amethyst_shard",
+    "s": "rustcraft:crystal_shard",
     "a": "rustcraft:coppersteel"
   },
   "result": {

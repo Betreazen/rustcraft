@@ -12,22 +12,35 @@
 //! `{"mod","done","passed","failed","timings"}`.
 
 pub mod anchor;
+pub mod craft18;
+pub mod craft18_w2;
 pub mod energy;
 pub mod expect;
 pub mod fluids;
 pub mod handbook;
 pub mod magistral;
 pub mod miners;
+// Slice 18, the module stream.
+pub mod modules18;
 pub mod monorail;
 pub mod orders2;
+// s18/pipe
+pub mod pipe18;
 pub mod rest;
 pub mod run;
+pub mod s18_energy;
 pub mod slice10;
 pub mod slice11;
 pub mod slice12;
 pub mod slice13;
 pub mod slice14;
 pub mod slice15;
+pub mod slice18_machine;
+// Slice 18, wave 2: machines and modules.
+pub mod w2_machine;
+// Slice 18, cross-stream agent.
+pub mod s18_cross;
+pub mod s18_last;
 pub mod explore2;
 pub mod sources;
 pub mod storage;
@@ -36,6 +49,17 @@ pub mod transport;
 pub mod turret;
 pub mod windows;
 pub mod workers;
+// Slice 18, stream 6 (rail and workers).
+pub mod s18_rail;
+// Slice 18, base and gear (stream 7).
+pub mod gear18;
+// Slice 18, last leftovers: the backpack.
+pub mod s18_last_pack;
+pub mod s18_last_orders;
+// Slice 18, wave 2: rail, workers, base and gear.
+pub mod s18_w2_rail_gear;
+// Slice 18, wave 2: the magistral and the energy.
+pub mod w2_pipe_energy;
 
 use std::collections::BTreeMap;
 
@@ -222,6 +246,9 @@ pub trait Bench {
     fn role(&self, pos: Pos) -> Option<String>;
     /// The console's `rustcraft_testkit` with these words after it; its answer.
     fn testkit(&mut self, args: &str) -> String;
+    // s18/pipe
+    /// Stream 1's actions on the block at `pos` (rustcraft_pipe18::bench), its answer.
+    fn pipe(&mut self, action: &str, pos: Pos) -> Result<String, String>;
 
     // ---- Slice 9 ----
 
@@ -306,6 +333,9 @@ pub trait Bench {
     fn item_known(&self, item: &str) -> bool;
     /// The 3 × 3 grid of the first crafting recipe of `item`, as the handbook's page reads it.
     fn recipe_grid(&self, item: &str) -> Option<[Option<String>; 9]>;
+    /// The recipes the handbook's page `page` (an index into PAGES) shows, as its window reads
+    /// them from the game (slice 18: machines' and transmuting recipes too).
+    fn handbook_recipes(&self, page: usize) -> Vec<crate::handbook::recipes::Shown>;
     // Spec 26: the wrench lifts suspicious blocks.
     /// The loot table of the suspicious block at `pos`, as a structure leaves it in its block
     /// entity.
@@ -319,6 +349,134 @@ pub trait Bench {
         into: Pos,
         slot: usize,
     ) -> Result<crate::utility::found::Lift, String>;
+
+    // ---- Slice 18, energy stream ----
+
+    /// Breaks the block at `pos` as `tool` would (none: by hand), the drops rolled by its loot
+    /// table and handed back instead of dropped.
+    fn break_block(&mut self, pos: Pos, tool: Option<&str>) -> Result<Vec<(String, u32)>, String>;
+    /// The seed at `pos` (CR2): its growth and the solution it holds.
+    fn seed(&self, pos: Pos) -> Option<crate::grow::Seed>;
+    /// Sets how far the seed at `pos` has grown.
+    fn set_seed(&mut self, pos: Pos, progress: f64) -> Result<(), String>;
+    /// How clients are told to draw the crystal at `pos`: a merged structure's box (its anchor),
+    /// hidden (another block of it), and lit with solution.
+    fn crystal_drawn(&self, pos: Pos) -> Option<(Option<[i32; 3]>, bool, bool)>;
+    // ---- Slice 18, stream 6 (rail and workers) ----
+    /// W3: worker `id` taken away as its one chassis item and that item placed on rail `cell`;
+    /// the new worker's id.
+    fn worker_as_item(&mut self, id: u64, cell: Pos) -> Result<u64, String>;
+    /// U4: chassis `item` clicked on worker `id`; the old chassis's item it gives back.
+    fn swap_chassis(&mut self, id: u64, item: &str) -> Result<String, String>;
+    /// W8: whether `owner` may place one more worker under a server limit of `limit`.
+    fn worker_room(&self, owner: u128, limit: u32) -> bool;
+    /// H6: worker `id`'s filter set to `items`.
+    fn set_worker_filter(&mut self, id: u64, items: &[&str]) -> Result<(), String>;
+    // ---- Slice 18, base and gear (stream 7) ----
+
+    /// `put_gear` of a piece holding `held` (its charge, modules, levels).
+    /// (Defaults keep other benches compiling; the game's bench answers.)
+    fn put_gear_held(&mut self, _pos: Pos, _slot: usize, _item: &str, _held: crate::gear::Held) -> Result<(), String> {
+        Err("not on this bench".to_owned())
+    }
+    /// The held data of the gear piece in slot `slot` at `pos`.
+    fn gear_held(&self, _pos: Pos, _slot: usize) -> Option<crate::gear::Held> {
+        None
+    }
+    /// The aim a turret's block entity tells clients: (yaw, pitch) in degrees, None before any.
+    fn turret_aim(&self, _pos: Pos) -> Option<(f32, f32)> {
+        None
+    }
+    /// What the anvil makes of a piece `piece` (with no enchantment yet) and `books` Capacity
+    /// books of level `level` one after another: the piece's Capacity level after each.
+    fn anvil_capacity(&mut self, _piece: &str, _level: u8, _books: usize) -> Vec<Option<u8>> {
+        Vec::new()
+    }
+    /// Rope `id` as if tied `ms` earlier.
+    fn age_rope(&mut self, _id: u64, _ms: u64) -> Result<(), String> {
+        Err("not on this bench".to_owned())
+    }
+    // ---- Slice 18, stream 3 (machines) ----
+    /// A right click with `item` on the tiered block at `pos` (U2, rustcraft_tiers): the old
+    /// tier's item it gives back, or why nothing was replaced.
+    fn swap_tier(&mut self, pos: Pos, item: &str) -> Result<String, String> {
+        let _ = (pos, item);
+        Err("no tiers on this bench".into())
+    }
+    /// A bucket `held` used on the tank at `pos` (guide `tank`): the bucket it leaves in the hand.
+    fn use_bucket(&mut self, pos: Pos, held: &str) -> Result<String, String> {
+        let _ = (pos, held);
+        Err("no buckets on this bench".into())
+    }
+    // ---- Slice 18, stream 5 (craft and storage) ----
+
+    /// An item written as SNBT (`{id:..,count:..,components:{..}}`) put into the container at
+    /// `pos` as a hopper would: how many went in.
+    fn insert_snbt(&mut self, pos: Pos, snbt: &str) -> Result<u32, String>;
+    /// The stacks the storage the cell or terminal at `pos` belongs to holds, each as the stack
+    /// its key makes: `item xCOUNT`, then its own name in quotes and its (stored) enchantments
+    /// `id level`, space-separated.
+    fn stored_stacks(&self, pos: Pos) -> Vec<String>;
+    /// The translation key of what a player looking at the cell or terminal at `pos` reads.
+    fn storage_diagnosis(&self, pos: Pos) -> Option<String>;
+    /// The int array under `key` in the saved compound of the mod block entity at `pos`.
+    fn int_array(&self, pos: Pos, key: &str) -> Vec<i32>;
+    /// The long (or int) under `key` in the saved compound of the mod block entity at `pos`.
+    fn long(&self, pos: Pos, key: &str) -> i64;
+    // Slice 18, cross-stream agent.
+    /// The data slots the mod block entity at `pos` sends its window.
+    fn menu_data(&self, _pos: Pos) -> Vec<i32> {
+        Vec::new()
+    }
+    // Slice 18, last leftovers: the backpack's store.
+    /// The backpack's store without a player: a deposit past 99 with a stack module, the module
+    /// kept while a slot is past a plain stack, the store saved and read back, a slice-10 file
+    /// read, the window's message (rustcraft_backpack::self_test_store).
+    fn backpack_store(&mut self) -> Result<(), String> {
+        Err("no backpack store on this bench".into())
+    }
+
+    // ---- Wave 2, w2-craft ----
+
+    /// The portal docks at `a` and `b` paired, as two wrench clicks pair them.
+    fn pair_docks(&mut self, _a: Pos, _b: Pos) -> Result<(), String> {
+        Err("no portal docks on this bench".into())
+    }
+
+    // ---- Slice 18, wave 2: rail, workers, base and gear ----
+    /// A right click with rail item `item` on the rail at `pos`: the old tier's item it gives
+    /// back, or why nothing changed (rustcraft_monorail::swap_rail_in_place).
+    fn swap_rail(&mut self, pos: Pos, item: &str) -> Result<String, String> {
+        let _ = (pos, item);
+        Err("no rails on this bench".into())
+    }
+    /// A press in worker `id`'s chassis window (rustcraft_workers::press_for_selftest).
+    fn chassis_press(&mut self, id: u64, press: crate::worker::screen::Press) -> Result<(), String> {
+        let _ = (id, press);
+        Err("no chassis windows on this bench".into())
+    }
+    /// Worker `id`'s sockets hold `modules`.
+    fn set_worker_modules(&mut self, id: u64, modules: &[&str]) -> Result<(), String> {
+        let _ = (id, modules);
+        Err("no workers on this bench".into())
+    }
+
+    // ---- Slice 18, final: a player's click ----
+    /// A player's right click with `held` (an item id, or `got:<id>` for a stack an earlier click
+    /// gave the player) on face `face` of the block at `pos`, sneaking or not, through the game's
+    /// own use, as a player's click reaches the server: every mod's right_click_block in its order,
+    /// then the block's own use, then the item's use_item_on and its placement. The ids of the
+    /// stacks the click gave the player.
+    fn click_block(
+        &mut self,
+        pos: Pos,
+        face: crate::geom::Face,
+        held: &str,
+        sneaking: bool,
+    ) -> Result<Vec<String>, String> {
+        let _ = (pos, face, held, sneaking);
+        Err("no player clicks on this bench".into())
+    }
 }
 
 /// A mob as the self-test reads it.
@@ -329,6 +487,11 @@ pub struct MobView {
     pub pos: [f64; 3],
     pub health: f32,
     pub effects: Vec<(String, u32, u8)>,
+    /// Slice 18: the share of its speed a turret's slowness takes now (its movement speed
+    /// modifier `rustcraft:turret_slow`), if it is slowed.
+    pub slow: Option<f64>,
+    /// Ticks left of that slowness.
+    pub slow_ticks: Option<u32>,
 }
 
 impl MobView {
@@ -496,6 +659,31 @@ pub fn catalog() -> Vec<Build> {
     all.extend(traversal::ALL);
     all.extend(handbook::ALL);
     all.extend(rest::ALL);
+    // Slice 18, energy stream.
+    all.extend(s18_energy::ALL);
+    // Slice 18, stream 6 (rail and workers).
+    all.extend(s18_rail::ALL);
+    // Slice 18, base and gear (stream 7).
+    all.extend(gear18::ALL);
+    // Slice 18, stream 3.
+    all.extend(slice18_machine::ALL);
+    // Slice 18, the module stream.
+    all.extend(modules18::ALL);
+    all.extend(craft18::ALL);
+    all.extend(craft18_w2::ALL);
+    // s18/pipe
+    all.extend(pipe18::ALL);
+    // Slice 18, cross-stream agent.
+    all.extend(s18_cross::ALL);
+    all.extend(s18_last::ALL);
+    // Slice 18, last leftovers: the backpack.
+    all.extend(s18_last_pack::ALL);
+    all.extend(s18_last_orders::ALL);
+    // Slice 18, wave 2: rail, workers, base and gear.
+    all.extend(s18_w2_rail_gear::ALL);
+    all.extend(w2_pipe_energy::ALL);
+    // Slice 18, wave 2: machines and modules.
+    all.extend(w2_machine::ALL);
     all
 }
 

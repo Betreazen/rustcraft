@@ -29,7 +29,7 @@ RustCraft — мод про аккуратную автоматизацию. В�
 <p align="center"><img src="docs/images/in-game.jpg" alt="Кадр из игры: магистраль с узлами, перед ней машины, за ними два ряда блоков хозяйства, утилизатор, дезинтегратор, голопроектор и другие" width="860"><br><sub>Так мод выглядит в игре: магистраль, машины и блоки хозяйства с моделями из справочника</sub></p>
 
 > [!NOTE]
-> Мод в активной разработке: версия 0.17, в игре есть все блоки справочника и снаряжение игрока. Всё, что перечислено ниже, работает в игре и проверено самотестом. Числа баланса — первое предложение, они поменяются после плейтестов.
+> Версия 0.18: игра совпадает со справочником — все блоки, окна, механики и снаряжение работают, как в нём написано; оставшиеся отличия перечислены в [mod/README.md](mod/README.md#что-срезы-пока-не-умеют). Всё, что перечислено ниже, проверено самотестом. Числа баланса — первое предложение, они поменяются после плейтестов.
 
 ## Возможности
 
@@ -106,7 +106,7 @@ RustCraft — мод про аккуратную автоматизацию. В�
 ### Клиент
 
 ```powershell
-git clone --branch v0.17.1 https://github.com/Betreazen/rustcraft
+git clone --branch v0.18.0 https://github.com/Betreazen/rustcraft
 horizon-launcher native-build rustcraft/mod/rustcraft --instance <экземпляр> --trust-native-code
 ```
 
@@ -116,7 +116,7 @@ horizon-launcher native-build rustcraft/mod/rustcraft --instance <экземпл
 
 ```powershell
 horizon-launcher native-build rustcraft/mod/rustcraft `
-    --server-output C:\horizon-engines\rustcraft-0.17.1 --trust-native-code
+    --server-output C:\horizon-engines\rustcraft-0.18.0 --trust-native-code
 horizon-server --dir <папка сервера> config set engine.path=C:\horizon-engines\rustcraft-0.12.0\horizon-engine.exe
 ```
 

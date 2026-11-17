@@ -7,6 +7,11 @@ use std::collections::BTreeMap;
 
 /// The most stacks on the way to one dock (PD3: its buffer of 27 slots).
 pub const MAX_STACKS: usize = 27;
+/// Wave 2 (guide `portal_dock`: «Буфер: 27 слотов и 16 вёдер»): the most fluid on the way to one
+/// dock, mB.
+pub const FLUID_ROOM: u64 = 16_000;
+/// Wave 2: a dock not seen stepping for this long (ms) is in a world that is not loaded.
+pub const UNLOADED_AFTER_MS: u64 = 3_000;
 
 /// A stack on its way, by item id and count (components are not carried).
 pub type Stack = (String, u32);
@@ -18,6 +23,15 @@ pub struct Transit {
     pub waiting: BTreeMap<u64, Vec<Stack>>,
     /// A dock the wrench clicked first, by player, waiting for its pair.
     pub pending: BTreeMap<u128, u64>,
+    /// Wave 2: fluid on the way to each dock, (fluid, mB), at most FLUID_ROOM in all.
+    #[serde(default)]
+    pub fluids: BTreeMap<u64, Vec<(String, u64)>>,
+    /// Wave 2: the world (dimension) each dock was last seen in.
+    #[serde(default)]
+    pub worlds: BTreeMap<u64, String>,
+    /// Wave 2: when each dock last stepped (ms), this server run only.
+    #[serde(skip)]
+    pub seen: BTreeMap<u64, u64>,
 }
 
 impl Transit {
@@ -78,6 +92,64 @@ impl Transit {
         self.waiting.remove(&id).unwrap_or_default()
     }
 
+    /// Wave 2: room for how much fluid (mB) on the way to `to`.
+    pub fn fluid_room(&self, to: u64) -> u64 {
+        FLUID_ROOM.saturating_sub(self.fluid_held(to))
+    }
+
+    /// Wave 2: how much fluid (mB) is on the way to `to`.
+    pub fn fluid_held(&self, to: u64) -> u64 {
+        self.fluids.get(&to).map_or(0, |l| l.iter().map(|(_, n)| *n).sum())
+    }
+
+    /// Wave 2: sends up to `mb` of `fluid` to `to`, as far as its room goes; how much went.
+    pub fn send_fluid(&mut self, to: u64, fluid: &str, mb: u64) -> u64 {
+        let fit = mb.min(self.fluid_room(to));
+        if fit == 0 {
+            return 0;
+        }
+        let list = self.fluids.entry(to).or_default();
+        match list.iter_mut().find(|(f, _)| f == fluid) {
+            Some((_, n)) => *n += fit,
+            None => list.push((fluid.to_owned(), fit)),
+        }
+        fit
+    }
+
+    /// Wave 2: takes the fluid that waits for `id`.
+    pub fn take_fluids(&mut self, id: u64) -> Vec<(String, u64)> {
+        self.fluids.remove(&id).unwrap_or_default()
+    }
+
+    /// Wave 2: gives back fluid a dock could not unload.
+    pub fn put_back_fluids(&mut self, id: u64, left: Vec<(String, u64)>) {
+        for (f, n) in left.into_iter().filter(|(_, n)| *n > 0) {
+            let list = self.fluids.entry(id).or_default();
+            match list.iter_mut().find(|(g, _)| *g == f) {
+                Some((_, m)) => *m += n,
+                None => list.push((f, n)),
+            }
+        }
+    }
+
+    /// Wave 2: dock `id` stepped at `now_ms` in `world`.
+    pub fn saw(&mut self, id: u64, world: &str, now_ms: u64) {
+        self.seen.insert(id, now_ms);
+        if self.worlds.get(&id).map(String::as_str) != Some(world) {
+            self.worlds.insert(id, world.to_owned());
+        }
+    }
+
+    /// Wave 2: whether dock `id`'s world is loaded: it stepped lately.
+    pub fn loaded(&self, id: u64, now_ms: u64) -> bool {
+        self.seen.get(&id).is_some_and(|t| now_ms.saturating_sub(*t) <= UNLOADED_AFTER_MS)
+    }
+
+    /// Wave 2: whether anything (items or fluid) waits to go to `to`.
+    pub fn holds_for(&self, to: u64) -> bool {
+        self.waiting.get(&to).is_some_and(|l| !l.is_empty()) || self.fluid_held(to) > 0
+    }
+
     /// Gives back stacks a dock could not take, ahead of the rest.
     pub fn put_back(&mut self, id: u64, mut stacks: Vec<Stack>) {
         if stacks.is_empty() {
@@ -103,6 +175,34 @@ mod tests {
         t.click(1, 10);
         assert_eq!(t.partner(10), Some(30));
         assert_eq!(t.partner(20), None);
+    }
+
+    #[test]
+    fn fluid_goes_to_the_pair_up_to_sixteen_buckets() {
+        let mut t = Transit::default();
+        assert_eq!(t.send_fluid(7, "minecraft:water", 10_000), 10_000);
+        assert_eq!(t.send_fluid(7, "rustcraft:milk", 10_000), 6_000, "16 buckets in all");
+        assert_eq!(t.fluid_room(7), 0);
+        assert!(t.holds_for(7));
+        let got = t.take_fluids(7);
+        assert_eq!(got, vec![("minecraft:water".into(), 10_000), ("rustcraft:milk".into(), 6_000)]);
+        t.put_back_fluids(7, vec![("rustcraft:milk".into(), 1_000), ("minecraft:water".into(), 0)]);
+        assert_eq!(t.fluid_held(7), 1_000);
+    }
+
+    #[test]
+    fn a_dock_not_seen_lately_is_in_an_unloaded_world() {
+        let mut t = Transit::default();
+        assert!(!t.loaded(5, 1_000), "never seen");
+        t.saw(5, "minecraft:the_nether", 1_000);
+        assert!(t.loaded(5, 2_000));
+        assert!(!t.loaded(5, 1_000 + UNLOADED_AFTER_MS + 1));
+        assert_eq!(t.worlds.get(&5).map(String::as_str), Some("minecraft:the_nether"));
+        // The store read back from the world keeps the worlds and the fluid, not the times.
+        let json = serde_json::to_string(&t).unwrap();
+        let back: Transit = serde_json::from_str(&json).unwrap();
+        assert!(back.seen.is_empty());
+        assert_eq!(back.worlds, t.worlds);
     }
 
     #[test]

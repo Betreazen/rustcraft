@@ -1,0 +1,18 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    "bsb",
+    "bkb",
+    "bbb"
+  ],
+  "key": {
+    "b": "rustcraft:starsteel",
+    "s": "minecraft:shears",
+    "k": "minecraft:bucket"
+  },
+  "result": {
+    "id": "rustcraft:shearer_4",
+    "count": 1
+  }
+}

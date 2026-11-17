@@ -1,0 +1,6 @@
+{
+  "type": "rustcraft:crushing",
+  "ingredient": ["minecraft:iron_ore", "minecraft:deepslate_iron_ore"],
+  "result": { "id": "rustcraft:dust_iron", "count": 2 },
+  "time": 100
+}

@@ -39,10 +39,36 @@ pub fn hold_name(item: &str, grown: bool) -> String {
 
 /// The item a hold's name stands for, and whether it was grown.
 pub fn from_hold(name: &str) -> (&str, bool) {
-    match name.strip_suffix(HOLD_MARK) {
-        Some(item) => (item, true),
-        None => (name, false),
+    let (item, grown, _) = from_hold_table(name);
+    (item, grown)
+}
+
+/// Slice 18, wave 2 (guide `mod_stratum`): the custom data key of the find table the vein's
+/// window chose for a grown block; it goes with the block to the archaeology table.
+pub const TABLE_KEY: &str = "rustcraft:grown_table";
+/// What comes between a grown block's hold name and its find table.
+pub const TABLE_MARK: char = '@';
+
+/// A grown block's hold name with its find table: `item+grown@table`.
+pub fn hold_name_with(item: &str, table: Option<&str>) -> String {
+    match table.filter(|t| !t.is_empty()) {
+        Some(t) => format!("{item}{HOLD_MARK}{TABLE_MARK}{t}"),
+        None => hold_name(item, true),
     }
+}
+
+/// The item a hold's name stands for, whether it was grown and the find table it carries.
+pub fn from_hold_table(name: &str) -> (&str, bool, Option<&str>) {
+    if let Some(at) = name.find(HOLD_MARK) {
+        let rest = &name[at + HOLD_MARK.len()..];
+        if rest.is_empty() {
+            return (&name[..at], true, None);
+        }
+        if let Some(table) = rest.strip_prefix(TABLE_MARK) {
+            return (&name[..at], true, Some(table));
+        }
+    }
+    (name, false, None)
 }
 
 /// The cells the vein grew a suspicious block in, by dimension, oldest first.
@@ -98,6 +124,19 @@ pub fn brush_report(owner: Option<u128>, grown: bool) -> Option<Report> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_hold_name_keeps_the_find_table() {
+        let name = hold_name_with("minecraft:suspicious_sand", Some("minecraft:archaeology/desert_well"));
+        assert_eq!(
+            from_hold_table(&name),
+            ("minecraft:suspicious_sand", true, Some("minecraft:archaeology/desert_well"))
+        );
+        assert_eq!(from_hold(&name), ("minecraft:suspicious_sand", true));
+        assert_eq!(from_hold_table("minecraft:suspicious_sand+grown"), ("minecraft:suspicious_sand", true, None));
+        assert_eq!(from_hold_table("minecraft:sand"), ("minecraft:sand", false, None));
+        assert_eq!(hold_name_with("minecraft:suspicious_sand", None), "minecraft:suspicious_sand+grown");
+    }
 
     const OVER: &str = "minecraft:overworld";
 

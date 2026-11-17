@@ -213,6 +213,8 @@ mod tests {
             mode,
             filter: Filter::default(),
             priority: 0,
+            auto: false,
+            refiner: false,
         }
     }
 

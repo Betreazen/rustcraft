@@ -2,8 +2,53 @@
   "type": "minecraft:block",
   "pools": [
     {
-      "condition": { "type": "minecraft:survives_explosion" },
-      "entries": [{ "type": "minecraft:item", "name": "rustcraft:furnace" }],
+      "condition": {
+        "type": "minecraft:survives_explosion"
+      },
+      "entries": [
+        {
+          "type": "minecraft:alternatives",
+          "children": [
+            {
+              "type": "minecraft:item",
+              "name": "rustcraft:furnace_2",
+              "condition": {
+                "type": "minecraft:match_block",
+                "blocks": "rustcraft:furnace",
+                "state": {
+                  "tier": "2"
+                }
+              }
+            },
+            {
+              "type": "minecraft:item",
+              "name": "rustcraft:furnace_3",
+              "condition": {
+                "type": "minecraft:match_block",
+                "blocks": "rustcraft:furnace",
+                "state": {
+                  "tier": "3"
+                }
+              }
+            },
+            {
+              "type": "minecraft:item",
+              "name": "rustcraft:furnace_4",
+              "condition": {
+                "type": "minecraft:match_block",
+                "blocks": "rustcraft:furnace",
+                "state": {
+                  "tier": "4"
+                }
+              }
+            },
+            {
+              "type": "minecraft:item",
+              "name": "rustcraft:furnace"
+            }
+          ]
+        }
+      ],
       "rolls": 1
     }
   ],

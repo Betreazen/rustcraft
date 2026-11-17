@@ -10,7 +10,7 @@
     "a": "rustcraft:sparksteel",
     "c": "minecraft:chest",
     "h": "minecraft:hopper",
-    "s": "minecraft:amethyst_shard"
+    "s": "rustcraft:crystal_shard"
   },
   "result": {
     "id": "rustcraft:module_storage",

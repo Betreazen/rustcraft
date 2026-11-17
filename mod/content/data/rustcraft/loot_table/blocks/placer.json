@@ -7,8 +7,35 @@
       },
       "entries": [
         {
-          "type": "minecraft:item",
-          "name": "rustcraft:placer"
+          "type": "minecraft:alternatives",
+          "children": [
+            {
+              "type": "minecraft:item",
+              "name": "rustcraft:placer_3",
+              "condition": {
+                "type": "minecraft:match_block",
+                "blocks": "rustcraft:placer",
+                "state": {
+                  "tier": "3"
+                }
+              }
+            },
+            {
+              "type": "minecraft:item",
+              "name": "rustcraft:placer_4",
+              "condition": {
+                "type": "minecraft:match_block",
+                "blocks": "rustcraft:placer",
+                "state": {
+                  "tier": "4"
+                }
+              }
+            },
+            {
+              "type": "minecraft:item",
+              "name": "rustcraft:placer"
+            }
+          ]
         }
       ],
       "rolls": 1

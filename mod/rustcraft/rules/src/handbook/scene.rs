@@ -11,6 +11,9 @@
 //!   scene's every step into the panel at one scale, `drawn` lists a moment's icons back to front.
 //! - Flows and beams are dots moving along their paths (`dots`), by the time since the step
 //!   began; water, lava and the projector's ghost are tinted cubes (`cube_faces`).
+//! - Labels (`Label`): the guide's badges (numbers and diagnoses over the scene) and name tags
+//!   (one per kind of block), drawn as small plates above their points (`labels_at`,
+//!   `label_box`); a tag on a moving object follows it.
 //! - `Playback` steps through a scene: on after its time (`Step::dur`, player.js `stepTime`), back
 //!   to the first after the last, or by the step buttons.
 
@@ -24,9 +27,18 @@ pub use super::scenes::{LOOKS, SCENES};
 pub enum Look {
     /// An item's icon (`minecraft:stone`, `rustcraft:crusher`).
     Item(&'static str),
+    /// A block with its moving parts, as a still (assets/models/poses_mc.py): the item, drawn
+    /// with the item model (`rustcraft:hb/<block>_on` working, `_still` standing).
+    Model(&'static str, &'static str),
     /// A cube of one colour (ARGB): water, lava, the projector's ghost.
     Tint(u32),
+    /// A dropped item, as the guide draws one: a little cube of one colour (ARGB), `DROP` of a
+    /// block's edge.
+    Drop(u32),
 }
+
+/// A dropped item's cube, of a block's edge.
+pub const DROP: f32 = 0.24;
 
 /// A block standing in a cell; `gone` is when in the step it vanishes (infinity: never).
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -35,18 +47,67 @@ pub struct Block {
     /// Its cell's corner (scene axes: x and y across, z up).
     pub at: [f32; 3],
     pub gone: f32,
+    /// Wave 2: the way it faces in the guide's scene (`face`), FACE_NONE when the guide gives none.
+    pub face: u8,
 }
+
+/// Wave 2: a block's facing in a scene (scenes.js `face`: `x+`, `x-`, `y+`, `y-`).
+pub const FACE_NONE: u8 = 0;
+pub const FACE_XP: u8 = 1;
+pub const FACE_XN: u8 = 2;
+pub const FACE_YP: u8 = 3;
+pub const FACE_YN: u8 = 4;
 
 pub const fn b(look: u16, at: [f32; 3]) -> Block {
     Block {
         look,
         at,
         gone: f32::INFINITY,
+        face: FACE_NONE,
     }
 }
 
 pub const fn bg(look: u16, at: [f32; 3], gone: f32) -> Block {
-    Block { look, at, gone }
+    Block { look, at, gone, face: FACE_NONE }
+}
+
+/// A block facing `face`.
+pub const fn bf(look: u16, at: [f32; 3], face: u8) -> Block {
+    Block { look, at, gone: f32::INFINITY, face }
+}
+
+/// A block facing `face` that vanishes at `gone`.
+pub const fn bgf(look: u16, at: [f32; 3], gone: f32, face: u8) -> Block {
+    Block { look, at, gone, face }
+}
+
+/// Wave 2: the game's `facing` of a scene's face. The scene draws its x as the world's east, its
+/// y as the world's south and its z as up (`world_of`), so `x+` faces east and `y+` south.
+pub fn facing_of(face: u8) -> Option<&'static str> {
+    match face {
+        FACE_XP => Some("east"),
+        FACE_XN => Some("west"),
+        FACE_YP => Some("south"),
+        FACE_YN => Some("north"),
+        _ => None,
+    }
+}
+
+/// Wave 2: a scene point in the world's axes (x east, y up, z south) for `native_draw_scene`.
+pub fn world_of(p: [f32; 3]) -> [f32; 3] {
+    [p[0], p[2], p[1]]
+}
+
+/// Wave 2: how `native_draw_scene` sees a scene so that it matches `project`: turned 135° and
+/// tilted 30° (the guide's dimetric view: x right and down, y left and down, z up), a block
+/// `EDGE × scale` pixels across, the panel's middle on the scene point that `fit` puts there.
+pub fn scene_view(fit: &Fit, size: [f32; 2]) -> ([f32; 3], f32, f32, f32) {
+    let mid = [(size[0] / 2.0 - fit.shift[0]) / fit.scale, (size[1] / 2.0 - fit.shift[1]) / fit.scale];
+    // project([x, y, 0]) = mid: x − y = mid.x / ACROSS, x + y = mid.y / DOWN.
+    let (d, s) = (mid[0] / ACROSS, mid[1] / DOWN);
+    let x = (s + d) / 2.0;
+    let y = (s - d) / 2.0;
+    (world_of([x, y, 0.0]), 135.0, 30.0, EDGE * fit.scale)
 }
 
 /// How a moving object goes along its path (engine.js `move`).
@@ -114,6 +175,32 @@ pub struct Step {
     pub beams: &'static [Beam],
     /// The night's veil over the panel (ARGB), 0 for none.
     pub tint: u32,
+    /// Its badges and name tags; label `k`'s text is `Scene::label_key(step, k)`.
+    pub labels: &'static [Label],
+}
+
+/// What a label says, and so its colours (player.js badge classes).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Tone {
+    /// A diagnosis: the block stands.
+    Bad,
+    /// It works worse.
+    Warn,
+    /// It works, or a gain.
+    Ok,
+    /// A plain fact or number.
+    Info,
+    /// A block's name.
+    Tag,
+}
+
+/// A badge or a name tag: where it stands (a scene point, or a moving object's corner raised by
+/// `lift` through its middle) and its tone.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Label {
+    pub at: End,
+    pub lift: f32,
+    pub tone: Tone,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -127,6 +214,11 @@ impl Scene {
     /// The caption of step `step`.
     pub fn caption_key(&self, step: usize) -> String {
         format!("{PREFIX}scene.{}.{step}", self.id)
+    }
+
+    /// The text of the step's label `k`.
+    pub fn label_key(&self, step: usize, k: usize) -> String {
+        format!("{PREFIX}scene.{}.{step}.label.{k}", self.id)
     }
 }
 
@@ -200,8 +292,61 @@ pub fn cells(scene: &Scene) -> Vec<[f32; 3]> {
         for f in st.flows {
             out.extend_from_slice(f.path);
         }
+        // A badge's point, as the guide's camera keeps room for its labels.
+        for l in st.labels {
+            if let End::Point(p) = l.at {
+                out.push([p[0] - 0.5, p[1] - 0.5, p[2] - 0.5]);
+            }
+        }
     }
     out
+}
+
+/// Where the step's labels stand `t` seconds into it: each label's index and scene point.
+pub fn labels_at(step: &Step, t: f32) -> Vec<(usize, [f32; 3])> {
+    step.labels
+        .iter()
+        .enumerate()
+        .filter_map(|(k, l)| {
+            let p = match l.at {
+                End::Point(p) => p,
+                End::Mover(i) => {
+                    let c = step.movers.get(usize::from(i))?.at(t);
+                    [c[0] + 0.5, c[1] + 0.5, c[2] + l.lift]
+                }
+            };
+            Some((k, p))
+        })
+        .collect()
+}
+
+/// A label's text is drawn at this share of the window's font.
+pub const LABEL_SCALE: f32 = 0.75;
+/// The font's line, and what a plate keeps round its text.
+pub const LABEL_LINE: f32 = 8.0;
+pub const LABEL_PAD: f32 = 2.0;
+
+/// The plate (panel pixels) of a label whose text is `width` wide at scale 1, standing on the
+/// point `at`: centred over it, kept inside a panel of `size`.
+pub fn label_box(at: [f32; 2], width: f32, size: [f32; 2]) -> Rect {
+    let w = width * LABEL_SCALE + 2.0 * LABEL_PAD;
+    let h = LABEL_LINE * LABEL_SCALE + 2.0 * LABEL_PAD;
+    let x = (at[0] - w / 2.0).clamp(0.0, (size[0] - w).max(0.0));
+    let y = (at[1] - h).clamp(0.0, (size[1] - h).max(0.0));
+    [x.round(), y.round(), w, h]
+}
+
+/// A label's colours: its text (RGB, as the window's text takes it) and its plate (ARGB).
+pub fn tone_colours(tone: Tone) -> (u32, u32) {
+    use crate::machines::style::colour;
+    const RGB: u32 = 0x00FF_FFFF;
+    match tone {
+        Tone::Bad => (colour::BAD_TEXT, colour::BAD_BACK),
+        Tone::Warn => (colour::WARN & RGB, colour::WARN_BACK),
+        Tone::Ok => (colour::OK & RGB, colour::OK_BACK),
+        Tone::Info => (colour::VALUE, colour::FACE),
+        Tone::Tag => (colour::LABEL, 0xC011_0D0B),
+    }
 }
 
 /// The box (x0, y0, x1, y1, GUI pixels at scale 1) of every icon of the scene, over all its
@@ -311,6 +456,12 @@ impl Drawn {
 /// The step's blocks and moving objects `t` seconds into it, back to front: a cell further
 /// along x, y or z is nearer the viewer and is drawn later.
 pub fn drawn(step: &Step, t: f32, fit: &Fit) -> Vec<Drawn> {
+    drawn_except(step, t, fit, |_| false)
+}
+
+/// Wave 2: `drawn` without the standing blocks whose look `skip` takes (the ones the window draws
+/// as a scene of blocks, `native_draw_scene`); moving objects stay.
+pub fn drawn_except(step: &Step, t: f32, fit: &Fit, skip: impl Fn(&Block) -> bool) -> Vec<Drawn> {
     let mut out: Vec<(Drawn, f32)> = Vec::new();
     let mut add = |look_id: u16, at: [f32; 3]| {
         let c = centre(at);
@@ -321,7 +472,7 @@ pub fn drawn(step: &Step, t: f32, fit: &Fit) -> Vec<Drawn> {
         };
         out.push((d, c[2]));
     };
-    for bl in step.blocks.iter().filter(|b| t < b.gone) {
+    for bl in step.blocks.iter().filter(|b| t < b.gone && !skip(b)) {
         add(bl.look, bl.at);
     }
     for m in step.movers {
@@ -535,3 +686,33 @@ impl Playback {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod wave2_view_tests {
+    use super::*;
+
+    /// native_scene.rs `scene_matrix`: translate(middle) · scale(−s) · rotX(−pitch) · rotY(yaw) ·
+    /// translate(−centre), applied to a world point, in panel pixels.
+    fn engine(p: [f32; 3], size: [f32; 2], view: ([f32; 3], f32, f32, f32)) -> [f32; 2] {
+        let (c, yaw, pitch, s) = view;
+        let q = [p[0] - c[0], p[1] - c[1], p[2] - c[2]];
+        let (sy, cy) = yaw.to_radians().sin_cos();
+        let r = [q[0] * cy + q[2] * sy, q[1], -q[0] * sy + q[2] * cy];
+        let (sp, cp) = (-pitch).to_radians().sin_cos();
+        let u = [r[0], r[1] * cp - r[2] * sp, r[1] * sp + r[2] * cp];
+        [size[0] / 2.0 - s * u[0], size[1] / 2.0 - s * u[1]]
+    }
+
+    #[test]
+    fn the_engines_scene_lies_where_the_guides_projection_puts_it() {
+        let size = [120.0, 90.0];
+        let fit = Fit { scale: 1.5, shift: [37.0, 21.0] };
+        let view = scene_view(&fit, size);
+        for p in [[0.0, 0.0, 0.0], [3.5, 1.0, 2.0], [-2.0, 4.0, 0.5], [1.0, 1.0, 1.0]] {
+            let want = fit.place(p);
+            let got = engine(world_of(p), size, view);
+            assert!((want[0] - got[0]).abs() < 0.01 && (want[1] - got[1]).abs() < 0.01, "{p:?}: {want:?} vs {got:?}");
+        }
+        assert_eq!(facing_of(FACE_YP), Some("south"));
+    }
+}

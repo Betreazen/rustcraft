@@ -9,7 +9,7 @@
   "key": {
     "a": "rustcraft:sparksteel",
     "x": "minecraft:iron_pickaxe",
-    "s": "minecraft:amethyst_shard"
+    "s": "rustcraft:crystal_shard"
   },
   "result": {
     "id": "rustcraft:module_area",

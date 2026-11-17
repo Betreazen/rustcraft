@@ -9,7 +9,7 @@
   "key": {
     "a": "rustcraft:coppersteel",
     "l": "minecraft:lapis_lazuli",
-    "s": "minecraft:amethyst_shard"
+    "s": "rustcraft:crystal_shard"
   },
   "result": {
     "id": "rustcraft:anchor",

@@ -24,6 +24,7 @@ use crate::game::{
 };
 use horizon_client::{hud::HudBatch, mod_api::NativeScreen};
 use rustcraft_rules::machines::{
+    extras::{self, Extras},
     panel::{self, Panel, Rect},
     processor::{Shown, WorkMode},
     style::{self, Fill, Severity, colour as C},
@@ -164,9 +165,10 @@ pub(super) fn draw(
     }
     let p = panel::decode(data);
     let o = origin;
+    let ex = extras::decode(data, panel::EXTRAS_AT);
     background(game, batch, o, [panel::WIDTH, panel::HEIGHT]);
     title(game, batch, o, machine);
-    slots_part(game, batch, o, machine, &p);
+    slots_part(game, batch, o, machine, &p, &ex);
     energy_part(
         game,
         batch,
@@ -175,6 +177,14 @@ pub(super) fn draw(
         p.asked,
         panel::ENERGY_BAR,
         panel::LABEL_ENERGY_Y,
+    );
+    sockets_part(
+        game,
+        batch,
+        o,
+        &ex,
+        &panel::MODULE_SLOTS,
+        Some([panel::MODULE_SLOTS[0][0] - 1.0, panel::LABEL_MODE_Y]),
     );
     modes_part(
         game,
@@ -190,16 +200,23 @@ pub(super) fn draw(
 
 /// The block's name and its tier («Электропечь · ступень 1»).
 pub(super) fn title(game: &Game<'_>, batch: &mut HudBatch, o: [f32; 2], machine: Machine) {
-    let tier = match machine {
-        Machine::Crafter => 2,
-        _ => 1,
-    };
     let name = tr(
         &format!("block.{}", machine.block().replace(':', ".")),
         fallback_name(machine),
     );
-    let tier = tr_with("rustcraft.window.tier", "tier %s", &[tier.to_string()]);
+    let tier = tier_label(game, machine.block())
+        .unwrap_or_else(|| tr_with("rustcraft.window.tier", "tier %s", &["1".to_owned()]));
     title_line(game, batch, o, &name, Some(&tier), panel::WIDTH);
+}
+
+/// Slice 18, stream 3: «ступень N» of the open window's block, from its state (rustcraft_tiers);
+/// none for a block made in one tier only.
+pub(super) fn tier_label(game: &Game<'_>, block: &str) -> Option<String> {
+    let family = rustcraft_rules::tiers::family_of_block(block)?;
+    let tier = game
+        .native_screen_pos()
+        .map_or(family.first, |pos| crate::game::rustcraft_tiers::tier_of(game, pos, block));
+    Some(tr_with("rustcraft.window.tier", "tier %s", &[tier.to_string()]))
 }
 
 /// The title line (style section 3, «Заголовок»): the name in the value colour, after it in the
@@ -390,7 +407,16 @@ pub(super) fn arrow(
     fills(game, batch, o, &style::arrow(shaft, progress));
 }
 
-fn slots_part(game: &Game<'_>, batch: &mut HudBatch, o: [f32; 2], machine: Machine, p: &Panel) {
+/// Slice 18: the input with its queue cells, the progress and the result, top to bottom as the
+/// guide's window has them (`ui.js` `machine`).
+fn slots_part(
+    game: &Game<'_>,
+    batch: &mut HudBatch,
+    o: [f32; 2],
+    machine: Machine,
+    p: &Panel,
+    ex: &Extras,
+) {
     let (input, output) = match machine {
         Machine::Crusher => (
             tr("rustcraft.window.input.crusher", "Ore"),
@@ -401,29 +427,146 @@ fn slots_part(game: &Game<'_>, batch: &mut HudBatch, o: [f32; 2], machine: Machi
             tr("rustcraft.window.output", "Output"),
         ),
     };
-    label(
-        game,
-        batch,
-        &input,
-        o,
-        [panel::INPUT[0] - 4.0, panel::LABEL_SLOTS_Y],
-    );
-    let output_right = panel::OUTPUT[0] + 21.0;
-    label_right(game, batch, &output, o, output_right, panel::LABEL_SLOTS_Y);
-    let modules = tr("rustcraft.window.modules", "Modules");
-    label(
-        game,
-        batch,
-        &modules,
-        o,
-        [panel::MODULE_SLOTS[0][0] - 1.0, panel::LABEL_SLOTS_Y],
-    );
+    label(game, batch, &input, o, [panel::INPUT[0] - 4.0, panel::LABEL_SLOTS_Y]);
     slot(game, batch, o, panel::INPUT);
-    slot(game, batch, o, panel::OUTPUT);
-    for m in panel::MODULE_SLOTS {
-        socket(game, batch, o, m, true);
-    }
+    cells_part(game, batch, o, ex, panel::cell);
+    label(
+        game,
+        batch,
+        &tr("rustcraft.window.work", "Progress"),
+        o,
+        [panel::ARROW[0] - 4.0, panel::LABEL_WORK_Y],
+    );
     arrow(game, batch, o, panel::ARROW, p.progress);
+    label_right(game, batch, &output, o, panel::OUTPUT[0] + 17.0, panel::LABEL_OUTPUT_Y);
+    slot(game, batch, o, panel::OUTPUT);
+    reserve_part(game, batch, o, ex, panel::RESERVE);
+}
+
+// ---- Slice 18, stream 3: sockets, queue cells and reserve of the drawn windows ----
+
+/// A drawn window's socket `k` is this menu button plus `k` (rustcraft_machines::SOCKET_BUTTON).
+pub(super) const SOCKET_BUTTON: i32 = 40;
+
+/// The module sockets the block's tier opens, with their modules' items, under their label.
+pub(super) fn sockets_part(
+    game: &Game<'_>,
+    batch: &mut HudBatch,
+    o: [f32; 2],
+    ex: &Extras,
+    at: &[[f32; 2]],
+    label_at: Option<[f32; 2]>,
+) {
+    if let Some(l) = label_at {
+        label(game, batch, &tr("rustcraft.window.modules", "Modules"), o, l);
+    }
+    for (k, p) in at.iter().enumerate().take(ex.open) {
+        let module = ex.modules.get(k).copied().flatten();
+        socket(game, batch, o, *p, module.is_none());
+        if let Some(m) = module {
+            game.native_item(batch, m.item(), [o[0] + p[0], o[1] + p[1]], 16.0);
+        }
+    }
+}
+
+/// The queue cells: the open ones and any closed one still holding items, each with its item
+/// and count (they are no menu slots: a menu slot holds at most 99, native-mods.md:4622).
+pub(super) fn cells_part(
+    game: &Game<'_>,
+    batch: &mut HudBatch,
+    o: [f32; 2],
+    ex: &Extras,
+    at: impl Fn(usize) -> [f32; 2],
+) {
+    for k in 0..ex.shown_cells() {
+        let p = at(k);
+        slot(game, batch, o, p);
+        let (number, count) = ex.cells[k];
+        let Some(item) = u32::try_from(number - 1)
+            .ok()
+            .and_then(|n| content::item_of_number(game, n))
+        else {
+            continue;
+        };
+        if count == 0 {
+            continue;
+        }
+        game.native_item(batch, item, [o[0] + p[0], o[1] + p[1]], 16.0);
+        if count > 1 {
+            text_right(game, batch, &count.to_string(), o, p[0] + 17.0, p[1] + 9.0, VALUE);
+        }
+    }
+}
+
+/// What waits behind the result slot, «+192», written at `at`.
+pub(super) fn reserve_part(game: &Game<'_>, batch: &mut HudBatch, o: [f32; 2], ex: &Extras, at: [f32; 2]) {
+    if ex.reserve > 0 {
+        let s = format!("+{}", ex.reserve);
+        text(game, batch, &s, o, at, VALUE);
+    }
+}
+
+/// The open socket at `at`.
+pub(super) fn socket_at(ex: &Extras, sockets: &[[f32; 2]], at: [f32; 2]) -> Option<usize> {
+    sockets
+        .iter()
+        .take(ex.open)
+        .position(|p| panel::inside(panel::slot_frame(*p), at))
+}
+
+/// The lines over a socket, a queue cell or the result's reserve; whether `at` is on one.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn extras_tooltip(
+    game: &Game<'_>,
+    block: &str,
+    ex: &Extras,
+    sockets: &[[f32; 2]],
+    cell: impl Fn(usize) -> [f32; 2],
+    reserve_at: [f32; 2],
+    at: [f32; 2],
+    lines: &mut Vec<String>,
+) -> bool {
+    if let Some(k) = socket_at(ex, sockets, at) {
+        match ex.modules.get(k).copied().flatten() {
+            Some(m) => lines.push(item_name(m.item())),
+            None => {
+                lines.push(tr("rustcraft.window.module_slot", "Module slot"));
+                let fits: Vec<String> = crate::game::rustcraft_machines::socket_holder(block)
+                    .map(|h| h.accepts().iter().map(|m| item_name(m.item())).collect())
+                    .unwrap_or_default();
+                if !fits.is_empty() {
+                    lines.push(format!(
+                        "§7{}",
+                        tr_with("rustcraft.window.module_slot.fits", "Takes: %s", &[fits.join(", ")])
+                    ));
+                }
+            }
+        }
+        return true;
+    }
+    if let Some(k) = (0..ex.shown_cells()).find(|k| panel::inside(panel::slot_frame(cell(*k)), at)) {
+        lines.push(tr("rustcraft.window.queue_cell", "Queue cell"));
+        let (number, count) = ex.cells[k];
+        if let Some(item) = u32::try_from(number - 1).ok().and_then(|n| content::item_of_number(game, n)) {
+            lines.push(format!("§7{} × {count}", item_name(item)));
+        }
+        return true;
+    }
+    if ex.reserve > 0 && panel::inside([reserve_at[0] - 2.0, reserve_at[1] - 2.0, 32.0, 12.0], at) {
+        lines.push(tr_with(
+            "rustcraft.window.reserve",
+            "%s more wait behind the slot",
+            &[ex.reserve.to_string()],
+        ));
+        return true;
+    }
+    false
+}
+
+/// An item's name in the player's language.
+pub(super) fn item_name(id: &str) -> String {
+    let key = id.replace(':', ".");
+    tr(&format!("item.{key}"), &tr(&format!("block.{key}"), id))
 }
 
 /// The energy bar with «получает X из Y Е/с» over its right end.
@@ -724,7 +867,16 @@ pub(super) fn on_click(
     };
     match machine.kind() {
         Kind::Processor => {}
-        Kind::Pump => return,
+        Kind::Pump => {
+            // Slice 18: the pump's sockets.
+            let ex = extras::decode(data, fluid_panels::PUMP_EXTRAS_AT);
+            *button = socket_at(&ex, &fluid_panels::PUMP_SOCKETS, at).map(|k| SOCKET_BUTTON + k as i32);
+            // Owner 2026-11-17: its work mode buttons.
+            if button.is_none() {
+                *button = fluid_panels::pump_mode_at(at).map(|m| i32::from(m.code()));
+            }
+            return;
+        }
         _ => {
             *button = panels::button_at(machine, data, at);
             return;
@@ -732,15 +884,22 @@ pub(super) fn on_click(
     }
     if let Some(mode) = panel::mode_button_at(at) {
         *button = Some(i32::from(mode.code()));
+    } else if let Some(k) = socket_at(&extras::decode(data, panel::EXTRAS_AT), &panel::MODULE_SLOTS, at) {
+        *button = Some(SOCKET_BUTTON + k as i32);
     }
 }
 
-/// The lines over a module slot that no module fills yet.
-pub(super) fn module_slot_tooltip(lines: &mut Vec<String>) {
+/// The lines over module socket `k` that its tier keeps closed (slice 18, wave 2: the fourth
+/// opens on tier 3).
+pub(super) fn module_slot_tooltip(k: usize, lines: &mut Vec<String>) {
     lines.push(tr("rustcraft.window.module_slot", "Module slot"));
     lines.push(format!(
         "§7{}",
-        tr("rustcraft.window.module_slot.none", "No modules exist yet")
+        tr_with(
+            "rustcraft.window.module_slot.locked",
+            "Closed: opens on tier %s",
+            &[rustcraft_rules::machines::sockets::opens_on_tier(k).to_string()],
+        )
     ));
 }
 
@@ -803,7 +962,7 @@ pub(super) fn tooltip(
     match machine.kind() {
         Kind::Processor => {}
         Kind::Pump => {
-            fluid_panels::pump_tooltip(data, at, lines);
+            fluid_panels::pump_tooltip(game, data, at, lines);
             return;
         }
         _ => {
@@ -812,9 +971,11 @@ pub(super) fn tooltip(
         }
     }
     let p = panel::decode(data);
-    if panel::module_slot_at(at).is_some() {
-        module_slot_tooltip(lines);
-    } else if panel::inside(panel::ARROW, at) {
+    let ex = extras::decode(data, panel::EXTRAS_AT);
+    if extras_tooltip(game, block, &ex, &panel::MODULE_SLOTS, panel::cell, panel::RESERVE, at, lines) {
+        return;
+    }
+    if panel::inside(panel::ARROW, at) {
         progress_tooltip(p.progress, lines);
     } else if panel::inside(panel::ENERGY_BAR, at) {
         energy_tooltip(lines);

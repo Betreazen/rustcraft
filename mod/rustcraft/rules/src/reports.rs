@@ -66,6 +66,13 @@ pub enum Report {
         entity: u32,
         kind: String,
     },
+    /// Slice 18 (cross): the electric furnace or the alloy smelter gave its result (the
+    /// contract's `smelt`).
+    Smelt {
+        owner: u128,
+        item: String,
+        count: u32,
+    },
     /// Slice 12: the kitchen made a recipe (the contract's `craft`).
     Craft {
         owner: u128,
@@ -107,6 +114,25 @@ pub enum Report {
         pos: Pos,
         block: String,
     },
+}
+
+/// Slice 18 (cross): what a machine's output slots gained between `before` and `after`, item by
+/// item (counts summed per item), for its `smelt` report; nothing taken away counts.
+pub fn gained<'a>(
+    before: impl IntoIterator<Item = (&'a str, u32)>,
+    after: impl IntoIterator<Item = (&'a str, u32)>,
+) -> Vec<(String, u32)> {
+    let mut had: std::collections::BTreeMap<&str, i64> = std::collections::BTreeMap::new();
+    for (item, n) in before {
+        *had.entry(item).or_default() -= i64::from(n);
+    }
+    for (item, n) in after {
+        *had.entry(item).or_default() += i64::from(n);
+    }
+    had.into_iter()
+        .filter(|(_, n)| *n > 0)
+        .map(|(item, n)| (item.to_owned(), u32::try_from(n).unwrap_or(u32::MAX)))
+        .collect()
 }
 
 /// The counted kinds of spec 22 Path-of-craft-tree takes.
@@ -151,6 +177,7 @@ impl Report {
                 count,
                 crafts,
             } => format!("{COMMAND} craft {owner:032x} {recipe} {item} {count} {crafts}"),
+            Report::Smelt { owner, item, count } => format!("{COMMAND} smelt {owner:032x} {item} {count}"),
             Report::Counted { kind, owner, count } => format!("{COMMAND} {kind} {owner:032x} {count}"),
             Report::Fish { owner, item, count } => format!("{COMMAND} fish {owner:032x} {item} {count}"),
             Report::Milk { owner, entity } => format!("{COMMAND} milk {owner:032x} {entity}"),
@@ -176,6 +203,7 @@ impl Report {
             Report::Place { .. } => "place",
             Report::Kill { .. } => "kill",
             Report::Slaughter { .. } => "slaughter",
+            Report::Smelt { .. } => "smelt",
             Report::Craft { .. } => "craft",
             Report::Counted { kind, .. } => kind,
             Report::Fish { .. } => "fish",
@@ -191,6 +219,25 @@ impl Report {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn gained_counts_only_what_came_out() {
+        let iron = "minecraft:iron_ingot";
+        assert_eq!(gained([(iron, 3)], [(iron, 4)]), vec![(iron.to_owned(), 1)]);
+        assert!(gained([(iron, 4)], [(iron, 1)]).is_empty());
+        assert_eq!(
+            gained([], [(iron, 2), ("rustcraft:sparksteel", 1), (iron, 1)]),
+            vec![(iron.to_owned(), 3), ("rustcraft:sparksteel".to_owned(), 1)]
+        );
+    }
+
+    #[test]
+    fn a_smelt_report_is_the_contracts() {
+        // docs/design/path-of-craft-tree-contract.md: `smelt <владелец> <предмет> <количество>`.
+        let s = Report::Smelt { owner: 0x26a5132a990442e59cfd2cccd5083fa8, item: "minecraft:iron_ingot".into(), count: 4 };
+        assert_eq!(s.command(), "pct-machine smelt 26a5132a990442e59cfd2cccd5083fa8 minecraft:iron_ingot 4");
+        assert_eq!(s.kind(), "smelt");
+    }
 
     #[test]
     fn spec_22_reports_read_as_the_contract_writes_them() {

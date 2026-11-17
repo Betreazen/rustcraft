@@ -1,0 +1,18 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    "bbb",
+    "bxb",
+    "brb"
+  ],
+  "key": {
+    "b": "rustcraft:crystallite",
+    "x": "minecraft:iron_pickaxe",
+    "r": "minecraft:redstone"
+  },
+  "result": {
+    "id": "rustcraft:breaker_3",
+    "count": 1
+  }
+}

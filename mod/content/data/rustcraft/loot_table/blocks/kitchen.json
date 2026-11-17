@@ -7,8 +7,35 @@
       },
       "entries": [
         {
-          "type": "minecraft:item",
-          "name": "rustcraft:kitchen"
+          "type": "minecraft:alternatives",
+          "children": [
+            {
+              "type": "minecraft:item",
+              "name": "rustcraft:kitchen_3",
+              "condition": {
+                "type": "minecraft:match_block",
+                "blocks": "rustcraft:kitchen",
+                "state": {
+                  "tier": "3"
+                }
+              }
+            },
+            {
+              "type": "minecraft:item",
+              "name": "rustcraft:kitchen_4",
+              "condition": {
+                "type": "minecraft:match_block",
+                "blocks": "rustcraft:kitchen",
+                "state": {
+                  "tier": "4"
+                }
+              }
+            },
+            {
+              "type": "minecraft:item",
+              "name": "rustcraft:kitchen"
+            }
+          ]
         }
       ],
       "rolls": 1

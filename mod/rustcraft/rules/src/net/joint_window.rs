@@ -180,7 +180,8 @@ fn row_cells(page: &Page, slot: usize) -> Vec<Cell> {
     }
     let s = &page.settings[slot];
     row.push(Cell::Direction { slot, mode: s.mode });
-    if kind != ChannelKind::Item {
+    // s18/pipe: a fluid channel has a filter (of fluids) and a priority too; energy has neither.
+    if kind == ChannelKind::Energy {
         row.resize(COLUMNS, unused(Unused::NotItems));
         return row;
     }
@@ -258,8 +259,47 @@ pub fn pick(page: &Page, item: &str) -> Action {
     }
 }
 
+/// s18/pipe: `pick` for the armed row's channel: a fluid row's filter takes the fluid a bucket
+/// carries (`minecraft:water_bucket` → `minecraft:water`); an item that names no fluid does
+/// nothing there.
+pub fn pick_for(page: &Page, item: &str) -> Action {
+    let Some(slot) = page.armed else {
+        return Action::None;
+    };
+    if page.rows[slot].kind != Some(ChannelKind::Fluid) {
+        return pick(page, item);
+    }
+    const NOT_FLUIDS: [&str; 7] = ["minecraft:milk", "minecraft:powder_snow", "minecraft:axolotl", "minecraft:tadpole", "minecraft:cod", "minecraft:salmon", "minecraft:pufferfish"];
+    match item.strip_suffix("_bucket").filter(|f| !NOT_FLUIDS.contains(f)) {
+        Some(fluid) => Action::Edit {
+            slot,
+            edit: Edit::AddItem(fluid.to_owned()),
+        },
+        None => Action::None,
+    }
+}
+
+/// s18/pipe: how far a player may stand from the housing whose joint window is open, blocks
+/// (survival's reach and a little more).
+pub const REACH: f64 = 8.0;
+
+/// Whether a player whose feet are at `feet` is within REACH of the middle of `housing`.
+pub fn within_reach(feet: [f64; 3], housing: crate::geom::Pos) -> bool {
+    let d: f64 = (0..3)
+        .map(|i| (feet[i] - (f64::from(housing[i]) + 0.5)).powi(2))
+        .sum();
+    d.sqrt() <= REACH
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_window_stays_open_within_reach_of_its_housing() {
+        assert!(super::within_reach([0.5, 0.0, 0.5], [0, 0, 0]));
+        assert!(super::within_reach([8.0, 0.5, 0.5], [0, 0, 0]));
+        assert!(!super::within_reach([9.0, 0.5, 0.5], [0, 0, 0]));
+    }
+
     use super::*;
 
     fn page() -> Page {
@@ -389,6 +429,23 @@ mod tests {
                 edit: Edit::ToggleList
             }
         );
+    }
+
+    #[test]
+    fn a_fluid_row_has_a_filter_and_a_priority() {
+        // s18/pipe, guide `ch_fluid`/`wrench`: direction, filter and priority for each channel.
+        let mut p = page();
+        p.rows[1].kind = Some(ChannelKind::Fluid);
+        let cells = cells(&p);
+        let fluid = &cells[2 * COLUMNS..3 * COLUMNS];
+        assert!(matches!(fluid[LIST], Cell::List { slot: 1, .. }));
+        assert!(matches!(fluid[PRIORITY_DOWN], Cell::PriorityDown { slot: 1, .. }));
+        p.armed = Some(1);
+        assert_eq!(
+            pick_for(&p, "minecraft:water_bucket"),
+            Action::Edit { slot: 1, edit: Edit::AddItem("minecraft:water".into()) }
+        );
+        assert_eq!(pick_for(&p, "minecraft:dirt"), Action::None, "only a fluid's bucket names a fluid");
     }
 
     #[test]

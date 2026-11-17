@@ -7,8 +7,40 @@ use serde::{Deserialize, Serialize};
 pub type Stack = (String, u32);
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(from = "Saved", into = "Saved")]
 pub struct Hold {
     pub slots: Vec<Option<Stack>>,
+}
+
+/// Slice 18: a hold as the fleet's JSON keeps it. With storage modules a hold has thousands of
+/// slots (×2 a module, guide `mod_storage`), mostly empty: its empty tail is not written, its size
+/// is. A hold written before (no size) reads as its slots.
+#[derive(Serialize, Deserialize)]
+struct Saved {
+    slots: Vec<Option<Stack>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    size: Option<usize>,
+}
+
+impl From<Saved> for Hold {
+    fn from(s: Saved) -> Hold {
+        let mut slots = s.slots;
+        if let Some(size) = s.size {
+            slots.resize(size.max(slots.len()), None);
+        }
+        Hold { slots }
+    }
+}
+
+impl From<Hold> for Saved {
+    fn from(h: Hold) -> Saved {
+        let size = h.slots.len();
+        let mut slots = h.slots;
+        while slots.last().is_some_and(Option::is_none) {
+            slots.pop();
+        }
+        Saved { slots, size: Some(size) }
+    }
 }
 
 impl Hold {
@@ -98,6 +130,30 @@ impl Hold {
         self.slots.iter().filter(|s| s.is_some()).count()
     }
 
+    /// Slice 18: the window shows the first `shown` slots (five rows); stacks past them move up
+    /// into its empty slots, so what the player can take is in the window.
+    pub fn settle(&mut self, shown: usize) {
+        let shown = shown.min(self.slots.len());
+        for hidden in shown..self.slots.len() {
+            if self.slots[hidden].is_none() {
+                continue;
+            }
+            let Some(free) = (0..shown).find(|&i| self.slots[i].is_none()) else {
+                return;
+            };
+            self.slots[free] = self.slots[hidden].take();
+        }
+    }
+
+    /// Slice 18: the stacks and the items the slots past the window's `shown` hold.
+    pub fn beyond(&self, shown: usize) -> (usize, u64) {
+        self.slots
+            .iter()
+            .skip(shown)
+            .flatten()
+            .fold((0, 0), |(k, n), (_, c)| (k + 1, n + u64::from(*c)))
+    }
+
     /// W4.a: no empty slot left.
     pub fn is_full(&self) -> bool {
         self.slots.iter().all(Option::is_some)
@@ -130,6 +186,34 @@ impl Hold {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_hold_bigger_than_its_window_moves_hidden_stacks_up() {
+        let mut h = Hold::new(6);
+        for _ in 0..5 {
+            h.add("a", 64, 64);
+        }
+        assert_eq!(h.beyond(3), (2, 128));
+        h.take("a", 64);
+        h.slots[0] = None;
+        h.settle(3);
+        assert!(h.slots[..3].iter().all(Option::is_some), "the window's slots fill from below");
+        assert_eq!(h.beyond(3), (0, 0));
+        assert_eq!(h.count("a"), 192, "nothing lost");
+    }
+
+    #[test]
+    fn a_hold_saves_without_its_empty_tail() {
+        let mut h = Hold::new(3456);
+        h.add("a", 5, 64);
+        let json = serde_json::to_string(&h).unwrap();
+        assert!(json.len() < 64, "{json}");
+        let back: Hold = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, h);
+        // A hold written before slice 18.
+        let old: Hold = serde_json::from_str(r#"{"slots":[["a",5],null,null]}"#).unwrap();
+        assert_eq!(old.slots.len(), 3);
+    }
 
     #[test]
     fn items_go_onto_their_stacks_then_into_empty_slots() {

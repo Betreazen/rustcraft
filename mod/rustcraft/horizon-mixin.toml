@@ -45,7 +45,7 @@
 # prototype hooked it.
 [mod]
 id = "rustcraft"
-version = "0.17.1"
+version = "0.18.0"
 
 # The commit the traversal prototype and path_of_craft_tree build on; every function used here
 # was checked in its source.
@@ -125,6 +125,13 @@ file = "crates/horizon-client/src/game.rs"
 name = "rustcraft_panels"
 source = "panels.rs"
 
+# Slice 18, stream 3: machine tiers and the right-click replacement (U2).
+[[module]]
+id = "tiers"
+file = "crates/horizon-client/src/game.rs"
+name = "rustcraft_tiers"
+source = "tiers.rs"
+
 # Slice 5: the storage on the server, the terminal's window on the client, the tanks, the pumps
 # and the fluid nets, and the tank's and the pump's windows.
 [[module]]
@@ -187,6 +194,13 @@ id = "power"
 file = "crates/horizon-client/src/game.rs"
 name = "rustcraft_power"
 source = "power.rs"
+
+# Slice 18: the crystal shard, the druses and growing crystals (rustcraft_rules::grow).
+[[module]]
+id = "crystals"
+file = "crates/horizon-client/src/game.rs"
+name = "rustcraft_crystals"
+source = "crystals.rs"
 
 [[module]]
 id = "mining"
@@ -269,6 +283,21 @@ file = "crates/horizon-client/src/game.rs"
 name = "rustcraft_tablet"
 source = "tablet.rs"
 
+# Slice 18 (stream 5): the holo-projector's plan by two corners, its turn, «В руку», the ghost; the
+# building machine from the storage (rustcraft_rules::utility::plan).
+[[module]]
+id = "projector"
+file = "crates/horizon-client/src/game.rs"
+name = "rustcraft_projector"
+source = "projector.rs"
+
+# Slice 18 (stream 5): the filter module's window, a server chest (rustcraft_rules::storage::filter).
+[[module]]
+id = "filter"
+file = "crates/horizon-client/src/game.rs"
+name = "rustcraft_filter"
+source = "filter.rs"
+
 # The zipline's saved ropes and their anchors, the aim's outline, and the harpoon on mobs
 # (rustcraft_rules::traversal; 12.5 Z1-Z3, G5).
 [[module]]
@@ -307,6 +336,27 @@ id = "selftest"
 file = "crates/horizon-client/src/game.rs"
 name = "rustcraft_selftest"
 source = "selftest.rs"
+
+# s18/pipe: slice 18's magistral as the handbook says (node tiers, wrench, node window).
+[[module]]
+id = "pipe18"
+file = "crates/horizon-client/src/game.rs"
+name = "rustcraft_pipe18"
+source = "pipe18.rs"
+
+# s18/pipe: the node's window (a screen of the mod's own) and the line-boost module.
+[[module]]
+id = "node_window"
+file = "crates/horizon-client/src/game.rs"
+name = "rustcraft_node_window"
+source = "node_window.rs"
+
+# s18/pipe: the joint window drawn as the guide's table (the client half; rustcraft_window serves it).
+[[module]]
+id = "joint_screen"
+file = "crates/horizon-client/src/game.rs"
+name = "rustcraft_joint_screen"
+source = "joint_screen.rs"
 
 # The fall handling lives in the client library, below the game crate, so the list of riders
 # whose falls do no damage must live there too.
@@ -911,6 +961,19 @@ bindings = [
   { name = "entity", ty = "Option<i32>", value = "entity" },
 ]
 
+# Slice 18 (cross): an energy shield whose charge ran out while held up goes down (API 131).
+[[injection]]
+id = "living_entity_use_item_tick"
+hook = "living_entity_use_item_tick"
+hook_version = 1
+kind = "HEAD"
+helper = "hook_use_item_tick.rs"
+bindings = [
+  { name = "stack", ty = "&horizon_client::items::ItemStack", value = "stack" },
+  { name = "entity", ty = "Option<i32>", value = "entity" },
+  { name = "canceled", ty = "&mut bool", value = "&mut *canceled" },
+]
+
 # Slice 13: a player's input flags (API 343), for the dash module.
 [[injection]]
 id = "player_input"
@@ -1019,4 +1082,213 @@ bindings = [
   { name = "game", ty = "&crate::game::Game<'_>", value = "&*self" },
   { name = "scroll", ty = "[f64; 2]", value = "scroll" },
   { name = "canceled", ty = "&mut bool", value = "&mut *canceled" },
+]
+
+# ---- Slice 18, stream 6 (rail and workers) ----
+
+# RustCraft's server settings file, config/rustcraft-server.toml or the world's serverconfig/ copy
+# (API 397, game/native_configs.rs): the worker limit per player (W8). register_configs is asked
+# from native_configs_load (native_configs.rs:255) and config_loading fires right after it
+# (native_configs.rs:261), config_reloading from native_configs_poll (native_configs.rs:306) on the
+# server's tick (levels.rs:503); all three by their named hook's HEAD, whatever mods() holds.
+[[injection]]
+id = "register_configs"
+hook = "register_configs"
+hook_version = 1
+kind = "HEAD"
+helper = "hook_register_configs.rs"
+bindings = [
+  { name = "configs", ty = "&mut Vec<crate::game::NativeConfig>", value = "&mut *configs" },
+]
+
+[[injection]]
+id = "config_loading"
+hook = "config_loading"
+hook_version = 1
+kind = "HEAD"
+helper = "hook_config_loading.rs"
+bindings = [
+  { name = "config", ty = "&crate::game::NativeConfigFile", value = "config" },
+]
+
+[[injection]]
+id = "config_reloading"
+hook = "config_reloading"
+hook_version = 1
+kind = "HEAD"
+helper = "hook_config_reloading.rs"
+bindings = [
+  { name = "config", ty = "&crate::game::NativeConfigFile", value = "config" },
+]
+
+# ---- Slice 18, base and gear (stream 7) ----
+
+# The charge bar under a gear piece's icon (client, API 60): the width the server keeps in the
+# stack's custom data (rustcraft_gear, `rustcraft:bar`).
+[[injection]]
+id = "item_bar"
+hook = "item_bar"
+hook_version = 1
+kind = "HEAD"
+helper = "hook_item_bar.rs"
+bindings = [
+  { name = "stack", ty = "&horizon_client::items::ItemStack", value = "stack" },
+  { name = "bar", ty = "&mut Option<(i32, u32)>", value = "&mut *bar" },
+]
+
+# The gear's keys (Z magnet, B backpack, ; night vision), rebindable in Options > Mods.
+[[module]]
+id = "gear_keys"
+file = "crates/horizon-client/src/game.rs"
+name = "rustcraft_gear_keys"
+source = "gear_keys.rs"
+
+[[injection]]
+id = "mods"
+hook = "mods"
+hook_version = 1
+kind = "HEAD"
+helper = "hook_mods.rs"
+bindings = [
+  { name = "mods", ty = "&mut Vec<horizon_client::mod_api::NativeMod>", value = "&mut *mods" },
+]
+
+[[injection]]
+id = "key"
+hook = "key"
+hook_version = 1
+kind = "HEAD"
+helper = "hook_key.rs"
+bindings = [
+  { name = "game", ty = "&mut crate::game::Game<'_>", value = "&mut *self" },
+  { name = "key", ty = "&str", value = "key" },
+  { name = "pressed", ty = "bool", value = "pressed" },
+]
+
+# The fourth tier's energy shield sends projectiles back (API 136, server).
+[[injection]]
+id = "hears_projectile_impacts"
+hook = "hears_projectile_impacts"
+hook_version = 1
+kind = "HEAD"
+helper = "hook_hears_projectiles.rs"
+bindings = [
+  { name = "hears", ty = "&mut bool", value = "&mut *hears" },
+]
+
+[[injection]]
+id = "projectile_impact"
+hook = "projectile_impact"
+hook_version = 1
+kind = "HEAD"
+helper = "hook_projectile_impact.rs"
+bindings = [
+  { name = "game", ty = "&mut crate::game::Game<'_>", value = "&mut *self" },
+  { name = "dimension", ty = "&str", value = "dimension" },
+  { name = "projectile", ty = "u32", value = "projectile" },
+  { name = "kind", ty = "&str", value = "kind" },
+  { name = "owner", ty = "u32", value = "owner" },
+  { name = "entity", ty = "Option<u32>", value = "entity" },
+  { name = "entity_kind", ty = "&str", value = "entity_kind" },
+  { name = "at", ty = "[f64; 3]", value = "at" },
+  { name = "canceled", ty = "&mut bool", value = "&mut *canceled" },
+]
+
+# Aiming the energy rifle zooms twice (client, API 362).
+[[injection]]
+id = "compute_fov_modifier"
+hook = "compute_fov_modifier"
+hook_version = 1
+kind = "HEAD"
+helper = "hook_fov.rs"
+bindings = [
+  { name = "modifier", ty = "&mut f32", value = "&mut *modifier" },
+]
+
+# Gear seen on players: the jetpack, the starsteel backpack, the zipline's handle (client, API 149).
+[[injection]]
+id = "player_render_listened"
+hook = "player_render_listened"
+hook_version = 1
+kind = "HEAD"
+helper = "hook_player_render_listened.rs"
+bindings = [
+  { name = "listened", ty = "&mut bool", value = "&mut *listened" },
+]
+
+[[injection]]
+id = "mob_layer"
+hook = "mob_layer"
+hook_version = 1
+kind = "HEAD"
+helper = "hook_mob_layer.rs"
+bindings = [
+  { name = "game", ty = "&crate::game::Game<'_>", value = "&*self" },
+  { name = "mob", ty = "&crate::game::native_mob_draw::NativeMobRender<'_>", value = "mob" },
+  { name = "who", ty = "Option<&crate::game::native_mob_draw::NativePlayerRender<'_>>", value = "who" },
+  { name = "draw", ty = "&mut crate::game::native_block_entity_draw::BlockEntityDraw", value = "&mut *draw" },
+]
+
+# The technical enchantments at the anvil (both sides): no catalog entry, so by its target
+# (SRC crates/horizon-client/src/game/native_hooks.rs:6103, NeoForge's AnvilUpdateEvent).
+[[injection]]
+id = "anvil_update"
+target = "horizon_client::game::native_hooks::Game<'_>::native_anvil_update"
+kind = "HEAD"
+helper = "hook_anvil_update.rs"
+bindings = [
+  { name = "left", ty = "&horizon_client::items::ItemStack", value = "left" },
+  { name = "right", ty = "Option<&horizon_client::items::ItemStack>", value = "right" },
+  { name = "output", ty = "&mut Option<horizon_client::items::ItemStack>", value = "&mut *output" },
+  { name = "xp_cost", ty = "&mut i32", value = "&mut *xp_cost" },
+  { name = "material_cost", ty = "&mut i32", value = "&mut *material_cost" },
+]
+
+# The zipline anchor's translucent ghost (client): no catalog entry, so by its target
+# (SRC crates/horizon-client/src/game/native_hooks.rs:3001, called from world_primitives.rs:43
+# for every frame with no trait-mod gate).
+[[injection]]
+id = "world_primitives"
+target = "horizon_client::game::native_hooks::Game<'_>::native_world_primitives"
+kind = "HEAD"
+helper = "hook_world_primitives.rs"
+bindings = [
+  { name = "game", ty = "&crate::game::Game<'_>", value = "&*self" },
+  { name = "primitives", ty = "&mut horizon_client::world_primitives::WorldPrimitives", value = "&mut *primitives" },
+]
+
+# ---- Slice 18, wave 2: a guard's or turret's kill drops the owner's loot ----
+
+# The loot hooks run in horizon-world, below the game crate, so the marks of the devices' lethal
+# hits live there (rustcraft_base sets them; SRC/crates/horizon-world/src/native_load_hooks.rs).
+[[module]]
+id = "loot_marks"
+file = "crates/horizon-world/src/loot.rs"
+name = "rustcraft_loot_marks"
+source = "loot_marks.rs"
+visibility = "pub"
+
+# Every mob table's `killed_by_player` also holds for `rustcraft:killed_for_owner` (API 75).
+[[injection]]
+id = "loot_table_load"
+hook = "loot_table_load"
+hook_version = 1
+kind = "HEAD"
+helper = "hook_loot_table_load.rs"
+bindings = [
+  { name = "id", ty = "&str", value = "id" },
+  { name = "table", ty = "&mut serde_json::Value", value = "&mut *table" },
+]
+
+# `rustcraft:killed_for_owner` holds where a device's lethal hit was marked (API 133, 156).
+[[injection]]
+id = "loot_condition"
+hook = "loot_condition"
+hook_version = 1
+kind = "HEAD"
+helper = "hook_loot_condition.rs"
+bindings = [
+  { name = "kind", ty = "&str", value = "kind" },
+  { name = "ctx", ty = "&crate::loot::NativeLootContext<'_>", value = "ctx" },
+  { name = "holds", ty = "&mut bool", value = "&mut *holds" },
 ]

@@ -9,7 +9,7 @@
   "key": {
     "c": "rustcraft:crystallite",
     "d": "minecraft:dropper",
-    "s": "minecraft:amethyst_shard",
+    "s": "rustcraft:crystal_shard",
     "r": "minecraft:redstone"
   },
   "result": {

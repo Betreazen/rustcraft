@@ -137,6 +137,28 @@ impl Inventories for Stocks {
             .sum()
     }
 
+    /// A machine's input takes `item` (a slot limited to its items, or the block's `accepts`),
+    /// whether or not it has room now; a chest or a storage takes anything and needs nothing.
+    fn needs(&self, block: Pos, item: &str) -> bool {
+        let Some(stock) = self.blocks.get(&block) else {
+            return false;
+        };
+        match &stock.accepts {
+            Some(a) => a.contains(item) && stock.slots.iter().any(|s| s.takes(item)),
+            None => stock
+                .slots
+                .iter()
+                .any(|s| s.can_put && s.only.as_ref().is_some_and(|o| o.contains(item))),
+        }
+    }
+
+    /// A machine limits what it takes (`accepts` or its input slots' `only`).
+    fn is_machine(&self, block: Pos) -> bool {
+        self.blocks.get(&block).is_some_and(|s| {
+            s.accepts.is_some() || s.slots.iter().any(|slot| slot.can_put && slot.only.is_some())
+        })
+    }
+
     fn take(&mut self, block: Pos, item: &str, count: u32) -> u32 {
         if let Some(s) = self.stores.get_mut(&block) {
             return if s.works {
@@ -270,6 +292,8 @@ mod tests {
             mode,
             filter: Filter::default(),
             priority: 0,
+            auto: false,
+            refiner: false,
         }
     }
 
@@ -297,6 +321,27 @@ mod tests {
         assert_eq!(stocks.room_for(A, INGOT), 64);
         stocks.max_stack.insert("minecraft:ender_pearl".into(), 16);
         assert_eq!(stocks.room_for(A, "minecraft:ender_pearl"), 16);
+    }
+
+    #[test]
+    fn a_machine_needs_its_ingredients_even_when_full_and_a_chest_needs_nothing() {
+        // Slice 18 (guide `quickstart` 5): dust the furnace takes is no chest's, room or not.
+        let mut stocks = Stocks::default();
+        stocks
+            .blocks
+            .insert(F, furnace(Some((RAW, 64)), None, &[RAW]));
+        assert_eq!(stocks.room_for(F, RAW), 0);
+        assert!(stocks.needs(F, RAW));
+        assert!(!stocks.needs(F, INGOT));
+        stocks.blocks.insert(A, chest(3));
+        assert!(!stocks.needs(A, RAW), "a chest takes anything but needs nothing");
+        // The bundle's machines limit their input slots (`only`) instead of the block.
+        let mut crusher = chest(2);
+        crusher.slots[0].only = Some(BTreeSet::from([RAW.to_string()]));
+        crusher.slots[1].can_put = false;
+        stocks.blocks.insert(B, crusher);
+        assert!(stocks.needs(B, RAW));
+        assert!(!stocks.needs(B, INGOT));
     }
 
     #[test]

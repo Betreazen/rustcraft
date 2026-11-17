@@ -21,9 +21,12 @@ snapshot of each step at its start:
 handbook_mc.py calls `build` and writes its table and lines with the pages' own, so one run owns
 every `rustcraft.handbook.` key. The table is `mod/rustcraft/rules/src/handbook/scenes.rs`
 (rustcraft_rules::handbook::scenes); its types and what the window does with them are in
-`rules/src/handbook/scene.rs`. What the game cannot show is dropped and counted: name tags and
-badges (the window's caption says what a step shows), the props that only change a model's
-pose (a facing, a machine running, a tank's level), and types with no item (`DROPPED`).
+`rules/src/handbook/scene.rs`. The step's badges and name tags (`s.badges`, `s.tags`) become
+labels: a point or a moving object to stand on, a tone, and their text as the lang key
+`rustcraft.handbook.scene.<id>.<n>.label.<k>`. A dropped item (`drop`) is a little cube of its
+colour. What the game cannot show is left out: the props that only change a model's pose (a
+facing, a machine running, a tank's level; see the plan's engine limits) and types with no item
+(`DROPPED`).
 """
 import json
 import shutil
@@ -36,6 +39,9 @@ ROOT = HERE.parent.parent
 GUIDE = ROOT / 'docs' / 'showcase' / 'js'
 ITEMS = ROOT / 'mod' / 'content' / 'assets' / 'rustcraft' / 'items'
 TABLE = ROOT / 'mod' / 'rustcraft' / 'rules' / 'src' / 'handbook' / 'scenes.rs'
+sys.path.insert(0, str(HERE))
+import poses_mc  # noqa: E402
+POSES = poses_mc.Poses()
 PREFIX = 'rustcraft.handbook.scene.'
 
 # The guide's scripts as its page loads them (index.html), with what models.js gives the others,
@@ -52,7 +58,7 @@ RC.TIER_COLOR = ['', '#c57f52', '#e2bd55', '#69d2d8', '#a184f2'];
 RC.CH_COLOR = { i: '#ffa53c', f: '#4c9bf5', e: '#ffe14a', '-': '#15171c' };
 for (const f of ['data.js', 'info.js', 'scenes.js']) run(f);
 const stepTime = (st) => Math.max(st.dur || 5, 3 + st.text.length / 14);
-const KEEP = ['tier', 'tool'];
+const KEEP = ['tier', 'tool', 'color', 'on', 'face'];
 const out = [];
 for (const [id, def] of Object.entries(RC.SCENES)) {
   const s = new RC.Scene();
@@ -73,7 +79,9 @@ for (const [id, def] of Object.entries(RC.SCENES)) {
       text: st.text, dur: stepTime(st), objs,
       flows: s.flows.map((f) => ({ pts: f.pts.map((p) => p.slice(0, 3)), color: f.color, n: f.n, speed: f.speed })),
       beams: s.beams.map((b) => ({ a: b.a, b: b.b, color: b.color })),
-      badges: s.badges.length, tint: s.tint || null,
+      badges: s.badges.map((b) => ({ at: [b.x + 0.5, b.y + 0.5, b.z + 2.15], text: b.text, kind: b.kind || 'bad' })),
+      tags: s.tags.map((tg) => ({ obj: tg.obj, text: tg.text, lift: tg.lift || 1.45 })),
+      tint: s.tint || null,
     };
     time += stepTime(st);
     return snap;
@@ -107,14 +115,16 @@ VANILLA = {
     'cactus': 'cactus', 'bamboo': 'bamboo', 'kelp': 'kelp', 'pumpkin': 'pumpkin',
     'melon': 'melon', 'pumpkin_stem': 'pumpkin_seeds', 'melon_stem': 'melon_seeds',
     'sweet_berry_bush': 'sweet_berries', 'cave_vines': 'glow_berries', 'cocoa': 'cocoa_beans',
-    'mob': 'zombie_spawn_egg', 'skeleton': 'skeleton_spawn_egg', 'cow': 'cow_spawn_egg',
+    'mob': 'zombie_head', 'skeleton': 'skeleton_skull', 'cow': 'cow_spawn_egg',
     'sheep': 'sheep_spawn_egg', 'bee': 'bee_spawn_egg', 'player': 'player_head',
-    'axe': 'iron_axe',
+    'axe': 'iron_axe', 'anvil': 'anvil',
 }
 # Cells no item shows: a tinted cube (ARGB), as the guide draws water, lava and the ghost.
 TINT = {'water': 0xB03F76E4, 'lava': 0xF0E8601C, 'lavapool': 0xF0E8601C, 'ghost': 0x7066E8F0}
-# Types the game has nothing for: a dropped item the guide draws as a coloured cube.
-DROPPED = {'drop'}
+# Types the game has nothing for (none now: a dropped item is a little cube of its colour, `drop`).
+DROPPED = set()
+# A dropped item's cube stands this far down in its cell (models.js `drop`: 0.24 high at 0.05).
+DROP_DOWN = 0.33
 # Types whose model is a full opaque cube: what covers the faces of the block behind it.
 FULL = {'stone', 'deepslate', 'dirt', 'grass', 'planks', 'log', 'bedrock', 'bricks', 'wool',
         'netherrack', 'soul_sand', 'sand', 'gravel', 'clay', 'sandstone', 'sus_sand',
@@ -141,6 +151,8 @@ def look_of(o, have):
     t = o['type']
     if t in TINT:
         return ('tint', TINT[t])
+    if t == 'drop':
+        return ('drop', 0xFF000000 | rgb(o.get('color') or '#d8a47a'))
     if t in DROPPED:
         return None
     name = None
@@ -160,7 +172,7 @@ def look_of(o, have):
     else:
         name = RENAME.get(t, t)
     if have(name):
-        return ('item', 'rustcraft:' + name)
+        return POSES.look(name, o.get('on')) or ('item', 'rustcraft:' + name)
     return None
 
 
@@ -248,6 +260,9 @@ class Table:
 
 
 MODE = {'once': 'Once', 'loop': 'Loop', 'ping': 'Ping'}
+# Wave 2: scenes.js `face` as rustcraft_rules::handbook::scene's FACE_* codes.
+FACE = {'x+': 1, 'x-': 2, 'y+': 3, 'y-': 4}
+TONE = {'bad': 'Bad', 'warn': 'Warn', 'ok': 'Ok', 'info': 'Info'}
 
 
 def step_rust(t, st, have, dropped):
@@ -267,10 +282,17 @@ def step_rust(t, st, have, dropped):
             movers.append('Mover { look: %d, path: %s, speed: %s, mode: Mode::%s, since: %s }' % (
                 i, t.path(m['pts']), num(m['speed']), MODE[m['mode']], num(m['since'])))
         elif o['id'] not in covered:
-            if 'gone' in o:
-                blocks.append('bg(%d,%s,%s)' % (i, point(o['at']), num(o['gone'])))
+            at = o['at'] if look[0] != 'drop' else [o['at'][0], o['at'][1], o['at'][2] - DROP_DOWN]
+            # Wave 2: a block that faces a way in the guide faces it in the game's scene too.
+            face = FACE.get(o.get('face')) if look[0] in ('item', 'model') else None
+            if 'gone' in o and face:
+                blocks.append('bgf(%d,%s,%s,%d)' % (i, point(at), num(o['gone']), face))
+            elif 'gone' in o:
+                blocks.append('bg(%d,%s,%s)' % (i, point(at), num(o['gone'])))
+            elif face:
+                blocks.append('bf(%d,%s,%d)' % (i, point(at), face))
             else:
-                blocks.append('b(%d,%s)' % (i, point(o['at'])))
+                blocks.append('b(%d,%s)' % (i, point(at)))
     flows = []
     for f in st['flows']:
         kind = 'Energy' if f['color'] in ENERGY else 'Fluid' if f['color'] in FLUID else 'Item'
@@ -291,9 +313,23 @@ def step_rust(t, st, have, dropped):
         else:
             end = 'End::Point(%s)' % point(to)
         beams.append('Beam { from: %s, to: %s, rgb: 0x%06x }' % (point(bm['a']), end, rgb(bm['color'])))
-    return ('Step { dur: %s, blocks: %s, movers: &[%s], flows: &[%s], beams: &[%s], tint: 0x%08x }' % (
+    labels, texts = [], []
+    for tg in st['tags']:
+        o = by_id.get(tg['obj'])
+        if o is None:
+            continue
+        if tg['obj'] in mover_of:
+            at, lift = 'End::Mover(%d)' % mover_of[tg['obj']], tg['lift']
+        else:
+            at, lift = 'End::Point(%s)' % point([o['at'][0] + 0.5, o['at'][1] + 0.5, o['at'][2] + tg['lift']]), 0
+        labels.append('Label { at: %s, lift: %s, tone: Tone::Tag }' % (at, num(lift)))
+        texts.append(tg['text'])
+    for bd in st['badges']:
+        labels.append('Label { at: End::Point(%s), lift: 0., tone: Tone::%s }' % (point(bd['at']), TONE[bd['kind']]))
+        texts.append(bd['text'])
+    return ('Step { dur: %s, blocks: %s, movers: &[%s], flows: &[%s], beams: &[%s], tint: 0x%08x, labels: &[%s] }' % (
         num(st['dur']), t.blocks(blocks), ', '.join(movers), ', '.join(flows), ', '.join(beams),
-        tint_argb(st['tint'])), len(blocks) + len(movers))
+        tint_argb(st['tint']), ', '.join(labels)), len(blocks) + len(movers), texts)
 
 
 def rust_str(s):
@@ -311,23 +347,31 @@ def build(page_ids, have):
             sys.exit('scenes_mc.py: the guide\'s scene %s has no page' % sc['id'])
         steps = []
         for n, st in enumerate(sc['steps']):
-            rust, shown = step_rust(t, st, have, dropped)
+            rust, shown, texts = step_rust(t, st, have, dropped)
             steps.append(rust)
             most = max(most, shown)
             ru['%s%s.%d' % (PREFIX, sc['id'], n)] = st['text']
-            badges += st['badges']
+            for k, text in enumerate(texts):
+                ru['%s%s.%d.label.%d' % (PREFIX, sc['id'], n, k)] = text
+            badges += len(texts)
             numbers += any(c.isdigit() for c in st['text'])
         steps_n += len(steps)
         scenes.append('    Scene { id: %s, steps: &[\n        %s,\n    ] },' % (
             rust_str(sc['id']), ',\n        '.join(steps)))
     looks = []
-    for kind, value in t.looks:
-        looks.append('Look::Item(%s)' % rust_str(value) if kind == 'item' else 'Look::Tint(0x%08x)' % value)
+    for look in t.looks:
+        kind, value = look[0], look[1]
+        if kind == 'item':
+            looks.append('Look::Item(%s)' % rust_str(value))
+        elif kind == 'model':
+            looks.append('Look::Model(%s, %s)' % (rust_str(value), rust_str(look[2])))
+        else:
+            looks.append('Look::%s(0x%08x)' % ('Drop' if kind == 'drop' else 'Tint', value))
     lists = ['const B%d: &[Block] = &[%s];' % (i, ','.join(rows)) for i, rows in enumerate(t.lists)]
     paths = ['const P%d: &[[f32; 3]] = %s;' % (i, p) for i, p in enumerate(t.paths)]
     text = ('//! The handbook\'s scenes, written by assets/models/scenes_mc.py (through handbook_mc.py)\n'
             '//! from the guide\'s docs/showcase/js/scenes.js: do not edit by hand, run the script.\n\n'
-            'use super::scene::{Beam, Block, End, Flow, Kind, Look, Mode, Mover, Scene, Step, b, bg};\n\n'
+            'use super::scene::{Beam, Block, End, Flow, Kind, Label, Look, Mode, Mover, Scene, Step, Tone, b, bf, bg, bgf};\n\n'
             '/// What the scenes\' blocks look like, by `Block::look` and `Mover::look`.\n'
             '#[rustfmt::skip]\npub const LOOKS: &[Look] = &[\n    %s,\n];\n\n'
             '#[rustfmt::skip]\npub const SCENES: &[Scene] = &[\n%s\n];\n\n'
@@ -336,7 +380,8 @@ def build(page_ids, have):
             % (',\n    '.join(looks), '\n'.join(scenes),
                '\n'.join('#[rustfmt::skip]\n' + line for line in lists),
                '\n'.join('#[rustfmt::skip]\n' + line for line in paths)))
-    summary = {'scenes': len(scenes), 'steps': steps_n, 'looks': len(t.looks), 'lists': len(t.lists),
+    stills = POSES.write()
+    summary = {'stills': stills, 'scenes': len(scenes), 'steps': steps_n, 'looks': len(t.looks), 'lists': len(t.lists),
                'dropped': dropped, 'badges': badges, 'numbers': numbers, 'most': most}
     return text, ru, {}, summary
 

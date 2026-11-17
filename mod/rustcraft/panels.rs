@@ -17,6 +17,7 @@ use crate::game::{
 use horizon_client::{hud::HudBatch, mod_api::NativeScreen};
 use rustcraft_rules::{
     machines::{
+        extras,
         panel::{Rect, energy_text, inside, slot_frame},
         processor::WorkMode,
         style::{self, colour},
@@ -51,10 +52,15 @@ pub(super) fn layout(machine: Machine) -> NativeScreen {
         ),
         _ => (cw::HEIGHT, cw::slot_positions(), cw::INVENTORY),
     };
+    let mut slots: Vec<Option<[f32; 2]>> = slots.into_iter().map(Some).collect();
+    if machine == Machine::Crafter {
+        // Slice 18: the old module slots are out of the menu (the modules live in the sockets).
+        slots.extend([None; cw::MODULE_SLOT_COUNT]);
+    }
     NativeScreen {
         width: WIDTH,
         height,
-        slots: slots.into_iter().map(Some).collect(),
+        slots,
         inventory_y: inventory[1],
         inventory_x: inventory[0],
         own_labels: true,
@@ -93,7 +99,8 @@ fn draw_generator(game: &Game<'_>, data: &[i32], batch: &mut HudBatch, o: [f32; 
         [gw::FUEL[0] - 4.0, gw::LABEL_SLOTS_Y],
     );
     slot(game, batch, o, gw::FUEL);
-    let burning = tr("rustcraft.window.burning", "Burns");
+    // Slice 18: the guide's «Ход работы»: how long the lit fuel still burns.
+    let burning = tr("rustcraft.window.burn_progress", "Progress");
     // Over the bar's right end: «ТОПЛИВО» over the slot is wider than the gap before the bar.
     let flame_right = gw::FLAME[0] + gw::FLAME[2];
     label_right(game, batch, &burning, o, flame_right, gw::LABEL_SLOTS_Y);
@@ -126,6 +133,7 @@ fn draw_generator(game: &Game<'_>, data: &[i32], batch: &mut HudBatch, o: [f32; 
         produced: p.produced,
         requested: p.requested,
         supplied: p.supplied,
+        ..GroupBalance::default()
     };
     let per_second = |v: f64| tr_with("rustcraft.window.per_second", "%s E/s", &[energy_text(v)]);
     let enough = if balance.enough() {
@@ -148,7 +156,16 @@ fn draw_generator(game: &Game<'_>, data: &[i32], batch: &mut HudBatch, o: [f32; 
         ),
         (
             tr("rustcraft.window.stored", "Stored"),
-            tr("rustcraft.window.stored.none", "no batteries"),
+            if p.capacity > 0.0 {
+                // Slice 18: the batteries on its circuit.
+                tr_with(
+                    "rustcraft.window.stored.of",
+                    "%s of %s E",
+                    &[energy_text(p.stored), energy_text(p.capacity)],
+                )
+            } else {
+                tr("rustcraft.window.stored.none", "no batteries")
+            },
         ),
         (tr("rustcraft.window.enough", "Enough"), enough),
     ];
@@ -185,9 +202,11 @@ fn draw_alloy(game: &Game<'_>, data: &[i32], batch: &mut HudBatch, o: [f32; 2]) 
     for s in aw::INPUTS.iter().chain(&aw::OUTPUTS) {
         slot(game, batch, o, *s);
     }
-    for s in aw::MODULE_SLOTS {
-        socket(game, batch, o, s, true);
-    }
+    // Slice 18: the queue cells under the inputs, the sockets its tier opens, the reserve.
+    let ex = extras::decode(data, aw::EXTRAS_AT);
+    kit::cells_part(game, batch, o, &ex, aw::cell);
+    kit::sockets_part(game, batch, o, &ex, &aw::MODULE_SLOTS, None);
+    kit::reserve_part(game, batch, o, &ex, [aw::OUTPUTS[0][0], aw::OUTPUTS[0][1] + 18.0]);
     kit::arrow(game, batch, o, aw::ARROW, p.progress);
     let fuel = tr("rustcraft.window.fuel", "Fuel");
     label(game, batch, &fuel, o, [aw::FUEL[0] - 2.0, aw::LABEL_FUEL_Y]);
@@ -247,7 +266,7 @@ fn draw_crafter(game: &Game<'_>, data: &[i32], batch: &mut HudBatch, o: [f32; 2]
     let p = cw::decode(data);
     kit::background(game, batch, o, [WIDTH, cw::HEIGHT]);
     kit::title(game, batch, o, Machine::Crafter);
-    let tabs: Vec<Rect> = (0..p.pages).map(cw::tab).collect();
+    let tabs: Vec<Rect> = (0..p.pages).map(|i| cw::tab_of(i, p.pages)).collect();
     let line_y = cw::TABS_Y + cw::TAB_H;
     let tab_right = cw::MODULE_SLOTS[0][0] - 4.0;
     kit::fills(
@@ -259,8 +278,14 @@ fn draw_crafter(game: &Game<'_>, data: &[i32], batch: &mut HudBatch, o: [f32; 2]
     for i in 0..p.pages {
         tab(game, batch, o, i, &p);
     }
-    for m in cw::MODULE_SLOTS {
-        socket(game, batch, o, m, true);
+    // Slice 18: the sockets its tier opens, and the queue cells beside the stock.
+    let ex = extras::decode(data, cw::EXTRAS_AT);
+    kit::sockets_part(game, batch, o, &ex, &cw::MODULE_SLOTS, None);
+    kit::cells_part(game, batch, o, &extras::Extras { open_cells: ex.open_cells.min(cw::QUEUE_DRAWN), ..ex.clone() }, cw::queue_cell);
+    if ex.shown_cells() > cw::QUEUE_DRAWN {
+        let more = format!("+{}", ex.shown_cells() - cw::QUEUE_DRAWN);
+        let p = cw::queue_cell(cw::QUEUE_DRAWN - 1);
+        text(game, batch, &more, o, [p[0], p[1] + 19.0], LABEL);
     }
     let pattern = tr("rustcraft.window.pattern", "Pattern");
     label(game, batch, &pattern, o, [8.0, cw::LABEL_GRID_Y]);
@@ -302,6 +327,7 @@ fn draw_crafter(game: &Game<'_>, data: &[i32], batch: &mut HudBatch, o: [f32; 2]
         cw::ENERGY_BAR,
         cw::LABEL_ENERGY_Y,
     );
+    label(game, batch, &tr("rustcraft.window.mode", "Work mode"), o, cw::LABEL_MODE);
     kit::modes_part(game, batch, o, p.mode, &cw::MODE_BUTTONS, None);
     if let Some(shown) = p.shown {
         kit::status_part(game, batch, o, cw::STATUS, Machine::Crafter, shown);
@@ -314,14 +340,23 @@ fn draw_crafter(game: &Game<'_>, data: &[i32], batch: &mut HudBatch, o: [f32; 2]
 fn tab(game: &Game<'_>, batch: &mut HudBatch, o: [f32; 2], i: usize, p: &cw::CrafterPanel) {
     let open = i == p.page;
     if !open {
-        kit::hover(game, batch, o, cw::tab(i));
+        kit::hover(game, batch, o, cw::tab_of(i, p.pages));
     }
-    let r = at(o, cw::tab(i));
+    let r = at(o, cw::tab_of(i, p.pages));
     let number = (i + 1).to_string();
     let colour = if open { VALUE } else { LABEL };
-    game.native_text(batch, &number, [r[0] + 3.0, r[1] + 5.0], colour, false);
-    if let Some(id) = p.tabs[i].and_then(|n| item_of_number(game, n)) {
-        game.native_item(batch, id, [r[0] + 12.0, r[1] + 2.0], 14.0);
+    let id = p.tabs[i].and_then(|n| item_of_number(game, n));
+    // Slice 18, wave 2 (`ui.js` crafter): «1 · Бумага» when the tab has room for it.
+    match id {
+        Some(id) if cw::tab_named(p.pages) => {
+            let named = kit::fit(game, &format!("{number} · {}", item_name(id)), r[2] - 6.0);
+            game.native_text(batch, &named, [r[0] + 3.0, r[1] + 5.0], colour, false);
+        }
+        Some(id) => {
+            game.native_text(batch, &number, [r[0] + 3.0, r[1] + 5.0], colour, false);
+            game.native_item(batch, id, [r[0] + 12.0, r[1] + 2.0], 14.0);
+        }
+        None => game.native_text(batch, &number, [r[0] + 3.0, r[1] + 5.0], colour, false),
     }
     if p.crafting == Some(i) {
         game.native_fill(
@@ -337,8 +372,14 @@ fn tab(game: &Game<'_>, batch: &mut HudBatch, o: [f32; 2], i: usize, p: &cw::Cra
 /// `native_screen_click` for the three windows: the button under `at`.
 pub(super) fn button_at(machine: Machine, data: &[i32], at: [f32; 2]) -> Option<i32> {
     match machine {
-        Machine::Alloy => aw::button_at(at),
-        Machine::Crafter => cw::button_at(at, cw::decode(data).pages),
+        Machine::Alloy => aw::button_at(at).or_else(|| {
+            kit::socket_at(&extras::decode(data, aw::EXTRAS_AT), &aw::MODULE_SLOTS, at)
+                .map(|k| kit::SOCKET_BUTTON + k as i32)
+        }),
+        Machine::Crafter => cw::button_at(at, cw::decode(data).pages).or_else(|| {
+            kit::socket_at(&extras::decode(data, cw::EXTRAS_AT), &cw::MODULE_SLOTS, at)
+                .map(|k| kit::SOCKET_BUTTON + k as i32)
+        }),
         _ => None,
     }
 }
@@ -366,8 +407,19 @@ pub(super) fn tooltip(
 ) {
     match machine {
         Machine::Generator => generator_tooltip(data, at, lines),
-        Machine::Alloy => alloy_tooltip(data, at, lines),
-        Machine::Crafter => crafter_tooltip(game, data, at, lines),
+        Machine::Alloy => {
+            let ex = extras::decode(data, aw::EXTRAS_AT);
+            let reserve_at = [aw::OUTPUTS[0][0], aw::OUTPUTS[0][1] + 18.0];
+            if !kit::extras_tooltip(game, "rustcraft:alloy", &ex, &aw::MODULE_SLOTS, aw::cell, reserve_at, at, lines) {
+                alloy_tooltip(data, at, lines);
+            }
+        }
+        Machine::Crafter => {
+            let ex = extras::decode(data, cw::EXTRAS_AT);
+            if !kit::extras_tooltip(game, "rustcraft:crafter", &ex, &cw::MODULE_SLOTS, cw::queue_cell, [-99.0, -99.0], at, lines) {
+                crafter_tooltip(game, data, at, lines);
+            }
+        }
         _ => {}
     }
 }
@@ -415,8 +467,8 @@ fn alloy_tooltip(data: &[i32], at: [f32; 2], lines: &mut Vec<String>) {
             "Fuel left: %s",
             &[format!("{}%", (p.flame * 100.0).round())],
         ));
-    } else if aw::module_slot_at(at).is_some() {
-        kit::module_slot_tooltip(lines);
+    } else if let Some(k) = aw::module_slot_at(at) {
+        kit::module_slot_tooltip(k, lines);
     } else if aw::button_at(at).is_some() {
         lines.push(tr("rustcraft.window.take_own", "Take own alloy"));
         hint(
@@ -441,7 +493,7 @@ fn alloy_tooltip(data: &[i32], at: [f32; 2], lines: &mut Vec<String>) {
 fn crafter_tooltip(game: &Game<'_>, data: &[i32], at: [f32; 2], lines: &mut Vec<String>) {
     let p = cw::decode(data);
     let name = |n: Option<u32>| n.and_then(|n| item_of_number(game, n)).map(item_name);
-    if let Some(i) = (0..p.pages).find(|&i| over(cw::tab(i), at)) {
+    if let Some(i) = (0..p.pages).find(|&i| over(cw::tab_of(i, p.pages), at)) {
         let made =
             name(p.tabs[i]).unwrap_or_else(|| tr("rustcraft.window.page.empty", "nothing yet"));
         lines.push(tr_with(

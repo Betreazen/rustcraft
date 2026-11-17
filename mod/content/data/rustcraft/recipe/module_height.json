@@ -2,14 +2,15 @@
   "type": "minecraft:crafting_shaped",
   "category": "misc",
   "pattern": [
-    "axa",
-    "xsx",
-    "axa"
+    "aca",
+    "rsr",
+    "aca"
   ],
   "key": {
     "a": "rustcraft:crystallite",
-    "x": "minecraft:rail",
-    "s": "minecraft:amethyst_shard"
+    "c": "minecraft:compass",
+    "r": "minecraft:redstone",
+    "s": "rustcraft:crystal_shard"
   },
   "result": {
     "id": "rustcraft:module_height",

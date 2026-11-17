@@ -18,6 +18,11 @@
 // The menu opens on the next tick of the player's level, not inside the click: there no player is
 // swapped in and the level is in place for the housing's block entity. Clicks wait for that tick
 // too.
+//
+// s18/pipe: a player on a Horizon client gets the window drawn as the guide's table instead (a
+// screen of the mod's own, rustcraft_joint_screen; rustcraft_rules::net::joint_screen): the same
+// page, sent as a view, and presses that become the same actions. The chest page stays for a
+// vanilla client and for the owner of a single-player or LAN world, whom no mod message reaches.
 use crate::game::{
     Game,
     rustcraft_content::{self as content, Machine},
@@ -31,6 +36,7 @@ use rustcraft_rules::{
     geom::{Face, Pos, step},
     net::{
         items::Mode,
+        joint_screen::{self as js, Press},
         joint_window::{self, Action, Cell, Page, Row, Unused},
         joints::ENERGY_DEFAULT,
         settings::{HousingJoints, JointSetting, Record},
@@ -56,6 +62,9 @@ const MAIN_SLOTS: usize = 27;
 const INVENTORY_SLOTS: usize = 36;
 /// The game's own empty item.
 const AIR: &str = "minecraft:air";
+/// s18/pipe: the window id of a session drawn as the guide's table (`joint_screen`), which has
+/// no menu: a menu's id is never negative.
+const SCREEN_WINDOW: i32 = -1;
 
 #[derive(Clone)]
 struct Session {
@@ -80,6 +89,8 @@ struct Click {
     right: bool,
     /// The item in the inventory slot clicked, when the click was on the inventory.
     picked: Option<String>,
+    /// s18/pipe: a press in the drawn window instead of a click on the chest page.
+    press: Option<Press>,
 }
 
 #[derive(Default)]
@@ -172,12 +183,6 @@ pub(super) fn write_joints(nbt: &mut Compound, joints: &HousingJoints) {
     nbt.insert(key, Tag::List(list));
 }
 
-/// The saved compound of a housing without any setting of `slot`: its channel was taken out.
-pub(super) fn forget_slot(nbt: &mut Compound, slot: usize) {
-    let joints = read_joints(nbt).without_slot(slot);
-    write_joints(nbt, &joints);
-}
-
 // ---- Hooks ----
 
 /// The wrench asked for the window of `housing`, on `preferred` if that face is a joint.
@@ -231,6 +236,7 @@ pub(super) fn on_menu_clicked(
         slot,
         right: button == RIGHT_BUTTON,
         picked,
+        press: None,
     });
 }
 
@@ -245,6 +251,7 @@ pub(super) fn on_menu_closed(uuid: u128, window: i32) {
 
 /// Each tick of a level: open the windows asked for there, then answer their clicks.
 pub(super) fn tick(game: &mut Game<'_>, dimension: &str, level: &mut LevelNet) {
+    close_when_far(game, dimension, level.ticks);
     let (opening, clicks) = {
         let mut guard = windows();
         // Through the guard once, so its fields borrow apart.
@@ -272,6 +279,119 @@ pub(super) fn tick(game: &mut Game<'_>, dimension: &str, level: &mut LevelNet) {
     for c in clicks {
         answer(game, dimension, level, c);
     }
+}
+
+/// s18/pipe (guide `wrench`: «окно закрывается, если отойти»): once a second, a window whose
+/// player walked out of reach of its housing, or left its level, closes.
+fn close_when_far(game: &mut Game<'_>, dimension: &str, ticks: u64) {
+    if !ticks.is_multiple_of(20) {
+        return;
+    }
+    let open: Vec<(u128, Session)> = windows()
+        .sessions
+        .iter()
+        .filter(|(_, s)| s.dimension == dimension)
+        .map(|(u, s)| (*u, s.clone()))
+        .collect();
+    if open.is_empty() {
+        return;
+    }
+    let players = game.native_server_players();
+    for (uuid, session) in open {
+        let near = players.iter().any(|p| {
+            p.uuid == uuid
+                && p.dimension == dimension
+                && rustcraft_rules::net::joint_window::within_reach(p.position, session.housing)
+        });
+        match (near, session.window == SCREEN_WINDOW) {
+            (false, false) => game.native_close_menu(uuid),
+            (false, true) => close_screen(game, uuid, session.housing),
+            // The drawn window is refreshed each second: the blocks beside the housing may change.
+            (true, true) => refresh_screen(game, dimension, uuid, &session),
+            (true, false) => {}
+        }
+    }
+}
+
+// ---- s18/pipe: the joint window drawn as the guide's table (rustcraft_joint_screen) ----
+
+/// Whether `uuid`'s window is drawn as the guide's table: their client is Horizon's, which
+/// carries mod messages. A vanilla client and the owner of a single-player or LAN world (whom no
+/// mod message reaches: SRC game/native_net.rs:120-137 sends only to hub guests, 226-245 sends
+/// to a server only from a remote client) get the chest page.
+fn drawn(game: &Game<'_>, uuid: u128) -> bool {
+    game.native_player_client(uuid)
+        .is_some_and(|c| c.brand == "horizon")
+}
+
+/// The drawn window's view of `page` sent to `uuid`.
+fn send_screen(game: &mut Game<'_>, uuid: u128, ctx: &Context, page: &Page, housing: Pos, open: bool) {
+    let block = &face_block(ctx, page.selected).block;
+    let view = js::JointView { open, ..js::view(page, housing, block) };
+    if let Err(e) = game.native_net_send_to_player(uuid, js::CHANNEL, &js::encode(&view)) {
+        log::debug!("rustcraft: a joint window not sent to {uuid:032x}: {e}");
+    }
+}
+
+/// The drawn window of `uuid` closes and its session ends.
+fn close_screen(game: &mut Game<'_>, uuid: u128, housing: Pos) {
+    {
+        let mut w = windows();
+        w.sessions.remove(&uuid);
+        w.clicks.retain(|c| c.uuid != uuid);
+    }
+    let view = js::JointView { pos: housing, close: true, ..js::JointView::default() };
+    if let Err(e) = game.native_net_send_to_player(uuid, js::CHANNEL, &js::encode(&view)) {
+        log::debug!("rustcraft: a joint window not closed for {uuid:032x}: {e}");
+    }
+}
+
+fn refresh_screen(game: &mut Game<'_>, dimension: &str, uuid: u128, session: &Session) {
+    let Some(ctx) = context(game, dimension, session.housing) else {
+        close_screen(game, uuid, session.housing);
+        return;
+    };
+    let clipboard = windows().clipboard.contains_key(&uuid);
+    let p = page(&ctx, session.face, None, clipboard);
+    send_screen(game, uuid, &ctx, &p, session.housing, false);
+}
+
+/// `native_net_from_client`: a press in the drawn window, answered at the level's next tick.
+pub(super) fn on_client_message(player: u128, channel: &str, data: &[u8]) {
+    if channel != js::PRESS {
+        return;
+    }
+    let Some((pos, press)) = js::decode_press(data) else {
+        return;
+    };
+    let mut w = windows();
+    let ours = w
+        .sessions
+        .get(&player)
+        .is_some_and(|s| s.window == SCREEN_WINDOW && s.housing == pos);
+    if !ours {
+        return;
+    }
+    if press == Press::Close {
+        w.sessions.remove(&player);
+        w.clicks.retain(|c| c.uuid != player);
+        return;
+    }
+    w.clicks.push(Click {
+        uuid: player,
+        window: SCREEN_WINDOW,
+        slot: -1,
+        right: false,
+        picked: None,
+        press: Some(press),
+    });
+}
+
+/// The item in `uuid`'s off hand: the drawn window's filter takes it.
+fn off_hand(game: &Game<'_>, uuid: u128) -> Option<String> {
+    game.native_player_equipment(uuid, horizon_world::player_inventory::EquipmentSlot::OffHand)
+        .map(|s| s.item.to_string())
+        .filter(|i| i != AIR)
 }
 
 // ---- What the window shows ----
@@ -390,6 +510,20 @@ fn open(game: &mut Game<'_>, dimension: &str, o: Opening) {
     };
     let clipboard = windows().clipboard.contains_key(&o.uuid);
     let p = page(&ctx, face, None, clipboard);
+    if drawn(game, o.uuid) {
+        windows().sessions.insert(
+            o.uuid,
+            Session {
+                dimension: dimension.to_owned(),
+                housing: o.housing,
+                face,
+                armed: None,
+                window: SCREEN_WINDOW,
+            },
+        );
+        send_screen(game, o.uuid, &ctx, &p, o.housing, true);
+        return;
+    }
     let items = stacks(game, &ctx, &p);
     let title = server::line("rustcraft.window.joint", "Joints of the housing", &[]);
     let Some(window) = game.native_open_menu(o.uuid, ROWS, title, items) else {
@@ -419,16 +553,33 @@ fn answer(game: &mut Game<'_>, dimension: &str, level: &mut LevelNet, c: Click) 
         };
         (s.clone(), w.clipboard.get(&c.uuid).cloned())
     };
+    let screen = session.window == SCREEN_WINDOW;
     let Some(ctx) = context(game, dimension, session.housing) else {
         // The housing is gone.
-        game.native_close_menu(c.uuid);
+        if screen {
+            close_screen(game, c.uuid, session.housing);
+        } else {
+            game.native_close_menu(c.uuid);
+        }
         return;
     };
     let p = page(&ctx, session.face, session.armed, clip.is_some());
     let index = usize::try_from(c.slot).unwrap_or(usize::MAX);
-    let action = match &c.picked {
-        Some(item) => joint_window::pick(&p, item),
-        None => joint_window::click(&p, index, c.right),
+    let action = match (&c.press, &c.picked) {
+        (Some(press), _) => {
+            let held = off_hand(game, c.uuid);
+            if matches!(press, Press::Add { .. }) && held.is_none() {
+                let text = server::line(
+                    "rustcraft.joint.window.hold",
+                    "Hold the item for the filter in your off hand",
+                    &[],
+                );
+                server::tell(game, c.uuid, text);
+            }
+            js::action(&p, press, held.as_deref())
+        }
+        (None, Some(item)) => joint_window::pick_for(&p, item),
+        (None, None) => joint_window::click(&p, index, c.right),
     };
     let mut next = session.clone();
     let mut joints = None;
@@ -474,8 +625,12 @@ fn answer(game: &mut Game<'_>, dimension: &str, level: &mut LevelNet, c: Click) 
     };
     let clipboard = windows().clipboard.contains_key(&c.uuid);
     let shown = page(&ctx, next.face, next.armed, clipboard);
-    let items = stacks(game, &ctx, &shown);
-    game.native_set_menu_items(c.uuid, items);
+    if screen {
+        send_screen(game, c.uuid, &ctx, &shown, session.housing, false);
+    } else {
+        let items = stacks(game, &ctx, &shown);
+        game.native_set_menu_items(c.uuid, items);
+    }
     if let Some(s) = windows().sessions.get_mut(&c.uuid) {
         s.face = next.face;
         s.armed = next.armed;
@@ -661,7 +816,13 @@ fn stack_of(game: &Game<'_>, ctx: &Context, cell: &Cell) -> Option<ItemStack> {
         Cell::Filter {
             item: Some(item), ..
         } => {
-            let mut stack = ItemStack::new(item, 1);
+            // s18/pipe: a fluid in a fluid row's filter shows as its bucket.
+            let shown = if game.items().get(item).is_some() {
+                item.clone()
+            } else {
+                format!("{item}_bucket")
+            };
+            let mut stack = ItemStack::new(&shown, 1);
             let lore = styled(
                 &tr(
                     "rustcraft.window.filter.remove",
@@ -817,4 +978,35 @@ pub(super) fn all_joints(
             (!joints.settings.is_empty()).then_some((pos, joints))
         })
         .collect()
+}
+
+/// s18/pipe, the self-test: the drawn window's view of `housing`'s `face`.
+pub(super) fn screen_view(game: &mut Game<'_>, dimension: &str, housing: Pos, face: Face) -> Option<js::JointView> {
+    let ctx = context(game, dimension, housing)?;
+    let p = page(&ctx, face, None, false);
+    Some(js::view(&p, housing, &face_block(&ctx, face).block))
+}
+
+/// s18/pipe, the self-test: `press` in the drawn window of `housing`'s `face` with `held` in the
+/// off hand, applied to the housing as a player's press is; the view after it. Err when the press
+/// asks nothing of the page.
+pub(super) fn screen_press(
+    game: &mut Game<'_>,
+    dimension: &str,
+    housing: Pos,
+    face: Face,
+    press: &Press,
+    held: Option<&str>,
+) -> Result<js::JointView, String> {
+    let ctx = context(game, dimension, housing).ok_or("no housing")?;
+    let p = page(&ctx, face, None, false);
+    let joints = match js::action(&p, press, held) {
+        Action::Edit { slot, edit } => ctx.joints.with(face, slot, p.settings[slot].apply(&edit)),
+        Action::None => return Err(format!("{press:?} did nothing")),
+        other => return Err(format!("{other:?} is not a setting")),
+    };
+    game.native_with_mod_block_entity(housing, |e| write_joints(&mut e.nbt, &joints))
+        .ok_or("no block entity")?;
+    server::mark_level_stale(dimension);
+    screen_view(game, dimension, housing, face).ok_or_else(|| "the housing went".to_owned())
 }

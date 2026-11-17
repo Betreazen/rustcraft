@@ -1,0 +1,18 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    "bbb",
+    "bnb",
+    "brb"
+  ],
+  "key": {
+    "b": "rustcraft:crystallite",
+    "n": "minecraft:anvil",
+    "r": "minecraft:redstone"
+  },
+  "result": {
+    "id": "rustcraft:repair_3",
+    "count": 1
+  }
+}

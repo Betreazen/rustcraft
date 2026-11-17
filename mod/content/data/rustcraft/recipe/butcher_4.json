@@ -1,0 +1,24 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    "bsb",
+    "bhb",
+    "brb"
+  ],
+  "key": {
+    "b": "rustcraft:starsteel",
+    "s": [
+      "minecraft:iron_sword",
+      "rustcraft:blade_2",
+      "rustcraft:blade_3",
+      "rustcraft:blade_4"
+    ],
+    "h": "minecraft:hopper",
+    "r": "minecraft:redstone"
+  },
+  "result": {
+    "id": "rustcraft:butcher_4",
+    "count": 1
+  }
+}

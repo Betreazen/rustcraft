@@ -1,0 +1,18 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    "bbb",
+    "btb",
+    "bfb"
+  ],
+  "key": {
+    "b": "rustcraft:starsteel",
+    "t": "minecraft:crafting_table",
+    "f": "minecraft:furnace"
+  },
+  "result": {
+    "id": "rustcraft:kitchen_4",
+    "count": 1
+  }
+}

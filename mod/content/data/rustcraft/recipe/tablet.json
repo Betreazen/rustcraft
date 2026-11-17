@@ -9,7 +9,7 @@
   "key": {
     "d": "rustcraft:starsteel",
     "g": "minecraft:glass",
-    "s": "minecraft:amethyst_shard",
+    "s": "rustcraft:crystal_shard",
     "p": "minecraft:ender_pearl"
   },
   "result": {

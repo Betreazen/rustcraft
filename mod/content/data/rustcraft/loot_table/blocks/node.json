@@ -2,8 +2,60 @@
   "type": "minecraft:block",
   "pools": [
     {
-      "condition": { "type": "minecraft:survives_explosion" },
-      "entries": [{ "type": "minecraft:item", "name": "rustcraft:node" }],
+      "condition": {
+        "type": "minecraft:survives_explosion"
+      },
+      "entries": [
+        {
+          "type": "minecraft:alternatives",
+          "children": [
+            {
+              "type": "minecraft:item",
+              "name": "rustcraft:node",
+              "condition": {
+                "type": "minecraft:match_block",
+                "blocks": "rustcraft:node",
+                "state": {
+                  "tier": "1"
+                }
+              }
+            },
+            {
+              "type": "minecraft:item",
+              "name": "rustcraft:node_2",
+              "condition": {
+                "type": "minecraft:match_block",
+                "blocks": "rustcraft:node",
+                "state": {
+                  "tier": "2"
+                }
+              }
+            },
+            {
+              "type": "minecraft:item",
+              "name": "rustcraft:node_3",
+              "condition": {
+                "type": "minecraft:match_block",
+                "blocks": "rustcraft:node",
+                "state": {
+                  "tier": "3"
+                }
+              }
+            },
+            {
+              "type": "minecraft:item",
+              "name": "rustcraft:node_4",
+              "condition": {
+                "type": "minecraft:match_block",
+                "blocks": "rustcraft:node",
+                "state": {
+                  "tier": "4"
+                }
+              }
+            }
+          ]
+        }
+      ],
       "rolls": 1
     }
   ],

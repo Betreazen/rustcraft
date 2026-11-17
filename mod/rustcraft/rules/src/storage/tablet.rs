@@ -110,6 +110,54 @@ pub fn click(slot: usize, page: usize, n: usize) -> Click {
     }
 }
 
+// ---- Slice 18: the drawn window ----
+//
+// The tablet's window is the mod's own screen on the client (API 111), drawn as the terminal's:
+// tabs, the search, the list, the limits. The server sends the storage's list (`wire`) on
+// LIST_CHANNEL and asks the client to open or close the window on OPEN_CHANNEL; the client's
+// presses come back on PRESS_CHANNEL.
+
+/// Server to client: the storage's list, as the terminal's (`wire::encode`).
+pub const LIST_CHANNEL: &str = "rustcraft:tablet_list";
+/// Server to client: one byte, 1 to open the window, 0 to close it.
+pub const OPEN_CHANNEL: &str = "rustcraft:tablet_open";
+/// Client to server: a press of the window.
+pub const PRESS_CHANNEL: &str = "rustcraft:tablet_press";
+
+/// A press of the tablet's window.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Press {
+    /// A terminal press (`terminal::encode`): a stored item's stack or one into the inventory, a
+    /// limit button.
+    Terminal(i32),
+    /// The stack in this inventory slot (0..9 the hotbar, 9..36 the rest) into the storage.
+    Deposit(u8),
+    /// The player closed the window.
+    Closed,
+}
+
+pub fn encode_press(p: Press) -> Vec<u8> {
+    match p {
+        Press::Terminal(id) => {
+            let mut out = vec![0];
+            out.extend(id.to_le_bytes());
+            out
+        }
+        Press::Deposit(slot) => vec![1, slot],
+        Press::Closed => vec![2],
+    }
+}
+
+/// What `encode_press` wrote; none for anything else, or a slot past the inventory's 36.
+pub fn decode_press(bytes: &[u8]) -> Option<Press> {
+    match bytes {
+        [0, a, b, c, d] => Some(Press::Terminal(i32::from_le_bytes([*a, *b, *c, *d]))),
+        [1, slot] if *slot < 36 => Some(Press::Deposit(*slot)),
+        [2] => Some(Press::Closed),
+        _ => None,
+    }
+}
+
 /// The count a listed stack shows: what there is, up to a stack (at least one).
 pub fn shown_count(count: u64, max_stack: u32) -> u32 {
     u32::try_from(count).unwrap_or(u32::MAX).clamp(1, max_stack.max(1))
@@ -168,6 +216,16 @@ mod tests {
         assert_eq!(pick([90.0, 0.0, 0.0], &s, &t), Some(2));
         assert_eq!(pick([10.0, 0.0, 0.0], &s, &t), Some(1));
         assert_eq!(pick([50.0, 0.0, 0.0], &s, &t), None, "between the bases");
+    }
+
+    #[test]
+    fn every_window_press_comes_back() {
+        for p in [Press::Terminal(-123_456), Press::Terminal(5), Press::Deposit(35), Press::Closed] {
+            assert_eq!(decode_press(&encode_press(p)), Some(p));
+        }
+        assert_eq!(decode_press(&[1, 36]), None);
+        assert_eq!(decode_press(&[9]), None);
+        assert_eq!(decode_press(&[]), None);
     }
 
     #[test]

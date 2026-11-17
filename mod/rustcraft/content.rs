@@ -398,22 +398,27 @@ impl Machine {
 
 /// The solar panel's outline and collision: the guide's panel on its post, 6.5 pixels high.
 const SOLAR_BOX: [f64; 6] = [0.0, 0.0, 0.0, 1.0, 0.40625, 1.0];
+/// Slice 18, stream 3: the charge plate's outline and collision: its model, 1.15 pixels high.
+const PLATE_BOX: [f64; 6] = [0.0, 0.0, 0.0, 1.0, 0.071875, 1.0];
 /// The crystal's outline and collision: the staged model's cluster, 2..14 across, 15 high.
 const CRYSTAL_BOX: [f64; 6] = [0.125, 0.0, 0.125, 0.875, 0.9375, 0.875];
 pub const ITEM_CHANNEL: &str = "rustcraft:item_channel";
 pub const FLUID_CHANNEL: &str = "rustcraft:fluid_channel";
 pub const ENERGY_CHANNEL: &str = "rustcraft:energy_channel";
 /// Slice 10: the channels by kind and tier, one item each (tiers 2 and 3 of plan slice 2).
-const CHANNEL_ITEMS: [(ChannelKind, u8, &str); 9] = [
+const CHANNEL_ITEMS: [(ChannelKind, u8, &str); 12] = [
     (ChannelKind::Item, 1, ITEM_CHANNEL),
     (ChannelKind::Item, 2, "rustcraft:item_channel_2"),
     (ChannelKind::Item, 3, "rustcraft:item_channel_3"),
+    (ChannelKind::Item, 4, "rustcraft:item_channel_4"),
     (ChannelKind::Fluid, 1, FLUID_CHANNEL),
     (ChannelKind::Fluid, 2, "rustcraft:fluid_channel_2"),
     (ChannelKind::Fluid, 3, "rustcraft:fluid_channel_3"),
+    (ChannelKind::Fluid, 4, "rustcraft:fluid_channel_4"),
     (ChannelKind::Energy, 1, ENERGY_CHANNEL),
     (ChannelKind::Energy, 2, "rustcraft:energy_channel_2"),
     (ChannelKind::Energy, 3, "rustcraft:energy_channel_3"),
+    (ChannelKind::Energy, 4, "rustcraft:energy_channel_4"),
 ];
 pub const WRENCH: &str = "rustcraft:wrench";
 
@@ -470,7 +475,21 @@ pub fn declare_blocks(blocks: &mut Vec<Block>) {
             ..BlockProperties::default()
         },
         connects_to: Some(JOINS.into()),
-        thickness: Some(HOUSING_THICKNESS),
+        // s18/pipe, F4: a facade makes the housing a whole block (`covered`, set by
+        // rustcraft_builder); open, its outline and collision are the pipe's, HOUSING_THICKNESS
+        // across, as `thickness` built them. The engine takes `thickness` or `shapes`, never
+        // both (SRC horizon-mods/src/content.rs:1164-1166), so the shapes table builds the pipe
+        // too. 64 states become 128.
+        state_properties: BTreeMap::from([(
+            rustcraft_rules::housing::COVERED.to_owned(),
+            StateProperty::Boolean,
+        )]),
+        default_state: BTreeMap::from([(
+            rustcraft_rules::housing::COVERED.to_owned(),
+            "false".to_owned(),
+        )]),
+        shapes: Some(housing_shapes()),
+        collision_shapes: Some(housing_shapes()),
         item: true,
         ..Block::default()
     });
@@ -498,6 +517,20 @@ pub fn declare_blocks(blocks: &mut Vec<Block>) {
     declare_storage_and_tanks(blocks);
     declare_monorail(blocks);
     declare_zip_anchor(blocks);
+}
+
+/// s18/pipe, F4: the housing's outline and collision by `covered` and its six sides.
+fn housing_shapes() -> BlockShapes {
+    let mut properties = vec![rustcraft_rules::housing::COVERED.to_owned()];
+    properties.extend(rustcraft_rules::housing::SIDES.map(str::to_owned));
+    BlockShapes {
+        property: String::new(),
+        properties,
+        values: rustcraft_rules::housing::covered_shapes(f64::from(HOUSING_THICKNESS))
+            .into_iter()
+            .collect(),
+        default: None,
+    }
 }
 
 /// The zipline's anchor (12.5 Z2, rustcraft_zipline): a stake with a ring a rope is tied to. It
@@ -654,15 +687,21 @@ fn declare_slice7(blocks: &mut Vec<Block>) {
     for machine in Machine::all().filter(|m| m.owned()) {
         // E19: the solar panel is a thin plate that lets the light through, so there is no
         // shadow under it; the turret's head and the windmill's mast reach past their cells.
+        // Slice 18, stream 3: the charge plate is thin, as a pressure plate (guide `charge_plate`).
         let open = matches!(
             machine,
             Machine::Turret | Machine::Windmill | Machine::Solar
-        );
-        let plate = (machine == Machine::Solar).then(|| BlockShapes {
+        ) || machine == Machine::Util(Util::ChargePlate);
+        let thin = match machine {
+            Machine::Solar => Some(SOLAR_BOX),
+            Machine::Util(Util::ChargePlate) => Some(PLATE_BOX),
+            _ => None,
+        };
+        let plate = thin.map(|b| BlockShapes {
             property: String::new(),
             properties: Vec::new(),
             values: BTreeMap::new(),
-            default: Some(vec![SOLAR_BOX]),
+            default: Some(vec![b]),
         });
         blocks.push(Block {
             id: machine.block().into(),
@@ -701,6 +740,7 @@ fn declare_slice7(blocks: &mut Vec<Block>) {
             item: true,
             ..Block::default()
         });
+        with_tier(blocks.last_mut());
     }
 }
 
@@ -711,15 +751,19 @@ fn declare_machines(blocks: &mut Vec<Block>) {
         values: BTreeMap::new(),
         default: Some(vec![CRYSTAL_BOX]),
     };
+    // Slice 18: the crystal copies the furnace, for its window on use (the structure's sheet,
+    // ui.js `structure`); its block model stays out of the chunk mesh and its block entity draws
+    // it, a merged structure as one crystal (rustcraft_power::draw_crystal).
     blocks.push(Block {
         id: CRYSTAL.into(),
-        template: "minecraft:amethyst_block".into(),
+        template: "minecraft:furnace".into(),
         properties: BlockProperties {
             hardness: Some(1.5),
             explosion_resistance: Some(3.0),
             light: Some(7),
             sounds: Some("minecraft:amethyst_block".into()),
             occludes: Some(false),
+            render_shape: Some(horizon_mods::content::RenderShape::EntityblockAnimated),
             ..BlockProperties::default()
         },
         shapes: Some(crystal_shape()),
@@ -741,6 +785,43 @@ fn declare_machines(blocks: &mut Vec<Block>) {
             item: true,
             ..Block::default()
         });
+        with_tier(blocks.last_mut());
+    }
+}
+
+/// Slice 18, stream 3: a tiered block (rustcraft_rules::tiers::FAMILIES) declares its tier, 1 to
+/// 4, its first tier by default (rustcraft_tiers). A world saved before keeps each machine as its
+/// first tier.
+fn with_tier(block: Option<&mut Block>) {
+    use rustcraft_rules::tiers;
+    let Some(block) = block else { return };
+    let Some(family) = tiers::family_of_block(&block.id) else {
+        return;
+    };
+    block.state_properties.insert(
+        tiers::PROPERTY.to_owned(),
+        StateProperty::Enum {
+            values: tiers::VALUES.map(str::to_owned).to_vec(),
+        },
+    );
+    block
+        .default_state
+        .insert(tiers::PROPERTY.to_owned(), family.first.to_string());
+}
+
+/// Slice 18, stream 3: the items of the tiers above each family's first; each places its
+/// family's block, and rustcraft_tiers sets the tier.
+fn declare_tier_items(items: &mut Vec<Item>) {
+    for family in rustcraft_rules::tiers::FAMILIES {
+        for tier in family.tiers().skip(1) {
+            let Some(id) = family.item(tier) else { continue };
+            items.push(Item {
+                id,
+                template: "minecraft:iron_ingot".into(),
+                place_block: Some(family.block.into()),
+                ..Item::default()
+            });
+        }
     }
 }
 
@@ -748,6 +829,8 @@ fn declare_machines(blocks: &mut Vec<Block>) {
 /// does is all `native_use_item_on`'s (rustcraft_server::on_use_item_on).
 pub fn declare_items(items: &mut Vec<Item>) {
     declare_gear(items);
+    // Slice 18, stream 3: the machines' higher tiers.
+    declare_tier_items(items);
     // Slice 12: the facade (spec 15); a click with it is rustcraft_builder's.
     items.push(Item {
         id: "rustcraft:facade".into(),
@@ -776,6 +859,15 @@ pub fn declare_items(items: &mut Vec<Item>) {
             ..Item::default()
         });
     }
+    // s18/pipe: the node's higher tiers place the node (rustcraft_pipe18 sets the tier).
+    for id in &rustcraft_rules::net::node_tier::ITEMS[1..] {
+        items.push(Item {
+            id: (*id).into(),
+            template: "minecraft:iron_ingot".into(),
+            place_block: Some(NODE.into()),
+            ..Item::default()
+        });
+    }
     // The monorail's higher tiers place the same block (the tier is set as it is placed).
     for id in &MONORAIL_ITEMS[1..] {
         items.push(Item {
@@ -794,6 +886,15 @@ pub fn declare_items(items: &mut Vec<Item>) {
             ..Item::default()
         });
     }
+    // Slice 18, stream 6: the chassis of tiers 2 and 3 (U4: 5 and 7 sockets), one to a stack.
+    for id in &rustcraft_rules::worker::chassis::ITEMS[1..] {
+        items.push(Item {
+            id: (*id).into(),
+            template: "minecraft:iron_ingot".into(),
+            max_stack_size: Some(1),
+            ..Item::default()
+        });
+    }
     // Slice 10: the backpacks, one to a stack; their use opens them (rustcraft_backpack).
     for id in BACKPACKS {
         items.push(Item {
@@ -803,6 +904,13 @@ pub fn declare_items(items: &mut Vec<Item>) {
             ..Item::default()
         });
     }
+    // Slice 18: starsteel's backpack, worn on the back (rustcraft_backpack).
+    items.push(Item {
+        id: rustcraft_rules::backpack::STAR.into(),
+        template: "minecraft:iron_ingot".into(),
+        max_stack_size: Some(1),
+        ..Item::default()
+    });
     for (_, id) in rustcraft_rules::modules::ITEMS {
         items.push(Item {
             id: id.into(),
@@ -810,13 +918,19 @@ pub fn declare_items(items: &mut Vec<Item>) {
             ..Item::default()
         });
     }
-    // The alloys and the capacity module: plain items, as an iron ingot is.
+    // Slice 18, w2-craft: the terminal's filter module (TM1), the «своя» tab's; only the terminal's
+    // socket takes it (rustcraft_rules::storage::modules), so it is no machine module.
+    items.push(Item {
+        id: rustcraft_rules::storage::modules::FILTER.into(),
+        template: "minecraft:iron_ingot".into(),
+        ..Item::default()
+    });
+    // The alloys: plain items, as an iron ingot is (the capacity module is one of the modules' ITEMS since slice 18).
     for id in [
         COPPERSTEEL,
         SPARKSTEEL,
         CRYSTALLITE,
         STARSTEEL,
-        MODULE_CAPACITY,
     ] {
         items.push(Item {
             id: id.into(),
@@ -848,7 +962,8 @@ pub fn block_entity(block: &str, entity: &mut Option<(String, Compound)>) {
 /// engine saves the slots with the block entity and drops them when the block breaks
 /// (docs/native-mods.md:224).
 pub fn block_entity_container(block: &str, container: &mut Option<ModContainer>) {
-    if container.is_none() && [TERMINAL, TANK, STATION].contains(&block) {
+    // Slice 18: the crystal's window is a sheet with only the menu's hidden slot.
+    if container.is_none() && [TERMINAL, TANK, STATION, CRYSTAL].contains(&block) {
         *container = Some(hidden_container(block));
         return;
     }
@@ -942,6 +1057,10 @@ fn declare_gear(items: &mut Vec<Item>) {
             ("!minecraft:max_damage".to_owned(), serde_json::json!({})),
             ("!minecraft:damage".to_owned(), serde_json::json!({})),
         ]);
+        // Slice 18: an axe switches the energy shield off for 5 / 3 / 1.5 s by tier.
+        if g.kind == gear::Kind::Shield {
+            components.insert("minecraft:blocks_attacks".to_owned(), gear::shield::blocks_attacks(g.tier));
+        }
         if let Some(slot) = g.slot_name() {
             components.insert(
                 "minecraft:equippable".to_owned(),
@@ -984,11 +1103,14 @@ fn declare_gear(items: &mut Vec<Item>) {
         max_stack_size: Some(1),
         ..Item::default()
     });
+    // Slice 18: the books shine like enchanted ones (their level is in their custom data and
+    // goes on at the anvil, rustcraft_gear).
     for book in [gear::BOOK_CAPACITY, gear::BOOK_THRIFT] {
         items.push(Item {
             id: book.into(),
             template: "minecraft:book".into(),
             max_stack_size: Some(16),
+            components: BTreeMap::from([("minecraft:enchantment_glint_override".to_owned(), serde_json::json!(true))]),
             ..Item::default()
         });
     }

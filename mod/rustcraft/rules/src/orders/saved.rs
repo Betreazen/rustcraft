@@ -11,17 +11,21 @@
 //! Slice 17 (version 2): the shipments riding the item channel are kept too, with what they
 //! still have to load and ride (`ship::Shipment`). After a load each rides on: it arrives, or,
 //! when its job is gone by then, turns back to the storage. A record of version 1 has none.
+//!
+//! Slice 18 (version 3, O11): the products its orders hold at machines for their next steps
+//! (`held`). A record of version 2 has none.
 
 use serde::{Deserialize, Serialize};
 
 use crate::machines::slots::{self, Slot};
 use crate::net::items::ItemKey;
 use crate::orders::fluid_of;
+use crate::orders::held::Held;
 use crate::orders::queue::{Job, Order, Queue};
 use crate::orders::ship::Shipment;
 
 /// The record's version; a record of a newer one is not read.
-pub const VERSION: u32 = 2;
+pub const VERSION: u32 = 3;
 
 /// An autocrafter's temporary page (O4): its pattern, cell by cell, and the crafts it still owes.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -45,11 +49,15 @@ pub struct Record {
     pub jobs: Vec<SavedJob>,
     /// Slice 17: the items its jobs have riding the item channel.
     pub ships: Vec<Shipment>,
+    /// Slice 18 (O11): the products its orders hold at machines for their next steps.
+    pub held: Vec<Held>,
 }
 
 impl Record {
     pub fn is_empty(&self) -> bool {
-        self.queue.orders.is_empty() && self.jobs.is_empty() && self.ships.is_empty()
+        self.queue.orders.is_empty() && self.jobs.is_empty()
+            && self.ships.is_empty()
+            && self.held.is_empty()
     }
 }
 
@@ -60,6 +68,7 @@ enum Entry {
     Order(Order),
     Job(SavedJob),
     Ship(Shipment),
+    Held(Held),
 }
 
 /// The record as the strings the storage's record keeps; none for an empty record.
@@ -74,10 +83,12 @@ pub fn encode(record: &Record) -> Vec<String> {
     let orders = record.queue.orders.iter().cloned().map(Entry::Order);
     let jobs = record.jobs.iter().cloned().map(Entry::Job);
     let ships = record.ships.iter().cloned().map(Entry::Ship);
+    let held = record.held.iter().cloned().map(Entry::Held);
     std::iter::once(head)
         .chain(orders)
         .chain(jobs)
         .chain(ships)
+        .chain(held)
         .filter_map(|e| serde_json::to_string(&e).ok())
         .collect()
 }
@@ -97,18 +108,21 @@ pub fn decode(entries: &[String]) -> Option<Record> {
     let mut orders = Vec::new();
     let mut jobs = Vec::new();
     let mut ships = Vec::new();
+    let mut held = Vec::new();
     for entry in parsed {
         match entry {
             Entry::Head { .. } => {}
             Entry::Order(o) => orders.push(o),
             Entry::Job(j) => jobs.push(j),
             Entry::Ship(s) => ships.push(s),
+            Entry::Held(h) => held.push(h),
         }
     }
     Some(Record {
         queue: Queue::restored(orders, next),
         jobs,
         ships,
+        held,
     })
 }
 
@@ -184,6 +198,7 @@ mod tests {
                 },
             ],
             ships: Vec::new(),
+            held: Vec::new(),
         }
     }
 
@@ -259,6 +274,36 @@ mod tests {
     }
 
     #[test]
+    fn products_held_at_machines_and_a_shipment_between_machines_come_back() {
+        // Slice 18 (O11): iron an order's furnace made waits there for the crafter's step, and
+        // a shipment rides from the furnace straight to the crafter.
+        let mut r = with_ships();
+        let id = r.queue.orders[1].id;
+        crate::orders::held::add(&mut r.held, 0, id, [5, 64, -3], IRON, 3);
+        r.ships[0].from = Some([5, 64, -3]);
+        let saved = encode(&r);
+        assert_eq!(saved.len(), 1 + 6 + 2 + 2 + 1);
+        let back = decode(&saved).unwrap();
+        assert_eq!(back, r);
+        // Held items alone are no empty record.
+        let only = Record {
+            held: r.held.clone(),
+            ..Record::default()
+        };
+        assert!(!only.is_empty());
+        assert_eq!(decode(&encode(&only)).unwrap().held, r.held);
+    }
+
+    #[test]
+    fn a_record_of_version_two_reads_without_held_products() {
+        let head = r#"{"t":"head","v":2,"next":4}"#.to_string();
+        let order = r#"{"t":"order","id":4,"item":"minecraft:piston","count":2,"done":0,"keep":false,"wait":"New","reserved":{}}"#.to_string();
+        let back = decode(&[head, order]).unwrap();
+        assert!(back.held.is_empty());
+        assert_eq!(back.queue.orders.len(), 1);
+    }
+
+    #[test]
     fn a_record_of_version_one_reads_without_shipments() {
         let head = r#"{"t":"head","v":1,"next":4}"#.to_string();
         let order = r#"{"t":"order","id":4,"item":"minecraft:piston","count":2,"done":0,"keep":false,"wait":"New","reserved":{}}"#.to_string();
@@ -277,7 +322,7 @@ mod tests {
     fn a_record_that_does_not_read_is_left_out() {
         let mut saved = encode(&record());
         // A newer version is not read; an entry cut short is left out.
-        let newer = saved[0].replace("\"v\":2", "\"v\":99");
+        let newer = saved[0].replace(&format!("\"v\":{VERSION}"), "\"v\":99");
         let mut cut = saved.clone();
         cut[0] = newer;
         assert_eq!(decode(&cut), None);

@@ -242,9 +242,11 @@ pub fn plan_trip(
     let goal = station_rail(net, to).ok_or(TripError::NoRail(to))?;
     let path =
         shortest_path(net, start_rail, goal).map_err(|ends_at| TripError::Broken { ends_at })?;
-    for &cell in &path {
+    for (i, &cell) in path.iter().enumerate() {
         let mount = net.rails[&cell].mount;
-        if let Some(at) = capsule::room_cells(cell, mount)
+        let before = i.checked_sub(1).map(|j| path[j]);
+        let ways = capsule::ways_at(cell, mount, before, path.get(i + 1).copied());
+        if let Some(at) = capsule::room_cells(cell, mount, &ways)
             .into_iter()
             .find(|&p| !net.rails.contains_key(&p) && !free(p))
         {
@@ -414,5 +416,29 @@ pub(crate) mod tests {
             [8.0, 14.0, 22.0, 32.0]
         );
         assert_eq!(spec.speed_of(9), 32.0);
+    }
+}
+
+/// Wave 2 (guide `monorail`: «ступень меняется правым кликом рельсом другой ступени»): a rail of
+/// `rail_tier` clicked with a rail item of `held_tier` takes that tier in place; the new tier and
+/// the item of the old one, which goes back to the player. None for the same tier or no rail item.
+pub fn tier_swap(rail_tier: u8, held_tier: Option<u8>) -> Option<(u8, &'static str)> {
+    let rails = crate::worker::bore::RAILS;
+    let held = held_tier.filter(|h| (1..=rails.len() as u8).contains(h))?;
+    let old = rails.get(usize::from(rail_tier).checked_sub(1)?)?;
+    (held != rail_tier).then_some((held, *old))
+}
+
+#[cfg(test)]
+mod wave2_swap_tests {
+    use super::tier_swap;
+
+    #[test]
+    fn a_rail_takes_another_tier_in_place() {
+        assert_eq!(tier_swap(1, Some(3)), Some((3, "rustcraft:monorail")));
+        assert_eq!(tier_swap(4, Some(2)), Some((2, "rustcraft:monorail_4")));
+        assert_eq!(tier_swap(2, Some(2)), None, "the same tier changes nothing");
+        assert_eq!(tier_swap(2, None), None);
+        assert_eq!(tier_swap(2, Some(9)), None);
     }
 }

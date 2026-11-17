@@ -190,6 +190,8 @@ fn one_catalyst_at_a_time(o: Pos, _: &Tuning) -> Scenario {
 fn butcher_at(b: &mut dyn Bench, pos: Pos, sword: bool) -> Result<(), String> {
     b.place(pos, butcher::BLOCK, &[])?;
     b.set_owner(pos, OWNER, 1)?;
+    // Slice 18: it strikes on its buffer's energy, 4 E/s.
+    b.set_buffer(pos, butcher::BUFFER)?;
     if sword {
         b.put(pos, butcher::SWORD_SLOT, SWORD, 1)?;
     }

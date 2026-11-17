@@ -289,6 +289,64 @@ pub fn pipe_length(
     None
 }
 
+/// Slice 18: the way `pipe_length` measures, housing by housing: each housing from the nearest
+/// of `from` to the nearest of `to`, with the blocks of pipe from the first to it (1 more for a
+/// touching housing, 2 through a node, as `links` counts). None when no way joins them.
+pub fn pipe_path(
+    layout: &Layout,
+    tuning: &Tuning,
+    housings: &BTreeSet<Pos>,
+    from: &[Pos],
+    to: &[Pos],
+) -> Option<Vec<(Pos, u32)>> {
+    let targets: BTreeSet<Pos> = to
+        .iter()
+        .copied()
+        .filter(|p| housings.contains(p))
+        .collect();
+    if targets.is_empty() {
+        return None;
+    }
+    let mut best: HashMap<Pos, (u32, Option<Pos>)> = HashMap::new();
+    let mut queue = BinaryHeap::new();
+    for &h in from.iter().filter(|p| housings.contains(*p)) {
+        queue.push((std::cmp::Reverse(0u32), h, None));
+    }
+    while let Some((std::cmp::Reverse(d), h, came)) = queue.pop() {
+        if best.get(&h).is_some_and(|b| b.0 <= d) {
+            continue;
+        }
+        best.insert(h, (d, came));
+        if targets.contains(&h) {
+            let mut path = vec![(h, d)];
+            let mut at = came;
+            while let Some(p) = at {
+                let (dp, before) = best[&p];
+                path.push((p, dp));
+                at = before;
+            }
+            path.reverse();
+            return Some(path);
+        }
+        for (next, cost) in links(layout, tuning, h) {
+            if housings.contains(&next) && best.get(&next).is_none_or(|b| b.0 > d + cost) {
+                queue.push((std::cmp::Reverse(d + cost), next, Some(h)));
+            }
+        }
+    }
+    None
+}
+
+/// Slice 18: the face of the housing at `from` the pipe leaves by to the housing at `to` next on
+/// its way (touching it, or behind a node it touches); none when they are not so joined.
+pub fn link_face(layout: &Layout, from: Pos, to: Pos) -> Option<Face> {
+    Face::ALL.into_iter().find(|&f| {
+        let next = step(from, f);
+        next == to
+            || (layout.nodes.contains_key(&next) && Face::ALL.into_iter().any(|g| step(next, g) == to))
+    })
+}
+
 /// Works out the lines, reaches and channel networks of `layout`.
 pub fn analyse(layout: &Layout, tuning: &Tuning) -> Topology {
     let lines = find_lines(layout, tuning);
@@ -540,5 +598,53 @@ mod tests {
             pipe_length(&layout, &tuning, &half, &[[1, 0, 0]], &[[9, 0, 0]]),
             None
         );
+    }
+
+    #[test]
+    fn the_path_between_two_housings_lists_each_housing_with_its_pipe_so_far() {
+        // Slice 18 (guide `orders`: the order's items seen riding the housings).
+        let mut layout = Layout::default();
+        layout.nodes.insert([0, 0, 0], Node { tier: 3 });
+        row(&mut layout, 1, 10);
+        layout.nodes.insert([11, 0, 0], Node { tier: 3 });
+        row(&mut layout, 12, 3);
+        // A bend: two housings up from housing 4.
+        for y in 1..=2 {
+            layout
+                .housings
+                .insert([4, y, 0], housing([item(1), None, None, None]));
+        }
+        let tuning = Tuning::default();
+        let t = analyse(&layout, &tuning);
+        let net = t.net_of([1, 0, 0], 0).unwrap();
+        let path = |from: &[Pos], to: &[Pos]| pipe_path(&layout, &tuning, &net.housings, from, to);
+        assert_eq!(path(&[[3, 0, 0]], &[[3, 0, 0]]), Some(vec![([3, 0, 0], 0)]));
+        assert_eq!(
+            path(&[[2, 0, 0]], &[[4, 2, 0]]),
+            Some(vec![
+                ([2, 0, 0], 0),
+                ([3, 0, 0], 1),
+                ([4, 0, 0], 2),
+                ([4, 1, 0], 3),
+                ([4, 2, 0], 4)
+            ])
+        );
+        // Through the node: 2 blocks of pipe, as pipe_length counts.
+        let through = path(&[[9, 0, 0]], &[[13, 0, 0]]).unwrap();
+        assert_eq!(
+            through,
+            vec![([9, 0, 0], 0), ([10, 0, 0], 1), ([12, 0, 0], 3), ([13, 0, 0], 4)]
+        );
+        assert_eq!(
+            through.last().map(|p| p.1),
+            pipe_length(&layout, &tuning, &net.housings, &[[9, 0, 0]], &[[13, 0, 0]])
+        );
+        assert_eq!(path(&[[1, 0, 0]], &[[40, 0, 0]]), None);
+        // The face each step leaves by, a node's too.
+        assert_eq!(link_face(&layout, [3, 0, 0], [4, 0, 0]), Some(Face::XPos));
+        assert_eq!(link_face(&layout, [4, 0, 0], [4, 1, 0]), Some(Face::YPos));
+        assert_eq!(link_face(&layout, [10, 0, 0], [12, 0, 0]), Some(Face::XPos));
+        assert_eq!(link_face(&layout, [12, 0, 0], [10, 0, 0]), Some(Face::XNeg));
+        assert_eq!(link_face(&layout, [1, 0, 0], [3, 0, 0]), None);
     }
 }

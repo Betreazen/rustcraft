@@ -7,8 +7,24 @@
       },
       "entries": [
         {
-          "type": "minecraft:item",
-          "name": "rustcraft:charger"
+          "type": "minecraft:alternatives",
+          "children": [
+            {
+              "type": "minecraft:item",
+              "name": "rustcraft:charger_4",
+              "condition": {
+                "type": "minecraft:match_block",
+                "blocks": "rustcraft:charger",
+                "state": {
+                  "tier": "4"
+                }
+              }
+            },
+            {
+              "type": "minecraft:item",
+              "name": "rustcraft:charger"
+            }
+          ]
         }
       ],
       "rolls": 1

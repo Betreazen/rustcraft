@@ -79,9 +79,61 @@ pub fn state(has_owner: bool, newest: bool, owner_online: bool, share: f64) -> S
     }
 }
 
+/// Slice 18: every level's anchors, as the world's own file keeps them (guide `anchor`: «База
+/// работает … в любой точке мира и в любом мире»). A level's own record is read only in its tick,
+/// and the Nether or the End does not tick after a restart until someone goes there; from this
+/// index another level's tick opens it (`native_force_chunk_in`) when an anchor's owner is on.
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct Index {
+    /// Level → its anchors: the owner (32 hex digits) and the anchor's block.
+    pub levels: BTreeMap<String, Vec<(String, Pos)>>,
+}
+
+impl Index {
+    /// The level's anchors now are `list`.
+    pub fn set(&mut self, dimension: &str, list: &[Anchor]) {
+        let entries: Vec<(String, Pos)> = list.iter().map(|a| (format!("{:032x}", a.owner), a.pos)).collect();
+        if entries.is_empty() {
+            self.levels.remove(dimension);
+        } else {
+            self.levels.insert(dimension.to_owned(), entries);
+        }
+    }
+
+    /// The chunks to open, one a level not read yet (`loaded`) holding an anchor whose owner is
+    /// on (`online`): that anchor's own chunk.
+    pub fn to_wake(&self, loaded: &BTreeSet<String>, online: &BTreeSet<u128>) -> Vec<(String, [i32; 2])> {
+        self.levels
+            .iter()
+            .filter(|(dim, _)| !loaded.contains(*dim))
+            .filter_map(|(dim, list)| {
+                list.iter()
+                    .find(|(owner, _)| u128::from_str_radix(owner, 16).is_ok_and(|o| online.contains(&o)))
+                    .map(|(_, p)| (dim.clone(), [p[0] >> 4, p[2] >> 4]))
+            })
+            .collect()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_level_with_an_anchor_of_someone_on_is_opened() {
+        let mut index = Index::default();
+        let nether = "minecraft:the_nether";
+        index.set(nether, &[Anchor { pos: [40, 70, -17], owner: 9, placed: 1 }]);
+        index.set("minecraft:the_end", &[Anchor { pos: [0, 60, 0], owner: 5, placed: 1 }]);
+        let online = BTreeSet::from([9u128]);
+        assert_eq!(index.to_wake(&BTreeSet::new(), &online), vec![(nether.to_owned(), [2, -2])]);
+        assert!(index.to_wake(&BTreeSet::from([nether.to_owned()]), &online).is_empty(), "read already");
+        assert!(index.to_wake(&BTreeSet::new(), &BTreeSet::new()).is_empty(), "nobody on");
+        index.set(nether, &[]);
+        assert!(!index.levels.contains_key(nether));
+        let json = serde_json::to_string(&index).expect("writes");
+        assert_eq!(serde_json::from_str::<Index>(&json).expect("reads"), index);
+    }
 
     #[test]
     fn one_chunk_then_3x3_then_5x5() {

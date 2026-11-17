@@ -10,14 +10,18 @@
 //!   right) and a page. A page's texts become `Piece`s (`pieces`), are wrapped by the client's own
 //!   text width into `Row`s (`lay_out`) and cut into sheets that fit the window (`sheets`);
 //!   `part_at` and `press` turn a click into the next `View`.
-//! - `recipe_grid`: a crafting recipe's cells as the 3 × 3 grid a page draws.
+//! - `recipe_grid`: a crafting recipe's cells as the 3 × 3 grid a page draws; `recipes`: every
+//!   recipe a page shows (the crafting table's, the transmuting ones, the machines'), two to a row.
 //! - `scene` (H3, H4): a page whose guide entry has an animated scene has one sheet more, its
 //!   last, which plays the scene (`scenes`, written by assets/models/scenes_mc.py from the
 //!   guide's scenes.js): `scene_sheet` says which sheet that is.
 
 pub mod pages;
+pub mod recipes;
 pub mod scene;
 pub mod scenes;
+pub mod window;
+pub mod windows;
 
 use crate::machines::panel::{Rect, inside};
 use std::collections::BTreeSet;
@@ -56,6 +60,14 @@ pub struct Page {
     pub stats: usize,
     pub diagnoses: usize,
     pub parts: usize,
+    /// What the guide entry's recipes make (game ids; `recipes::ANY_FLUID` for every fluid):
+    /// the page shows the game's recipes of these, every tier of each (`recipes::for_page`).
+    pub makes: &'static [&'static str],
+    /// The guide entry's tables, each its columns and rows (`.table.<t>.title`, `.note`,
+    /// `.head.<c>`, `.row.<r>.<c>`).
+    pub tables: &'static [[usize; 2]],
+    /// The pages of its «см. также», by their ids.
+    pub see: &'static [&'static str],
 }
 
 impl Page {
@@ -159,12 +171,6 @@ pub const LINE: f32 = 10.0;
 /// What a key and value line keeps between them, and what a line under a heading is set in.
 pub const PAIR_GAP: f32 = 8.0;
 pub const INDENT: f32 = 12.0;
-/// The recipe's block: the 3 × 3 grid, the arrow and the result, its icons' corners from the
-/// block's top left.
-pub const RECIPE_HEIGHT: f32 = 58.0;
-pub const RECIPE_GRID: [f32; 2] = [1.0, 2.0];
-pub const RECIPE_ARROW: Rect = [62.0, 25.0, 22.0, 6.0];
-pub const RECIPE_RESULT: [f32; 2] = [98.0, 20.0];
 /// A part's number: a brass square at the line's left.
 pub const NUMBER: [f32; 2] = [9.0, 9.0];
 /// A sheet asked for by its end: the window takes the last one.
@@ -200,14 +206,6 @@ pub fn entry_rect(row: usize) -> Rect {
 pub fn entry_icon(row: usize) -> [f32; 2] {
     let r = entry_rect(row);
     [r[0] + 1.0, r[1] + 1.0]
-}
-
-/// Where the recipe's cell `i` (row by row) goes, from the block's top `y`.
-pub fn recipe_cell(y: f32, i: usize) -> [f32; 2] {
-    [
-        BODY_X + RECIPE_GRID[0] + 18.0 * (i % 3) as f32,
-        y + RECIPE_GRID[1] + 18.0 * (i / 3) as f32,
-    ]
 }
 
 /// What the window shows.
@@ -385,8 +383,8 @@ pub enum Piece {
     Lead(String),
     /// A part's heading: «Рецепт», «Диагнозы», «Окно блока».
     Heading(String),
-    /// The crafting recipe's grid.
-    Recipe,
+    /// The recipes, by the height of each one's block (`recipes::Shown::height`).
+    Recipes(Vec<f32>),
     Paragraph(String),
     Stat {
         key: String,
@@ -402,23 +400,81 @@ pub enum Piece {
         label: String,
         note: String,
     },
+    /// A table's head and rows (its title and note are a heading and a paragraph before it).
+    Table {
+        head: Vec<String>,
+        rows: Vec<Vec<String>>,
+    },
+    /// «См. также»: the pages it links, as indices into PAGES.
+    See(Vec<usize>),
+    /// The block's window as a picture (`window`): its title and its parts, before the legend.
+    Window {
+        title: String,
+        parts: Vec<WindowPart>,
+    },
 }
 
-/// A page's pieces: the summary, the recipe when `recipe` (the game has one for its item), the
-/// paragraphs, the stats, the diagnoses and the window's parts. `lookup` gives a lang key's line,
-/// None (or empty) where the reader's language has none, which leaves that piece out.
-pub fn pieces(page: &Page, recipe: bool, lookup: &dyn Fn(&str) -> Option<String>) -> Vec<Piece> {
+/// A part of the window's picture: its number, its label, its widget and the words it shows.
+#[derive(Clone, Debug, PartialEq)]
+pub struct WindowPart {
+    pub n: usize,
+    pub label: String,
+    pub widget: &'static window::Widget,
+    pub words: Vec<String>,
+}
+
+/// How many words a widget shows.
+fn word_count(w: &window::Widget) -> usize {
+    use window::Widget;
+    match *w {
+        Widget::Mode { .. } => 3,
+        Widget::Bar { .. } | Widget::Tank { .. } | Widget::Status { .. } | Widget::Text => 1,
+        Widget::Rows { n } => 2 * usize::from(n),
+        Widget::Chips { on, note } => on.len() + usize::from(note),
+        Widget::Map { n } => usize::from(n),
+        _ => 0,
+    }
+}
+
+/// The page's window as a picture, when its guide entry has one and the reader's language has
+/// its title.
+fn window_piece(page: &Page, get: &dyn Fn(&str) -> Option<String>) -> Option<Piece> {
+    let widgets = window::window_of(page.id)?;
+    let title = get("window")?;
+    let parts = widgets
+        .iter()
+        .enumerate()
+        .map(|(i, widget)| WindowPart {
+            n: i + 1,
+            label: get(&format!("part.{i}.label")).unwrap_or_default(),
+            widget,
+            words: (0..word_count(widget))
+                .map(|k| get(&format!("part.{i}.w.{k}")).unwrap_or_default())
+                .collect(),
+        })
+        .collect();
+    Some(Piece::Window { title, parts })
+}
+
+/// A page's pieces: the summary, the recipes (`recipes`: each one's block height, as the game's
+/// recipes give them), the paragraphs, the stats, the diagnoses and the window's parts. `lookup`
+/// gives a lang key's line, None (or empty) where the reader's language has none, which leaves
+/// that piece out.
+pub fn pieces(page: &Page, recipes: &[f32], lookup: &dyn Fn(&str) -> Option<String>) -> Vec<Piece> {
     let get = |rest: &str| lookup(&page.key(rest)).filter(|s| !s.trim().is_empty());
     let word = |rest: &str| lookup(&key(rest)).filter(|s| !s.trim().is_empty());
     let mut out = Vec::new();
     if let Some(sum) = get("sum") {
         out.push(Piece::Lead(sum));
     }
-    if recipe {
-        out.push(Piece::Heading(
-            word("recipe").unwrap_or_else(|| "Recipe".into()),
-        ));
-        out.push(Piece::Recipe);
+    if !recipes.is_empty() {
+        let (w, fallback) = if recipes.len() > 1 {
+            ("recipes", "Recipes")
+        } else {
+            ("recipe", "Recipe")
+        };
+        out.push(Piece::Heading(word(w).unwrap_or_else(|| fallback.into())));
+        out.push(Piece::Recipes(recipes.to_vec()));
     }
     for i in 0..page.text {
         if let Some(t) = get(&format!("text.{i}")) {
@@ -433,6 +489,7 @@ pub fn pieces(page: &Page, recipe: bool, lookup: &dyn Fn(&str) -> Option<String>
             out.push(Piece::Stat { key, value });
         }
     }
+    tables(page, &get, &mut out);
     let diagnoses: Vec<Piece> = (0..page.diagnoses)
         .filter_map(|i| {
             let name = get(&format!("diag.{i}"))?;
@@ -461,9 +518,43 @@ pub fn pieces(page: &Page, recipe: bool, lookup: &dyn Fn(&str) -> Option<String>
         out.push(Piece::Heading(
             word("window").unwrap_or_else(|| "Window".into()),
         ));
+        out.extend(window_piece(page, &get));
         out.extend(parts);
     }
+    let see: Vec<usize> = page.see.iter().filter_map(|id| page_index(id)).collect();
+    if !see.is_empty() {
+        out.push(Piece::Heading(
+            word("see").unwrap_or_else(|| "See also".into()),
+        ));
+        out.push(Piece::See(see));
+    }
     out
+}
+
+/// The page's tables as pieces: each its title, its note and itself; one whose title the
+/// reader's language lacks is left out.
+fn tables(page: &Page, get: &dyn Fn(&str) -> Option<String>, out: &mut Vec<Piece>) {
+    for (t, &[cols, rows]) in page.tables.iter().enumerate() {
+        let Some(title) = get(&format!("table.{t}.title")) else {
+            continue;
+        };
+        out.push(Piece::Heading(title));
+        if let Some(note) = get(&format!("table.{t}.note")) {
+            out.push(Piece::Paragraph(note));
+        }
+        let cell = |rest: String| get(&rest).unwrap_or_default();
+        let head = (0..cols)
+            .map(|c| cell(format!("table.{t}.head.{c}")))
+            .collect();
+        let rows = (0..rows)
+            .map(|r| {
+                (0..cols)
+                    .map(|c| cell(format!("table.{t}.row.{r}.{c}")))
+                    .collect()
+            })
+            .collect();
+        out.push(Piece::Table { head, rows });
+    }
 }
 
 /// How a line of text is coloured (the window picks the colours of the style).
@@ -499,17 +590,41 @@ pub enum Row {
         text: String,
         role: Role,
     },
-    /// The recipe's block.
-    Recipe,
+    /// A row of recipe blocks: `n` (1 or 2) of the page's recipes from `first`, side by side.
+    Recipes {
+        first: usize,
+        n: usize,
+        height: f32,
+    },
     /// A little space between pieces.
     Gap,
+    /// One line of a table: each cell's text at its column's `x`.
+    Cells {
+        cells: Vec<(f32, String)>,
+        role: Role,
+    },
+    /// A row of «см. также» links: up to two pages (indices into PAGES).
+    Links([Option<usize>; 2]),
+    /// The window picture's title strip.
+    WindowTitle(String),
+    /// A part of the window picture, `height` tall.
+    Widget {
+        n: usize,
+        label: String,
+        widget: &'static window::Widget,
+        words: Vec<String>,
+        height: f32,
+    },
 }
 
 impl Row {
     pub fn height(&self) -> f32 {
         match self {
-            Row::Recipe => RECIPE_HEIGHT,
+            Row::Recipes { height, .. } => *height,
             Row::Gap => 4.0,
+            Row::Links(_) => LINK_HEIGHT,
+            Row::WindowTitle(_) => window::TITLE_HEIGHT,
+            Row::Widget { height, .. } => *height,
             _ => LINE,
         }
     }
@@ -598,7 +713,40 @@ pub fn lay_out(pieces: &[Piece], width: f32, measure: &dyn Fn(&str) -> f32) -> V
                 text: t.to_uppercase(),
                 role: Role::Heading,
             }),
-            Piece::Recipe => out.push(Row::Recipe),
+            Piece::Table { head, rows } => table(&mut out, head, rows, width, measure),
+            Piece::Window { title, parts } => {
+                out.push(Row::WindowTitle(title.clone()));
+                for p in parts {
+                    let height = window::part_height(
+                        p.widget,
+                        !p.label.is_empty(),
+                        &p.words,
+                        width,
+                        measure,
+                    );
+                    out.push(Row::Widget {
+                        n: p.n,
+                        label: p.label.clone(),
+                        widget: p.widget,
+                        words: p.words.clone(),
+                        height,
+                    });
+                }
+            }
+            Piece::See(pages) => {
+                for pair in pages.chunks(2) {
+                    out.push(Row::Links([pair.first().copied(), pair.get(1).copied()]));
+                }
+            }
+            Piece::Recipes(heights) => {
+                for (row, pair) in heights.chunks(2).enumerate() {
+                    out.push(Row::Recipes {
+                        first: row * 2,
+                        n: pair.len(),
+                        height: pair.iter().copied().fold(0.0, f32::max),
+                    });
+                }
+            }
             Piece::Paragraph(t) => lines(&mut out, t, 0.0, width, Role::Text, measure),
             Piece::Stat { key, value } => {
                 if measure(key) + PAIR_GAP + measure(value) <= width {
@@ -695,6 +843,133 @@ fn is_heading(row: &Row) -> bool {
 /// The top of the sheet `sheet`'s first line, in window pixels.
 pub fn sheet_top(sheet: usize) -> f32 {
     if sheet == 0 { FIRST_TOP } else { REST_TOP }
+}
+
+// ---- Tables and links (guide: an entry's `tables`, its «См. также») ----
+
+/// What a table keeps between its columns.
+pub const COLUMN_GAP: f32 = 6.0;
+/// A «см. также» link: a page's icon and name, two to a row.
+pub const LINK_WIDTH: f32 = 152.0;
+pub const LINK_HEIGHT: f32 = 18.0;
+
+/// The widths of a table's columns in `width`: each its `natural` width (its widest cell on one
+/// line) when that fits its fair share; what the narrow ones leave is shared by the wide ones.
+pub fn columns(natural: &[f32], width: f32) -> Vec<f32> {
+    let n = natural.len();
+    if n == 0 {
+        return Vec::new();
+    }
+    let mut room = (width - COLUMN_GAP * (n - 1) as f32).max(0.0);
+    let mut out = vec![0.0; n];
+    let mut open: Vec<usize> = (0..n).collect();
+    loop {
+        let fair = room / open.len() as f32;
+        let narrow: Vec<usize> = open
+            .iter()
+            .copied()
+            .filter(|&i| natural[i] <= fair)
+            .collect();
+        if narrow.is_empty() {
+            for &i in &open {
+                out[i] = fair;
+            }
+            return out;
+        }
+        for &i in &narrow {
+            out[i] = natural[i];
+            room -= natural[i];
+        }
+        open.retain(|i| !narrow.contains(i));
+        if open.is_empty() {
+            // Everything fits: the last column takes what is left over.
+            out[n - 1] += room;
+            return out;
+        }
+    }
+}
+
+/// The lines of one table row: each cell wrapped in its column, side by side.
+fn table_row(
+    out: &mut Vec<Row>,
+    cells: &[String],
+    widths: &[f32],
+    role: Role,
+    measure: &dyn Fn(&str) -> f32,
+) {
+    let wrapped: Vec<Vec<String>> = cells
+        .iter()
+        .zip(widths)
+        .map(|(c, &w)| wrap(c, w, measure))
+        .collect();
+    let height = wrapped.iter().map(Vec::len).max().unwrap_or(0);
+    for line in 0..height {
+        let mut x = 0.0;
+        let mut row = Vec::new();
+        for (col, w) in wrapped.iter().zip(widths) {
+            if let Some(t) = col.get(line) {
+                row.push((x, t.clone()));
+            }
+            x += w + COLUMN_GAP;
+        }
+        out.push(Row::Cells { cells: row, role });
+    }
+}
+
+/// A table laid out in `width`: its head, then each row, a little space between rows.
+fn table(
+    out: &mut Vec<Row>,
+    head: &[String],
+    rows: &[Vec<String>],
+    width: f32,
+    measure: &dyn Fn(&str) -> f32,
+) {
+    let n = head.len().max(rows.iter().map(Vec::len).max().unwrap_or(0));
+    let mut natural = vec![0.0f32; n];
+    for r in std::iter::once(head).chain(rows.iter().map(Vec::as_slice)) {
+        for (i, c) in r.iter().enumerate() {
+            natural[i] = natural[i].max(measure(c));
+        }
+    }
+    let widths = columns(&natural, width);
+    table_row(out, head, &widths, Role::Key, measure);
+    for r in rows {
+        out.push(Row::Gap);
+        table_row(out, r, &widths, Role::Text, measure);
+    }
+}
+
+/// The page a click at `at` (window pixels) on the sheet `sheet` (its rows `range`) lands on: a
+/// «см. также» link's.
+pub fn link_at(rows: &[Row], range: Range<usize>, sheet: usize, at: [f32; 2]) -> Option<usize> {
+    let mut y = sheet_top(sheet);
+    for row in rows.get(range)? {
+        if let Row::Links(pages) = row
+            && at[1] >= y
+            && at[1] < y + LINK_HEIGHT
+            && at[0] >= BODY_X
+        {
+            let col = ((at[0] - BODY_X) / LINK_WIDTH) as usize;
+            return pages.get(col).copied().flatten();
+        }
+        y += row.height();
+    }
+    None
+}
+
+/// The rectangle (window pixels) of link `col` of a links row whose top is `y`.
+pub fn link_rect(y: f32, col: usize) -> Rect {
+    [
+        BODY_X + LINK_WIDTH * col as f32,
+        y,
+        LINK_WIDTH - 4.0,
+        LINK_HEIGHT,
+    ]
+}
+
+/// The page whose guide id is `id`.
+pub fn page_index(id: &str) -> Option<usize> {
+    PAGES.iter().position(|p| p.id == id)
 }
 
 // ---- The recipe ----

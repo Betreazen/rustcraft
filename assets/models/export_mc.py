@@ -117,8 +117,13 @@ def turned(p, q, about=8):
 
 
 # Models scaled about the middle of their floor to fit the game's limit of two blocks above the
-# block (LOW..HIGH): the windmill, three blocks tall in the guide, stands two thirds as big.
-SCALED = {'windmill': 0.68}
+# block (LOW..HIGH). Slice 18: none; the windmill keeps the guide's three blocks (LIFTED below).
+SCALED = {}
+# Slice 18: models taller than the game's limit (an element reaches at most 32 pixels up). The
+# boxes that reach above `top` pixels become part 'top' (unless they belong to a moving part), and
+# the parts named here are lowered by `by` pixels in their own models; anim_mc moves them back up
+# (still_move), so the windmill stands three blocks tall as in the guide.
+LIFTED = {'windmill': {'top': 32, 'by': 16, 'parts': ('top', 'rotor')}}
 
 
 def scaled(p, k):
@@ -138,7 +143,14 @@ def read_full(draw, name=None, rest_turn=True):
     turns = REST_TURN.get(name, {}) if rest_turn else {}
     k = SCALED.get(name)
     boxes = []
+    lift = LIFTED.get(name)
     for part, mat, lo, hi, rot in rec.boxes:
+        if lift and part == 'body' and hi[2] > lift['top']:
+            part = 'top'
+        if lift and part in lift['parts']:
+            lo, hi = (lo[0], lo[1], lo[2] - lift['by']), (hi[0], hi[1], hi[2] - lift['by'])
+            if rot:
+                rot = (rot[0], rot[1], (rot[2][0], rot[2][1], rot[2][2] - lift['by']))
         if k:
             lo, hi = scaled(lo, k), scaled(hi, k)
             if rot:
@@ -149,6 +161,8 @@ def read_full(draw, name=None, rest_turn=True):
             rot = ({'X': (1, 0, 0), 'Y': (0, 1, 0), 'Z': (0, 0, 1)}[axis], degrees, rec.pivots[part])
         boxes.append((part, mat, lo, hi, rot))
     pivots = {part: (scaled(p, k) if k else p) for part, p in rec.pivots.items()}
+    if lift:
+        pivots = {part: ((p[0], p[1], p[2] - lift['by']) if part in lift['parts'] else p) for part, p in pivots.items()}
     return boxes, pivots
 
 
@@ -548,6 +562,7 @@ def staged(out, report, skipped):
             els = elements(boxes, skin, stats)
             if moving:
                 anim_parts(out, name, draw, skin, stats)
+            energy_parts(out, name, every, skin, stats)
             if stats.get('outside_limit'):
                 skipped.append(name)
                 continue
@@ -706,8 +721,19 @@ def rail_halves_shown(mask):
     return sorted(sides)
 
 
+def rail_rise(m):
+    """The piece of a floor rail up the wall at its x+ side (rustcraft_rules::monorail::shape
+    `Rise`): the rail's section stood on end against that wall, from the floor to the top of the
+    cell, where the wall rail's lower half meets it, with a tie halfway up."""
+    m.box('steel_dark', 15.5, 6.5, 0, 0.5, 3, 16, part='rise')
+    m.box('tint', 14.25, 7, 0, 1.25, 2, 16, part='rise')
+    m.box('tint_light', 14, 7, 0, 0.25, 2, 16, part='rise')
+    m.box('steel_mid', 15.25, 5, 7.25, 0.75, 6, 1.5, part='rise')
+
+
 def monorail(out, report):
     boxes = read(transport.rail)
+    rise = read(rail_rise)
     by_part = {}
     for b in boxes:
         by_part.setdefault(b[0], []).append(b)
@@ -716,6 +742,7 @@ def monorail(out, report):
         parts['half%d' % k] = by_part[RAIL_HALVES[k]]
         parts['arc%d' % k] = by_part[RAIL_ARCS[k]]
         parts['climb%d' % k] = turned_boxes(by_part['slope'], k)
+        parts['rise%d' % k] = turned_boxes(rise, k)
     stats = {}
     for tier in range(1, 5):
         skin = Skin('monorail_t%d' % tier, {'tint': TIER[tier], 'tint_light': kit.shade(TIER[tier], 0.3)})
@@ -741,15 +768,29 @@ def monorail(out, report):
                 if shapes:
                     entries.append({'when': dict(when, shape='|'.join(shapes)),
                                     'apply': dict({'model': 'rustcraft:block/monorail_t%d_%s' % (tier, name)}, **turn)})
-            part('hub', ['s%d' % m for m in masks if m not in RAIL_CORNERS])
+            # The states of rustcraft_rules::monorail::shape::Shape::values: s<mask>, c<k>,
+            # c<k>f<fork> (a climb with a fork on its lower level) and r<k>s<mask> (a floor rail
+            # under a wall rail, mask holding k).
+            forks = [(k, f) for k in range(4) for f in (1, 2, 3)]
+            rises = [(k, m) for k in range(4) for m in masks if m >> k & 1]
+
+            def fork_halves(k, f):
+                return [(k + 2) % 4] + [(k + 1) % 4] * (f & 1) + [(k + 3) % 4] * (f >> 1 & 1)
+            part('hub', ['s%d' % m for m in masks if m not in RAIL_CORNERS]
+                 + ['c%df%d' % kf for kf in forks]
+                 + ['r%ds%d' % km for km in rises if km[1] not in RAIL_CORNERS])
+            for j in range(4):
+                part('half%d' % j, ['s%d' % m for m in masks if j in rail_halves_shown(m)]
+                     + ['c%df%d' % (k, f) for k, f in forks if j in fork_halves(k, f)]
+                     + ['r%ds%d' % (k, m) for k, m in rises if j in rail_halves_shown(m)])
+            for mask, j in sorted(RAIL_CORNERS.items(), key=lambda e: e[1]):
+                part('arc%d' % j, ['s%d' % mask] + ['r%ds%d' % (k, m) for k, m in rises if m == mask])
             for k in range(4):
-                part('half%d' % k, ['s%d' % m for m in masks if k in rail_halves_shown(m)])
-            for mask, k in sorted(RAIL_CORNERS.items(), key=lambda e: e[1]):
-                part('arc%d' % k, ['s%d' % mask])
+                part('climb%d' % k, ['c%d' % k] + ['c%df%d' % (k, f) for f in (1, 2, 3)])
             for k in range(4):
-                part('climb%d' % k, ['c%d' % k])
+                part('rise%d' % k, ['r%ds%d' % (k, m) for m in masks if m >> k & 1])
     out.text('blockstates/monorail.json', '{\n  "multipart": [\n%s\n  ]\n}\n' % ',\n'.join('    ' + json.dumps(e) for e in entries))
-    report.append(('rail', 'monorail_t1..4_{hub,half0..3,arc0..3,climb0..3,inventory}', stats))
+    report.append(('rail', 'monorail_t1..4_{hub,half0..3,arc0..3,climb0..3,rise0..3,inventory}', stats))
 
 
 # The capsule (rustcraft_rules::monorail::capsule): no block, a model the client draws round a
@@ -773,26 +814,54 @@ def capsule(out, report):
 
 
 # The worker (rustcraft_rules::worker; slice 7): no block, a model the client draws round its seat
-# mob, its chassis, its floor bracket and each tool apart, so the tool can follow what it carries.
-WORKER_PARTS = {
-    'body': ['body'],
-    'below': ['below'],
-    'saw': ['saw', 'aim_yaw_saw', 'reach_saw', 'saw_disc'],
-    'reaper': ['reaper', 'reaper_reel'],
-}
+# mob: its chassis, each bracket (floor, ceiling, wall) and each part of each tool apart, so the
+# bracket follows the rail and the tool's parts move as the guide's poses move them (slice 18,
+# docs/showcase/js/poses.js `P.worker`). The pivots of the moving parts go to the rules crate
+# (rustcraft_rules::worker::pose::PIVOTS) in block units, Minecraft axes.
+WORKER_PARTS = [
+    'body', 'below', 'above', 'side',
+    'saw', 'aim_yaw_saw', 'reach_saw', 'saw_disc',
+    'reaper', 'reaper_reel',
+    'hold',
+    'grab', 'grab_left', 'grab_right',
+    'bore', 'bore_bit',
+    'gun', 'aim_yaw_gun', 'aim_pitch_gun',
+    'scoop', 'aim_yaw_scoop', 'reach_scoop', 'scoop_bucket',
+    'map', 'map_drum',
+]
 
 
 def worker_parts(out, report):
-    boxes = read(transport.worker)
+    boxes, pivots = read_full(transport.worker)
     skin = Skin('worker_parts')
     for b in boxes:
         skin.slot(b[1])
     stats = {}
-    for name, parts in WORKER_PARTS.items():
-        part_boxes = [b for b in boxes if b[0] in parts]
+    for name in WORKER_PARTS:
+        part_boxes = [b for b in boxes if b[0] == name and not (name == 'body' and b[1] == 'chassis')]
+        assert part_boxes, 'no boxes in worker part %s' % name
         out.text('models/block/worker_%s.json' % name, model_json(skin.textures(), elements(part_boxes, skin, stats)))
     out.skin(skin)
-    report.append(('worker', 'worker_body, worker_below, worker_saw, worker_reaper', stats))
+    # The chassis's shell, white and tinted: the client paints it in its tool's colour
+    # (models.js `TOOL`, rustcraft_rules::worker::pose::colour).
+    paint = [b for b in boxes if b[0] == 'body' and b[1] == 'chassis']
+    white = Skin('worker_paint', dict((b[1], '#ffffff') for b in paint))
+    out.text('models/block/worker_paint.json', model_json(white.textures(), elements(paint, white, stats, tint_index=True)))
+    out.skin(white)
+    rows = []
+    for name in WORKER_PARTS:
+        if name in pivots:
+            pv = [v / 16 for v in swap(pivots[name])]
+            rows.append('    (%s, [%s]),' % (json.dumps(name), ', '.join(rust_f(v) for v in pv)))
+    text = ('//! The pivots of the worker parts that move, written by assets/models/export_mc.py from\n'
+            '//! assets/models/transport.py: do not edit by hand, run the exporter.\n\n'
+            '/// (part, pivot in blocks, Minecraft axes, in the model frame).\n'
+            '#[rustfmt::skip]\npub const PIVOTS: &[(&str, [f64; 3])] = &[\n%s\n];\n' % '\n'.join(rows))
+    path = HERE.parent.parent / 'mod' / 'rustcraft' / 'rules' / 'src' / 'worker' / 'pivots.rs'
+    data = text.encode('utf-8')
+    if not path.exists() or path.read_bytes() != data:
+        path.write_bytes(data)
+    report.append(('worker', 'worker_' + ', worker_'.join(WORKER_PARTS), stats))
 
 
 # The slice-7 and slice-8 blocks: since slice 9 they copy the furnace for their own windows
@@ -853,6 +922,39 @@ def zip_parts(out):
 def items(out):
     for name in icons_mc.ICONS:
         out.image('textures/item/%s.png' % name, icons_mc.icon(name))
+
+
+# ---------------------------------------------------------------- slice 18, energy stream
+
+# The model's sides (energy.py's link_<side>, z up, y south) as the game's faces.
+LINK_FACES = {'x-': 'west', 'x+': 'east', 'y-': 'north', 'y+': 'south', 'z-': 'down', 'z+': 'up'}
+LINKED = ('crystal', 'windmill', 'solar')
+# Every face tinted, so the client's tint sets how bright it glows: the crystal's pulse
+# (P.crystal), a structure lit with solution and dim without (P.crystalblock).
+LIT = ('crystal', 'crystalblock')
+# The seed's stages, one model each (P.seed shows stage<n> and hides the others).
+STAGED = {'seed': 3}
+
+
+def energy_parts(out, name, every, skin, stats):
+    """Slice 18: the housing connectors link_<side> of the crystal, the windmill and the solar
+    panel, each a standalone model `<name>__link_<face>` the client draws on the sides a housing
+    touches; and the seed's stages `seed_<n>`, its blockstate's models by `stage`."""
+    if name in LINKED:
+        for side, face in LINK_FACES.items():
+            boxes = [b for b in every if b[0] == 'link_' + side]
+            if boxes:
+                model = '%s__link_%s' % (name, face)
+                out.text('models/block/%s.json' % model, model_json(skin.textures(), elements(boxes, skin, stats)))
+    if name in LIT:
+        boxes = [b for b in every if not any(fnmatch.fnmatchcase(b[0], p) for p in ALWAYS_HIDDEN)]
+        out.text('models/block/%s__lit.json' % name,
+                 model_json(skin.textures(), elements(boxes, skin, stats, tint_index=True)))
+    if name in STAGED:
+        for n in range(STAGED[name]):
+            hidden = ['stage%d' % i for i in range(STAGED[name]) if i != n]
+            boxes = [b for b in every if b[0] not in hidden and not any(fnmatch.fnmatchcase(b[0], p) for p in ALWAYS_HIDDEN)]
+            out.text('models/block/%s_%d.json' % (name, n), model_json(skin.textures(), elements(boxes, skin, stats), BLOCK))
 
 
 def main():

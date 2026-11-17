@@ -1,0 +1,18 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    "aca",
+    "csc",
+    "aca"
+  ],
+  "key": {
+    "a": "rustcraft:sparksteel",
+    "c": "minecraft:copper_ingot",
+    "s": "rustcraft:node"
+  },
+  "result": {
+    "id": "rustcraft:node_2",
+    "count": 1
+  }
+}

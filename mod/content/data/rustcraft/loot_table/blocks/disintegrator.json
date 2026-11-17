@@ -7,8 +7,24 @@
       },
       "entries": [
         {
-          "type": "minecraft:item",
-          "name": "rustcraft:disintegrator"
+          "type": "minecraft:alternatives",
+          "children": [
+            {
+              "type": "minecraft:item",
+              "name": "rustcraft:disintegrator_4",
+              "condition": {
+                "type": "minecraft:match_block",
+                "blocks": "rustcraft:disintegrator",
+                "state": {
+                  "tier": "4"
+                }
+              }
+            },
+            {
+              "type": "minecraft:item",
+              "name": "rustcraft:disintegrator"
+            }
+          ]
         }
       ],
       "rolls": 1

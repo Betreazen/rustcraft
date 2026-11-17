@@ -19,18 +19,17 @@
 //   the housing from its block entity. Not made: F4's full collision and F5's see-through panels
 //   while a wrench is held.
 use crate::game::{
-    Game, native_block_entity_draw::BlockEntityDraw, rustcraft_base as base,
+    Game, native_block_entity_draw::BlockEntityDraw,
     rustcraft_content as content,
-    rustcraft_utility::{self as util, items, read_i64, read_json, spend, with_items, write_i64, write_json},
+    rustcraft_utility::{self as util, items, read_i64, read_json, spend, with_items, write_i64},
 };
 use horizon_client::{containers::ModBlockEntity, items::ItemStack, text::Text};
 use horizon_world::nbt::{Compound, JavaString, Tag};
 use rustcraft_rules::{
     geom::Pos,
-    reports::Report,
     utility::{
         Shown, Util,
-        plan::{self, Built, Plan},
+        plan::{self, Plan},
         transit::Transit,
     },
 };
@@ -40,17 +39,11 @@ use std::{
 };
 
 const PLAN_KEY: &str = "plan";
-const GHOST_KEY: &str = "ghost";
-const BUILT_KEY: &str = "built";
 const DOCK_KEY: &str = "dock_id";
 pub(super) const FACADE_KEY: &str = "facade";
 pub(super) const LOOK_KEY: &str = "facade_state";
 pub(super) const FACADE: &str = "rustcraft:facade";
 const FACADE_PLAIN: &str = "minecraft:smooth_stone";
-/// The ghost's blocks are drawn this big, about their cell's middle.
-const GHOST_SCALE: f32 = 0.6;
-/// The most ghost blocks a projector draws in a frame.
-const GHOST_MAX: usize = 256;
 
 #[derive(Default)]
 struct State {
@@ -65,11 +58,12 @@ fn state() -> MutexGuard<'static, State> {
     STATE.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
-pub(super) fn step(game: &mut Game<'_>, dimension: &str, pos: Pos, u: Util, cost: f64, _now: u64) -> Shown {
+pub(super) fn step(game: &mut Game<'_>, dimension: &str, level: &crate::game::rustcraft_server::LevelNet, pos: Pos, u: Util, cost: f64, _now: u64) -> Shown {
+    // Slice 18: the projector and the building machine are rustcraft_projector's.
     match u {
-        Util::Projector => projector_shown(game, pos),
-        Util::Builder => build(game, dimension, pos, cost),
-        _ => dock(game, pos, cost),
+        Util::Projector => crate::game::rustcraft_projector::projector_step(game, dimension, level, pos, cost),
+        Util::Builder => crate::game::rustcraft_projector::build(game, dimension, level, pos, cost),
+        _ => dock(game, dimension, level, pos, cost),
     }
 }
 
@@ -83,14 +77,63 @@ pub(super) fn row(game: &Game<'_>, pos: Pos, u: Util) -> Text {
         Util::Builder => util_line("rustcraft.util.builder.next", "Builds its projector's plan beside it", &[]),
         _ => {
             let id = dock_id(game, pos);
-            let paired = id.is_some_and(|id| state().transit.partner(id).is_some());
-            if paired {
-                util_line("rustcraft.util.portal_dock.paired", "Paired", &[])
-            } else {
-                util_line("rustcraft.util.portal_dock.unpaired", "No pair: click two docks with the wrench", &[])
+            let s = state();
+            let partner = id.and_then(|id| s.transit.partner(id));
+            match partner {
+                // Wave 2 (ui.js `portal_dock`): «Пара · док в Незере · связан».
+                Some(p) => {
+                    let world = s.transit.worlds.get(&p).cloned();
+                    drop(s);
+                    match world {
+                        Some(w) => util_line("rustcraft.util.portal_dock.paired_in", "Pair: a dock in %s · paired", &[world_name(&w)]),
+                        None => util_line("rustcraft.util.portal_dock.paired", "Paired", &[]),
+                    }
+                }
+                None => util_line("rustcraft.util.portal_dock.unpaired", "No pair: click two docks with the wrench", &[]),
             }
         }
     }
+}
+
+/// Wave 2: a world's name, «Незер», «Верхний мир», «Энд» (the game's own ids otherwise).
+fn world_name(world: &str) -> Text {
+    let key = format!("rustcraft.world.{}", world.rsplit(':').next().unwrap_or(world));
+    util_line(&key, world, &[])
+}
+
+/// Wave 2 (ui.js `portal_dock`): the dock's first row, «Тот мир · загружен / выгружен», with its
+/// fluid buffer «жидкость N из 16 вёдер» (a line: 27 slots leave no room for a bar in 240 px).
+pub(super) fn dock_world_row(game: &Game<'_>, pos: Pos) -> Text {
+    use rustcraft_rules::utility::transit::FLUID_ROOM;
+    let id = dock_id(game, pos);
+    let s = state();
+    let partner = id.and_then(|id| s.transit.partner(id));
+    let held = partner.map_or(0, |p| s.transit.fluid_held(p));
+    let loaded = partner.map(|p| s.transit.loaded(p, now_ms()));
+    drop(s);
+    let world = match loaded {
+        Some(true) => util_line("rustcraft.util.portal_dock.world_loaded", "The other world · loaded", &[]),
+        Some(false) => util_line("rustcraft.util.portal_dock.world_unloaded", "The other world · not loaded", &[]),
+        None => util_line("rustcraft.util.portal_dock.world_none", "The other world · no pair", &[]),
+    };
+    // In-game check w3: the row was cut; as ui.js `rows` («Тот мир — выгружен»), the fluid only
+    // when the buffer holds some.
+    let buckets = |mb: u64| Text::literal(format!("{}", mb / 1000));
+    let mut row = world;
+    if held > 0 {
+        row.push(util_line(
+            "rustcraft.util.portal_dock.fluid_short",
+            " · %s of %s buckets",
+            &[buckets(held), buckets(FLUID_ROOM)],
+        ));
+    }
+    row
+}
+
+fn now_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_millis() as u64)
 }
 
 fn util_line(key: &str, fallback: &str, args: &[Text]) -> Text {
@@ -99,72 +142,18 @@ fn util_line(key: &str, fallback: &str, args: &[Text]) -> Text {
 
 // ---- The projector ----
 
-fn projector_shown(game: &mut Game<'_>, pos: Pos) -> Shown {
-    let Some(e) = game.native_mod_block_entity(pos) else {
-        return Shown::Idle("idle");
-    };
-    let plan: Plan = read_json(&e.nbt, PLAN_KEY);
-    if plan.cells.is_empty() {
-        return Shown::Idle("projector_empty");
-    }
-    let on = read_i64(&e.nbt, GHOST_KEY) != 0;
-    if on { Shown::Working } else { Shown::Idle("projector_hidden") }
-}
 
-fn block_at(game: &Game<'_>, at: Pos) -> Option<String> {
-    let b = game.native_block(at);
-    (!matches!(b.as_str(), "minecraft:air" | "minecraft:cave_air" | "minecraft:void_air" | "minecraft:water" | "minecraft:lava"))
-        .then_some(b)
-}
-
-fn offset(pos: Pos, o: [i32; 3]) -> Pos {
-    [pos[0] + o[0], pos[1] + o[1], pos[2] + o[2]]
-}
-
-/// A press in its window: remember, ghost on or off, clear.
+/// A press in its window: slice 18's (rustcraft_projector).
 pub(super) fn projector_press(game: &mut Game<'_>, pos: Pos, entity: &mut ModBlockEntity, i: usize) {
-    match i {
-        0 => {
-            let p = Plan::read(|o| block_at(game, offset(pos, o)).filter(|b| !crate::game::rustcraft_server::is_ours(b)));
-            write_json(&mut entity.nbt, PLAN_KEY, &p);
-            write_i64(&mut entity.nbt, GHOST_KEY, 1);
-        }
-        1 => {
-            let on = read_i64(&entity.nbt, GHOST_KEY) != 0;
-            write_i64(&mut entity.nbt, GHOST_KEY, i64::from(!on));
-        }
-        _ => {
-            write_json(&mut entity.nbt, PLAN_KEY, &Plan::default());
-            write_i64(&mut entity.nbt, GHOST_KEY, 0);
-        }
-    }
-    game.native_block_entity_sync(pos);
+    crate::game::rustcraft_projector::projector_press(game, pos, entity, i);
 }
 
-/// On a client: the plan's missing blocks, smaller, where the world has air.
+
+/// On a client: slice 18's ghost (rustcraft_projector).
 pub(super) fn draw_ghost(game: &Game<'_>, pos: Pos, entity: &ModBlockEntity, draw: &mut BlockEntityDraw) -> bool {
-    if read_i64(&entity.nbt, GHOST_KEY) == 0 {
-        return false;
-    }
-    let plan: Plan = read_json(&entity.nbt, PLAN_KEY);
-    let mut drawn = 0;
-    for cell in plan.missing(|o| block_at(game, offset(pos, o))) {
-        if drawn >= GHOST_MAX {
-            break;
-        }
-        if block_at(game, offset(pos, cell.at)).is_some() {
-            continue;
-        }
-        draw.push();
-        let k = (1.0 - GHOST_SCALE) / 2.0;
-        draw.translate([cell.at[0] as f32 + k, cell.at[1] as f32 + k, cell.at[2] as f32 + k]);
-        draw.scale([GHOST_SCALE; 3]);
-        game.native_draw_block(draw, &cell.block, &[]);
-        draw.pop();
-        drawn += 1;
-    }
-    true
+    crate::game::rustcraft_projector::draw_ghost(game, pos, entity, draw)
 }
+
 
 /// The projector's area for culling.
 pub(super) fn ghost_bounds(bounds: &mut [f32; 6]) {
@@ -174,63 +163,6 @@ pub(super) fn ghost_bounds(bounds: &mut [f32; 6]) {
 
 // ---- The building machine ----
 
-fn build(game: &mut Game<'_>, dimension: &str, pos: Pos, cost: f64) -> Shown {
-    let Some(projector) = util::neighbour_of(game, pos, Util::Projector.spec().block) else {
-        return Shown::Blocked("builder_no_projector");
-    };
-    let Some(pe) = game.native_mod_block_entity(projector) else {
-        return Shown::Blocked("builder_no_projector");
-    };
-    let plan: Plan = read_json(&pe.nbt, PLAN_KEY);
-    if plan.cells.is_empty() {
-        return Shown::Blocked("builder_no_plan");
-    }
-    let slots = items(game, pos);
-    let next = plan
-        .missing(|o| block_at(game, offset(projector, o)))
-        .find(|c| {
-            block_at(game, offset(projector, c.at)).is_none()
-                && slots.iter().flatten().any(|s| s.count > 0 && *s.item == *c.block)
-        })
-        .cloned();
-    let Some(cell) = next else {
-        let done = plan.missing(|o| block_at(game, offset(projector, o))).next().is_none();
-        return if done { Shown::Idle("builder_done") } else { Shown::Blocked("builder_no_blocks") };
-    };
-    let Some(state_id) = game.native_default_state(&cell.block) else {
-        return Shown::Blocked("builder_no_blocks");
-    };
-    if !spend(game, pos, cost) {
-        return Shown::NoEnergy;
-    }
-    let at = offset(projector, cell.at);
-    game.native_set_block(dimension, at, state_id, 3);
-    let pays = game
-        .native_with_mod_block_entity(pos, |e| {
-            if let Some(slot) = e.items.iter().position(|s| s.as_ref().is_some_and(|s| *s.item == *cell.block)) {
-                util::take_one(&mut e.items, slot);
-            }
-            let mut built: Built = read_json(&e.nbt, BUILT_KEY);
-            let pays = built.pays(cell.at);
-            write_json(&mut e.nbt, BUILT_KEY, &built);
-            pays
-        })
-        .unwrap_or(false);
-    match base::owner_at(game, pos) {
-        Some(o) if pays => base::report(Report::Build {
-            owner: o,
-            dimension: dimension.to_owned(),
-            pos: at,
-            block: cell.block,
-        }),
-        _ => base::report(Report::Place {
-            dimension: dimension.to_owned(),
-            pos: at,
-            block: cell.block,
-        }),
-    }
-    Shown::Working
-}
 
 // ---- The portal dock ----
 
@@ -292,11 +224,13 @@ fn by_portal(game: &Game<'_>, pos: Pos) -> bool {
     (-1..=1).any(|dx| (-1..=1).any(|dy| (-1..=1).any(|dz| game.native_block([pos[0] + dx, pos[1] + dy, pos[2] + dz]) == "minecraft:nether_portal")))
 }
 
-fn dock(game: &mut Game<'_>, pos: Pos, cost: f64) -> Shown {
+fn dock(game: &mut Game<'_>, dimension: &str, level: &crate::game::rustcraft_server::LevelNet, pos: Pos, cost: f64) -> Shown {
     let id = ensure_id(game, pos);
     let partner = {
         let mut s = state();
         load(game, &mut s);
+        // Wave 2: the other dock knows this one's world is loaded, and which world it is.
+        s.transit.saw(id, dimension, now_ms());
         s.transit.partner(id)
     };
     let Some(partner) = partner else {
@@ -305,7 +239,7 @@ fn dock(game: &mut Game<'_>, pos: Pos, cost: f64) -> Shown {
     if !by_portal(game, pos) {
         return Shown::Blocked("dock_no_portal");
     }
-    let mut moved = false;
+    let mut moved = dock_fluids(game, level, pos, id, partner, cost);
     // What waits for this dock comes in.
     let waiting = state().transit.take(id);
     let mut back = Vec::new();
@@ -324,12 +258,15 @@ fn dock(game: &mut Game<'_>, pos: Pos, cost: f64) -> Shown {
     }
     // What the net gave it goes.
     let slots = items(game, pos);
+    // Slice 18 (stream 6): items wait and its pair's store has no room: «Буфер дока полон».
+    let mut full = false;
     for slot in 0..18 {
         let Some(Some(st)) = slots.get(slot) else { continue };
         let max = crate::game::rustcraft_machines::max_stack(game, &st.item);
         let room = state().transit.room(partner, &st.item, max);
         let n = st.count.min(room);
         if n == 0 {
+            full |= st.count > 0;
             continue;
         }
         if !spend(game, pos, cost * f64::from(n)) {
@@ -346,7 +283,67 @@ fn dock(game: &mut Game<'_>, pos: Pos, cost: f64) -> Shown {
         });
         moved = true;
     }
-    if moved { Shown::Working } else { Shown::Idle("dock_idle") }
+    // Wave 2: «Копит груз: другой мир выгружен».
+    let holding = {
+        let s = state();
+        !s.transit.loaded(partner, now_ms()) && s.transit.holds_for(partner)
+    };
+    if full {
+        Shown::Blocked("dock_full")
+    } else if holding {
+        Shown::Idle("dock_holding")
+    } else if moved {
+        Shown::Working
+    } else {
+        Shown::Idle("dock_idle")
+    }
+}
+
+/// Wave 2 (guide `portal_dock`: «предметы и жидкости», «16 вёдер», «1 Е за ведро»): what came
+/// from the pair goes into the tanks the dock unloads to; the fluid of the tanks it sends from
+/// goes to the pair's store, as far as its 16 buckets go, 1 E a bucket. Whether anything moved.
+fn dock_fluids(game: &mut Game<'_>, level: &crate::game::rustcraft_server::LevelNet, pos: Pos, id: u64, partner: u64, cost: f64) -> bool {
+    use crate::game::rustcraft_fluids as fluids;
+    let t = crate::game::rustcraft_server::tuning();
+    let mut moved = false;
+    let came = state().transit.take_fluids(id);
+    let mut left = Vec::new();
+    for (fluid, mb) in came {
+        let put = fluids::dock_move(game, level, pos, &fluid, mb, true, t);
+        moved |= put > 0;
+        left.push((fluid, mb - put));
+    }
+    {
+        let mut s = state();
+        s.transit.put_back_fluids(id, left);
+        s.dirty = true;
+    }
+    for (fluid, have) in fluids::dock_offer(game, level, pos, t) {
+        let room = state().transit.fluid_room(partner);
+        // Whole buckets, 1 E each.
+        let buckets = have.min(room) / 1000;
+        if buckets == 0 {
+            continue;
+        }
+        if !spend(game, pos, cost * buckets as f64) {
+            break;
+        }
+        let took = fluids::dock_move(game, level, pos, &fluid, buckets * 1000, false, t);
+        let sent = state().transit.send_fluid(partner, &fluid, took);
+        moved |= sent > 0;
+    }
+    moved
+}
+
+/// Wave 2 (the self-test's bench): the docks at `a` and `b` paired, as two wrench clicks pair
+/// them.
+pub(super) fn pair_docks(game: &mut Game<'_>, a: Pos, b: Pos) -> Result<(), String> {
+    let (ia, ib) = (ensure_id(game, a), ensure_id(game, b));
+    let mut s = state();
+    load(game, &mut s);
+    s.dirty = true;
+    s.transit.click(0, ia);
+    s.transit.click(0, ib).map(|_| ()).ok_or_else(|| "the docks did not pair".to_owned())
 }
 
 /// A wrench click on a portal dock: pairs it with the dock clicked before.
@@ -366,11 +363,11 @@ pub(super) fn wrench_dock(game: &mut Game<'_>, player: u128, pos: Pos) {
 
 // ---- The facade ----
 
-fn has_facade(nbt: &Compound) -> bool {
+pub(super) fn has_facade(nbt: &Compound) -> bool {
     read_i64(nbt, FACADE_KEY) != 0
 }
 
-fn look(nbt: &Compound) -> Option<String> {
+pub(super) fn look(nbt: &Compound) -> Option<String> {
     match nbt.get(&JavaString::from(LOOK_KEY)) {
         Some(Tag::String(s)) => Some(s.to_string_lossy()).filter(|s| !s.is_empty()),
         _ => None,
@@ -379,6 +376,13 @@ fn look(nbt: &Compound) -> Option<String> {
 
 /// A click with `stack` on a housing or node at `pos`: claims it when it was the facade's.
 pub(super) fn on_use_item_on(game: &mut Game<'_>, player: u128, sneaking: bool, stack: &ItemStack, pos: Pos) -> bool {
+    // Slice 18: the wrench sets a projector's corners, and lifts it with its plan.
+    if &*stack.item == content::WRENCH
+        && let Some(dimension) = crate::game::rustcraft_server::acting(game).map(|p| p.dimension)
+        && crate::game::rustcraft_projector::on_wrench(game, player, &dimension, sneaking, pos)
+    {
+        return true;
+    }
     let block = game.native_block(pos);
     if block != content::HOUSING && block != content::NODE {
         return false;
@@ -391,6 +395,8 @@ pub(super) fn on_use_item_on(game: &mut Game<'_>, player: u128, sneaking: bool, 
     if item == FACADE && !covered {
         game.native_with_mod_block_entity(pos, |e| write_i64(&mut e.nbt, FACADE_KEY, 1));
         game.native_take_items(FACADE, 1);
+        // s18/pipe, F4: the hidden housing is a whole block (the node is one already).
+        game.native_set_block_property(pos, rustcraft_rules::housing::COVERED, "true");
     } else if item == content::WRENCH && sneaking && covered {
         let old = look(&entity.nbt);
         game.native_with_mod_block_entity(pos, |e| {
@@ -401,7 +407,13 @@ pub(super) fn on_use_item_on(game: &mut Game<'_>, player: u128, sneaking: bool, 
         if let Some(o) = old {
             give(game, player, &o);
         }
-    } else if covered && game.items().get(item).is_some_and(|i| i.block.is_some()) && !crate::game::rustcraft_server::is_ours(item) {
+        game.native_set_block_property(pos, rustcraft_rules::housing::COVERED, "false");
+    } else if covered
+        && game.items().get(item).is_some_and(|i| i.block.is_some())
+        && !crate::game::rustcraft_server::is_ours(item)
+        // s18/pipe, F2: only a whole block gives the look.
+        && rustcraft_rules::housing::whole_block(item)
+    {
         let old = look(&entity.nbt);
         game.native_with_mod_block_entity(pos, |e| {
             e.nbt.insert(JavaString::from(LOOK_KEY), Tag::String(JavaString::from(item)));
@@ -423,13 +435,14 @@ fn give(game: &mut Game<'_>, _player: u128, item: &str) {
 
 /// On a client: the housing's look over it.
 pub(super) fn draw_facade(game: &Game<'_>, entity: &ModBlockEntity, draw: &mut BlockEntityDraw) -> bool {
-    if !has_facade(&entity.nbt) {
+    // s18/pipe, F5: with the wrench in hand every facade is see-through; drawn each frame (not
+    // kept) so that taking the wrench shows it at once.
+    if !has_facade(&entity.nbt) || crate::game::rustcraft_pipe18::wrench_in_hand(game) {
         return false;
     }
     let look = look(&entity.nbt).unwrap_or_else(|| FACADE_PLAIN.to_owned());
     if !game.native_draw_block(draw, &look, &[]) {
         game.native_draw_block(draw, FACADE_PLAIN, &[]);
     }
-    draw.keep();
     true
 }

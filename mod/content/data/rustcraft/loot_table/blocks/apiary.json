@@ -7,8 +7,35 @@
       },
       "entries": [
         {
-          "type": "minecraft:item",
-          "name": "rustcraft:apiary"
+          "type": "minecraft:alternatives",
+          "children": [
+            {
+              "type": "minecraft:item",
+              "name": "rustcraft:apiary_3",
+              "condition": {
+                "type": "minecraft:match_block",
+                "blocks": "rustcraft:apiary",
+                "state": {
+                  "tier": "3"
+                }
+              }
+            },
+            {
+              "type": "minecraft:item",
+              "name": "rustcraft:apiary_4",
+              "condition": {
+                "type": "minecraft:match_block",
+                "blocks": "rustcraft:apiary",
+                "state": {
+                  "tier": "4"
+                }
+              }
+            },
+            {
+              "type": "minecraft:item",
+              "name": "rustcraft:apiary"
+            }
+          ]
         }
       ],
       "rolls": 1

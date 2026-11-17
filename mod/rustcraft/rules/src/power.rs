@@ -51,6 +51,8 @@ pub struct PowerView {
     pub capacity: f64,
     /// The fluid it holds, mB: a lava generator's lava, a crystal structure's solution.
     pub fluid: f64,
+    /// Slice 18: the most a battery structure gives, E/s (ui.js «отдаёт 0 из 192»).
+    pub max_out: f64,
 }
 
 // ---- Structures ----
@@ -137,6 +139,44 @@ pub fn structure_shown(n: usize, form: Form, fed: bool, t: &Tuning) -> Shown {
     }
 }
 
+/// E9 (guide `structure`): what holds a crystal structure back now.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Limit {
+    /// Only its size: more crystals would give more.
+    Size,
+    /// No solution: it gives one crystal's output.
+    Solution,
+    /// The energy channels it is on let through less than it gives: this many E/s.
+    Channel(f64),
+    /// Not an allowed box: one crystal's output.
+    Shape,
+}
+
+/// E9: what limits a group of `n` crystals of form `form`; `channel` is what the energy nets it is
+/// on let through together, E/s (none when it is on no net).
+pub fn structure_limit(n: usize, form: Form, fed: bool, channel: Option<f64>, t: &Tuning) -> Limit {
+    match form {
+        Form::Broken => return Limit::Shape,
+        Form::Box(_) if !fed => return Limit::Solution,
+        _ => {}
+    }
+    let out = structure_output(n, form, fed, t);
+    match channel {
+        Some(cap) if cap + 1e-9 < out => Limit::Channel(cap),
+        _ => Limit::Size,
+    }
+}
+
+/// The size of a box form as the window names it, «2×2», «3×3×3»; none for a single crystal or a
+/// broken form.
+pub fn form_name(form: Form) -> Option<String> {
+    match form {
+        Form::Box([a, b, c]) if a == 1 => Some(format!("{c}×{b}")),
+        Form::Box([a, b, c]) => Some(format!("{c}×{b}×{a}")),
+        _ => None,
+    }
+}
+
 /// The solution a box of `n` crystals drinks, mB a second (spec 12.3: 0.1 bucket a minute each).
 pub fn solution_per_second(n: usize, t: &Tuning) -> f64 {
     n as f64 * t.solution_per_minute * BUCKET / 60.0
@@ -179,19 +219,18 @@ pub fn windmill_output(y: i32, clear: bool, t: &Tuning) -> f64 {
     t.windmill_low + (t.windmill_high - t.windmill_low) * k
 }
 
-/// The cells a windmill at `pos` needs free: the two above it (its mast) and the ring round the
-/// first of them, where the blades turn.
-pub fn windmill_room(pos: Pos) -> Vec<Pos> {
-    let up = |n: i32| [pos[0], pos[1] + n, pos[2]];
-    let mut cells = vec![up(1), up(2)];
-    for dx in -1..=1 {
-        for dz in -1..=1 {
-            if dx != 0 || dz != 0 {
-                cells.push([pos[0] + dx, pos[1] + 1, pos[2] + dz]);
-            }
-        }
-    }
-    cells
+/// The cells a windmill at `pos` facing `facing` needs free: the two above it (its mast and top)
+/// and those its blades sweep. The rotor turns about the facing's axis with its hub two blocks
+/// up (rustcraft:block/windmill__rotor lifted a block, anim::parts), its blades from about 1.2 to
+/// 2.9 blocks up and a block to either side across the facing: x for north and south, z for east
+/// and west. Behind and before it they reach no further than its own column.
+pub fn windmill_room(pos: Pos, facing: &str) -> Vec<Pos> {
+    let side = match facing {
+        "east" | "west" => [0, 0, 1],
+        _ => [1, 0, 0],
+    };
+    let at = |s: i32, n: i32| [pos[0] + s * side[0], pos[1] + n, pos[2] + s * side[2]];
+    vec![at(0, 1), at(0, 2), at(-1, 1), at(1, 1), at(-1, 2), at(1, 2)]
 }
 
 // ---- Lava ----
@@ -393,6 +432,25 @@ mod tests {
     }
 
     #[test]
+    fn a_structure_names_what_holds_it_back() {
+        // E9: size, solution, channel or shape.
+        let t = Tuning::default();
+        let square = Form::Box([1, 2, 2]);
+        assert_eq!(structure_limit(4, square, true, None, &t), Limit::Size);
+        assert_eq!(structure_limit(4, square, false, None, &t), Limit::Solution);
+        // A tier-1 channel (32 E/s) under a 3×3 (108 E/s) holds it back; a wider one does not.
+        let nine = Form::Box([1, 3, 3]);
+        assert_eq!(structure_limit(9, nine, true, Some(32.0), &t), Limit::Channel(32.0));
+        assert_eq!(structure_limit(9, nine, true, Some(512.0), &t), Limit::Size);
+        assert_eq!(structure_limit(3, Form::Broken, true, Some(1.0), &t), Limit::Shape);
+        assert_eq!(structure_limit(1, Form::Single, false, None, &t), Limit::Size);
+        assert_eq!(form_name(square).as_deref(), Some("2×2"));
+        assert_eq!(form_name(Form::Box([1, 1, 2])).as_deref(), Some("2×1"));
+        assert_eq!(form_name(Form::Box([3, 3, 3])).as_deref(), Some("3×3×3"));
+        assert_eq!(form_name(Form::Broken), None);
+    }
+
+    #[test]
     fn a_panel_gives_by_day_less_in_rain_and_a_quarter_at_night() {
         // Guide `solar`: 2 by day, 1 in rain, 0.5 at night; nothing under a block (E21).
         let t = Tuning::default();
@@ -414,7 +472,21 @@ mod tests {
         let mid = windmill_output(111, true, &t);
         assert!(mid > 6.9 && mid < 7.0, "{mid}");
         assert!(close(windmill_output(200, false, &t), 0.0));
-        assert_eq!(windmill_room([0, 10, 0]).len(), 10);
+    }
+
+    #[test]
+    fn the_windmills_blades_need_room_where_the_lifted_rotor_turns() {
+        // Wave 2: the hub two blocks up, the blades a block to either side across the facing, on
+        // the first and the second block above it.
+        let north = windmill_room([0, 10, 0], "north");
+        for c in [[0, 11, 0], [0, 12, 0], [-1, 12, 0], [1, 12, 0], [-1, 11, 0], [1, 11, 0]] {
+            assert!(north.contains(&c), "{c:?}");
+        }
+        assert!(!north.contains(&[0, 11, 1]), "behind it the blades do not reach");
+        assert_eq!(north.len(), 6);
+        let east = windmill_room([0, 10, 0], "east");
+        assert!(east.contains(&[0, 12, 1]) && east.contains(&[0, 12, -1]));
+        assert!(!east.contains(&[1, 12, 0]));
     }
 
     #[test]

@@ -10,7 +10,9 @@
 //!
 //! O11: what a step makes for a later step of the same order comes back into the storage's count
 //! and is the order's own there (`Order::made`): no other order plans on it, and the round in the
-//! same second hands it to the next machine. A step takes a free machine with energy or fuel
+//! same second hands it to the next machine. Since slice 18 such a product waits at the machine
+//! that made it (`held`) instead, and `round_with` counts it as the order's own stock there. A
+//! step takes a free machine with energy or fuel
 //! first; an order whose jobs all stand on machines without either waits for energy and says so.
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -64,6 +66,16 @@ pub struct Order {
     /// O11: what its steps made for its later steps and the storage holds for it.
     #[serde(default)]
     pub made: BTreeMap<ItemKey, u64>,
+    /// Slice 18 (guide `terminal`: «каждый заказ — цепочка шагов; выделенный шаг идёт сейчас»):
+    /// its plan's steps as the last round made them, each (machine kind, what it makes, runs
+    /// now). Not saved: the next round makes it again.
+    #[serde(skip)]
+    pub chain: Vec<(String, ItemKey, bool)>,
+    /// Slice 18 (O11, `held`): of what the order holds at machines, what the plan of the last
+    /// round needs; none when that round did not plan it (it runs, or has nothing left to make),
+    /// so what it holds stays. Not saved: the next round makes it again.
+    #[serde(skip)]
+    pub held_need: Option<BTreeMap<ItemKey, u64>>,
 }
 
 impl Order {
@@ -141,6 +153,8 @@ impl Queue {
             wait: Wait::New,
             reserved: BTreeMap::new(),
             made: BTreeMap::new(),
+            chain: Vec::new(),
+            held_need: None,
         });
         Some(id)
     }
@@ -158,12 +172,21 @@ impl Queue {
 
     /// A job went to its machine: the order's own items it took are no longer in the storage.
     pub fn started(&mut self, job: &Job) {
+        self.started_with(job, &BTreeMap::new());
+    }
+
+    /// Slice 18 (O11): a job went to its machine with `from_held` of its items from what the
+    /// order held at machines (`held`); the rest came out of the storage, and of that the
+    /// order's own items are no longer there.
+    pub fn started_with(&mut self, job: &Job, from_held: &BTreeMap<ItemKey, u64>) {
         let Some(o) = self.orders.iter_mut().find(|o| o.id == job.order) else {
             return;
         };
         for (item, n) in &job.step.inputs {
+            let used = (u64::from(*n) * u64::from(job.runs))
+                .saturating_sub(from_held.get(item).copied().unwrap_or(0));
             if let Some(m) = o.made.get_mut(item) {
-                *m = m.saturating_sub(u64::from(*n) * u64::from(job.runs));
+                *m = m.saturating_sub(used);
             }
         }
         o.made.retain(|_, n| *n > 0);
@@ -245,9 +268,29 @@ impl Queue {
         running: &dyn Fn(u16) -> bool,
         fits: &mut dyn FnMut(Pos, &Step, u32) -> u32,
     ) -> Vec<Job> {
+        self.round_with(stock, &BTreeMap::new(), book, kinds, free, running, fits)
+    }
+
+    /// Slice 18 (O11): a round where `held` is what each order holds at machines (`held`): its
+    /// own stock and no other order's, used before its own products in the storage. Each order
+    /// the round plans says how much of it the plan needs (`Order::held_need`).
+    #[allow(clippy::too_many_arguments)]
+    pub fn round_with(
+        &mut self,
+        stock: &BTreeMap<ItemKey, u64>,
+        held: &BTreeMap<u16, BTreeMap<ItemKey, u64>>,
+        book: &[PlanRecipe],
+        kinds: &[&str],
+        free: &[FreeMachine],
+        running: &dyn Fn(u16) -> bool,
+        fits: &mut dyn FnMut(Pos, &Step, u32) -> u32,
+    ) -> Vec<Job> {
+        let none = BTreeMap::new();
+        let held_of = |id: u16| held.get(&id).unwrap_or(&none);
         // An order's own products count as far as the storage still holds them (a player may
         // have taken some out).
         for o in &mut self.orders {
+            o.held_need = None;
             for (item, n) in &mut o.made {
                 *n = (*n).min(stock.get(item).copied().unwrap_or(0));
             }
@@ -278,8 +321,28 @@ impl Queue {
             for (item, n) in &o.made {
                 *free_stock.entry(item.clone()).or_insert(0) += n;
             }
+            // Slice 18: what it holds at machines is its stock too.
+            let at_machines = held_of(o.id);
+            for (item, n) in at_machines {
+                *free_stock.entry(item.clone()).or_insert(0) += n;
+            }
             free_stock.remove(&o.item);
             let p = plan(&o.item, u64::from(wanted), &free_stock, book, kinds);
+            o.held_need = Some(
+                at_machines
+                    .iter()
+                    .filter_map(|(k, n)| {
+                        let need = (*n).min(p.reserved.get(k).copied().unwrap_or(0));
+                        (need > 0).then(|| (k.clone(), need))
+                    })
+                    .collect(),
+            );
+            let held_k = |k: &ItemKey| at_machines.get(k).copied().unwrap_or(0);
+            o.chain = p
+                .steps
+                .iter()
+                .map(|s| (s.machine.clone(), s.output.0.clone(), false))
+                .collect();
             o.reserved.clear();
             if !p.missing_machines.is_empty() {
                 o.wait = Wait::Machines(p.missing_machines);
@@ -295,7 +358,7 @@ impl Queue {
                 .reserved
                 .iter()
                 .map(|(k, n)| {
-                    let own = o.made.get(k).copied().unwrap_or(0);
+                    let own = o.made.get(k).copied().unwrap_or(0) + held_k(k);
                     (k.clone(), n.saturating_sub(own))
                 })
                 .collect();
@@ -304,7 +367,8 @@ impl Queue {
                 .made
                 .iter()
                 .filter_map(|(k, n)| {
-                    let used = (*n).min(p.reserved.get(k).copied().unwrap_or(0));
+                    let reserved = p.reserved.get(k).copied().unwrap_or(0);
+                    let used = (*n).min(reserved.saturating_sub(held_k(k)));
                     (used > 0).then(|| (k.clone(), used))
                 })
                 .collect();
@@ -359,6 +423,11 @@ impl Queue {
                 }
             }
             avail.retain(|_, n| *n > 0);
+            for job in &jobs[before..] {
+                if let Some(c) = o.chain.iter_mut().find(|c| c.0 == job.step.machine && c.1 == job.step.output.0) {
+                    c.2 = true;
+                }
+            }
             o.reserved = avail;
             o.wait = if jobs.len() > before {
                 Wait::Running
@@ -456,6 +525,22 @@ mod tests {
             powered: false,
             ..machine(x, kind)
         }
+    }
+
+    #[test]
+    fn an_order_shows_its_chain_with_the_running_step() {
+        // Slice 18: pistons from raw iron: the furnace step runs first, the crafter's waits.
+        let mut q = Queue::default();
+        q.add(PISTON, 2, false);
+        round(&mut q, &stock(0, 8), &[machine(1, "furnace"), machine(2, "crafter")]);
+        let chain = &q.orders[0].chain;
+        assert_eq!(
+            chain,
+            &vec![
+                ("furnace".to_owned(), IRON.to_owned(), true),
+                ("crafter".to_owned(), PISTON.to_owned(), false),
+            ]
+        );
     }
 
     #[test]
@@ -756,5 +841,81 @@ mod tests {
         assert_eq!(runs_that_fit(&empty, &inputs, 4, &stack), 4);
         let full: Vec<Slot> = vec![Some(("minecraft:dirt".into(), 64)); 9];
         assert_eq!(runs_that_fit(&full, &inputs, 4, &stack), 0);
+    }
+
+    fn held_round(
+        q: &mut Queue,
+        stock: &BTreeMap<ItemKey, u64>,
+        held: &BTreeMap<u16, BTreeMap<ItemKey, u64>>,
+        running: &dyn Fn(u16) -> bool,
+    ) -> Vec<Job> {
+        q.round_with(
+            stock,
+            held,
+            &book(),
+            &["crafter", "furnace"],
+            &[machine(1, "crafter")],
+            running,
+            &mut |_, _, w| w,
+        )
+    }
+
+    #[test]
+    fn held_products_are_the_orders_stock_and_no_one_elses() {
+        // O11 (slice 18): the iron the second order's furnace made waits at the furnace, not in
+        // the storage: it is that order's stock, and the first order, short of iron, cannot take
+        // it.
+        let mut q = Queue::default();
+        let a = q.add(PISTON, 1, false).unwrap();
+        let b = q.add(PISTON, 1, false).unwrap();
+        let held = BTreeMap::from([(b, BTreeMap::from([(IRON.to_string(), 1)]))]);
+        let jobs = held_round(&mut q, &stock(0, 0), &held, &idle);
+        assert_eq!(jobs.len(), 1);
+        assert_eq!(jobs[0].order, b);
+        assert_eq!(jobs[0].step.output.0, PISTON);
+        assert_eq!(q.orders[0].id, a);
+        assert_eq!(q.orders[0].wait, Wait::Items(vec![(IRON.into(), 1)]));
+        assert_eq!(
+            q.orders[1].held_need,
+            Some(BTreeMap::from([(IRON.to_string(), 1)]))
+        );
+        // The first order holds nothing, and needs nothing held.
+        assert_eq!(q.orders[0].held_need, Some(BTreeMap::new()));
+    }
+
+    #[test]
+    fn held_products_beyond_the_plan_are_not_needed() {
+        let mut q = Queue::default();
+        let b = q.add(PISTON, 1, false).unwrap();
+        let held = BTreeMap::from([(b, BTreeMap::from([(IRON.to_string(), 3)]))]);
+        assert_eq!(held_round(&mut q, &stock(0, 0), &held, &idle).len(), 1);
+        assert_eq!(
+            q.orders[0].held_need,
+            Some(BTreeMap::from([(IRON.to_string(), 1)]))
+        );
+        // A running order is not judged: what it holds stays.
+        let running = |o: u16| o == b;
+        held_round(&mut q, &stock(0, 0), &held, &running);
+        assert_eq!(q.orders[0].held_need, None);
+    }
+
+    #[test]
+    fn held_products_come_first_and_leave_the_storages_own_ones_owned() {
+        // The order holds 1 iron at the furnace and owns 1 in the storage; 2 pistons take both.
+        // Started with the held one, the storage's stays its own until a job takes it.
+        let mut q = Queue::default();
+        let b = q.add(PISTON, 2, false).unwrap();
+        q.keep_for(b, IRON, 1);
+        let held = BTreeMap::from([(b, BTreeMap::from([(IRON.to_string(), 1)]))]);
+        let jobs = held_round(&mut q, &stock(1, 0), &held, &idle);
+        assert_eq!(jobs.len(), 1);
+        assert_eq!(jobs[0].runs, 2);
+        assert_eq!(q.orders[0].made, BTreeMap::from([(IRON.to_string(), 1)]));
+        let mut half = jobs[0].clone();
+        half.runs = 1;
+        q.started_with(&half, &BTreeMap::from([(IRON.to_string(), 1)]));
+        assert_eq!(q.orders[0].made, BTreeMap::from([(IRON.to_string(), 1)]));
+        q.started_with(&half, &BTreeMap::new());
+        assert!(q.orders[0].made.is_empty());
     }
 }

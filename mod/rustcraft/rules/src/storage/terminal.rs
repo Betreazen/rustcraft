@@ -10,8 +10,9 @@
 //!
 //! The window has three modes: taking items (the default), «Лимиты» (S5) and «Заказы» (O3, O8,
 //! O14). In the orders mode a click on an item chooses it for the row under the grid (order ×1,
-//! ×8, ×64; «держать N»), and the line under the status shows one order of the queue with its
-//! cancel button; a click on that line shows the next order.
+//! ×8, ×64; «держать N»), and the rows under the status list the queue (wave 2, `ui.js`: «каждый
+//! заказ — цепочка шагов»), QUEUE_ROWS orders at a time, each with its chain and its cancel button;
+//! a click on a row shows the next ones.
 
 use crate::machines::panel::{Rect, inside, slot_frame};
 use crate::net::items::ItemKey;
@@ -20,12 +21,15 @@ use crate::storage::{Limit, Store};
 
 pub const WIDTH: f32 = 214.0;
 pub const TITLE: [f32; 2] = [8.0, 6.0];
-/// The quick filter's tabs, in `Tab::ALL` order.
-pub const TABS: [Rect; 4] = [
-    [8.0, 16.0, 30.0, 12.0],
-    [40.0, 16.0, 44.0, 12.0],
-    [86.0, 16.0, 74.0, 12.0],
-    [162.0, 16.0, 44.0, 12.0],
+/// The quick filter's tabs, in `Tab::ALL` order (slice 18: «своя» last).
+/// In-game check w3: «инструменты» (66 px) ran out of its 62 into «броня»; the tabs share the
+/// row by their words.
+pub const TABS: [Rect; 5] = [
+    [8.0, 16.0, 24.0, 12.0],
+    [34.0, 16.0, 34.0, 12.0],
+    [70.0, 16.0, 70.0, 12.0],
+    [142.0, 16.0, 34.0, 12.0],
+    [178.0, 16.0, 28.0, 12.0],
 ];
 pub const SEARCH: Rect = [8.0, 30.0, 64.0, 12.0];
 pub const ORDER_MODE: Rect = [74.0, 30.0, 36.0, 12.0];
@@ -36,34 +40,80 @@ pub const LIMIT_MODE: Rect = [170.0, 30.0, 36.0, 12.0];
 pub const COLUMNS: usize = 9;
 /// Where the first stored item's icon goes; the others follow in rows of COLUMNS.
 pub const GRID: [f32; 2] = [26.0, 45.0];
-/// O1: the recipe book's socket, left of the grid (the icon's corner).
-pub const BOOK: [f32; 2] = [6.0, 45.0];
+/// Slice 18: the three sockets left of the grid (the icons' corners), in
+/// `storage::modules::SOCKET_*` order: the stack module, the recipe book (O1), the filter.
+pub const SOCKETS: [[f32; 2]; 3] = [[6.0, 45.0], [6.0, 63.0], [6.0, 81.0]];
+/// The recipe book's socket.
+pub const BOOK: [f32; 2] = SOCKETS[1];
 pub const LIMIT_ICON: [f32; 2] = [8.0, 100.0];
 pub const LIMIT_TEXT: [f32; 2] = [24.0, 102.0];
 pub const LIMIT_MINUS: Rect = [96.0, 100.0, 13.0, 12.0];
 pub const LIMIT_PLUS: Rect = [110.0, 100.0, 13.0, 12.0];
 pub const LIMIT_CLEAR: Rect = [124.0, 100.0, 13.0, 12.0];
 pub const LIMIT_DESTROY: Rect = [140.0, 100.0, 66.0, 12.0];
-/// The orders mode's row under the grid: order ×1, ×8, ×64, then «держать N» and its buttons.
+/// The orders mode's row under the grid (slice 18: any count): «−», the count, «+», «Заказать»,
+/// then «держать N» and its buttons. ORDER_BUTTONS in ORDER_MINUS, ORDER_PLUS, ORDER_GO order.
 pub const ORDER_BUTTONS: [Rect; 3] = [
-    [24.0, 100.0, 16.0, 12.0],
-    [42.0, 100.0, 16.0, 12.0],
-    [60.0, 100.0, 20.0, 12.0],
+    [24.0, 100.0, 10.0, 12.0],
+    [58.0, 100.0, 10.0, 12.0],
+    [70.0, 100.0, 32.0, 12.0],
 ];
-pub const KEEP_TEXT: [f32; 2] = [84.0, 102.0];
+pub const ORDER_COUNT: Rect = [35.0, 100.0, 22.0, 12.0];
+pub const ORDER_MINUS: usize = 0;
+pub const ORDER_PLUS: usize = 1;
+pub const ORDER_GO: usize = 2;
+pub const KEEP_TEXT: [f32; 2] = [104.0, 102.0];
+/// Slice 18: the «Лимиты» mode lists every item as a row (those with a limit first), this many a
+/// page, in the grid's place.
+pub const LIMIT_ROWS: usize = 5;
+pub const LIMIT_ROW_H: f32 = 11.0;
 pub const KEEP_MINUS: Rect = [166.0, 100.0, 13.0, 12.0];
 pub const KEEP_PLUS: Rect = [180.0, 100.0, 13.0, 12.0];
 pub const KEEP_CLEAR: Rect = [194.0, 100.0, 12.0, 12.0];
 pub const STATUS: Rect = [8.0, 114.0, 198.0, 12.0];
 pub const DETAIL: [f32; 2] = [8.0, 129.0];
-/// The orders mode: the line of one order of the queue, and its cancel button.
-pub const QUEUE: Rect = [8.0, 127.0, 184.0, 11.0];
-pub const CANCEL: Rect = [194.0, 127.0, 12.0, 11.0];
-pub const INVENTORY: [f32; 2] = [26.0, 152.0];
+/// The orders mode: the rows of the queue (wave 2: a list, QUEUE_ROWS orders at a time), each
+/// with its cancel button.
+pub const QUEUE_ROWS: usize = 2;
+pub const QUEUE_ROW_H: f32 = 10.0;
+pub const QUEUE: Rect = [8.0, 127.0, 184.0, QUEUE_ROW_H];
+pub const CANCEL: Rect = [194.0, 127.0, 12.0, QUEUE_ROW_H];
+pub const INVENTORY: [f32; 2] = [26.0, 158.0];
 pub const INVENTORY_LABEL_Y: f32 = INVENTORY[1] - 10.0;
 pub const HEIGHT: f32 = INVENTORY[1] + 80.0;
-/// What the order buttons order.
-pub const ORDER_COUNTS: [u16; 3] = [1, 8, 64];
+/// The most one order press orders (the press's count field).
+pub const MAX_ORDER: u16 = MAX_DAMAGE as u16;
+
+/// Wave 2: the queue's row `k` and its cancel button.
+pub fn queue_row(k: usize) -> (Rect, Rect) {
+    let dy = QUEUE_ROW_H * k as f32;
+    ([QUEUE[0], QUEUE[1] + dy, QUEUE[2], QUEUE[3]], [CANCEL[0], CANCEL[1] + dy, CANCEL[2], CANCEL[3]])
+}
+
+/// Wave 2: the orders the queue's rows show, from the page `first` is on: their places in the
+/// queue of `len`, QUEUE_ROWS at most.
+pub fn queue_page(len: usize, first: usize) -> Vec<usize> {
+    if len == 0 {
+        return Vec::new();
+    }
+    let start = (first % len) / QUEUE_ROWS * QUEUE_ROWS;
+    (start..len.min(start + QUEUE_ROWS)).collect()
+}
+
+/// Slice 18: the order count after «−» or «+» by `delta`, never below 1 nor past MAX_ORDER.
+pub fn step_count(count: u16, delta: i32) -> u16 {
+    (i32::from(count) + delta).clamp(1, i32::from(MAX_ORDER)) as u16
+}
+
+/// The «Лимиты» mode's row `i` (its whole width).
+pub fn limit_row(i: usize) -> Rect {
+    [GRID[0], GRID[1] + LIMIT_ROW_H * i as f32, 18.0 * COLUMNS as f32, LIMIT_ROW_H - 1.0]
+}
+
+/// The row at `at` in the «Лимиты» mode.
+pub fn limit_row_at(at: [f32; 2]) -> Option<usize> {
+    (0..LIMIT_ROWS).find(|&i| inside(limit_row(i), at))
+}
 
 /// Where the item of the page's `i`th place goes.
 pub fn cell(i: usize) -> [f32; 2] {
@@ -84,19 +134,21 @@ pub enum Part {
     LimitMode,
     /// A place of the page, from 0.
     Cell(usize),
-    Book,
+    /// Slice 18: a socket, by its place in SOCKETS.
+    Socket(usize),
     LimitMinus,
     LimitPlus,
     LimitClear,
     LimitDestroy,
-    /// The orders mode: an order button by its place in ORDER_COUNTS.
+    /// The orders mode: «−», «+» or «Заказать» (ORDER_MINUS, ORDER_PLUS, ORDER_GO).
     Order(usize),
     KeepMinus,
     KeepPlus,
     KeepClear,
     Status,
-    Queue,
-    Cancel,
+    /// Wave 2: a row of the queue, and its cancel button, by the row.
+    Queue(usize),
+    Cancel(usize),
 }
 
 /// The part at `at`, in window pixels, in the taking or the limits mode.
@@ -113,8 +165,8 @@ pub fn part_in(at: [f32; 2], orders: bool) -> Option<Part> {
     if let Some(i) = (0..PER_PAGE).find(|&i| inside(slot_frame(cell(i)), at)) {
         return Some(Part::Cell(i));
     }
-    if inside(slot_frame(BOOK), at) {
-        return Some(Part::Book);
+    if let Some(k) = SOCKETS.iter().position(|&p| inside(slot_frame(p), at)) {
+        return Some(Part::Socket(k));
     }
     let shared = [
         (SEARCH, Part::Search),
@@ -137,9 +189,12 @@ pub fn part_in(at: [f32; 2], orders: bool) -> Option<Part> {
         (KEEP_MINUS, Part::KeepMinus),
         (KEEP_PLUS, Part::KeepPlus),
         (KEEP_CLEAR, Part::KeepClear),
-        (QUEUE, Part::Queue),
-        (CANCEL, Part::Cancel),
     ];
+    if orders
+        && let Some(k) = (0..QUEUE_ROWS).find(|&k| inside(queue_row(k).0, at) || inside(queue_row(k).1, at))
+    {
+        return Some(if inside(queue_row(k).1, at) { Part::Cancel(k) } else { Part::Queue(k) });
+    }
     let own: &[(Rect, Part)] = if orders { &order_parts } else { &limits };
     shared
         .iter()
@@ -149,8 +204,14 @@ pub fn part_in(at: [f32; 2], orders: bool) -> Option<Part> {
 
 // ---- Presses the server answers ----
 
-/// An item as a press names it: its number in the item table and its damage.
+/// An item as a press names it: its number in the item table and its damage; or, with VARIANT in
+/// the second, the place of a component stack among its item's (`Store::variants_of`).
 pub type ItemRef = (u16, u16);
+
+/// Slice 18: the mark of a component stack's place in an ItemRef's second number (and a wire
+/// line's damage). A press with it has the top bit of its id set.
+pub const VARIANT: u16 = 0x8000;
+const VARIANT_BIT: u32 = 1 << 31;
 
 /// The largest damage a press can name. A stack worn further has no place in the storage.
 pub const MAX_DAMAGE: u32 = (1 << DAMAGE_BITS) - 1;
@@ -220,8 +281,9 @@ pub enum Press {
     Cancel {
         order: u16,
     },
-    /// O1: the recipe book's socket: the book on the cursor goes in, or the book comes out.
-    Book,
+    /// O1, slice 18: socket `k` (`storage::modules::SOCKET_*`): the module on the cursor goes
+    /// in, or the module comes out.
+    Socket(u8),
 }
 
 /// A press that does nothing on the server: a tab, the search, a page.
@@ -292,7 +354,9 @@ pub fn encode(press: Press) -> Option<i32> {
                 .flatten()
         }
         Press::Cancel { order } => pack(CANCEL_ORDER, 0, u32::from(order)),
-        Press::Book => pack(BOOK_SOCKET, 0, 0),
+        Press::Socket(k) => (usize::from(k) < SOCKETS.len())
+            .then(|| pack(BOOK_SOCKET, 0, u32::from(k)))
+            .flatten(),
         Press::Place { .. } | Press::Limit { .. } => encode_item_press(press),
     }
 }
@@ -313,19 +377,49 @@ fn encode_item_press(press: Press) -> Option<i32> {
         Press::Limit { item, .. } => Some(item),
         _ => None,
     };
-    let (number, damage) = match item {
-        Some((n, d)) if addressable(u32::from(d)) && u32::from(n) != NO_ITEM => {
-            (u32::from(n), u32::from(d))
+    let (number, damage, variant) = match item {
+        Some((n, d))
+            if addressable(u32::from(d & !VARIANT)) && u32::from(n) != NO_ITEM =>
+        {
+            (u32::from(n), u32::from(d & !VARIANT), d & VARIANT != 0)
         }
         Some(_) => return None,
-        None => (NO_ITEM, 0),
+        None => (NO_ITEM, 0, false),
     };
-    pack(action, damage, number)
+    let id = pack(action, damage, number)?;
+    // A component stack's press: the top bit, so the id is below zero.
+    Some(if variant {
+        (id as u32 | VARIANT_BIT) as i32
+    } else {
+        id
+    })
 }
 
 /// The press a menu button id names; none for NO_PRESS or an id it does not know.
 pub fn decode(id: i32) -> Option<Press> {
-    let id = u32::try_from(id).ok()?;
+    let raw = id as u32;
+    let variant = raw & VARIANT_BIT != 0;
+    let id = raw & !VARIANT_BIT;
+    if variant {
+        return match decode_plain(id)? {
+            Press::Place {
+                item: Some((n, d)),
+                take,
+            } => Some(Press::Place {
+                item: Some((n, d | VARIANT)),
+                take,
+            }),
+            Press::Limit { item: (n, d), change } => Some(Press::Limit {
+                item: (n, d | VARIANT),
+                change,
+            }),
+            _ => None,
+        };
+    }
+    decode_plain(id)
+}
+
+fn decode_plain(id: u32) -> Option<Press> {
     let action = id >> ACTION_SHIFT;
     let number = id & ((1 << ITEM_BITS) - 1);
     let damage = (id >> ITEM_BITS) & MAX_DAMAGE;
@@ -341,7 +435,10 @@ pub fn decode(id: i32) -> Option<Press> {
         CANCEL_ORDER => Some(Press::Cancel {
             order: number as u16,
         }),
-        BOOK_SOCKET => Some(Press::Book),
+        BOOK_SOCKET => u8::try_from(number)
+            .ok()
+            .filter(|k| usize::from(*k) < SOCKETS.len())
+            .map(Press::Socket),
         _ => {
             let bare = *ACTIONS.get((action as usize).checked_sub(1)?)?;
             let item = (number != NO_ITEM).then_some((number as u16, damage as u16));
@@ -436,6 +533,45 @@ mod tests {
     use super::*;
 
     #[test]
+    fn any_count_can_be_ordered() {
+        assert_eq!(step_count(1, -1), 1);
+        assert_eq!(step_count(1, 8), 9);
+        assert_eq!(step_count(2000, 64), MAX_ORDER);
+        let p = Press::Order {
+            item: 5,
+            count: MAX_ORDER,
+        };
+        assert_eq!(decode(encode(p).unwrap()), Some(p));
+        assert_eq!(limit_row_at([30.0, 46.0]), Some(0));
+        assert_eq!(limit_row_at([30.0, 45.0 + 11.0 * 4.0 + 2.0]), Some(4));
+        assert_eq!(limit_row_at([30.0, 45.0 + 11.0 * 5.0 + 2.0]), None);
+    }
+
+    #[test]
+    fn a_component_stacks_press_names_its_place() {
+        // Slice 18: a press on the third enchanted book of the list.
+        for p in [
+            Press::Place {
+                item: Some((812, VARIANT | 2)),
+                take: Take::One,
+            },
+            Press::Limit {
+                item: (812, VARIANT | 2047),
+                change: LimitChange::Clear,
+            },
+        ] {
+            let id = encode(p).unwrap();
+            assert!(id < 0, "the top bit marks it");
+            assert_eq!(decode(id), Some(p));
+        }
+        let plain = Press::Place {
+            item: Some((812, 2)),
+            take: Take::One,
+        };
+        assert_eq!(decode(encode(plain).unwrap()), Some(plain));
+    }
+
+    #[test]
     fn every_press_comes_back_from_its_id() {
         let presses = [
             Press::Place {
@@ -472,7 +608,9 @@ mod tests {
             },
             Press::Cancel { order: 0xFFFF },
             Press::Cancel { order: 1 },
-            Press::Book,
+            Press::Socket(0),
+            Press::Socket(1),
+            Press::Socket(2),
         ];
         for p in presses {
             let id = encode(p).unwrap();
@@ -575,14 +713,20 @@ mod tests {
         );
         assert_eq!(part_at([150.0, 104.0]), Some(Part::LimitDestroy));
         assert_eq!(part_at([200.0, 200.0]), None);
-        assert_eq!(part_at([8.0, 50.0]), Some(Part::Book));
+        assert_eq!(part_at([8.0, 50.0]), Some(Part::Socket(0)));
+        assert_eq!(part_at([8.0, 68.0]), Some(Part::Socket(1)));
+        assert_eq!(part_at([8.0, 86.0]), Some(Part::Socket(2)));
+        assert_eq!(part_at([190.0, 20.0]), Some(Part::Tab(Tab::Own)));
+        assert_eq!(encode(Press::Socket(3)), None);
         assert_eq!(part_at([80.0, 34.0]), Some(Part::OrderMode));
         // The orders mode's row under the grid and line under the status.
         assert_eq!(part_in([30.0, 104.0], true), Some(Part::Order(0)));
         assert_eq!(part_in([70.0, 104.0], true), Some(Part::Order(2)));
         assert_eq!(part_in([200.0, 104.0], true), Some(Part::KeepClear));
-        assert_eq!(part_in([100.0, 131.0], true), Some(Part::Queue));
-        assert_eq!(part_in([198.0, 131.0], true), Some(Part::Cancel));
+        assert_eq!(part_in([100.0, 131.0], true), Some(Part::Queue(0)));
+        assert_eq!(part_in([198.0, 131.0], true), Some(Part::Cancel(0)));
+        assert_eq!(part_in([100.0, 141.0], true), Some(Part::Queue(1)));
+        assert_eq!(part_in([198.0, 141.0], true), Some(Part::Cancel(1)));
         assert_eq!(part_in([150.0, 104.0], true), None);
         assert_eq!(part_in([100.0, 131.0], false), None);
         // The book's socket and the grid do not touch.
@@ -590,5 +734,17 @@ mod tests {
         assert!(book[0] + book[2] <= slot_frame(cell(0))[0]);
         // The window fits a 1280×720 screen at GUI scale 3.
         const { assert!(HEIGHT <= 240.0) };
+    }
+
+    #[test]
+    fn the_queue_is_a_list_a_page_at_a_time() {
+        // Wave 2: two orders a page; a click goes on to the next page and round.
+        assert_eq!(queue_page(5, 0), vec![0, 1]);
+        assert_eq!(queue_page(5, 3), vec![2, 3]);
+        assert_eq!(queue_page(5, 4), vec![4]);
+        assert_eq!(queue_page(5, 6), vec![0, 1]);
+        assert!(queue_page(0, 3).is_empty());
+        // The last row ends above the inventory's label.
+        assert!(queue_row(QUEUE_ROWS - 1).0[1] + QUEUE_ROW_H <= INVENTORY_LABEL_Y);
     }
 }

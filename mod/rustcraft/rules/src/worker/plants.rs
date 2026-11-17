@@ -134,6 +134,30 @@ pub fn is_seed(item: &str) -> bool {
         || item == "minecraft:cocoa_beans"
 }
 
+/// Whether the reaper's filter (H6, guide `tool_reaper`: «Фильтр в окне шасси оставляет только
+/// нужные растения, например одни тыквы») lets it take the plant `block`: an empty filter takes
+/// all; otherwise the plant's block, its crop or its seed is in it.
+pub fn wanted(block: &str, filter: &[String]) -> bool {
+    if filter.is_empty() {
+        return true;
+    }
+    let crop = match block {
+        "minecraft:carrots" => "minecraft:carrot",
+        "minecraft:potatoes" => "minecraft:potato",
+        "minecraft:beetroots" => "minecraft:beetroot",
+        "minecraft:cocoa" => "minecraft:cocoa_beans",
+        SWEET_BERRY_BUSH => "minecraft:sweet_berries",
+        "minecraft:cave_vines" | "minecraft:cave_vines_plant" => "minecraft:glow_berries",
+        "minecraft:kelp_plant" => "minecraft:kelp",
+        "minecraft:pitcher_crop" => "minecraft:pitcher_plant",
+        b => b,
+    };
+    let seed = AGED.iter().find(|a| a.block == block).map(|a| a.seed);
+    filter
+        .iter()
+        .any(|f| f == block || f == crop || Some(f.as_str()) == seed)
+}
+
 /// Whether two cells of a column are the same plant (kelp's two blocks are one plant).
 fn same_column(a: &str, b: &str) -> bool {
     let kelp = |s: &str| s == "minecraft:kelp" || s == "minecraft:kelp_plant";
@@ -144,9 +168,13 @@ fn age(view: &dyn BlockView, pos: Pos) -> Option<u32> {
     view.prop(pos, "age")?.parse().ok()
 }
 
-/// What the reaper does at `pos`, a cell of its zone; `top` is the highest y its zone reaches
-/// (H4: columns are cut within it). None when there is nothing ripe there.
-pub fn plan(view: &dyn BlockView, pos: Pos, top: i32) -> Option<Harvest> {
+/// How far down a column is followed to find its base.
+const COLUMN_REACH: usize = 64;
+
+/// What the reaper does at `pos`, a cell of its zone; `bottom` and `top` are the lowest and the
+/// highest y its zone reaches (H4: columns are cut within it). None when there is nothing ripe
+/// there.
+pub fn plan(view: &dyn BlockView, pos: Pos, bottom: i32, top: i32) -> Option<Harvest> {
     let block = view.block(pos);
     let below = view.block(step(pos, Face::YNeg));
     if let Some(a) = AGED.iter().find(|a| a.block == block) {
@@ -183,20 +211,28 @@ pub fn plan(view: &dyn BlockView, pos: Pos, top: i32) -> Option<Harvest> {
         });
     }
     if COLUMNS.contains(&block.as_str()) {
-        // Only the base plans its column: the cell under it is not the same plant.
-        if same_column(&below, &block) {
+        // A column is planned from its top cell, or from the zone's top when it grows higher, and
+        // cut top down to its base or the zone's bottom, whichever is higher: the base stays. So
+        // a reaper reaches a column from any side of it: over a field, hanging over kelp from a
+        // ceiling rail or riding up a bamboo on a wall rail.
+        let above = view.block(step(pos, Face::YPos));
+        let is_top = !same_column(&above, &block);
+        if pos[1] > top || !(is_top || pos[1] == top) {
             return None;
         }
-        let mut breaks = Vec::new();
-        let mut p = step(pos, Face::YPos);
-        while p[1] <= top && same_column(&view.block(p), &block) {
-            breaks.push(p);
-            p = step(p, Face::YPos);
+        let mut base = pos;
+        for _ in 0..COLUMN_REACH {
+            let under = step(base, Face::YNeg);
+            if !same_column(&view.block(under), &block) {
+                break;
+            }
+            base = under;
         }
+        let lowest = (base[1] + 1).max(bottom);
+        let breaks: Vec<Pos> = (lowest..=pos[1]).rev().map(|y| [pos[0], y, pos[2]]).collect();
         if breaks.is_empty() {
             return None;
         }
-        breaks.reverse();
         return Some(Harvest {
             group: Group::Column,
             breaks,
@@ -297,26 +333,54 @@ mod tests {
         w.set([0, 0, 0], "minecraft:farmland", &[]);
         w.set([0, 1, 0], "minecraft:wheat", &[("age", "7")]);
         w.set([1, 1, 0], "minecraft:wheat", &[("age", "3")]);
-        let h = plan(&w, [0, 1, 0], 3).unwrap();
+        let h = plan(&w, [0, 1, 0], 0, 3).unwrap();
         assert_eq!(h.group, Group::Aged);
         assert_eq!(h.breaks, vec![[0, 1, 0]]);
         assert_eq!(h.replant.unwrap().seed, "minecraft:wheat_seeds");
-        assert_eq!(plan(&w, [1, 1, 0], 3), None);
+        assert_eq!(plan(&w, [1, 1, 0], 0, 3), None);
     }
 
     #[test]
     fn a_column_is_cut_over_its_base_top_down_within_the_zone() {
-        // spec 17 example: cane 3 high gives 2, the base stays.
+        // spec 17 example: cane 3 high gives 2, the base stays; a zone up to y 3 plans it there.
         let mut w = World::default();
         for y in 1..=4 {
             w.set([0, y, 0], "minecraft:sugar_cane", &[]);
         }
-        let h = plan(&w, [0, 1, 0], 3).unwrap();
+        let h = plan(&w, [0, 3, 0], 1, 3).unwrap();
         assert_eq!(h.breaks, vec![[0, 3, 0], [0, 2, 0]]);
-        assert_eq!(plan(&w, [0, 2, 0], 3), None, "only the base plans");
+        for y in [1, 2, 4] {
+            assert_eq!(plan(&w, [0, y, 0], 1, 3), None, "only one cell plans it: y {y}");
+        }
         let mut lone = World::default();
         lone.set([0, 1, 0], "minecraft:cactus", &[]);
-        assert_eq!(plan(&lone, [0, 1, 0], 3), None);
+        assert_eq!(plan(&lone, [0, 1, 0], 0, 3), None);
+    }
+
+    #[test]
+    fn a_column_is_cut_from_its_top_inside_the_zone() {
+        // A bamboo 6 high beside a wall rail at y 4, its zone y 3..5: the top is out of reach, so
+        // the zone's top cell plans it down to the zone's bottom.
+        let mut w = World::default();
+        for y in 1..=6 {
+            w.set([0, y, 0], "minecraft:bamboo", &[]);
+        }
+        assert_eq!(plan(&w, [0, 5, 0], 3, 5).unwrap().breaks, vec![[0, 5, 0], [0, 4, 0], [0, 3, 0]]);
+        // Riding higher its zone holds the top: cut from it down to y 5.
+        assert_eq!(plan(&w, [0, 6, 0], 5, 7).unwrap().breaks, vec![[0, 6, 0], [0, 5, 0]]);
+    }
+
+    #[test]
+    fn kelp_under_a_ceiling_rail_is_reached() {
+        // Kelp from the sea floor at y 0 to y 6; a reaper hanging from a ceiling rail at y 8
+        // reaches y 6..8 and cuts the kelp's top block, the base far below stays.
+        let mut w = World::default();
+        for y in 0..6 {
+            w.set([0, y, 0], "minecraft:kelp_plant", &[]);
+        }
+        w.set([0, 6, 0], "minecraft:kelp", &[]);
+        assert_eq!(plan(&w, [0, 6, 0], 6, 8).unwrap().breaks, vec![[0, 6, 0]]);
+        assert_eq!(plan(&w, [0, 6, 0], 0, 8).unwrap().breaks.len(), 6, "all over the base");
     }
 
     #[test]
@@ -325,7 +389,7 @@ mod tests {
         w.set([0, 1, 0], "minecraft:kelp_plant", &[]);
         w.set([0, 2, 0], "minecraft:kelp_plant", &[]);
         w.set([0, 3, 0], "minecraft:kelp", &[]);
-        assert_eq!(plan(&w, [0, 1, 0], 5).unwrap().breaks.len(), 2);
+        assert_eq!(plan(&w, [0, 3, 0], 1, 5).unwrap().breaks.len(), 2);
     }
 
     #[test]
@@ -338,9 +402,9 @@ mod tests {
             &[("facing", "east")],
         );
         w.set([5, 1, 0], "minecraft:pumpkin", &[]);
-        assert_eq!(plan(&w, [1, 1, 0], 3).unwrap().group, Group::Stem);
-        assert_eq!(plan(&w, [0, 1, 0], 3), None, "the stem stays");
-        assert_eq!(plan(&w, [5, 1, 0], 3), None, "a placed pumpkin stays");
+        assert_eq!(plan(&w, [1, 1, 0], 0, 3).unwrap().group, Group::Stem);
+        assert_eq!(plan(&w, [0, 1, 0], 0, 3), None, "the stem stays");
+        assert_eq!(plan(&w, [5, 1, 0], 0, 3), None, "a placed pumpkin stays");
     }
 
     #[test]
@@ -349,13 +413,13 @@ mod tests {
         w.set([0, 1, 0], SWEET_BERRY_BUSH, &[("age", "3")]);
         w.set([1, 1, 0], SWEET_BERRY_BUSH, &[("age", "1")]);
         w.set([2, 1, 0], "minecraft:cave_vines", &[("berries", "true")]);
-        let h = plan(&w, [0, 1, 0], 3).unwrap();
+        let h = plan(&w, [0, 1, 0], 0, 3).unwrap();
         assert!(h.breaks.is_empty());
         assert_eq!(h.picks[0].count, 2);
         assert_eq!(h.picks[0].set, ("age".into(), "1".into()));
-        assert_eq!(plan(&w, [1, 1, 0], 3), None);
+        assert_eq!(plan(&w, [1, 1, 0], 0, 3), None);
         assert_eq!(
-            plan(&w, [2, 1, 0], 3).unwrap().picks[0].item,
+            plan(&w, [2, 1, 0], 0, 3).unwrap().picks[0].item,
             "minecraft:glow_berries"
         );
     }
@@ -364,13 +428,27 @@ mod tests {
     fn ripe_cocoa_is_planted_again_facing_the_same_trunk() {
         let mut w = World::default();
         w.set([0, 1, 0], COCOA, &[("age", "2"), ("facing", "west")]);
-        let r = plan(&w, [0, 1, 0], 3).unwrap().replant.unwrap();
+        let r = plan(&w, [0, 1, 0], 0, 3).unwrap().replant.unwrap();
         assert!(r.props.contains(&("facing".into(), "west".into())));
         assert_eq!(r.seed, "minecraft:cocoa_beans");
     }
 
     #[test]
+    fn a_filtered_reaper_takes_only_pumpkins() {
+        let pumpkins = vec!["minecraft:pumpkin".to_owned()];
+        assert!(wanted("minecraft:pumpkin", &pumpkins));
+        for other in ["minecraft:wheat", "minecraft:melon", "minecraft:cocoa"] {
+            assert!(!wanted(other, &pumpkins), "{other}");
+        }
+        assert!(wanted("minecraft:wheat", &[]), "no filter: all");
+        let crops = vec!["minecraft:carrot".to_owned(), "minecraft:wheat_seeds".to_owned()];
+        assert!(wanted("minecraft:carrots", &crops) && wanted("minecraft:wheat", &crops));
+        assert!(wanted("minecraft:kelp_plant", &["minecraft:kelp".to_owned()]));
+    }
+
+    #[test]
     fn chorus_and_mushrooms_are_never_touched() {
+
         let mut w = World::default();
         for (i, b) in [
             "minecraft:chorus_flower",
@@ -381,7 +459,7 @@ mod tests {
         .enumerate()
         {
             w.set([i as i32, 1, 0], b, &[("age", "5")]);
-            assert_eq!(plan(&w, [i as i32, 1, 0], 3), None);
+            assert_eq!(plan(&w, [i as i32, 1, 0], 0, 3), None);
         }
     }
 
@@ -392,10 +470,10 @@ mod tests {
         w.set([0, 1, 0], TORCHFLOWER, &[]);
         w.set([2, 1, 0], TORCHFLOWER, &[]);
         assert_eq!(
-            plan(&w, [0, 1, 0], 3).unwrap().replant.unwrap().seed,
+            plan(&w, [0, 1, 0], 0, 3).unwrap().replant.unwrap().seed,
             TORCHFLOWER_SEED
         );
-        assert_eq!(plan(&w, [2, 1, 0], 3), None, "a wild one stays");
+        assert_eq!(plan(&w, [2, 1, 0], 0, 3), None, "a wild one stays");
         assert!(is_seed(TORCHFLOWER_SEED) && is_seed("minecraft:wheat_seeds"));
     }
 }

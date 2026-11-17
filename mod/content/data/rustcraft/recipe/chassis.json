@@ -8,7 +8,7 @@
   ],
   "key": {
     "b": "rustcraft:sparksteel",
-    "s": "minecraft:amethyst_shard"
+    "s": "rustcraft:crystal_shard"
   },
   "result": {
     "id": "rustcraft:chassis",

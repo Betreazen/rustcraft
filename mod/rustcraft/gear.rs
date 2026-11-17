@@ -8,8 +8,10 @@
 //   backpack's way): its module sockets, then the Capacity and the Thrift book slots. Closing it
 //   keeps the modules of its piece and up to three books each; the rest goes back to the player.
 // - Twice a second, for each player of the level: the worn pieces' modules work on their charge —
-//   night vision, jump boost and speed as the game's effects, the magnet picks up what lies within
-//   6 blocks, the jetpack lets the player fly while the chestplate holds charge
+//   night vision (switched by its key) and jump boost as the game's effects, the run module +50 %
+//   speed for 5 s from the start of a sprint (an attribute modifier), the magnet (switched by its
+//   key) pulls what lies within 6 blocks toward the player every 2 ticks for the game's pickup
+//   (slice 18), the jetpack lets the player fly while the chestplate holds charge
 //   (`native_set_flight`). What the damage hook needs is noted for it (it runs inside the hit,
 //   with no game): the blade in hand, the damper, the shock absorber.
 // - The damage hook: a charged blade strikes and pays 25 E (the fourth tier one point harder), an
@@ -94,7 +96,22 @@ struct State {
     /// The dash: each player's last input flags and the tick forward last went down.
     input: HashMap<u128, (i32, u64)>,
     /// Players holding up a charged energy shield, by entity id: the shield's number.
-    blocking: HashMap<i32, u64>,
+    blocking: HashMap<i32, (u64, u8)>,
+    /// Slice 18: the tick each player began to sprint (the run module's burst), the players
+    /// whose burst modifier is on, and the players whose magnet pulls.
+    sprint: HashMap<u128, u64>,
+    running: HashSet<u128>,
+    magnets: HashSet<u128>,
+    /// Players whose leftover burst modifier (from a logout or a restart mid-burst) was taken
+    /// off since they came on.
+    cleaned: HashSet<u128>,
+    /// Slice 18: each player's scout compass mode and the place its needle points at.
+    compass_mode: HashMap<u128, rules::compass::Mode>,
+    needles: HashMap<u128, (String, [i32; 3])>,
+    /// Slice 18: players riding a zipline rope (seen with its handle), and the looks each level's
+    /// players were last sent.
+    zip_riders: HashSet<u128>,
+    looks_sent: HashMap<String, Vec<u8>>,
 }
 
 /// The client's side of the dash: a push the server asked for, applied at the window's next tick.
@@ -169,15 +186,19 @@ pub(super) fn battery(game: &Game<'_>, stack: &ItemStack) -> Option<Battery> {
     let mut s = state();
     load(&mut s, game);
     let (_, g, h) = held_of(&s, stack)?;
-    let cap = rules::capacity(g, &h, false);
+    let cap = rules::charger_capacity(g, &h)?;
     Some(Battery { charge: h.charge.min(cap), capacity: cap })
 }
 
-/// Sets a piece's charge.
+/// A charger's fill: the piece's charge goes up to `charge_now`, within its charger battery, and
+/// never down.
 pub(super) fn charge(stack: &ItemStack, charge_now: f64) {
     let mut s = state();
     let Some(id) = id_of(stack) else { return };
-    s.store.held.entry(id).or_default().charge = charge_now.max(0.0);
+    let Some(g) = Gear::of(&stack.item) else { return };
+    let h = s.store.held.entry(id).or_default();
+    let Some(cap) = rules::charger_capacity(g, h) else { return };
+    rules::add_charge(h, cap, charge_now);
     s.dirty = true;
 }
 
@@ -193,10 +214,15 @@ fn needs_full(game: &mut Game<'_>, slot: i32) -> f64 {
 
 /// `native_inventory_tick`: a gear piece without a number gets one.
 pub(super) fn on_inventory_tick(game: &mut Game<'_>, slot: i32) {
-    let needs = game
-        .native_carried_stack(slot)
-        .is_some_and(|s| Gear::of(&s.item).is_some() && id_of(s).is_none());
-    if !needs {
+    point_compass(game, slot);
+    let (gear, numbered) = match game.native_carried_stack(slot) {
+        Some(s) => (Gear::of(&s.item), id_of(s).is_some()),
+        None => return,
+    };
+    let Some(g) = gear else { return };
+    if numbered {
+        sync_levels(game, slot);
+        show_bar(game, slot, g);
         return;
     }
     let id = {
@@ -215,24 +241,295 @@ pub(super) fn on_inventory_tick(game: &mut Game<'_>, slot: i32) {
     }
 }
 
+// ---- Slice 18: the charge bar under the icon ----
+
+/// The battery a piece's bar is measured against: its charger battery, the zipline's charges.
+fn shown_capacity(g: Gear, h: &Held) -> f64 {
+    rules::charger_capacity(g, h).unwrap_or_else(|| g.base_capacity())
+}
+
+fn bar_of(stack: &ItemStack) -> Option<u8> {
+    match stack.custom_data()?.get(&JavaString::from(rules::BAR_KEY))? {
+        Tag::Byte(v) => u8::try_from(*v).ok(),
+        _ => None,
+    }
+}
+
+const MODEL_DATA: &str = "minecraft:custom_model_data";
+
+// ---- Slice 18: the technical enchantments at the anvil ----
+
+const GLINT: &str = "minecraft:enchantment_glint_override";
+const LORE: &str = "minecraft:lore";
+
+fn byte_of(data: Option<&horizon_world::nbt::Compound>, key: &str) -> Option<u8> {
+    match data?.get(&JavaString::from(key))? {
+        Tag::Byte(v) => u8::try_from(*v).ok(),
+        _ => None,
+    }
+}
+
+/// A lore line «Ёмкость II».
+fn lore_line(book: rules::enchant::Book, level: u8) -> Tag {
+    Tag::Compound(horizon_world::nbt::Compound::from([
+        (JavaString::from("translate"), Tag::String(JavaString::from(book.name_key()))),
+        (JavaString::from("with"), Tag::List(vec![Tag::String(JavaString::from(rules::enchant::roman(level)))])),
+        (JavaString::from("italic"), Tag::Byte(0)),
+        (JavaString::from("color"), Tag::String(JavaString::from("aqua"))),
+    ]))
+}
+
+/// Writes a piece's levels on its stack: custom data for the anvil, the glint and lore lines.
+fn write_levels(stack: &mut ItemStack, capacity: u8, thrift: u8) {
+    use rules::enchant::{Book, CAPACITY_KEY, THRIFT_KEY};
+    let mut data = stack.custom_data().cloned().unwrap_or_default();
+    data.insert(JavaString::from(CAPACITY_KEY), Tag::Byte(capacity as i8));
+    data.insert(JavaString::from(THRIFT_KEY), Tag::Byte(thrift as i8));
+    stack.data_mut().set_other(CUSTOM_DATA, Some(Tag::Compound(data)));
+    let lines: Vec<Tag> = [(Book::Capacity, capacity), (Book::Thrift, thrift)]
+        .into_iter()
+        .filter(|(_, l)| *l > 0)
+        .map(|(b, l)| lore_line(b, l))
+        .collect();
+    let any = !lines.is_empty();
+    stack.data_mut().set_other(LORE, any.then(|| Tag::List(lines)));
+    stack.data_mut().set_other(GLINT, any.then_some(Tag::Byte(1)));
+}
+
+/// A carried piece's levels and the server's agree: the stack's (from the anvil) win when it has
+/// them; a piece without them (older, or new) gets the server's written on.
+fn sync_levels(game: &mut Game<'_>, slot: i32) {
+    use rules::enchant::{CAPACITY_KEY, THRIFT_KEY};
+    let Some(stack) = game.native_carried_stack(slot) else { return };
+    let Some(id) = id_of(stack) else { return };
+    let on_stack = (byte_of(stack.custom_data(), CAPACITY_KEY), byte_of(stack.custom_data(), THRIFT_KEY));
+    let mut s = state();
+    let h = s.store.held.entry(id).or_default();
+    match on_stack {
+        (Some(c), Some(t)) => {
+            let (c, t) = (c.min(rules::MAX_LEVEL), t.min(rules::MAX_LEVEL));
+            if (h.capacity, h.thrift) != (c, t) {
+                h.capacity = c;
+                h.thrift = t;
+                s.dirty = true;
+            }
+        }
+        _ => {
+            let (c, t) = (h.capacity, h.thrift);
+            drop(s);
+            if let Some(stack) = game.native_carried_stack(slot) {
+                write_levels(stack, c, t);
+            }
+        }
+    }
+}
+
+/// The self-test: a piece through the anvil with `books` Capacity books of `level`, one after
+/// another; its Capacity level after each (None when the anvil made nothing).
+pub(super) fn anvil_for_selftest(piece: &str, level: u8, books: usize) -> Vec<Option<u8>> {
+    let mut left = ItemStack::new(piece, 1);
+    let mut book = ItemStack::new(rules::BOOK_CAPACITY, 1);
+    let mut data = horizon_world::nbt::Compound::new();
+    data.insert(JavaString::from(rules::enchant::LEVEL_KEY), Tag::Byte(level as i8));
+    book.data_mut().set_other(CUSTOM_DATA, Some(Tag::Compound(data)));
+    let mut out = Vec::new();
+    for _ in 0..books {
+        let (mut output, mut xp, mut cost) = (None, 0, 0);
+        on_anvil_update(&left, Some(&book), &mut output, &mut xp, &mut cost);
+        match output {
+            Some(made) => {
+                out.push(byte_of(made.custom_data(), rules::enchant::CAPACITY_KEY));
+                left = made;
+            }
+            None => out.push(None),
+        }
+    }
+    out
+}
+
+/// A book's level: I for one made on the crafting table.
+fn book_level(stack: &ItemStack) -> u8 {
+    byte_of(stack.custom_data(), rules::enchant::LEVEL_KEY).unwrap_or(1).clamp(1, rules::MAX_LEVEL)
+}
+
+/// `native_anvil_update` (both sides): a technical book on a gear piece raises its level; two
+/// books of a kind make one of the next level (guide `enchants`).
+pub(super) fn on_anvil_update(
+    left: &ItemStack,
+    right: Option<&ItemStack>,
+    output: &mut Option<ItemStack>,
+    xp_cost: &mut i32,
+    material_cost: &mut i32,
+) {
+    use rules::enchant::{self as e, Book};
+    let Some(right) = right else { return };
+    // Unbreaking and Mending never go on gear: it has no durability.
+    if Gear::of(&left.item).is_some()
+        && right.stored_enchantments().iter().chain(right.enchantments()).any(|(id, _)| e::refused_on_gear(id))
+    {
+        *output = None;
+        return;
+    }
+    let Some(book) = Book::of(&right.item) else { return };
+    let level = book_level(right);
+    if Book::of(&left.item) == Some(book) {
+        let new = e::combine(book_level(left), level);
+        let mut out = left.clone();
+        out.count = 1;
+        let mut data = out.custom_data().cloned().unwrap_or_default();
+        data.insert(JavaString::from(e::LEVEL_KEY), Tag::Byte(new as i8));
+        out.data_mut().set_other(CUSTOM_DATA, Some(Tag::Compound(data)));
+        out.data_mut().set_other(LORE, Some(Tag::List(vec![lore_line(book, new)])));
+        *output = Some(out);
+        *xp_cost = e::cost(new);
+        *material_cost = 1;
+        return;
+    }
+    if Gear::of(&left.item).is_none() {
+        return;
+    }
+    let data = left.custom_data();
+    let (capacity, thrift) = (
+        byte_of(data, e::CAPACITY_KEY).unwrap_or(0),
+        byte_of(data, e::THRIFT_KEY).unwrap_or(0),
+    );
+    let now = if book == Book::Capacity { capacity } else { thrift };
+    let Some(new) = e::apply(now, level) else {
+        *output = None;
+        return;
+    };
+    let mut out = left.clone();
+    match book {
+        Book::Capacity => write_levels(&mut out, new, thrift),
+        Book::Thrift => write_levels(&mut out, capacity, new),
+    }
+    *output = Some(out);
+    *xp_cost = e::cost(new);
+    *material_cost = 1;
+}
+
+/// The `minecraft:custom_model_data` of a lit blade or shield: its first flag (the item model's
+/// `minecraft:condition` shows the field; tools/gen_gear_dark.py).
+fn lit_flags(lit: bool) -> Tag {
+    Tag::Compound(horizon_world::nbt::Compound::from([(
+        JavaString::from("flags"),
+        Tag::List(vec![Tag::Byte(i8::from(lit))]),
+    )]))
+}
+
+/// A carried piece's bar width, written into its custom data when it changed; a blade's or a
+/// shield's lit flag the same way (slice 18).
+fn show_bar(game: &mut Game<'_>, slot: i32, g: Gear) {
+    let (width, lit) = {
+        let s = state();
+        let Some(stack) = game.native_carried_stack(slot) else { return };
+        let Some(id) = id_of(stack) else { return };
+        let h = s.store.held.get(&id).cloned().unwrap_or_default();
+        let w = rules::bar(h.charge, shown_capacity(g, &h));
+        let lit = rules::lit(g, &h).map(lit_flags);
+        let same_lit = lit.is_none() || stack.data().and_then(|d| d.other(MODEL_DATA)) == lit.as_ref();
+        if bar_of(stack) == Some(w) && same_lit {
+            return;
+        }
+        (w, lit)
+    };
+    if let Some(stack) = game.native_carried_stack(slot) {
+        let mut data = stack.custom_data().cloned().unwrap_or_default();
+        data.insert(JavaString::from(rules::BAR_KEY), Tag::Byte(width as i8));
+        stack.data_mut().set_other(CUSTOM_DATA, Some(Tag::Compound(data)));
+        if let Some(flags) = lit {
+            stack.data_mut().set_other(MODEL_DATA, Some(flags));
+        }
+    }
+}
+
+/// `native_item_bar` on a client: a gear piece's bar from its custom data.
+pub(super) fn item_bar(stack: &ItemStack, bar: &mut Option<(i32, u32)>) {
+    if let Some(w) = bar_of(stack) {
+        *bar = Some((i32::from(w), rules::bar_rgb(w)));
+    }
+}
+
+// ---- Slice 18: the scout compass's needle and its two targets ----
+
+const LODESTONE: &str = "minecraft:lodestone_tracker";
+
+/// The place a carried scout compass points at, as its `minecraft:lodestone_tracker` (the item
+/// model's needle reads it), written when it changed; taken off when there is none.
+fn point_compass(game: &mut Game<'_>, slot: i32) {
+    let holds = game
+        .native_carried_stack(slot)
+        .is_some_and(|s| *s.item == *crate::game::rustcraft_explore::COMPASS);
+    if !holds {
+        return;
+    }
+    let Some(player) = crate::game::rustcraft_server::acting(game) else { return };
+    let needle = state().needles.get(&player.uuid).cloned();
+    let want = needle.map(|(dimension, pos)| {
+        Tag::Compound(horizon_world::nbt::Compound::from([
+            (
+                JavaString::from("target"),
+                Tag::Compound(horizon_world::nbt::Compound::from([
+                    (JavaString::from("dimension"), Tag::String(JavaString::from(dimension.as_str()))),
+                    (JavaString::from("pos"), Tag::IntArray(pos.to_vec())),
+                ])),
+            ),
+            (JavaString::from("tracked"), Tag::Byte(0)),
+        ]))
+    });
+    let Some(stack) = game.native_carried_stack(slot) else { return };
+    if stack.data().and_then(|d| d.other(LODESTONE)) == want.as_ref() {
+        return;
+    }
+    stack.data_mut().set_other(LODESTONE, want);
+}
+
+/// A right click with the scout compass switches what it looks for: structures or biomes.
+fn switch_compass(game: &mut Game<'_>, player: u128) {
+    let mode = {
+        let mut s = state();
+        let m = s.compass_mode.entry(player).or_default();
+        *m = m.toggled();
+        *m
+    };
+    let said = match mode {
+        rules::compass::Mode::Structures => line("rustcraft.compass.mode_structures", "Compass: structures", &[]),
+        rules::compass::Mode::Biomes => line("rustcraft.compass.mode_biomes", "Compass: biomes", &[]),
+    };
+    tell(game, player, said);
+}
+
 /// `native_use_item`: a sneaking right click with a piece opens its window; the rifle shoots.
 pub(super) fn on_use_item(game: &mut Game<'_>, stack: &ItemStack, claimed: &mut bool) {
     if *claimed {
         return;
     }
+    if *stack.item == *crate::game::rustcraft_explore::COMPASS {
+        if let Some(player) = crate::game::rustcraft_server::acting(game) {
+            *claimed = true;
+            switch_compass(game, player.uuid);
+        }
+        return;
+    }
     let Some(g) = Gear::of(&stack.item) else { return };
-    let Some(player) = game.native_acting_player() else { return };
+    let Some(player) = crate::game::rustcraft_server::acting(game) else { return };
     if player.sneaking {
         *claimed = true;
+        // Slice 18: a weapon has no sockets: its books go on at the anvil.
+        if g.sockets() == 0 {
+            tell(game, player.uuid, line("rustcraft.gear.no_window", "No sockets: put the technical books on at the anvil", &[]));
+            return;
+        }
         match id_of(stack) {
             Some(id) => state().opening.push((player.uuid, id, g)),
             None => tell(game, player.uuid, line("rustcraft.gear.not_ready", "The piece is getting ready, try again", &[])),
         }
         return;
     }
+    // Wave 2: the rifle fires from its client (a tap of use, or attack while aiming, see
+    // `client_tick`), so a held use that aims does not also fire.
     if g.kind == Kind::Rifle {
         *claimed = true;
-        shoot(game, &player, stack);
     }
     if g.kind == Kind::Zipline {
         *claimed = true;
@@ -397,12 +694,26 @@ fn shoot(game: &mut Game<'_>, player: &horizon_client::mod_api::NativeServerPlay
             shot::Target { id: m.id, lo: [p.x - w, p.y, p.z - w], hi: [p.x + w, p.y + h, p.z + w] }
         })
         .collect();
-    if let Some(target) = shot::hit(eye, dir, &targets, wall, rules::RIFLE_RANGE) {
+    let hit = shot::hit(eye, dir, &targets, wall, rules::RIFLE_RANGE);
+    // Slice 18: the shot's beam, from the muzzle to the creature hit, or to the wall, or its range.
+    let end = hit
+        .and_then(|id| targets.iter().find(|t| t.id == id))
+        .map(|t| [(t.lo[0] + t.hi[0]) / 2.0, (t.lo[1] + t.hi[1]) / 2.0, (t.lo[2] + t.hi[2]) / 2.0])
+        .unwrap_or_else(|| {
+            let d = wall.min(rules::RIFLE_RANGE);
+            [eye[0] + dir[0] * d, eye[1] + dir[1] * d, eye[2] + dir[2] * d]
+        });
+    let muzzle = [eye[0] + dir[0] * 0.8, eye[1] - 0.15 + dir[1] * 0.8, eye[2] + dir[2] * 0.8];
+    let options = horizon_client::particles::ParticleOptions::named("minecraft:electric_spark".to_owned());
+    for p in rustcraft_rules::aim::beam(muzzle, end, rules::BEAM_STEP) {
+        game.with_level(|_, level, _| level.native_send_particles(&options, None, p, [0.0; 3], 0.0, 1));
+    }
+    if let Some(target) = hit {
         game.native_hurt_entity(&player.dimension, target, rules::RIFLE_DAMAGE, "minecraft:arrow", Some(me));
     }
 }
 
-/// `native_menu_input_closed`: a piece's window keeps its modules and books.
+/// `native_menu_input_closed`: a piece's window keeps its modules.
 pub(super) fn on_menu_input_closed(uuid: u128, window: i32, slots: &mut [Option<ItemStack>]) {
     let mut s = state();
     let Some(&(open, id, g)) = s.open.get(&uuid) else { return };
@@ -414,34 +725,16 @@ pub(super) fn on_menu_input_closed(uuid: u128, window: i32, slots: &mut [Option<
         .iter()
         .map(|x| x.as_ref().filter(|x| x.count > 0).map(|x| (x.item.to_string(), x.count)))
         .collect();
-    let (modules, capacity, thrift) = rules::from_window(g, &view);
+    let modules = rules::from_window(g, &view);
     // What stays in the piece is taken out of the window; the rest goes back to the player.
-    let sockets = g.sockets();
-    for (i, slot) in slots.iter_mut().enumerate() {
-        let Some(st) = slot.as_mut() else { continue };
-        let keep = if i < sockets {
-            modules.iter().any(|m| *m == *st.item)
-        } else {
-            let level = if i == sockets { capacity } else { thrift };
-            level > 0 && rules::window_takes(g, i, &st.item, 1)
-        };
-        if !keep {
-            continue;
-        }
-        if i < sockets {
+    for slot in slots.iter_mut().take(g.sockets()) {
+        if slot.as_ref().is_some_and(|st| modules.iter().any(|m| *m == *st.item)) {
             *slot = None;
-        } else {
-            let level = u32::from(if i == sockets { capacity } else { thrift });
-            st.count -= level.min(st.count);
-            if st.count == 0 {
-                *slot = None;
-            }
         }
     }
     let h = s.store.held.entry(id).or_default();
+    h.on.retain(|m| modules.contains(m));
     h.modules = modules;
-    h.capacity = capacity;
-    h.thrift = thrift;
     s.dirty = true;
     save(&mut s);
 }
@@ -451,6 +744,10 @@ pub(super) fn on_logout(uuid: u128) {
     let mut s = state();
     s.open.remove(&uuid);
     s.flying.remove(&uuid);
+    s.sprint.remove(&uuid);
+    s.running.remove(&uuid);
+    s.magnets.remove(&uuid);
+    s.cleaned.remove(&uuid);
 }
 
 // ---- The dash ----
@@ -462,6 +759,11 @@ pub(super) fn on_player_input(game: &mut Game<'_>, player: u128, flags: i32) {
         let mut s = state();
         let now = s.now;
         let (before, last) = s.input.get(&player).copied().unwrap_or((0, 0));
+        if rules::moves::sprint_started(before, flags) {
+            s.sprint.insert(player, now);
+        } else if flags & rules::moves::SPRINT == 0 {
+            s.sprint.remove(&player);
+        }
         let pressed = rules::forward_pressed(before, flags);
         let twice = pressed && last > 0 && now.saturating_sub(last) <= rules::DASH_WINDOW_TICKS;
         s.input.insert(player, (flags, if pressed && !twice { now } else if twice { 0 } else { last }));
@@ -496,8 +798,16 @@ pub(super) fn on_player_input(game: &mut Game<'_>, player: u128, flags: i32) {
     }
 }
 
-/// `native_net_from_server` on a client: the server's dash.
+/// `native_net_from_server` on a client: the server's dash, a gear window's view.
 pub(super) fn on_net(channel: &str, data: &[u8]) {
+    if channel == rules::looks::CHANNEL {
+        *LOOKS.lock().unwrap_or_else(PoisonError::into_inner) = rules::looks::decode(data).into_iter().collect();
+        return;
+    }
+    if channel == rules::window::CHANNEL {
+        *WINDOW.lock().unwrap_or_else(PoisonError::into_inner) = serde_json::from_slice(data).ok();
+        return;
+    }
     if channel != DASH_CHANNEL || data.len() != 12 {
         return;
     }
@@ -505,8 +815,129 @@ pub(super) fn on_net(channel: &str, data: &[u8]) {
     *PUSH.lock().unwrap_or_else(PoisonError::into_inner) = Some([f(0), f(4), f(8)]);
 }
 
-/// The window's tick: a dash waiting is pushed.
+// ---- Slice 18: the gear window's charge and modules, on the client ----
+
+/// The view of the gear window the server opened last.
+static WINDOW: Mutex<Option<rules::window::View>> = Mutex::new(None);
+const PANEL_GAP: f32 = 4.0;
+const PANEL_WIDTH: f32 = 168.0;
+const LINE: f32 = 11.0;
+
+/// `native_screen_render_post`: beside a gear window's sockets, its charge bar and a line a
+/// module (guide `armor`).
+pub(super) fn draw_window(game: &Game<'_>, batch: &mut horizon_client::hud::HudBatch, screen: &horizon_client::mod_api::NativeScreenView<'_>) {
+    use crate::game::rustcraft_screens as kit;
+    if screen.title.and_then(|t| t.translation_key()) != Some(rules::window::TITLE_KEY) {
+        return;
+    }
+    let Some(v) = WINDOW.lock().unwrap_or_else(PoisonError::into_inner).clone() else { return };
+    // Beside the menu, narrowed or moved so it stays on the screen (in-game check w3: at
+    // 1280 × 720 and GUI scale 3 it ran off the right edge).
+    let (x, width) = rules::window::panel(screen.rect, PANEL_WIDTH, PANEL_GAP);
+    let o = [x, screen.rect[1]];
+    let height = 38.0 + LINE * v.modules.len() as f32;
+    kit::background(game, batch, o, [width, height]);
+    kit::label(game, batch, &kit::tr("rustcraft.gear.window.charge", "Charge"), o, [8.0, 7.0]);
+    let share = if v.capacity > 0.0 { v.charge / v.capacity } else { 0.0 };
+    kit::bar(game, batch, [o[0] + 8.0, o[1] + 17.0, width - 16.0, 5.0], share, kit::ENERGY);
+    let amount = kit::tr_with(
+        "rustcraft.gear.window.amount",
+        "%s of %s E",
+        &[rules::window::grouped(v.charge), rules::window::grouped(v.capacity)],
+    );
+    kit::text(game, batch, &amount, o, [8.0, 25.0], kit::VALUE);
+    for (i, (item, st)) in v.modules.iter().enumerate() {
+        // Wave 2 (#15): the guide's short name, and for a module without a key what it gives.
+        let named = Module::of(item).map(rules::window::named);
+        let name = match named {
+            Some(((k, f), _)) => kit::tr(k, f),
+            None => kit::tr(&format!("item.{}", item.replace(':', ".")), item),
+        };
+        let key = Module::of(item)
+            .and_then(rules::window::key_of)
+            .map(|k| rules::window::key_label(&game.native_mod_key("rustcraft", k.name(), k.default_key())));
+        let state = match (st, key) {
+            (rules::window::State::On, Some(k)) => kit::tr_with("rustcraft.gear.window.on", "on · key %s", &[k]),
+            (rules::window::State::Off, Some(k)) => kit::tr_with("rustcraft.gear.window.off", "off · key %s", &[k]),
+            _ => match named {
+                Some((_, (k, f))) => kit::tr(k, f),
+                None => kit::tr("rustcraft.gear.window.auto", "works by itself"),
+            },
+        };
+        let line = format!("{name}: {state}");
+        let colour = if *st == rules::window::State::Off { kit::TEXT } else { kit::TEXT_ON };
+        kit::text(game, batch, &kit::fit(game, &line, width - 16.0), o, [8.0, 38.0 + LINE * i as f32], colour);
+    }
+}
+
+/// Slice 18: whether this window's player aims the rifle (in the main hand, its use key held).
+static AIMING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// Wave 2: ticks the use key was held with the rifle, and the attack key last tick.
+static RIFLE_HELD: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+static ATTACK_WAS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// Wave 2: the players whose rifle fired, for the server's next gear tick.
+static RIFLE_SHOTS: Mutex<Vec<u128>> = Mutex::new(Vec::new());
+
+/// `native_net_from_client`: a player's rifle fired (rules::RIFLE_SHOT_CHANNEL).
+pub(super) fn on_client_message(player: u128, channel: &str, _data: &[u8]) {
+    if channel == rules::RIFLE_SHOT_CHANNEL {
+        RIFLE_SHOTS.lock().unwrap_or_else(PoisonError::into_inner).push(player);
+    }
+}
+
+/// The rifle shots since the last tick of the players in `dimension` (the level whose mobs the
+/// shot meets): each from the rifle in that player's main hand.
+fn rifle_shots(game: &mut Game<'_>, dimension: &str) {
+    let players = game.native_server_players();
+    let due: Vec<u128> = {
+        let mut shots = RIFLE_SHOTS.lock().unwrap_or_else(PoisonError::into_inner);
+        let (here, later): (Vec<u128>, Vec<u128>) = std::mem::take(&mut *shots)
+            .into_iter()
+            .filter(|u| players.iter().any(|p| p.uuid == *u))
+            .partition(|u| players.iter().any(|p| p.uuid == *u && p.dimension == dimension));
+        *shots = later;
+        here
+    };
+    for uuid in due {
+        let Some(player) = players.iter().find(|p| p.uuid == uuid && p.health > 0.0).cloned() else {
+            continue;
+        };
+        let Some(stack) = game.native_player_equipment(uuid, EquipmentSlot::MainHand) else { continue };
+        if Gear::of(&stack.item).is_some_and(|g| g.kind == Kind::Rifle) {
+            shoot(game, &player, &stack);
+        }
+    }
+}
+
+/// `native_compute_fov_modifier` on a client: aiming the rifle zooms twice.
+pub(super) fn fov(modifier: &mut f32) {
+    if AIMING.load(std::sync::atomic::Ordering::Relaxed) {
+        *modifier = rules::zoom(*modifier);
+    }
+}
+
+/// The window's tick: a dash waiting is pushed; whether the rifle is aimed.
 pub(super) fn client_tick(game: &mut Game<'_>) {
+    use std::sync::atomic::Ordering::Relaxed;
+    let rifle = game.native_held().is_some_and(|(item, _, _)| item == "rustcraft:rifle");
+    let playing = rifle && game.native_playing();
+    let use_down = playing && game.native_mapping("key.use").is_some_and(|(down, _)| down);
+    let attack_down = playing && game.native_mapping("key.attack").is_some_and(|(down, _)| down);
+    let attack_pressed = attack_down && !ATTACK_WAS.swap(attack_down, Relaxed);
+    ATTACK_WAS.store(attack_down, Relaxed);
+    let held = if playing { RIFLE_HELD.load(Relaxed) } else { 0 };
+    let (held, aiming, fire) = rules::rifle_input(held, use_down, attack_pressed);
+    RIFLE_HELD.store(held, Relaxed);
+    AIMING.store(aiming, Relaxed);
+    if fire && playing {
+        if game.remote.is_some() {
+            if let Err(e) = game.native_net_send_to_server(rules::RIFLE_SHOT_CHANNEL, &[]) {
+                log::warn!("rustcraft: a rifle shot was not sent: {e}");
+            }
+        } else if let Some(p) = crate::game::rustcraft_server::acting(game) {
+            RIFLE_SHOTS.lock().unwrap_or_else(PoisonError::into_inner).push(p.uuid);
+        }
+    }
     let push = PUSH.lock().unwrap_or_else(PoisonError::into_inner).take();
     if let Some(p) = push {
         game.native_push_player(p);
@@ -525,12 +956,31 @@ pub(super) fn on_use_start(stack: &ItemStack, entity: Option<i32>, canceled: &mu
     let Some(id) = id_of(stack) else { return };
     let mut s = state();
     let charge = s.store.held.get(&id).map_or(0.0, |h| h.charge);
-    if charge < rules::SHIELD_PER_DAMAGE {
+    if !rules::shield::holds_up(charge) {
         *canceled = true;
         return;
     }
     if let Some(e) = entity {
-        s.blocking.insert(e, id);
+        s.blocking.insert(e, (id, g.tier));
+    }
+}
+
+/// `native_living_entity_use_item_tick` (API 131): an energy shield held up whose charge ran out
+/// goes down (guide `eshield`): the cancel finishes the use, so vanilla's blocking ends. Only
+/// where its charge is known (the server's store); a client that does not know leaves it.
+pub(super) fn on_use_tick(stack: &ItemStack, entity: Option<i32>, canceled: &mut bool) {
+    let Some(g) = Gear::of(&stack.item) else { return };
+    if g.kind != Kind::Shield {
+        return;
+    }
+    let Some(id) = id_of(stack) else { return };
+    let mut s = state();
+    let Some(charge) = s.store.held.get(&id).map(|h| h.charge) else { return };
+    if !rules::shield::holds_up(charge) {
+        *canceled = true;
+        if let Some(e) = entity {
+            s.blocking.remove(&e);
+        }
     }
 }
 
@@ -538,6 +988,67 @@ pub(super) fn on_use_start(stack: &ItemStack, entity: Option<i32>, canceled: &mu
 pub(super) fn on_use_stop(entity: Option<i32>) {
     if let Some(e) = entity {
         state().blocking.remove(&e);
+    }
+}
+
+// ---- Slice 18: the fourth tier's shield sends projectiles back ----
+
+/// `native_hears_projectile_impacts`: the server keeps its flying projectiles for the hook below.
+pub(super) fn hears_projectiles(hears: &mut bool) {
+    *hears = true;
+}
+
+/// How fast a projectile flies back, blocks a tick (an arrow from a full bow: 3).
+const BACK_SPEED: f64 = 1.6;
+
+/// `native_projectile_impact`: a projectile meeting a player who holds up a charged fourth-tier
+/// energy shield in front of it is cancelled and a new one of its kind flies back at its shooter,
+/// shot by the shield's bearer (guide `eshield`).
+#[allow(clippy::too_many_arguments)]
+pub(super) fn on_projectile_impact(
+    game: &mut Game<'_>,
+    dimension: &str,
+    projectile: u32,
+    kind: &str,
+    owner: u32,
+    entity: Option<u32>,
+    entity_kind: &str,
+    at: [f64; 3],
+    canceled: &mut bool,
+) {
+    if *canceled || entity_kind != "minecraft:player" || owner == 0 {
+        return;
+    }
+    let Some(target) = entity.and_then(|e| i32::try_from(e).ok()) else { return };
+    let Some((_, tier)) = state().blocking.get(&target).copied() else { return };
+    let Some(p) = game.native_server_players().into_iter().find(|p| p.entity_id == target) else { return };
+    let shooter = game
+        .mobs
+        .iter()
+        .find(|m| m.id == owner)
+        .map(|m| [m.position.x, m.position.y + f64::from(m.height()) * 0.6, m.position.z])
+        .or_else(|| {
+            game.native_server_players()
+                .into_iter()
+                .find(|q| q.entity_id as u32 == owner)
+                .map(|q| [q.position[0], q.position[1] + 1.2, q.position[2]])
+        });
+    let Some(shooter) = shooter else { return };
+    if !rules::shield::reflects(tier, p.yaw, p.position, shooter) {
+        return;
+    }
+    *canceled = true;
+    game.native_remove_entity(dimension, projectile);
+    let motion = rules::shield::back_motion(at, shooter, BACK_SPEED);
+    let start = [at[0] + motion[0] * 0.5, at[1] + motion[1] * 0.5, at[2] + motion[2] * 0.5];
+    let words = [(p.uuid >> 96) as u32, (p.uuid >> 64) as u32, (p.uuid >> 32) as u32, p.uuid as u32].map(|w| w as i32);
+    let nbt = horizon_world::nbt::Compound::from([
+        (JavaString::from("Motion"), Tag::List(motion.iter().map(|v| Tag::Double(v.to_bits())).collect())),
+        (JavaString::from("Owner"), Tag::IntArray(words.to_vec())),
+        (JavaString::from("pickup"), Tag::Byte(0)),
+    ]);
+    if game.native_summon(dimension, kind, start, nbt).is_none() {
+        log::debug!("rustcraft: a {kind} sent back by a shield did not spawn");
     }
 }
 
@@ -564,7 +1075,7 @@ pub(super) fn on_incoming_damage(entity: i32, kind: &str, damage_type: &str, cau
     }
     // W8: a hit from someone on a held-up energy shield costs 10 E a point, at least 10 E.
     if causing != 0
-        && let Some(&id) = s.blocking.get(&entity)
+        && let Some(&(id, _)) = s.blocking.get(&entity)
     {
         let cost = (f64::from(*amount) * rules::SHIELD_PER_DAMAGE).max(rules::SHIELD_PER_DAMAGE);
         let cost = s.store.held.get(&id).map_or(cost, |h| rules::cost(cost, h));
@@ -615,6 +1126,11 @@ pub(super) fn tick(game: &mut Game<'_>, dimension: &str) {
         n
     };
     open_windows(game);
+    keys(game);
+    rifle_shots(game, dimension);
+    if now.is_multiple_of(rules::moves::MAGNET_EVERY) {
+        pull(game, dimension);
+    }
     if !now.is_multiple_of(EVERY) {
         return;
     }
@@ -635,13 +1151,231 @@ pub(super) fn tick(game: &mut Game<'_>, dimension: &str) {
         let compass = worn
             .iter()
             .any(|(slot, st)| *slot == EquipmentSlot::MainHand && *st.item == *crate::game::rustcraft_explore::COMPASS);
-        crate::game::rustcraft_explore::player(game, &p, compass);
+        let mode = compass.then(|| state().compass_mode.get(&p.uuid).copied().unwrap_or_default());
+        let needle = crate::game::rustcraft_explore::player(game, &p, mode);
+        match needle {
+            Some(at) => state().needles.insert(p.uuid, (p.dimension.clone(), at)),
+            None => state().needles.remove(&p.uuid),
+        };
         player_tick(game, &p, &worn);
     }
+    send_looks(game, dimension, now);
     if now.is_multiple_of(200) {
         save(&mut state());
         crate::game::rustcraft_explore::save(game);
         crate::game::rustcraft_utility::save_grown(game);
+    }
+}
+
+// ---- Slice 18: the magnet's pull and the run burst ----
+
+const RUN_MODIFIER: &str = "rustcraft:pm_run";
+
+/// The run module's burst: +50 % speed as a movement-speed modifier while it holds.
+fn run_burst(game: &mut Game<'_>, p: &horizon_client::mod_api::NativeServerPlayer, on: bool) {
+    let (had, clean) = {
+        let mut s = state();
+        (s.running.contains(&p.uuid), s.cleaned.insert(p.uuid))
+    };
+    if clean && !had {
+        game.native_run_command(&format!("attribute {} minecraft:movement_speed modifier remove {RUN_MODIFIER}", p.name));
+    }
+    if on == had {
+        return;
+    }
+    let name = &p.name;
+    if on {
+        game.native_run_command(&format!(
+            "attribute {name} minecraft:movement_speed modifier add {RUN_MODIFIER} {} add_multiplied_total",
+            rules::moves::RUN_BOOST
+        ));
+        state().running.insert(p.uuid);
+    } else {
+        game.native_run_command(&format!("attribute {name} minecraft:movement_speed modifier remove {RUN_MODIFIER}"));
+        state().running.remove(&p.uuid);
+    }
+}
+
+/// Each `MAGNET_EVERY` ticks: the items in a working magnet's reach come a step nearer its
+/// player; the game's own pickup takes them when they arrive.
+fn pull(game: &mut Game<'_>, dimension: &str) {
+    if state().magnets.is_empty() {
+        return;
+    }
+    for p in game.native_server_players() {
+        if p.dimension != dimension || !state().magnets.contains(&p.uuid) {
+            continue;
+        }
+        let to = [p.position[0], p.position[1] + 0.5, p.position[2]];
+        game.native_run_command(&rules::moves::pull_command(dimension, to, rules::MAGNET_REACH));
+    }
+}
+
+// ---- Slice 18: gear seen on players ----
+
+/// Looks are sent again this often even unchanged, for players who came into the level, ticks.
+const LOOKS_AGAIN: u64 = 100;
+const JETPACK_MODEL: &str = "rustcraft:block/worn_jetpack";
+const FLAME_MODEL: &str = "rustcraft:block/worn_flame";
+const BACKPACK_MODEL: &str = "rustcraft:block/worn_backpack";
+const HANDLE_MODEL: &str = "rustcraft:block/worn_handle";
+/// Wave 2: one of the handle's two rollers, drawn turning (rules::looks::roller_angle).
+const ROLLER_MODEL: &str = "rustcraft:block/worn_handle_roller";
+pub(super) const WORN_MODELS: [&str; 5] = [JETPACK_MODEL, FLAME_MODEL, BACKPACK_MODEL, HANDLE_MODEL, ROLLER_MODEL];
+
+/// A player began a zipline ride (rustcraft_zipline): seen with the handle while it lasts.
+pub(super) fn note_zip_ride(player: u128) {
+    state().zip_riders.insert(player);
+}
+
+/// What `p` is seen wearing.
+fn look_of(game: &mut Game<'_>, p: &horizon_client::mod_api::NativeServerPlayer) -> rules::looks::Look {
+    let jetpack = game.native_player_equipment(p.uuid, EquipmentSlot::Chest).is_some_and(|st| {
+        let s = state();
+        held_of(&s, &st).is_some_and(|(_, _, h)| h.has(Module::Jetpack))
+    });
+    let riding = crate::game::rustcraft_monorail::riding(p.uuid);
+    let handle = {
+        let mut s = state();
+        if !riding {
+            s.zip_riders.remove(&p.uuid);
+        }
+        s.zip_riders.contains(&p.uuid)
+    };
+    rules::looks::Look {
+        jetpack,
+        flying: jetpack && p.flying,
+        handle,
+        backpack: crate::game::rustcraft_backpack::wears_star(p.uuid),
+    }
+}
+
+/// Every tick of the gear: each player of the level is told what the level's players wear, when
+/// it changed (and every few seconds for newcomers).
+fn send_looks(game: &mut Game<'_>, dimension: &str, now: u64) {
+    let players: Vec<_> = game.native_server_players().into_iter().filter(|p| p.dimension == dimension).collect();
+    let looks: Vec<(i32, rules::looks::Look)> = players
+        .iter()
+        .map(|p| (p.entity_id, look_of(game, p)))
+        .filter(|(_, l)| l.shows())
+        .collect();
+    let bytes = rules::looks::encode(&looks);
+    let changed = state().looks_sent.get(dimension) != Some(&bytes);
+    if !changed && (bytes.is_empty() || !now.is_multiple_of(LOOKS_AGAIN)) {
+        return;
+    }
+    state().looks_sent.insert(dimension.to_owned(), bytes.clone());
+    for p in &players {
+        if let Err(e) = game.native_net_send_to_player(p.uuid, rules::looks::CHANNEL, &bytes) {
+            log::debug!("rustcraft: looks not sent to {}: {e}", p.name);
+        }
+    }
+}
+
+/// On a client: what the players in view wear, by entity id.
+static LOOKS: LazyLock<Mutex<HashMap<i32, rules::looks::Look>>> = LazyLock::new(Mutex::default);
+
+/// `native_player_render_listened`: the player layers are asked for.
+pub(super) fn player_render_listened(listened: &mut bool) {
+    *listened = true;
+}
+
+/// `native_mob_layer` on a client: a player's jetpack (its flames in flight), starsteel backpack
+/// and zipline handle, after their model.
+pub(super) fn draw_looks(
+    game: &Game<'_>,
+    mob: &crate::game::native_mob_draw::NativeMobRender<'_>,
+    who: Option<&crate::game::native_mob_draw::NativePlayerRender<'_>>,
+    draw: &mut crate::game::native_block_entity_draw::BlockEntityDraw,
+) {
+    if who.is_none() {
+        return;
+    }
+    let Some(look) = i32::try_from(mob.id)
+        .ok()
+        .and_then(|id| LOOKS.lock().unwrap_or_else(PoisonError::into_inner).get(&id).copied())
+    else {
+        return;
+    };
+    draw.push();
+    draw.translate([-0.5, 0.0, -0.5]);
+    if look.jetpack {
+        game.native_draw_model(draw, JETPACK_MODEL, 0xFF_FFFF);
+        if look.flying {
+            // The flame flickers: its length follows the player's age.
+            let k = 0.75 + 0.25 * (mob.age * 1.7).sin();
+            draw.push();
+            draw.translate([0.0, 0.75, 0.0]);
+            draw.scale([1.0, k, 1.0]);
+            draw.translate([0.0, -0.75, 0.0]);
+            game.native_draw_model(draw, FLAME_MODEL, 0xFF_FFFF);
+            draw.pop();
+        }
+    }
+    if look.backpack {
+        draw.push();
+        // Behind the jetpack when both are worn: the backpack has its own slot on the back.
+        if look.jetpack {
+            draw.translate([0.0, 0.0, -0.2]);
+        }
+        game.native_draw_model(draw, BACKPACK_MODEL, 0xFF_FFFF);
+        draw.pop();
+    }
+    if look.handle {
+        draw.push();
+        draw.translate([0.0, 1.0, 0.0]);
+        game.native_draw_model(draw, HANDLE_MODEL, 0xFF_FFFF);
+        // Wave 2 (#40): the rollers roll along the rope.
+        let angle = rules::looks::roller_angle(mob.age);
+        for at in rules::looks::ROLLERS {
+            draw.push();
+            draw.translate([at[0] - rules::looks::ROLLERS[0][0], 0.0, 0.0]);
+            draw.rotate_about(rules::looks::ROLLER_AXIS, angle, rules::looks::ROLLERS[0]);
+            game.native_draw_model(draw, ROLLER_MODEL, 0xFF_FFFF);
+            draw.pop();
+        }
+        draw.pop();
+    }
+    draw.pop();
+}
+
+// ---- Slice 18: the gear's keys ----
+
+/// The keys pressed since the last tick (rustcraft_gear_keys): the magnet and night vision switch
+/// in the worn piece holding them, the backpack key opens the first backpack carried.
+fn keys(game: &mut Game<'_>) {
+    for (uuid, key) in crate::game::rustcraft_gear_keys::take() {
+        let Some(m) = key.module() else {
+            crate::game::rustcraft_backpack::open_by_key(game, uuid);
+            continue;
+        };
+        let slot = if m.piece() == Piece::Helmet { EquipmentSlot::Head } else { EquipmentSlot::Chest };
+        let on = game.native_player_equipment(uuid, slot).and_then(|st| {
+            let mut s = state();
+            load(&mut s, game);
+            let id = id_of(&st)?;
+            Gear::of(&st.item)?;
+            let h = s.store.held.get_mut(&id)?;
+            if !h.has(m) {
+                return None;
+            }
+            let on = rules::keys::toggle(h, m);
+            s.dirty = true;
+            Some(on)
+        });
+        let magnet = m == Module::Magnet;
+        let said = match (on, magnet) {
+            (Some(true), true) => line("rustcraft.gear.magnet_on", "Magnet on", &[]),
+            (Some(false), true) => line("rustcraft.gear.magnet_off", "Magnet off", &[]),
+            (Some(true), false) => line("rustcraft.gear.night_on", "Night vision on", &[]),
+            (Some(false), false) => line("rustcraft.gear.night_off", "Night vision off", &[]),
+            (None, true) => line("rustcraft.gear.no_magnet", "No magnet module in the chestplate", &[]),
+            (None, false) => line("rustcraft.gear.no_night", "No night vision module in the helmet", &[]),
+        };
+        if m == Module::Night && on == Some(false) {
+            game.native_remove_effect(uuid, "minecraft:night_vision");
+        }
+        game.native_action_bar(uuid, said);
     }
 }
 
@@ -657,10 +1391,14 @@ fn player_tick(game: &mut Game<'_>, p: &horizon_client::mod_api::NativeServerPla
     });
     let mut view = View::default();
     let mut wants_flight = false;
+    let (mut wants_run, mut wants_magnet) = (false, false);
     for (slot, id, g, h) in &pieces {
-        let cap = rules::capacity(*g, h, suit);
-        let mut h = h.clone();
-        h.charge = h.charge.min(cap);
+        let h = h.clone();
+        if matches!(g.kind, Kind::Armor(_)) && h.suit != suit {
+            let mut s = state();
+            s.store.held.entry(*id).or_default().suit = suit;
+            s.dirty = true;
+        }
         if *slot == EquipmentSlot::MainHand {
             if g.kind == Kind::Blade {
                 view.blade = Some((*id, g.tier, h.charge >= rules::cost(rules::BLADE_HIT, &h)));
@@ -675,6 +1413,7 @@ fn player_tick(game: &mut Game<'_>, p: &horizon_client::mod_api::NativeServerPla
                 continue;
             }
             match m {
+                Module::Night | Module::Magnet if !rules::keys::works(&h, m) => {}
                 Module::Night => {
                     effect(game, p.uuid, "minecraft:night_vision", 0);
                     drain += need;
@@ -684,13 +1423,15 @@ fn player_tick(game: &mut Game<'_>, p: &horizon_client::mod_api::NativeServerPla
                     drain += need;
                 }
                 Module::Run => {
-                    effect(game, p.uuid, "minecraft:speed", 1);
-                    drain += need;
-                }
-                Module::Magnet => {
-                    if magnet(game, p) {
+                    let s = state();
+                    if rules::moves::run_boost(s.sprint.get(&p.uuid).copied(), s.now) {
+                        wants_run = true;
                         drain += need;
                     }
+                }
+                Module::Magnet => {
+                    wants_magnet = true;
+                    drain += need;
                 }
                 Module::Jetpack => {
                     wants_flight = true;
@@ -706,11 +1447,17 @@ fn player_tick(game: &mut Game<'_>, p: &horizon_client::mod_api::NativeServerPla
         if drain > 0.0 {
             let mut s = state();
             let e = s.store.held.entry(*id).or_default();
-            e.charge = (e.charge.min(cap) - drain).max(0.0);
+            e.charge = (e.charge - drain).max(0.0);
             s.dirty = true;
         }
     }
     state().views.insert(p.entity_id, view);
+    run_burst(game, p, wants_run);
+    if wants_magnet {
+        state().magnets.insert(p.uuid);
+    } else {
+        state().magnets.remove(&p.uuid);
+    }
     // The jetpack: flight while the chestplate holds charge, outside creative and spectator.
     let survival = matches!(p.game_mode, 0 | 2);
     let had = state().flying.contains(&p.uuid);
@@ -723,29 +1470,6 @@ fn player_tick(game: &mut Game<'_>, p: &horizon_client::mod_api::NativeServerPla
         game.native_set_flying_speed(p.uuid, None);
         state().flying.remove(&p.uuid);
     }
-}
-
-/// The magnet: what lies within reach goes into the player's inventory. True when it took any.
-fn magnet(game: &mut Game<'_>, p: &horizon_client::mod_api::NativeServerPlayer) -> bool {
-    let r = rules::MAGNET_REACH;
-    let at = p.position;
-    let items = game.native_item_entities(&p.dimension, [at[0] - r, at[1] - r, at[2] - r], [at[0] + r, at[1] + r, at[2] + r]);
-    let mut took = false;
-    for e in items {
-        if e.pickup_delay > 0 {
-            continue;
-        }
-        let left = game.native_give_stack(p.uuid, e.stack.clone());
-        let left_count = left.as_ref().map_or(0, |l| l.count);
-        if left_count == e.stack.count {
-            continue;
-        }
-        let mut rest = e.stack.clone();
-        rest.count = left_count;
-        game.native_set_item_entity(&p.dimension, e.id, rest);
-        took = true;
-    }
-    took
 }
 
 /// The windows asked for open: a piece's modules and books.
@@ -761,19 +1485,27 @@ fn open_windows(game: &mut Game<'_>) {
             let mut items: Vec<Option<ItemStack>> = (0..g.sockets())
                 .map(|i| h.modules.get(i).map(|m| ItemStack::new(m, 1)))
                 .collect();
-            items.push((h.capacity > 0).then(|| ItemStack::new(rules::BOOK_CAPACITY, u32::from(h.capacity))));
-            items.push((h.thrift > 0).then(|| ItemStack::new(rules::BOOK_THRIFT, u32::from(h.thrift))));
             items.resize(9, None);
             items
         };
         let title = line(
             "rustcraft.gear.window",
-            "Modules: %s · books: Capacity, Thrift",
+            "Modules: %s · enchantments at the anvil",
             &[Text::literal(g.sockets().to_string())],
         );
         let used = rules::window_slots(g);
         if let Some(window) = game.native_open_menu_with_input(uuid, 1, title, items, 0..used) {
             state().open.insert(uuid, (window, id, g));
+            // Slice 18: the charge and the modules' lines, drawn beside the sockets.
+            let view = rules::window::view(g, &state().store.held.get(&id).cloned().unwrap_or_default());
+            match serde_json::to_vec(&view) {
+                Ok(bytes) => {
+                    if let Err(e) = game.native_net_send_to_player(uuid, rules::window::CHANNEL, &bytes) {
+                        log::warn!("rustcraft: the gear window's view was not sent: {e}");
+                    }
+                }
+                Err(e) => log::warn!("rustcraft: the gear window's view does not write: {e}"),
+            }
         }
     }
 }

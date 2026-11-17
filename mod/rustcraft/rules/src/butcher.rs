@@ -37,7 +37,55 @@ pub fn icon(kind: &str) -> String {
 
 /// Whether `item` goes into the sword slot: any sword (K5).
 pub fn is_sword(item: &str) -> bool {
-    item.ends_with("_sword")
+    item.ends_with("_sword") || is_blade(item)
+}
+
+/// Slice 18 (guide `butcher`): the energy blade, which spends its charge instead of wearing.
+pub fn is_blade(item: &str) -> bool {
+    item.starts_with("rustcraft:blade_")
+}
+
+/// Slice 18: the butcher's buffer of energy and the most it fills a second (it spends 4 E/s:
+/// 40 E a strike every 10 s).
+pub const BUFFER: f64 = 200.0;
+pub const DRAW: f64 = 8.0;
+pub const ENERGY_PER_SECOND: f64 = 4.0;
+/// The charge a blade spends a strike.
+pub const BLADE_CHARGE: f64 = 25.0;
+
+/// The energy one strike costs, every `ticks`, with `economy` economy modules (×0.6 each).
+pub fn strike_energy(ticks: u64, economy: u32) -> f64 {
+    ENERGY_PER_SECOND * ticks as f64 / 20.0 * 0.6f64.powi(economy as i32)
+}
+
+/// Slice 18, wave 2 (A9, guide `mod_eco`: работа ×0,85): ticks between a butcher's strikes
+/// with `economy` economy modules: `base` over `economy_work` (0.85) for each. A strike still
+/// costs [`strike_energy`] of `base`, so its energy is ×0.6 a strike.
+pub fn strike_ticks(base: u64, economy: u32, economy_work: f64) -> u64 {
+    ((base as f64 / economy_work.powi(economy as i32)).round() as u64).max(1)
+}
+
+/// Slice 18: what Looting adds to a farm animal's drops, as the game's loot tables add it (0 to
+/// `level` more of each looting drop, `random` 0..1 a drop); with Fire Aspect the meat cooked.
+pub fn looting_bonus(kind: &str, level: u32, fire: bool, random: &mut dyn FnMut() -> f64) -> Vec<(String, u32)> {
+    let drops: &[(&str, &str)] = match kind {
+        "minecraft:cow" | "minecraft:mooshroom" => &[("minecraft:beef", "minecraft:cooked_beef"), ("minecraft:leather", "minecraft:leather")],
+        "minecraft:sheep" => &[("minecraft:mutton", "minecraft:cooked_mutton")],
+        "minecraft:pig" => &[("minecraft:porkchop", "minecraft:cooked_porkchop")],
+        "minecraft:chicken" => &[("minecraft:chicken", "minecraft:cooked_chicken"), ("minecraft:feather", "minecraft:feather")],
+        "minecraft:rabbit" => &[("minecraft:rabbit", "minecraft:cooked_rabbit"), ("minecraft:rabbit_hide", "minecraft:rabbit_hide")],
+        _ => &[],
+    };
+    if level == 0 {
+        return Vec::new();
+    }
+    drops
+        .iter()
+        .filter_map(|(raw, cooked)| {
+            let n = (random() * f64::from(level + 1)).floor().min(f64::from(level)) as u32;
+            (n > 0).then(|| ((if fire { *cooked } else { *raw }).to_owned(), n))
+        })
+        .collect()
 }
 
 /// An animal in its radius, as the bundle saw it.
@@ -106,6 +154,8 @@ pub enum Shown {
     NothingToCull,
     /// «Добыче некуда деться»: its drop slots are full.
     OutputFull,
+    /// Slice 18: «Нет энергии»: its buffer, or its energy blade's charge, holds less than a strike.
+    NoEnergy,
 }
 
 /// The adults of each animal of [`ANIMALS`] in `animals` it may cull.
@@ -163,9 +213,40 @@ pub fn worn(damage: u32, max_damage: u32) -> Option<u32> {
     (next < max_damage).then_some(next)
 }
 
+/// Wave 2 (w2-craft, guide `machine`: «машина следующей ступени работает быстрее»): a strike
+/// every `ticks` on its first tier comes `tier_speed` (`tiers::speed`) times as often.
+pub fn tier_strike_ticks(ticks: u64, tier_speed: f64) -> u64 {
+    ((ticks as f64 / tier_speed.max(1e-6)).round() as u64).max(1)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn economy_slows_the_strike() {
+        let t = crate::tuning::Tuning::default();
+        assert_eq!(super::strike_ticks(t.butcher_ticks, 0, t.economy_work), t.butcher_ticks);
+        let one = super::strike_ticks(200, 1, t.economy_work);
+        assert_eq!(one, 235);
+        assert!(super::strike_ticks(200, 2, t.economy_work) > one);
+    }
+
+    #[test]
+    fn the_blade_strikes_and_looting_adds_fire_cooks() {
+        assert!(is_sword("rustcraft:blade_3") && is_sword("minecraft:iron_sword"));
+        assert!(!is_sword("minecraft:stick"));
+        assert!((strike_energy(200, 0) - 40.0).abs() < 1e-9);
+        assert!((strike_energy(200, 1) - 24.0).abs() < 1e-9);
+        let mut top = || 0.99;
+        assert_eq!(
+            looting_bonus("minecraft:cow", 3, true, &mut top),
+            vec![("minecraft:cooked_beef".to_owned(), 3), ("minecraft:leather".to_owned(), 3)]
+        );
+        let mut low = || 0.0;
+        assert!(looting_bonus("minecraft:cow", 3, false, &mut low).is_empty());
+        assert!(looting_bonus("minecraft:cow", 0, false, &mut top).is_empty());
+    }
 
     fn animal(id: u32, kind: &str) -> Animal {
         Animal {
@@ -263,5 +344,11 @@ mod tests {
         assert!(is_sword("minecraft:iron_sword"));
         assert!(!is_sword("minecraft:iron_axe"));
         assert_eq!(icon("minecraft:cow"), "minecraft:cow_spawn_egg");
+    }
+
+    #[test]
+    fn a_higher_tier_strikes_more_often() {
+        assert_eq!(tier_strike_ticks(200, 1.0), 200);
+        assert_eq!(tier_strike_ticks(200, 2.0), 100, "tier 4 of a tier-2 machine");
     }
 }

@@ -43,7 +43,9 @@ fn item_of(data: &[i32], i: usize) -> Option<u32> {
 pub mod generator {
     use super::*;
 
-    pub const DATA_SLOTS: usize = 8;
+    pub const DATA_SLOTS: usize = 10;
+    /// Slice 18: the batteries' charge and size go in hundreds of E (data slots are 16-bit).
+    const STORE_SCALE: f64 = 0.01;
 
     /// What the generator's window shows.
     #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -58,6 +60,9 @@ pub mod generator {
         pub requested: f64,
         pub supplied: f64,
         pub shown: Option<Shown>,
+        /// Slice 18: the charge and size of the batteries on its circuit, E (to 100 E).
+        pub stored: f64,
+        pub capacity: f64,
     }
 
     pub fn encode(p: &GenPanel) -> Vec<i32> {
@@ -71,6 +76,8 @@ pub mod generator {
             scaled(p.supplied, ENERGY_SCALE),
             shown,
             percent,
+            scaled(p.stored, STORE_SCALE),
+            scaled(p.capacity, STORE_SCALE),
         ]
     }
 
@@ -83,11 +90,15 @@ pub mod generator {
             requested: energy(data, 4),
             supplied: energy(data, 5),
             shown: (data.len() > 6).then(|| shown_of(at(data, 6), at(data, 7))),
+            stored: f64::from(at(data, 8)) / STORE_SCALE,
+            capacity: f64::from(at(data, 9)) / STORE_SCALE,
         }
     }
 
     pub const FUEL: [f32; 2] = [12.0, 26.0];
-    pub const FLAME: Rect = [34.0, 31.0, 80.0, 8.0];
+    /// In-game check w3: long enough that «ХОД РАБОТЫ» over its right end stands apart from
+    /// «ТОПЛИВО» over the slot.
+    pub const FLAME: Rect = [34.0, 31.0, 150.0, 8.0];
     pub const LABEL_SLOTS_Y: f32 = 16.0;
     pub const LABEL_GIVES_Y: f32 = 47.0;
     pub const GIVES_BAR: Rect = [8.0, 56.0, 198.0, 5.0];
@@ -151,21 +162,31 @@ pub mod alloy {
     pub const INPUTS: [[f32; 2]; 4] = [[10.0, 26.0], [28.0, 26.0], [46.0, 26.0], [64.0, 26.0]];
     pub const ARROW: Rect = [86.0, 31.0, 44.0, 8.0];
     pub const OUTPUTS: [[f32; 2]; 3] = [[150.0, 26.0], [168.0, 26.0], [186.0, 26.0]];
-    pub const FUEL: [f32; 2] = [10.0, 56.0];
-    pub const FLAME: Rect = [32.0, 61.0, 60.0, 6.0];
-    pub const MODULE_SLOTS: [[f32; 2]; 3] = [[150.0, 56.0], [168.0, 56.0], [186.0, 56.0]];
+    /// Slice 18: the queue cells under the inputs (rustcraft_rules::machines::queue), as many
+    /// as are open; the parts below moved down a row for them.
+    pub fn cell(k: usize) -> [f32; 2] {
+        [10.0 + 18.0 * k as f32, 44.0]
+    }
+    pub const FUEL: [f32; 2] = [10.0, 74.0];
+    pub const FLAME: Rect = [32.0, 79.0, 60.0, 6.0];
+    /// The module sockets (A5: three on tiers 1–2, four on 3–4).
+    pub const MODULE_SLOTS: [[f32; 2]; 4] =
+        [[132.0, 74.0], [150.0, 74.0], [168.0, 74.0], [186.0, 74.0]];
     /// The «take own alloy» switch: one well, two segments (style::segment_rects).
-    pub const TAKE_OWN_WELL: Rect = [8.0, 87.0, 131.0, 13.0];
-    pub const TAKE_OWN: [Rect; 2] = [[9.0, 88.0, 64.0, 11.0], [74.0, 88.0, 64.0, 11.0]];
-    pub const ENERGY_BAR: Rect = [8.0, 113.0, 198.0, 5.0];
-    pub const STATUS: Rect = [8.0, 121.0, 198.0, 12.0];
+    pub const TAKE_OWN_WELL: Rect = [8.0, 103.0, 131.0, 13.0];
+    pub const TAKE_OWN: [Rect; 2] = [[9.0, 104.0, 64.0, 11.0], [74.0, 104.0, 64.0, 11.0]];
+    pub const ENERGY_BAR: Rect = [8.0, 127.0, 198.0, 5.0];
+    pub const STATUS: Rect = [8.0, 134.0, 198.0, 12.0];
     pub const LABEL_SLOTS_Y: f32 = 16.0;
-    pub const LABEL_FUEL_Y: f32 = 46.0;
-    pub const LABEL_TAKE_Y: f32 = 77.0;
-    pub const LABEL_ENERGY_Y: f32 = 104.0;
-    pub const INVENTORY: [f32; 2] = [26.0, 147.0];
+    pub const LABEL_FUEL_Y: f32 = 64.0;
+    pub const LABEL_TAKE_Y: f32 = 94.0;
+    pub const LABEL_ENERGY_Y: f32 = 118.0;
+    pub const INVENTORY: [f32; 2] = [26.0, 160.0];
     pub const INVENTORY_LABEL_Y: f32 = INVENTORY[1] - 10.0;
     pub const HEIGHT: f32 = INVENTORY[1] + 80.0;
+    /// Slice 18: the window's own data slots, then the extras.
+    pub const EXTRAS_AT: usize = DATA_SLOTS;
+    pub const ALL_DATA_SLOTS: usize = DATA_SLOTS + crate::machines::extras::DATA;
 
     /// The switch's button at `at`: on or off.
     pub fn button_at(at: [f32; 2]) -> Option<i32> {
@@ -271,16 +292,29 @@ pub mod crafter {
     const ROWS: [f32; 3] = [46.0, 64.0, 82.0];
     pub const ARROW: Rect = [66.0, 68.0, 10.0, 8.0];
     pub const RESULT: [f32; 2] = [86.0, 64.0];
-    pub const MODULE_SLOTS: [[f32; 2]; 3] = [[152.0, 16.0], [171.0, 16.0], [190.0, 16.0]];
+    /// The module sockets (A5: three on tier 2, four on 3–4); slice 18 keeps the modules in the
+    /// block entity, as the sheets do, so the old module slots 12–14 are out of the menu.
+    pub const MODULE_SLOTS: [[f32; 2]; 4] =
+        [[133.0, 16.0], [152.0, 16.0], [171.0, 16.0], [190.0, 16.0]];
+    /// Slice 18: the capacity and stack modules' queue cells drawn beside the stock (the first
+    /// three; the window counts the rest), and the extras after the window's own data slots.
+    pub const QUEUE_DRAWN: usize = 3;
+    pub fn queue_cell(k: usize) -> [f32; 2] {
+        [BUFFER_X + 54.0, ROWS[k.min(QUEUE_DRAWN - 1)]]
+    }
+    pub const EXTRAS_AT: usize = DATA_SLOTS;
+    pub const ALL_DATA_SLOTS: usize = DATA_SLOTS + crate::machines::extras::DATA;
     pub const LABEL_ENERGY_Y: f32 = 102.0;
     pub const ENERGY_BAR: Rect = [8.0, 111.0, 198.0, 5.0];
     /// The work mode switch: one well, three segments (style::segment_rects).
-    pub const MODE_WELL: Rect = [8.0, 119.0, 198.0, 13.0];
+    /// Slice 18: «Режим работы» is written left of the switch, as the guide's window has it.
+    pub const MODE_WELL: Rect = [76.0, 119.0, 130.0, 13.0];
     pub const MODE_BUTTONS: [Rect; 3] = [
-        [9.0, 120.0, 65.0, 11.0],
-        [75.0, 120.0, 65.0, 11.0],
-        [141.0, 120.0, 64.0, 11.0],
+        [77.0, 120.0, 42.0, 11.0],
+        [120.0, 120.0, 42.0, 11.0],
+        [163.0, 120.0, 42.0, 11.0],
     ];
+    pub const LABEL_MODE: [f32; 2] = [8.0, 122.0];
     pub const STATUS: Rect = [8.0, 135.0, 198.0, 12.0];
     pub const INVENTORY: [f32; 2] = [26.0, 159.0];
     pub const INVENTORY_LABEL_Y: f32 = INVENTORY[1] - 10.0;
@@ -290,6 +324,24 @@ pub mod crafter {
 
     pub fn tab(i: usize) -> Rect {
         [8.0 + i as f32 * (TAB_W + 2.0), TABS_Y, TAB_W, TAB_H]
+    }
+
+    /// Slice 18, wave 2 (`ui.js` crafter: «1 · Бумага»): where the row ends, before the sockets.
+    pub const TABS_RIGHT: f32 = MODULE_SLOTS[0][0] - 4.0;
+    /// A tab at least this wide writes its page's name after its number; a narrower one shows the
+    /// number and the result's icon.
+    pub const NAMED_TAB_W: f32 = 40.0;
+
+    /// Tab `i` of a crafter with `pages` pages: the row is shared out among them.
+    pub fn tab_of(i: usize, pages: usize) -> Rect {
+        let n = pages.clamp(1, MAX_PAGES) as f32;
+        let w = ((TABS_RIGHT - 8.0 - 2.0 * (n - 1.0)) / n).floor();
+        [8.0 + i as f32 * (w + 2.0), TABS_Y, w, TAB_H]
+    }
+
+    /// Whether tab `i` of `pages` has room for «N · name».
+    pub fn tab_named(pages: usize) -> bool {
+        tab_of(0, pages)[2] >= NAMED_TAB_W
     }
 
     /// Where pattern cell `i` (row by row) has its item.
@@ -310,7 +362,6 @@ pub mod crafter {
         (0..BUFFER_SLOTS)
             .map(buffer)
             .chain((0..OUTPUT_SLOTS).map(output))
-            .chain(MODULE_SLOTS)
             .collect()
     }
 
@@ -319,7 +370,7 @@ pub mod crafter {
         if let Some(i) = MODE_BUTTONS.iter().position(|&r| inside(r, at)) {
             return Some(i32::from(WorkMode::ALL[i].code()));
         }
-        if let Some(i) = (0..pages.min(MAX_PAGES)).find(|&i| inside(tab(i), at)) {
+        if let Some(i) = (0..pages.min(MAX_PAGES)).find(|&i| inside(tab_of(i, pages), at)) {
             return Some(TAB_BUTTON + i as i32);
         }
         cell_at(at).map(|i| CELL_BUTTON + i as i32)
@@ -354,6 +405,8 @@ mod tests {
             requested: 16.0,
             supplied: 16.0,
             shown: Some(Shown::Working),
+            stored: 3_200.0,
+            capacity: 40_000.0,
         };
         let data = generator::encode(&p);
         assert_eq!(data.len(), generator::DATA_SLOTS);
@@ -380,8 +433,8 @@ mod tests {
         assert_eq!(data.len(), alloy::DATA_SLOTS);
         assert_eq!(alloy::decode(&data), p);
         assert!(alloy::decode(&[]).take_own);
-        assert_eq!(alloy::button_at([10.0, 90.0]), Some(alloy::TAKE_OWN_ON));
-        assert_eq!(alloy::button_at([100.0, 90.0]), Some(alloy::TAKE_OWN_OFF));
+        assert_eq!(alloy::button_at([10.0, 106.0]), Some(alloy::TAKE_OWN_ON));
+        assert_eq!(alloy::button_at([100.0, 106.0]), Some(alloy::TAKE_OWN_OFF));
         assert_eq!(alloy::button_at([100.0, 60.0]), None);
     }
 
@@ -414,22 +467,25 @@ mod tests {
     #[test]
     fn the_crafters_buttons() {
         use crafter::*;
-        assert_eq!(button_at([10.0, 121.0], 1), Some(0));
-        assert_eq!(button_at([150.0, 125.0], 1), Some(2));
+        assert_eq!(button_at([78.0, 121.0], 1), Some(0));
+        assert_eq!(button_at([170.0, 125.0], 1), Some(2));
+        assert_eq!(button_at([10.0, 121.0], 1), None);
         assert_eq!(button_at(cell(0), 1), Some(CELL_BUTTON));
         assert_eq!(
             button_at([cell(8)[0] + 8.0, cell(8)[1] + 8.0], 1),
             Some(CELL_BUTTON + 8)
         );
-        let second_tab = [tab(1)[0] + 2.0, tab(1)[1] + 2.0];
-        assert_eq!(button_at(second_tab, 1), None);
+        // Slice 18, wave 2: one page's tab takes the whole row.
+        let second_tab = [tab_of(1, 2)[0] + 2.0, tab_of(1, 2)[1] + 2.0];
+        assert_eq!(button_at(second_tab, 1), Some(TAB_BUTTON));
         assert_eq!(button_at(second_tab, 2), Some(TAB_BUTTON + 1));
         assert_eq!(button_at(buffer(0), 4), None);
         assert_eq!(
-            slot_positions().len(),
+            slot_positions().len() + MODULE_SLOT_COUNT,
             BUFFER_SLOTS + OUTPUT_SLOTS + MODULE_SLOT_COUNT
         );
-        assert_eq!(module_slot_at([153.0, 18.0]), Some(0));
+        assert_eq!(module_slot_at([134.0, 18.0]), Some(0));
+        assert_eq!(module_slot_at([195.0, 20.0]), Some(3));
     }
 
     #[test]
@@ -446,6 +502,23 @@ mod tests {
     }
 
     #[test]
+    fn tabs_share_the_row_and_leave_the_sockets_free() {
+        use crafter as c;
+        for pages in 1..=c::MAX_PAGES {
+            let last = c::tab_of(pages - 1, pages);
+            assert!(last[0] + last[2] <= c::TABS_RIGHT + 0.5, "{pages}: {last:?}");
+            for i in 1..pages {
+                let (a, b) = (c::tab_of(i - 1, pages), c::tab_of(i, pages));
+                assert!(a[0] + a[2] < b[0], "{pages}");
+            }
+            assert_eq!(c::button_at([last[0] + 2.0, last[1] + 2.0], pages), Some(super::crafter::TAB_BUTTON + pages as i32 - 1));
+        }
+        // «1 · Бумага» on one or two pages; three and four show the number and the icon.
+        assert!(c::tab_named(1) && c::tab_named(2));
+        assert!(!c::tab_named(4));
+    }
+
+    #[test]
     fn every_part_fits_its_window() {
         use crafter as c;
         for r in c::MODE_BUTTONS
@@ -454,6 +527,8 @@ mod tests {
             .copied()
             .chain((0..c::MAX_PAGES).map(c::tab))
             .chain(c::slot_positions().into_iter().map(slot_frame))
+            .chain(c::MODULE_SLOTS.iter().map(|p| slot_frame(*p)))
+            .chain((0..c::QUEUE_DRAWN).map(|k| slot_frame(c::queue_cell(k))))
             .chain((0..c::CELLS).map(|i| slot_frame(c::cell(i))))
         {
             fits(r, c::HEIGHT, c::INVENTORY_LABEL_Y);
@@ -471,6 +546,7 @@ mod tests {
                     .map(|p| slot_frame(*p)),
             )
             .chain([slot_frame(a::FUEL)])
+            .chain((0..crate::machines::extras::MAX_CELLS).map(|k| slot_frame(a::cell(k))))
         {
             fits(r, a::HEIGHT, a::INVENTORY_LABEL_Y);
         }

@@ -27,7 +27,7 @@ use crate::game::{
     rustcraft_storage as storage, rustcraft_window as window, rustcraft_workers as workers,
 };
 use crate::mod_api::NativeCommand;
-use horizon_client::{items::ItemStack, text::Text};
+use horizon_client::{items::ItemStack, mod_api::NativeUseTarget, text::Text};
 use horizon_core::geometry::Direction;
 use horizon_world::nbt::{Compound, Limits, Tag, read_network, write_network};
 use rustcraft_rules::{
@@ -73,6 +73,21 @@ struct Pending {
 
 static PENDING: LazyLock<Mutex<Option<Pending>>> = LazyLock::new(Mutex::default);
 static EPOCH: LazyLock<Instant> = LazyLock::new(Instant::now);
+
+/// Slice 18, final: the stacks the bench's clicks gave the fake player (`Bench::click_block`), for a
+/// later click to hold (`got:<id>`).
+static GOT: LazyLock<Mutex<Vec<ItemStack>>> = LazyLock::new(Mutex::default);
+
+fn got() -> MutexGuard<'static, Vec<ItemStack>> {
+    GOT.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+/// The first stack of `item` an earlier click gave, taken out of the store.
+fn take_got(item: &str) -> Option<ItemStack> {
+    let mut g = got();
+    let i = g.iter().position(|s| &*s.item == item)?;
+    Some(g.remove(i))
+}
 
 fn pending() -> MutexGuard<'static, Option<Pending>> {
     PENDING.lock().unwrap_or_else(PoisonError::into_inner)
@@ -232,6 +247,8 @@ impl Bench for GameBench<'_, '_> {
 
     fn clear(&mut self, area: &Area) -> Result<(), String> {
         self.clear_slice7(area);
+        // s18/pipe: a cleared plot's housings drop no channels.
+        crate::game::rustcraft_pipe18::cleared(DIMENSION, area.min, area.max);
         let height = u32::try_from(area.max[1] - area.min[1] + 1).map_err(|e| e.to_string())?;
         let mut runs = Vec::new();
         for x in area.min[0]..=area.max[0] {
@@ -641,6 +658,11 @@ impl Bench for GameBench<'_, '_> {
         base::role_at(self.game, pos)
     }
 
+    // s18/pipe
+    fn pipe(&mut self, action: &str, pos: Pos) -> Result<String, String> {
+        crate::game::rustcraft_pipe18::bench(self.game, action, pos)
+    }
+
     fn testkit(&mut self, args: &str) -> String {
         let mut ran = false;
         base::on_testkit_command(self.game, &format!("rustcraft_testkit {args}"), &mut ran);
@@ -781,6 +803,10 @@ impl Bench for GameBench<'_, '_> {
         crate::game::rustcraft_handbook::recipe_of(self.game, item).map(|(grid, _)| grid)
     }
 
+    fn handbook_recipes(&self, page: usize) -> Vec<rustcraft_rules::handbook::recipes::Shown> {
+        crate::game::rustcraft_handbook::page_recipes(self.game, page)
+    }
+
     fn set_brush_loot(&mut self, pos: Pos, table: &str) -> Result<(), String> {
         crate::game::rustcraft_utility::set_brush_loot(self.game, pos, table)
             .then_some(())
@@ -806,6 +832,51 @@ impl Bench for GameBench<'_, '_> {
         })?;
         Ok(said)
     }
+
+    // ---- Slice 18, energy stream ----
+
+    fn break_block(&mut self, pos: Pos, tool: Option<&str>) -> Result<Vec<(String, u32)>, String> {
+        let tool = tool.map(|t| ItemStack::new(t, 1));
+        let drops = self
+            .game
+            .native_machine_destroy_block(pos, tool.as_ref(), true)
+            .ok_or_else(|| format!("nothing broken at {pos:?}"))?;
+        Ok(drops.into_iter().map(|d| (d.item.to_string(), d.count)).collect())
+    }
+
+    fn seed(&self, pos: Pos) -> Option<rustcraft_rules::grow::Seed> {
+        power::seed_at(self.game, pos)
+    }
+
+    fn set_seed(&mut self, pos: Pos, progress: f64) -> Result<(), String> {
+        self.change_entity(pos, |e| machines::write_f64(&mut e.nbt, "grow", progress))
+    }
+
+    fn crystal_drawn(&self, pos: Pos) -> Option<(Option<[i32; 3]>, bool, bool)> {
+        self.game
+            .native_mod_block_entity(pos)
+            .map(|e| power::drawn_of(&e.nbt))
+    }
+
+    // ---- Slice 18, stream 6 (rail and workers) ----
+    fn worker_as_item(&mut self, id: u64, cell: Pos) -> Result<u64, String> {
+        workers::as_item_for_selftest(self.game, DIMENSION, id, cell, server::tuning())
+    }
+
+    fn swap_chassis(&mut self, id: u64, item: &str) -> Result<String, String> {
+        workers::swap_for_selftest(DIMENSION, id, item)
+    }
+
+    fn worker_room(&self, owner: u128, limit: u32) -> bool {
+        workers::may_place_for_selftest(owner, limit)
+    }
+
+    fn set_worker_filter(&mut self, id: u64, items: &[&str]) -> Result<(), String> {
+        workers::filter_for_selftest(DIMENSION, id, items)
+    }
+
+
+
 
     fn anim(&self, pos: Pos) -> Option<rustcraft_rules::anim::Shown> {
         self.game
@@ -841,6 +912,190 @@ impl Bench for GameBench<'_, '_> {
             .into_iter()
             .map(|e| (e.stack.item.to_string(), e.stack.count))
             .collect()
+    }
+
+    // ---- Slice 18, base and gear (stream 7) ----
+
+    fn put_gear_held(&mut self, pos: Pos, slot: usize, item: &str, held: rustcraft_rules::gear::Held) -> Result<(), String> {
+        let mut stack = ItemStack::new(item, 1);
+        crate::game::rustcraft_gear::number(&mut stack);
+        crate::game::rustcraft_gear::set_held(&stack, held);
+        self.change_entity(pos, move |e| {
+            if e.items.len() <= slot {
+                e.items.resize(slot + 1, None);
+            }
+            e.items[slot] = Some(stack);
+        })
+    }
+
+    fn gear_held(&self, pos: Pos, slot: usize) -> Option<rustcraft_rules::gear::Held> {
+        let stack = self.game.native_mod_block_entity(pos)?.items.get(slot).cloned().flatten()?;
+        crate::game::rustcraft_gear::held(&stack)
+    }
+
+    fn anvil_capacity(&mut self, piece: &str, level: u8, books: usize) -> Vec<Option<u8>> {
+        crate::game::rustcraft_gear::anvil_for_selftest(piece, level, books)
+    }
+
+    fn age_rope(&mut self, id: u64, ms: u64) -> Result<(), String> {
+        crate::game::rustcraft_zipline::age_rope_for_selftest(self.game, id, ms)
+    }
+
+    fn turret_aim(&self, pos: Pos) -> Option<(f32, f32)> {
+        let e = self.game.native_mod_block_entity(pos)?;
+        e.nbt
+            .contains_key(&horizon_world::nbt::JavaString::from(base::AIM_KEYS[0]))
+            .then(|| base::aim_of(&e.nbt))
+    }
+
+    // Slice 18, stream 3 (machines).
+    fn swap_tier(&mut self, pos: Pos, item: &str) -> Result<String, String> {
+        crate::game::rustcraft_tiers::swap_in_place(self.game, pos, item)
+            .map(|(old, _, _)| old)
+            .map_err(str::to_owned)
+    }
+
+    fn use_bucket(&mut self, pos: Pos, held: &str) -> Result<String, String> {
+        fluids::bucket_on_tank(self.game, DIMENSION, pos, held)
+            .map(str::to_owned)
+            .map_err(|(_, why)| why.to_owned())
+    }
+
+    // Slice 18, final: a player's click through the game's own use.
+    fn click_block(&mut self, pos: Pos, face: Face, held: &str, sneaking: bool) -> Result<Vec<String>, String> {
+        let stack = match held.strip_prefix("got:") {
+            Some(item) => take_got(item).ok_or_else(|| format!("no {item} from an earlier click"))?,
+            None => ItemStack::new(held, 1),
+        };
+        let n = face.offset().map(f64::from);
+        let centre = pos.map(|c| f64::from(c) + 0.5);
+        let point: [f64; 3] = std::array::from_fn(|k| centre[k] + 0.5 * n[k]);
+        // The eye out from the face, looking at it (yaw 0 south, 90 west, 180 north): far enough
+        // that the player's body is clear of the cell a placed block takes (a body 0.6 wide and
+        // 1.8 high next to the face would stand in it, and the game refuses such a placement),
+        // and within reach.
+        let out = if matches!(face, Face::YPos | Face::YNeg) { 3.5 } else { 2.5 };
+        let eye: [f64; 3] = std::array::from_fn(|k| centre[k] + out * n[k]);
+        let (yaw, pitch) = match face {
+            Face::ZNeg => (0.0, 0.0),
+            Face::ZPos => (180.0, 0.0),
+            Face::XNeg => (-90.0, 0.0),
+            Face::XPos => (90.0, 0.0),
+            Face::YPos => (0.0, 90.0),
+            Face::YNeg => (0.0, -90.0),
+        };
+        let target = NativeUseTarget::Block {
+            pos,
+            face: crate::game::rustcraft_transport::direction(face),
+            point,
+        };
+        // `native_give_stack` fills the fake inventory for the acting id (native_server.rs:1118).
+        let uuid = self.game.native_acting_id();
+        let game = &mut *self.game;
+        let used = server::as_bench_actor(uuid, DIMENSION, || {
+            game.native_use_as_player(stack, eye, yaw, pitch, target, sneaking)
+        })
+        .ok_or("the fake player could not act")?;
+        let ids = used.other.iter().map(|s| s.item.to_string()).collect();
+        got().extend(used.other);
+        Ok(ids)
+    }
+
+    // ---- Wave 2, w2-craft ----
+
+    fn pair_docks(&mut self, a: Pos, b: Pos) -> Result<(), String> {
+        crate::game::rustcraft_builder::pair_docks(self.game, a, b)
+    }
+
+    // ---- Slice 18, stream 5 (craft and storage) ----
+
+    fn insert_snbt(&mut self, pos: Pos, snbt: &str) -> Result<u32, String> {
+        let (tag, _) = horizon_world::nbt::parse_snbt(snbt)?;
+        let stack = horizon_client::save::item_from_nbt(&tag)
+            .ok_or_else(|| format!("no item in {snbt}"))?;
+        let count = stack.count;
+        let left = self
+            .game
+            .native_insert_item(pos, Direction::Up, stack)
+            .map_or(0, |s| s.count);
+        Ok(count - left.min(count))
+    }
+
+    fn long(&self, pos: Pos, key: &str) -> i64 {
+        match self
+            .game
+            .native_mod_block_entity(pos)
+            .and_then(|e| e.nbt.get(&horizon_world::nbt::JavaString::from(key)).cloned())
+        {
+            Some(Tag::Long(v)) => v,
+            Some(Tag::Int(v)) => i64::from(v),
+            // Slice 18, cross-stream agent: a byte (a machine's work mode).
+            Some(Tag::Byte(v)) => i64::from(v),
+            _ => 0,
+        }
+    }
+
+    fn menu_data(&self, pos: Pos) -> Vec<i32> {
+        self.game
+            .native_mod_block_entity(pos)
+            .map(|e| e.data.clone())
+            .unwrap_or_default()
+    }
+
+    // Slice 18, last leftovers: the backpack's store.
+    fn backpack_store(&mut self) -> Result<(), String> {
+        crate::game::rustcraft_backpack::self_test_store(self.game)?;
+        // In-game check w3: the key on a worn backpack hung the server.
+        crate::game::rustcraft_backpack::self_test_key(self.game)
+    }
+
+    fn int_array(&self, pos: Pos, key: &str) -> Vec<i32> {
+        match self
+            .game
+            .native_mod_block_entity(pos)
+            .and_then(|e| e.nbt.get(&horizon_world::nbt::JavaString::from(key)).cloned())
+        {
+            Some(Tag::IntArray(v)) => v,
+            _ => Vec::new(),
+        }
+    }
+
+    fn storage_diagnosis(&self, pos: Pos) -> Option<String> {
+        let block = self.game.native_block(pos);
+        let text = storage::diagnosis(self.game, DIMENSION, pos, &block)?;
+        text.component()
+            .get("translate")
+            .and_then(|t| t.as_str())
+            .map(str::to_owned)
+    }
+
+    fn stored_stacks(&self, pos: Pos) -> Vec<String> {
+        storage::stored_stacks_at(DIMENSION, pos)
+            .into_iter()
+            .map(|s| {
+                let mut out = format!("{} x{}", s.item, s.count);
+                if let Some(name) = s.custom_name() {
+                    out.push_str(&format!(" {name:?}"));
+                }
+                for (id, level) in s.enchantments().iter().chain(s.stored_enchantments()) {
+                    out.push_str(&format!(" {id} {level}"));
+                }
+                out
+            })
+            .collect()
+    }
+
+    // ---- Slice 18, wave 2: rail, workers, base and gear ----
+    fn swap_rail(&mut self, pos: Pos, item: &str) -> Result<String, String> {
+        crate::game::rustcraft_monorail::swap_rail_in_place(self.game, DIMENSION, pos, item)
+            .map(|(old, _, _)| old.to_owned())
+            .map_err(str::to_owned)
+    }
+    fn chassis_press(&mut self, id: u64, press: rustcraft_rules::worker::screen::Press) -> Result<(), String> {
+        workers::press_for_selftest(DIMENSION, id, press)
+    }
+    fn set_worker_modules(&mut self, id: u64, modules: &[&str]) -> Result<(), String> {
+        workers::modules_for_selftest(DIMENSION, id, modules)
     }
 }
 
@@ -905,5 +1160,13 @@ pub(super) fn slice7_mob(game: &Game<'_>, id: u32) -> Option<MobView> {
                 )
             })
             .collect(),
+        // Slice 18: the turret's slowness modifier, as the share of speed it takes.
+        slow: horizon_client::mobs::finalize::modifier_amount(
+            m,
+            horizon_client::mobs::finalize::Attr::MovementSpeed,
+            base::SLOW_ID,
+        )
+        .map(|a| -a),
+        slow_ticks: base::slow_ticks_left(id),
     })
 }

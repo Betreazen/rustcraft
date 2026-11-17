@@ -7,8 +7,46 @@
       },
       "entries": [
         {
-          "type": "minecraft:item",
-          "name": "rustcraft:alloy"
+          "type": "minecraft:alternatives",
+          "children": [
+            {
+              "type": "minecraft:item",
+              "name": "rustcraft:alloy_2",
+              "condition": {
+                "type": "minecraft:match_block",
+                "blocks": "rustcraft:alloy",
+                "state": {
+                  "tier": "2"
+                }
+              }
+            },
+            {
+              "type": "minecraft:item",
+              "name": "rustcraft:alloy_3",
+              "condition": {
+                "type": "minecraft:match_block",
+                "blocks": "rustcraft:alloy",
+                "state": {
+                  "tier": "3"
+                }
+              }
+            },
+            {
+              "type": "minecraft:item",
+              "name": "rustcraft:alloy_4",
+              "condition": {
+                "type": "minecraft:match_block",
+                "blocks": "rustcraft:alloy",
+                "state": {
+                  "tier": "4"
+                }
+              }
+            },
+            {
+              "type": "minecraft:item",
+              "name": "rustcraft:alloy"
+            }
+          ]
         }
       ],
       "rolls": 1

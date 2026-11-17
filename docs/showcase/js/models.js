@@ -181,6 +181,14 @@
     out.box(o, 7 * p, 15 * p, 7 * p, 2 * p, p, 4 * p, 'chest_lock');
   };
 
+  // The vanilla anvil, as its model stands: a foot, a waist and the long face on top (along x).
+  M.anvil = (o, t, out) => {
+    const p = 1 / 16, top = '#74777e', side = '#55585f', dark = '#43454b';
+    out.box(o, 2 * p, 2 * p, 0, 12 * p, 12 * p, 4 * p, side, dark, side);
+    out.box(o, 3 * p, 4 * p, 4 * p, 10 * p, 8 * p, p, side, dark, side);
+    out.box(o, 4 * p, 6 * p, 5 * p, 8 * p, 4 * p, 5 * p, side, dark, side);
+    out.box(o, 0, 3 * p, 10 * p, 16 * p, 10 * p, 6 * p, top, side, dark);
+  };
   M.furnace = machine('m_furnace', 'm_furnace_top');
   M.crusher = machine('m_crusher', 'm_crusher');
   M.crafter = machine('m_crafter', 'm_crafter');

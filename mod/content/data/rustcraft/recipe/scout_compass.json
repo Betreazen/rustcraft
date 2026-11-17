@@ -9,7 +9,7 @@
   "key": {
     "c": "rustcraft:crystallite",
     "m": "minecraft:compass",
-    "s": "minecraft:amethyst_shard"
+    "s": "rustcraft:crystal_shard"
   },
   "result": {
     "id": "rustcraft:scout_compass",

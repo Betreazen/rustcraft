@@ -135,7 +135,11 @@ fn mixer_on_a_channel(b: &mut dyn Bench, o: Pos, tier: u8) -> Result<(), String>
     )?;
     let water = at(o, [1, 0, 1]);
     b.place(water, TANK, &[])?;
-    b.set_tank(water, WATER, 8000)?;
+    b.set_tank(water, WATER, 16_000)?;
+    // Slice 18: the mixer's tanks hold 16 buckets (`ui.js` mixer), so the water tank holds more
+    // than that: the water keeps the tier-1 channel's one lane.
+    b.place(at(water, [0, 1, 0]), TANK, &[])?;
+    b.set_tank(at(water, [0, 1, 0]), WATER, 16_000)?;
     b.set_joint(
         at(o, [1, 0, 0]),
         Face::ZPos,
@@ -472,10 +476,12 @@ fn load_dock_window(o: Pos, _: &Tuning) -> Scenario {
             b.place(dock, DOCK_LOAD, &[])?;
             b.put(dock, 0, COBBLE, 10)
         })
-        .until("its sheet: a line and a state", 60, move |b, _| {
+        .until("its sheet: its lines and a state", 60, move |b, _| {
             let s = sheet(b, dock)?;
-            Ok(s.rows.len() == 1 && s.status.is_some())
+            // Slice 18: «Берёт груз · …» and «Грузит · всё подряд», as the guide's window.
+            Ok(s.rows.len() == 2 && s.status.is_some())
         })
+
 }
 
 fn turbine_window(o: Pos, _: &Tuning) -> Scenario {

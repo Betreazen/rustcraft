@@ -10,7 +10,9 @@ use crate::geom::Pos;
 use crate::net::items::ItemKey;
 
 pub mod cells;
+pub mod filter;
 pub mod keys;
+pub mod modules;
 pub mod tablet;
 pub mod terminal;
 pub mod view;
@@ -138,6 +140,32 @@ impl Store {
         let partial = if rest == 0 { 0 } else { stack - rest };
         free * stack + partial
     }
+
+    /// Slice 18: the component keys of `item` the storage names (held, limited or kept), in key
+    /// order. A component line's index in the terminal's list is its place here.
+    pub fn variants_of(&self, item: &str) -> Vec<&ItemKey> {
+        let mut out: BTreeSet<&ItemKey> = BTreeSet::new();
+        for k in self.items.keys().chain(self.limits.keys()).chain(self.keep.keys()) {
+            if keys::payload(k).is_some() && keys::item_of(k) == item {
+                out.insert(k);
+            }
+        }
+        out.into_iter().collect()
+    }
+
+    /// The component key of `item` at `index` of `variants_of`.
+    pub fn variant(&self, item: &str, index: u16) -> Option<ItemKey> {
+        self.variants_of(item).get(usize::from(index)).map(|k| (*k).clone())
+    }
+
+    /// The index of the component key `key` among its item's `variants_of`.
+    pub fn variant_index(&self, key: &str) -> Option<u16> {
+        let item = keys::item_of(key);
+        self.variants_of(item)
+            .iter()
+            .position(|k| k.as_str() == key)
+            .and_then(|i| u16::try_from(i).ok())
+    }
 }
 
 /// S8: the cells form a solid box. Otherwise the cells to add (holes inside the box) or to remove
@@ -146,10 +174,107 @@ impl Store {
 pub enum Shape {
     Solid,
     Holes(BTreeSet<Pos>),
+    /// Wave 2: cells outside the biggest solid box of them (a protrusion), when fewer are to be
+    /// taken away than to be added.
+    Extra(BTreeSet<Pos>),
 }
 
-/// Checks that `cells` fill their bounding box.
+/// Wave 2: the most boxes the search for the biggest solid box tries; a bigger bounding box is
+/// judged by its holes alone.
+const BOX_SEARCH: usize = 2_000_000;
+
+/// The biggest box (lowest and highest corner) every cell of which is in `cells`, inside the
+/// bounding box `lo`..=`hi`; none past [`BOX_SEARCH`].
+fn biggest_box(cells: &BTreeSet<Pos>, lo: Pos, hi: Pos) -> Option<(Pos, Pos)> {
+    let d: [usize; 3] = std::array::from_fn(|a| (hi[a] - lo[a] + 1) as usize);
+    let pairs = |n: usize| n * (n + 1) / 2;
+    if pairs(d[0]).saturating_mul(pairs(d[1])).saturating_mul(pairs(d[2])) > BOX_SEARCH {
+        return None;
+    }
+    // Prefix sums: p[x][y][z] = cells in lo..(lo + (x, y, z)), exclusive.
+    let idx = |x: usize, y: usize, z: usize| (x * (d[1] + 1) + y) * (d[2] + 1) + z;
+    let mut p = vec![0i32; (d[0] + 1) * (d[1] + 1) * (d[2] + 1)];
+    for x in 1..=d[0] {
+        for y in 1..=d[1] {
+            for z in 1..=d[2] {
+                let c = i32::from(cells.contains(&[lo[0] + x as i32 - 1, lo[1] + y as i32 - 1, lo[2] + z as i32 - 1]));
+                p[idx(x, y, z)] = c + p[idx(x - 1, y, z)] + p[idx(x, y - 1, z)] + p[idx(x, y, z - 1)]
+                    - p[idx(x - 1, y - 1, z)]
+                    - p[idx(x - 1, y, z - 1)]
+                    - p[idx(x, y - 1, z - 1)]
+                    + p[idx(x - 1, y - 1, z - 1)];
+            }
+        }
+    }
+    let count = |a: [usize; 3], b: [usize; 3]| {
+        p[idx(b[0], b[1], b[2])] - p[idx(a[0], b[1], b[2])] - p[idx(b[0], a[1], b[2])] - p[idx(b[0], b[1], a[2])]
+            + p[idx(a[0], a[1], b[2])]
+            + p[idx(a[0], b[1], a[2])]
+            + p[idx(b[0], a[1], a[2])]
+            - p[idx(a[0], a[1], a[2])]
+    };
+    let mut best: Option<(i32, [usize; 3], [usize; 3])> = None;
+    for x0 in 0..d[0] {
+        for x1 in x0 + 1..=d[0] {
+            for y0 in 0..d[1] {
+                for y1 in y0 + 1..=d[1] {
+                    for z0 in 0..d[2] {
+                        for z1 in z0 + 1..=d[2] {
+                            let vol = ((x1 - x0) * (y1 - y0) * (z1 - z0)) as i32;
+                            if best.is_some_and(|(v, _, _)| v >= vol) {
+                                continue;
+                            }
+                            if count([x0, y0, z0], [x1, y1, z1]) == vol {
+                                best = Some((vol, [x0, y0, z0], [x1, y1, z1]));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    let (_, a, b) = best?;
+    let at = |v: [usize; 3], k: i32| -> Pos { std::array::from_fn(|i| lo[i] + v[i] as i32 + k) };
+    Some((at(a, 0), at(b, -1)))
+}
+
+/// Checks that `cells` fill their bounding box. Wave 2: when the cells outside the biggest
+/// solid box among them are fewer than the holes of the bounding box, those cells are named
+/// instead (a protrusion: «подсветит лишнюю ячейку»).
 pub fn shape(cells: &BTreeSet<Pos>) -> Shape {
+    match holes_shape(cells) {
+        Shape::Holes(holes) => {
+            let (lo, hi) = bounds(cells);
+            let extra: Option<BTreeSet<Pos>> = biggest_box(cells, lo, hi).map(|(a, b)| {
+                cells
+                    .iter()
+                    .filter(|c| (0..3).any(|k| c[k] < a[k] || c[k] > b[k]))
+                    .copied()
+                    .collect()
+            });
+            match extra {
+                Some(e) if !e.is_empty() && e.len() < holes.len() => Shape::Extra(e),
+                _ => Shape::Holes(holes),
+            }
+        }
+        s => s,
+    }
+}
+
+fn bounds(cells: &BTreeSet<Pos>) -> (Pos, Pos) {
+    let first = cells.first().copied().unwrap_or_default();
+    let (mut lo, mut hi) = (first, first);
+    for c in cells {
+        for a in 0..3 {
+            lo[a] = lo[a].min(c[a]);
+            hi[a] = hi[a].max(c[a]);
+        }
+    }
+    (lo, hi)
+}
+
+/// The bounding box's holes.
+fn holes_shape(cells: &BTreeSet<Pos>) -> Shape {
     let Some(first) = cells.first() else {
         return Shape::Solid;
     };
@@ -194,6 +319,21 @@ mod tests {
             cells,
             ..Store::default()
         }
+    }
+
+    #[test]
+    fn each_component_stack_of_an_item_has_its_place() {
+        // Slice 18: the terminal names a component stack by its item and its place.
+        let mut s = store(1);
+        let a = keys::component_key("minecraft:potion", "0a");
+        let b = keys::component_key("minecraft:potion", "0b");
+        s.put(&b, 1, &vanilla);
+        s.put(&a, 1, &vanilla);
+        s.put("minecraft:potion", 1, &vanilla);
+        assert_eq!(s.variants_of("minecraft:potion"), vec![&a, &b]);
+        assert_eq!(s.variant_index(&b), Some(1));
+        assert_eq!(s.variant("minecraft:potion", 0), Some(a));
+        assert_eq!(s.variant("minecraft:potion", 2), None);
     }
 
     #[test]
@@ -276,6 +416,37 @@ mod tests {
         assert_eq!(shape(&cells), Shape::Solid);
         cells.remove(&[1, 1, 0]);
         assert_eq!(shape(&cells), Shape::Holes(BTreeSet::from([[1, 1, 0]])));
+    }
+
+    #[test]
+    fn a_cell_sticking_out_is_the_extra_one() {
+        // Wave 2 (guide `cell`: «подсветит лишнюю или недостающую ячейку»): a 2 × 2 with one
+        // cell on top is a box and one cell too many, not a 2 × 2 × 2 short of three.
+        let mut cells: BTreeSet<Pos> = [[0, 0, 0], [1, 0, 0], [0, 0, 1], [1, 0, 1]].into();
+        cells.insert([1, 1, 1]);
+        assert_eq!(shape(&cells), Shape::Extra(BTreeSet::from([[1, 1, 1]])));
+        // A column of three on a 2 × 2: two too many.
+        let mut tall: BTreeSet<Pos> = [[0, 0, 0], [1, 0, 0], [0, 0, 1], [1, 0, 1]].into();
+        tall.extend([[0, 1, 0], [0, 2, 0]]);
+        assert_eq!(shape(&tall), Shape::Extra(BTreeSet::from([[0, 1, 0], [0, 2, 0]])));
+    }
+
+    #[test]
+    fn a_hole_is_still_a_hole() {
+        // One missing of a 2 × 2 × 2: a hole (one to add) beats four to remove.
+        let mut cells = BTreeSet::new();
+        for x in 0..2 {
+            for y in 0..2 {
+                for z in 0..2 {
+                    cells.insert([x, y, z]);
+                }
+            }
+        }
+        cells.remove(&[1, 1, 1]);
+        assert_eq!(shape(&cells), Shape::Holes(BTreeSet::from([[1, 1, 1]])));
+        // A tie (an L of three): the missing one is named.
+        let l: BTreeSet<Pos> = [[0, 0, 0], [1, 0, 0], [0, 0, 1]].into();
+        assert_eq!(shape(&l), Shape::Holes(BTreeSet::from([[1, 0, 1]])));
     }
 
     #[test]

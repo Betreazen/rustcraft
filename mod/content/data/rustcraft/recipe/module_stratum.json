@@ -2,14 +2,15 @@
   "type": "minecraft:crafting_shaped",
   "category": "misc",
   "pattern": [
-    "axa",
-    "xsx",
-    "axa"
+    "asa",
+    "bdb",
+    "asa"
   ],
   "key": {
     "a": "rustcraft:starsteel",
-    "x": "minecraft:brush",
-    "s": "minecraft:amethyst_shard"
+    "s": "rustcraft:crystal_shard",
+    "b": "minecraft:brush",
+    "d": "minecraft:diamond"
   },
   "result": {
     "id": "rustcraft:module_stratum",

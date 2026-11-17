@@ -28,8 +28,12 @@ pub enum Mode {
 }
 
 impl Mode {
-    /// The order the joint window steps through a joint's modes.
-    const CYCLE: [Mode; 4] = [Mode::Into, Mode::From, Mode::Both, Mode::Off];
+    /// The order the joint window steps through a joint's modes: the handbook's three (data.js
+    /// `Направление`: «в машину», «из машины», «выключен»). `Both` is no step of it: it is a
+    /// block's default before its joint is set (data.js: «По умолчанию магистраль сама подаёт
+    /// машине то, что она принимает, и забирает готовое»), and the window names it so.
+    const CYCLE: [Mode; 3] = [Mode::Into, Mode::From, Mode::Off];
+    const ALL: [Mode; 4] = [Mode::Into, Mode::From, Mode::Both, Mode::Off];
 
     /// The net may put into the block.
     pub fn takes(self) -> bool {
@@ -41,14 +45,20 @@ impl Mode {
         matches!(self, Mode::From | Mode::Both)
     }
 
-    /// The mode a click sets next: into, from, both, off, and round again.
+    /// The mode a click sets next: into, from, off, and round again; the default goes to into.
     pub fn next(self) -> Mode {
+        if self == Mode::Both {
+            return Mode::Into;
+        }
         let at = Self::CYCLE.iter().position(|&m| m == self).unwrap_or(0);
         Self::CYCLE[(at + 1) % Self::CYCLE.len()]
     }
 
-    /// The mode before this one in that order (a right click).
+    /// The mode before this one in that order (a right click); the default goes to off.
     pub fn previous(self) -> Mode {
+        if self == Mode::Both {
+            return Mode::Off;
+        }
         let at = Self::CYCLE.iter().position(|&m| m == self).unwrap_or(0);
         Self::CYCLE[(at + Self::CYCLE.len() - 1) % Self::CYCLE.len()]
     }
@@ -66,7 +76,7 @@ impl Mode {
     /// The mode `code` wrote; none for a byte it does not know, so a damaged save falls back
     /// to the block's default.
     pub fn from_code(code: u8) -> Option<Mode> {
-        Self::CYCLE.into_iter().find(|m| m.code() == code)
+        Self::ALL.into_iter().find(|m| m.code() == code)
     }
 }
 
@@ -94,6 +104,15 @@ pub struct Joint {
     pub mode: Mode,
     pub filter: Filter,
     pub priority: i32,
+    /// Slice 18 (guide `quickstart` 5, `housing`): a vanilla container with no setting of its
+    /// own. It works both ways but only with the rest of the net: it gives a machine or a storage
+    /// what they take, takes a machine's products after every other receiver, and never trades
+    /// with another such container.
+    pub auto: bool,
+    /// Slice 18 (guide `quickstart` 5: ore → crusher → furnace): a crusher on its default joint.
+    /// What it takes goes to it, not to another receiver of its priority that takes it too (the
+    /// furnace smelts ore as well), and waits for it while it is full.
+    pub refiner: bool,
 }
 
 /// The inventories behind the joints, as the game sees them this tick.
@@ -102,6 +121,16 @@ pub trait Inventories {
     fn offered(&self, block: Pos) -> Vec<(ItemKey, u32)>;
     /// How many of `item` the block can take now.
     fn room_for(&self, block: Pos, item: &str) -> u32;
+    /// Slice 18: the block is a machine that takes `item` as an ingredient, room or not. Such an
+    /// item is no auto container's (guide `ch_item`: what no receiver needs goes to a chest).
+    fn needs(&self, _block: Pos, _item: &str) -> bool {
+        false
+    }
+    /// Slice 18: the block is a machine (it takes only its ingredients): its products go to the
+    /// nearest auto container (guide `quickstart` 5, «слитками в правом»).
+    fn is_machine(&self, _block: Pos) -> bool {
+        false
+    }
     /// Takes up to `count` of `item` out of the block; returns how many it took.
     fn take(&mut self, block: Pos, item: &str, count: u32) -> u32;
     /// Puts up to `count` of `item` into the block; returns how many fitted.
@@ -143,6 +172,9 @@ pub struct TickResult {
     pub notes: Vec<(usize, JointNote)>,
 }
 
+/// The turn key of the auto containers' group (`NetState::turn`).
+const AUTO_TURN: i32 = i32::MIN;
+
 /// One tick of an item net that carries `per_second` items, with `joints` on it.
 pub fn tick(
     joints: &[Joint],
@@ -162,10 +194,13 @@ pub fn tick(
         return result;
     }
     // Receivers by priority, highest first; the order inside a priority is the joints' order.
-    let mut by_priority: BTreeMap<std::cmp::Reverse<i32>, Vec<usize>> = BTreeMap::new();
+    // Auto containers come after every other receiver (slice 18), with a turn of their own.
+    let mut by_priority: BTreeMap<(bool, std::cmp::Reverse<i32>), Vec<usize>> = BTreeMap::new();
     for &r in &receivers {
+        let j = &joints[r];
+        let priority = if j.auto { AUTO_TURN } else { j.priority };
         by_priority
-            .entry(std::cmp::Reverse(joints[r].priority))
+            .entry((j.auto, std::cmp::Reverse(priority)))
             .or_default()
             .push(r);
     }
@@ -179,31 +214,50 @@ pub fn tick(
                 continue;
             }
             let mut left = count;
-            for (std::cmp::Reverse(priority), group) in &by_priority {
+            // M17: never back into the block it came from.
+            let open = |r: usize| joints[r].block != src.block && joints[r].filter.passes(&item);
+            // Slice 18: an item a machine on the line takes is no auto container's.
+            let machine_needs = receivers
+                .iter()
+                .any(|&r| !joints[r].auto && open(r) && inv.needs(joints[r].block, &item));
+            for ((auto, std::cmp::Reverse(priority)), group) in &by_priority {
                 if left == 0 || available == 0 {
                     break;
                 }
-                // M17: never back into the block it came from.
-                let candidates: Vec<usize> = group
+                if *auto && machine_needs {
+                    continue;
+                }
+                let mut candidates: Vec<usize> = group
                     .iter()
                     .copied()
-                    .filter(|&r| joints[r].block != src.block && joints[r].filter.passes(&item))
+                    .filter(|&r| open(r) && !(src.auto && joints[r].auto))
                     .collect();
+                // Slice 18: a crusher of this priority that takes the item goes before the others.
+                let refines = |r: usize| joints[r].refiner && inv.needs(joints[r].block, &item);
+                if candidates.iter().any(|&r| refines(r)) {
+                    candidates.retain(|&r| refines(r));
+                }
                 if candidates.is_empty() {
                     continue;
                 }
                 let turn = state.turn.entry(*priority).or_insert(0);
-                let gave = share_in_turn(
-                    joints,
-                    &candidates,
-                    turn,
-                    src.block,
-                    &item,
-                    &mut left,
-                    &mut available,
-                    inv,
-                    &mut result.transfers,
-                );
+                let mut gave = 0;
+                // A machine's products: auto containers nearest it along the line first, equally
+                // near in turn; from a chest, auto containers take turns (M8).
+                let nearest = *auto && inv.is_machine(src.block);
+                for near in nearest_first(joints, &candidates, src.housing, nearest) {
+                    gave += share_in_turn(
+                        joints,
+                        &near,
+                        turn,
+                        src.block,
+                        &item,
+                        &mut left,
+                        &mut available,
+                        inv,
+                        &mut result.transfers,
+                    );
+                }
                 moved += gave;
                 if left > 0 && available > 0 {
                     // Items waited and every receiver of this priority had no room.
@@ -219,6 +273,23 @@ pub fn tick(
         .map(|j| (j, JointNote::ReceiverFull))
         .collect();
     result
+}
+
+/// Slice 18 (guide `quickstart` 5, «слитками в правом»): with `nearest`, the candidates grouped
+/// by how far their housings are from `from` (the source's), nearest first; else one group.
+fn nearest_first(joints: &[Joint], candidates: &[usize], from: Pos, nearest: bool) -> Vec<Vec<usize>> {
+    if !nearest {
+        return vec![candidates.to_vec()];
+    }
+    let far = |r: usize| -> i32 {
+        let h = joints[r].housing;
+        (0..3).map(|i| (h[i] - from[i]).abs()).sum()
+    };
+    let mut by_far: BTreeMap<i32, Vec<usize>> = BTreeMap::new();
+    for &r in candidates {
+        by_far.entry(far(r)).or_default().push(r);
+    }
+    by_far.into_values().collect()
 }
 
 /// The first joint on each block whose mode passes `wanted`: two joints on one block are one inventory.
@@ -302,6 +373,8 @@ mod tests {
         offer: HashMap<Pos, Vec<(ItemKey, u32)>>,
         room: HashMap<Pos, HashMap<ItemKey, u32>>,
         got: HashMap<Pos, HashMap<ItemKey, u32>>,
+        /// What a machine takes as an ingredient, room or not (`Inventories::needs`).
+        need: HashMap<Pos, BTreeSet<ItemKey>>,
     }
 
     impl World {
@@ -316,6 +389,11 @@ mod tests {
                 .entry(block)
                 .or_default()
                 .insert(item.into(), room);
+        }
+        /// A machine's input for `item` with `room` left.
+        fn machine_takes(&mut self, block: Pos, item: &str, room: u32) {
+            self.takes(block, item, room);
+            self.need.entry(block).or_default().insert(item.into());
         }
         fn got(&self, block: Pos, item: &str) -> u32 {
             self.got
@@ -342,6 +420,12 @@ mod tests {
                 .and_then(|m| m.get(item))
                 .copied()
                 .unwrap_or(0)
+        }
+        fn needs(&self, block: Pos, item: &str) -> bool {
+            self.need.get(&block).is_some_and(|n| n.contains(item))
+        }
+        fn is_machine(&self, block: Pos) -> bool {
+            self.need.contains_key(&block)
         }
         fn take(&mut self, block: Pos, item: &str, count: u32) -> u32 {
             let mut left = count;
@@ -381,7 +465,176 @@ mod tests {
             mode,
             filter: Filter::default(),
             priority,
+            auto: false,
+            refiner: false,
         }
+    }
+
+    fn auto_chest(block: Pos) -> Joint {
+        Joint {
+            auto: true,
+            ..joint(block, Mode::Both, 0)
+        }
+    }
+
+    const FURNACE: Pos = [5, 0, 0];
+
+    #[test]
+    fn an_auto_chest_feeds_a_machine_and_takes_its_products() {
+        // Guide `quickstart` 5: ore in the left chest reaches the furnace, ingots the right chest.
+        let mut world = World::default();
+        world.gives(CHEST, "minecraft:raw_iron", 4);
+        world.takes(FURNACE, "minecraft:raw_iron", 64);
+        world.gives(FURNACE, "minecraft:iron_ingot", 2);
+        world.takes(CHEST2, "minecraft:iron_ingot", 64);
+        world.takes(CHEST2, "minecraft:raw_iron", 64);
+        let joints = [auto_chest(CHEST), joint(FURNACE, Mode::Both, 0), auto_chest(CHEST2)];
+        run(&joints, &mut world, 1);
+        assert_eq!(world.got(FURNACE, "minecraft:raw_iron"), 4);
+        assert_eq!(world.got(CHEST2, "minecraft:iron_ingot"), 2);
+        assert_eq!(world.got(CHEST2, "minecraft:raw_iron"), 0, "chest to chest");
+    }
+
+    #[test]
+    fn auto_chests_never_trade_between_themselves() {
+        let mut world = World::default();
+        world.gives(CHEST, "minecraft:cobblestone", 10);
+        world.takes(CHEST2, "minecraft:cobblestone", 64);
+        let joints = [auto_chest(CHEST), auto_chest(CHEST2)];
+        let r = run(&joints, &mut world, 2);
+        assert!(r.iter().all(|t| t.transfers.is_empty()));
+        assert!(r.iter().all(|t| t.notes.is_empty()), "no «Приёмник полон» either");
+    }
+
+    #[test]
+    fn an_auto_chest_is_the_last_receiver() {
+        // A machine product goes to a storage or a set receiver first, to the chest only after.
+        let mut world = World::default();
+        world.gives(FURNACE, "minecraft:iron_ingot", 3);
+        world.takes(CHEST, "minecraft:iron_ingot", 64);
+        world.takes(CHEST2, "minecraft:iron_ingot", 2);
+        let joints = [
+            joint(FURNACE, Mode::Both, 0),
+            auto_chest(CHEST),
+            joint(CHEST2, Mode::Into, -5),
+        ];
+        run(&joints, &mut world, 1);
+        assert_eq!(world.got(CHEST2, "minecraft:iron_ingot"), 2);
+        assert_eq!(world.got(CHEST, "minecraft:iron_ingot"), 1);
+    }
+
+    #[test]
+    fn a_set_chest_still_feeds_an_auto_chest() {
+        let mut world = World::default();
+        world.gives(CHEST, "minecraft:cobblestone", 5);
+        world.takes(CHEST2, "minecraft:cobblestone", 64);
+        let joints = [joint(CHEST, Mode::From, 0), auto_chest(CHEST2)];
+        run(&joints, &mut world, 1);
+        assert_eq!(world.got(CHEST2, "minecraft:cobblestone"), 5);
+    }
+
+    /// The guide's quickstart line (`quickstart` 3–5, scenes.js `bus`): the left chest, the
+    /// crusher, the furnace and the right chest along one line, no joint set.
+    const LEFT: Pos = [10, 0, 0];
+    const LINE_CRUSHER: Pos = [11, 0, 0];
+    const LINE_FURNACE: Pos = [12, 0, 0];
+    const RIGHT: Pos = [13, 0, 0];
+    const RAW: &str = "minecraft:raw_iron";
+    const DUST: &str = "rustcraft:iron_dust";
+    const INGOT: &str = "minecraft:iron_ingot";
+
+    fn quickstart_line() -> [Joint; 4] {
+        [
+            auto_chest(LEFT),
+            Joint { refiner: true, ..joint(LINE_CRUSHER, Mode::Both, 0) },
+            joint(LINE_FURNACE, Mode::Both, 0),
+            auto_chest(RIGHT),
+        ]
+    }
+
+    #[test]
+    fn ore_goes_to_the_crusher_not_the_furnace() {
+        // Guide `quickstart` 5: ore from the left chest → crusher; the furnace smelts ore too, but
+        // on a line with a crusher it waits for the dust. A full crusher keeps the rest waiting.
+        let mut world = World::default();
+        world.gives(LEFT, RAW, 6);
+        world.machine_takes(LINE_CRUSHER, RAW, 4);
+        world.machine_takes(LINE_FURNACE, RAW, 64);
+        world.machine_takes(LINE_FURNACE, DUST, 64);
+        world.takes(RIGHT, RAW, 64);
+        run(&quickstart_line(), &mut world, 2);
+        assert_eq!(world.got(LINE_CRUSHER, RAW), 4);
+        assert_eq!(world.got(LINE_FURNACE, RAW), 0, "ore skipped the crusher");
+        assert_eq!(world.got(RIGHT, RAW), 0, "ore went from chest to chest");
+        assert_eq!(world.left(LEFT, RAW), 2);
+    }
+
+    #[test]
+    fn dust_waits_for_the_furnace_and_never_goes_into_a_chest() {
+        // A product a machine on the line takes is no chest's: it waits while the furnace is full.
+        let mut world = World::default();
+        world.gives(LINE_CRUSHER, DUST, 6);
+        world.machine_takes(LINE_FURNACE, DUST, 2);
+        world.takes(LEFT, DUST, 64);
+        world.takes(RIGHT, DUST, 64);
+        let r = run(&quickstart_line(), &mut world, 2);
+        assert_eq!(world.got(LINE_FURNACE, DUST), 2);
+        assert_eq!(world.got(LEFT, DUST) + world.got(RIGHT, DUST), 0, "dust in a chest");
+        assert_eq!(world.left(LINE_CRUSHER, DUST), 4);
+        assert!(r[1].notes.contains(&(2, JointNote::ReceiverFull)), "the furnace is full");
+    }
+
+    #[test]
+    fn a_chests_items_take_turns_between_auto_chests() {
+        // M8 holds for what a chest gives: equally prioritised receivers share, near or far.
+        let mut world = World::default();
+        world.gives(LEFT, INGOT, 6);
+        world.takes(LINE_FURNACE, INGOT, 64);
+        world.takes(RIGHT, INGOT, 64);
+        let line = [
+            joint(LEFT, Mode::From, 0),
+            auto_chest(LINE_FURNACE),
+            auto_chest(RIGHT),
+        ];
+        run(&line, &mut world, 1);
+        assert_eq!(world.got(LINE_FURNACE, INGOT), 3);
+        assert_eq!(world.got(RIGHT, INGOT), 3);
+    }
+
+    #[test]
+    fn ingots_go_to_the_nearest_chest_then_the_next() {
+        // «Она сама станет слитками в правом»: the furnace's product goes to the chest nearest along
+        // the line; only when that one is full, on to the next.
+        let mut world = World::default();
+        world.machine_takes(LINE_FURNACE, DUST, 64);
+        world.gives(LINE_FURNACE, INGOT, 5);
+        world.takes(LEFT, INGOT, 64);
+        world.takes(RIGHT, INGOT, 64);
+        run(&quickstart_line(), &mut world, 1);
+        assert_eq!(world.got(RIGHT, INGOT), 5);
+        assert_eq!(world.got(LEFT, INGOT), 0);
+        let mut world = World::default();
+        world.machine_takes(LINE_FURNACE, DUST, 64);
+        world.gives(LINE_FURNACE, INGOT, 5);
+        world.takes(LEFT, INGOT, 64);
+        world.takes(RIGHT, INGOT, 3);
+        run(&quickstart_line(), &mut world, 1);
+        assert_eq!(world.got(RIGHT, INGOT), 3);
+        assert_eq!(world.got(LEFT, INGOT), 2, "on to the next chest when the nearest is full");
+    }
+
+    #[test]
+    fn a_set_furnace_joint_still_takes_ore_before_the_crusher() {
+        // The crusher goes first only among receivers of its priority: a player's priority wins.
+        let mut world = World::default();
+        world.gives(LEFT, RAW, 4);
+        world.machine_takes(LINE_CRUSHER, RAW, 64);
+        world.machine_takes(LINE_FURNACE, RAW, 64);
+        let mut line = quickstart_line();
+        line[2].priority = 1;
+        run(&line, &mut world, 1);
+        assert_eq!(world.got(LINE_FURNACE, RAW), 4);
+        assert_eq!(world.got(LINE_CRUSHER, RAW), 0);
     }
 
     const CRUSHER: Pos = [0, 0, 0];
@@ -496,18 +749,18 @@ mod tests {
     }
 
     #[test]
-    fn the_wrench_cycles_into_from_both_off() {
-        // Slice 2: Into → From → Both → Off → Into.
-        let mut mode = Mode::Into;
+    fn the_wrench_cycles_the_handbooks_three_directions() {
+        // Wave 2 (data.js `Направление`): Into → From → Off → Into; the default is left for into
+        // (or, back, for off) and never comes round again.
+        let mut mode = Mode::Both;
         let mut seen = vec![mode];
         for _ in 0..4 {
             mode = mode.next();
             seen.push(mode);
         }
-        assert_eq!(
-            seen,
-            [Mode::Into, Mode::From, Mode::Both, Mode::Off, Mode::Into]
-        );
+        assert_eq!(seen, [Mode::Both, Mode::Into, Mode::From, Mode::Off, Mode::Into]);
+        assert_eq!(Mode::Both.previous(), Mode::Off);
+        assert_eq!(Mode::Into.previous(), Mode::Off);
     }
 
     #[test]

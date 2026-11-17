@@ -4,4 +4,15 @@ fn rustcraft_screen_render_post(
     screen: &horizon_client::mod_api::NativeScreenView<'_>,
 ) {
     crate::game::rustcraft_handbook::draw(game, batch, screen);
+    // Slice 18, stream 6: the chassis window's panel beside its menu.
+    crate::game::rustcraft_station::draw_chassis(game, batch, screen);
+
+    // Slice 18, base and gear: a gear window's charge and modules.
+    crate::game::rustcraft_gear::draw_window(game, batch, screen);
+
+    crate::game::rustcraft_tablet::draw(game, batch, screen);
+    // Slice 18: the backpack's own screen.
+    crate::game::rustcraft_backpack::draw(game, batch, screen);
+    crate::game::rustcraft_node_window::draw(game, batch, screen);
+    crate::game::rustcraft_joint_screen::draw(game, batch, screen);
 }

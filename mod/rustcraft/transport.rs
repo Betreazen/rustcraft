@@ -51,7 +51,7 @@ use rustcraft_rules::{
         topology::{ChannelKind, Layout, pipe_length},
     },
     orders::ship::{self, NetKey, Route},
-    storage::{keys, terminal},
+    storage::keys,
     tuning::Tuning,
 };
 use std::collections::{BTreeMap, BTreeSet, HashMap};
@@ -64,8 +64,10 @@ const NOTE_HOLD: u64 = 40;
 const LEGACY_JOINT_KEY: &str = "joint";
 /// M17: a machine takes its input and gives its products through one joint.
 const MACHINE_DEFAULT: Mode = Mode::Both;
-/// A chest beside the magistral is filled until its joint says otherwise.
-const CONTAINER_DEFAULT: Mode = Mode::Into;
+/// Slice 18 (guide `quickstart` 5): a chest beside the magistral works both ways until its
+/// joint says otherwise, as an auto joint (rustcraft_rules::net::items::Joint::auto): it gives a
+/// machine or a storage what they take and takes the machines' products last.
+const CONTAINER_DEFAULT: Mode = Mode::Both;
 /// A storage takes what the net brings (M16: «ненужное уходит туда»).
 const STORAGE_DEFAULT: Mode = Mode::Into;
 
@@ -160,6 +162,28 @@ impl Transport {
             })
     }
 
+    /// Slice 18: the housings an order's shipment on the net `key` rides from the block `from` to
+    /// the block `to`, each with its pipe from the first (rustcraft_rules::net::topology::pipe_path,
+    /// the way `route` measures); none when the net no longer joins them.
+    pub fn path(
+        &self,
+        layout: &Layout,
+        tuning: &Tuning,
+        key: NetKey,
+        from: Pos,
+        to: Pos,
+    ) -> Option<Vec<(Pos, u32)>> {
+        let net = self.nets.iter().find(|n| n.key == key)?;
+        let ends = |block: Pos| -> Vec<Pos> {
+            net.joints
+                .iter()
+                .filter(|j| j.block == block && j.mode != Mode::Off)
+                .map(|j| j.housing)
+                .collect()
+        };
+        rustcraft_rules::net::topology::pipe_path(layout, tuning, &net.housings, &ends(from), &ends(to))
+    }
+
     /// Slice 17: what the orders' shipments loaded on each net over the last `ticks` ticks
     /// (rustcraft_rules::orders::ship::advance); the nets they did not load on keep their
     /// throughput whole.
@@ -197,8 +221,14 @@ fn block_side(joint: &Joint) -> Direction {
 /// housings' settings.
 pub(super) fn rebuild(game: &mut Game<'_>, dimension: &str, level: &mut LevelNet, tuning: &Tuning) {
     let saved = load_modes(game);
+    // s18/pipe: the nodes' line-boost modules raise their sections' throughput.
+    let boosts = crate::game::rustcraft_node_window::node_modules(game, level.layout.nodes.keys().copied());
     let mut inventories: BTreeMap<Pos, Mode> = BTreeMap::new();
     let mut checked: BTreeSet<Pos> = BTreeSet::new();
+    // Slice 18: the vanilla containers on their default, auto joints unless a housing sets them.
+    let mut auto: BTreeSet<Pos> = BTreeSet::new();
+    // Slice 18 (guide `quickstart` 5): the crushers, first for the ore on their default joints.
+    let mut refiners: BTreeSet<Pos> = BTreeSet::new();
     let item_nets = || {
         level
             .topology
@@ -218,14 +248,21 @@ pub(super) fn rebuild(game: &mut Game<'_>, dimension: &str, level: &mut LevelNet
                 let side = direction(face.opposite());
                 if let Some(mode) = default_mode(game, dimension, block, side, &saved) {
                     inventories.insert(block, mode);
+                    if Machine::of(&game.native_block(block)) == Some(Machine::Crusher) {
+                        refiners.insert(block);
+                    }
+                    if is_auto_container(game, block, &saved) {
+                        auto.insert(block);
+                    }
                 }
             }
         }
     }
     let nets: Vec<ItemNet> = item_nets()
         .filter_map(|net| {
-            let joints: Vec<Joint> =
-                joints::item_joints(net, &level.layout, &inventories, &level.joints)
+            let found = joints::item_joints(net, &level.layout, &inventories, &level.joints);
+            let marked = joints::mark_auto(found, net, &level.joints, &auto);
+            let joints: Vec<Joint> = joints::mark_refiners(marked, net, &level.joints, &refiners)
                     .into_iter()
                     .filter_map(|mut j| {
                         // A storage's cells and terminals are one joint, at its first cell; a
@@ -240,7 +277,12 @@ pub(super) fn rebuild(game: &mut Game<'_>, dimension: &str, level: &mut LevelNet
             (!joints.is_empty()).then(|| ItemNet {
                 key: (net.slot, first),
                 joints,
-                per_second: tuning.items_of(net.min_tier),
+                per_second: tuning.items_of(net.min_tier)
+                    * rustcraft_rules::net::node_window::net_boost(
+                        &net.housings,
+                        &level.topology.reach,
+                        &boosts,
+                    ),
                 housings: net.housings.clone(),
                 tier: net.min_tier,
             })
@@ -289,6 +331,13 @@ pub(super) fn default_mode(
     Some(saved.get(&pos).copied().unwrap_or(CONTAINER_DEFAULT))
 }
 
+/// Slice 18: whether the block at `pos` (with slots a joint reaches) is a vanilla container on
+/// the default: no slice-2 mode of its own.
+fn is_auto_container(game: &Game<'_>, pos: Pos, saved: &BTreeMap<Pos, Mode>) -> bool {
+    let block = game.native_block(pos);
+    !block.starts_with("rustcraft:") && !saved.contains_key(&pos)
+}
+
 /// The slice-2 modes of the level's vanilla containers.
 pub(super) fn legacy_modes(game: &mut Game<'_>) -> BTreeMap<Pos, Mode> {
     load_modes(game)
@@ -330,6 +379,8 @@ pub(super) fn tick(game: &mut Game<'_>, dimension: &str, level: &mut LevelNet, t
             &mut stocks,
         );
         apply(game, dimension, &net.joints, &stores, &result.transfers);
+        // Wave 2: the moves drawn in the housings (rustcraft_pipe18::show_flow, M5).
+        crate::game::rustcraft_pipe18::moved(dimension, net.key, &result.transfers);
         for (j, note) in result.notes {
             if note == JointNote::ReceiverFull {
                 full_until.insert(net.joints[j].block, now + NOTE_HOLD);
@@ -372,11 +423,9 @@ fn snapshot(
         let slots: Vec<ReadSlot> = slots
             .into_iter()
             .map(|s| {
-                // Keyed as the storage keys stacks: a worn one apart, one with components marked.
-                let held = s.stack.map(|st| {
-                    let marked = st.extra.is_some() || !terminal::addressable(st.damage);
-                    (keys::stack_key(&st.item, st.damage, marked), st.count)
-                });
+                // Keyed as the storage keys stacks: a worn one apart, one with components by
+                // its saved form (slice 18).
+                let held = s.stack.map(|st| (storage::net_key(&st), st.count));
                 if let Some((item, _)) = &held {
                     seen.insert(item.clone());
                 }
@@ -385,6 +434,8 @@ fn snapshot(
             .collect();
         read.insert(joint.block, slots);
     }
+    // Slice 18 (O11): a product an order takes straight to its next step's machine stays put.
+    let kept = crate::game::rustcraft_orders::kept_outputs(dimension);
     for (pos, slots) in read {
         let machine = machines.get(&pos).copied();
         let entity = machine.and_then(|_| crate::game::rustcraft_machines::entity(game, pos));
@@ -392,6 +443,9 @@ fn snapshot(
             .into_iter()
             .map(|(slot, held, can_take)| {
                 let input = machine.is_none_or(|m| m.inputs().contains(&slot));
+                let ordered = !input
+                    && held.as_ref().is_some_and(|(i, _)| kept.get(&pos) == Some(i));
+                let can_take = can_take && !ordered;
                 let only = entity.as_ref().filter(|_| input).map(|entity| {
                     seen.iter()
                         .filter(|item| slot_takes(entity, slot, keys::item_of(item), tuning))
@@ -490,10 +544,21 @@ pub(super) fn on_right_click_block(
     if held != content::WRENCH {
         return;
     }
-    let Some(player) = game.native_acting_player() else {
+    let Some(player) = crate::game::rustcraft_server::acting(game) else {
         return;
     };
     if player.sneaking {
+        return;
+    }
+    // s18/pipe (guide `wrench`): a click on a machine turns it; the joint window opens on a housing.
+    if let Some(facing) = crate::game::rustcraft_pipe18::rotate_machine(game, pos) {
+        *canceled = true;
+        let text = server::line(
+            "rustcraft.wrench.turned",
+            "Turned: faces %s",
+            &[server::line(&format!("rustcraft.facing.{facing}"), facing, &[])],
+        );
+        server::tell(game, player.uuid, text);
         return;
     }
     let target = if game.native_block(pos) == content::HOUSING {

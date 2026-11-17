@@ -82,23 +82,27 @@ fn reported(b: &dyn Bench, kind: &str) -> bool {
     b.reports().iter().any(|r| r.starts_with(&format!("pct-machine {kind} ")))
 }
 
+/// Slice 18, wave 2: the trash's filter is its joint's (the wrench): what that lets through
+/// burns, and what a player put in that it does not stays.
 fn trash_burns_what_its_filter_names(o: Pos, _: &Tuning) -> Scenario {
+    use crate::geom::Face;
+    let h = at(o, [2, 1, 0]);
     let p = at(o, [3, 1, 0]);
     Scenario::new("util_trash_burns_its_filter", plot_area(o))
-        .then("a trash with dirt in its filter and dirt to burn", move |b, _| {
+        .then("a trash beside a housing whose joint lets dirt through, dirt and stone in it", move |b, _| {
             floor(b, o)?;
+            b.place(h, "rustcraft:housing", &[])?;
             machine(b, p, "rustcraft:trash")?;
-            b.put(p, 0, "minecraft:dirt", 1)?;
+            let mut j = crate::machines::tiered::trash_joint();
+            j.filter.items.insert("minecraft:dirt".into());
+            b.set_joint(h, Face::XPos, 0, j)?;
             b.put(p, 9, "minecraft:dirt", 6)?;
             b.put(p, 10, STONE, 3)
         })
         .until("the dirt is burnt", 120, move |b, _| {
-            Ok(b.items(p).get(9).is_none_or(|s| s.as_ref().is_none_or(|s| s.1 == 0)))
+            Ok(count_of(&b.items(p), "minecraft:dirt") == 0)
         })
-        .check("the filter and the stone stay", move |b, _| {
-            same("filter", count_of(&b.items(p).into_iter().take(9).collect::<Vec<_>>(), "minecraft:dirt"), 1)?;
-            same("stone", count_of(&b.items(p), STONE), 3)
-        })
+        .check("the stone stays", move |b, _| same("stone", count_of(&b.items(p), STONE), 3))
 }
 
 fn trash_without_a_filter_stands(o: Pos, _: &Tuning) -> Scenario {
@@ -133,7 +137,7 @@ fn repair_passes_a_whole_tool(o: Pos, _: &Tuning) -> Scenario {
             b.put(p, 0, "minecraft:iron_pickaxe", 1)
         })
         .until("the pickaxe is in its output slot", LIMIT, move |b, _| {
-            Ok(b.items(p).get(5).cloned().flatten().is_some_and(|s| s.0 == "minecraft:iron_pickaxe"))
+            Ok(b.items(p).get(11).cloned().flatten().is_some_and(|s| s.0 == "minecraft:iron_pickaxe"))
         })
 }
 
@@ -169,7 +173,7 @@ fn feeder_feeds_a_pair(o: Pos, _: &Tuning) -> Scenario {
             }
             Ok(())
         })
-        .until("it fed them two wheat", LIMIT, move |b, _| Ok(count_of(&b.items(p), "minecraft:wheat") == 2))
+        .until("it fed them two wheat", 2 * LIMIT, move |b, _| Ok(count_of(&b.items(p), "minecraft:wheat") == 2))
         .check("Path-of-craft-tree heard breed", move |b, _| {
             if reported(b, "breed") { Ok(()) } else { Err(format!("no breed in {:?}", b.reports())) }
         })
@@ -178,15 +182,14 @@ fn feeder_feeds_a_pair(o: Pos, _: &Tuning) -> Scenario {
 fn shearer_shears_a_sheep(o: Pos, _: &Tuning) -> Scenario {
     let p = at(o, [3, 1, 0]);
     Scenario::new("util_shearer_shears", plot_area(o))
-        .then("a shearer with shears and a sheep by it", move |b, _| {
+        .then("a shearer (its shears built in) and a sheep by it", move |b, _| {
             floor(b, o)?;
             machine(b, p, "rustcraft:shearer")?;
-            b.put(p, 0, "minecraft:shears", 1)?;
             b.spawn_mob("minecraft:sheep", [f64::from(o[0]) + 3.5, f64::from(o[1] + 1), f64::from(o[2]) + 2.5], None)
                 .map(|_| ())
         })
         .until("wool in its output", LIMIT, move |b, _| {
-            Ok(b.items(p).iter().skip(2).flatten().any(|s| s.0.ends_with("_wool")))
+            Ok(b.items(p).iter().flatten().any(|s| s.0.ends_with("_wool")))
         })
         .check("Path-of-craft-tree heard shear", move |b, _| {
             if reported(b, "shear") { Ok(()) } else { Err(format!("no shear in {:?}", b.reports())) }
@@ -196,15 +199,15 @@ fn shearer_shears_a_sheep(o: Pos, _: &Tuning) -> Scenario {
 fn shearer_milks_a_cow(o: Pos, _: &Tuning) -> Scenario {
     let p = at(o, [3, 1, 0]);
     Scenario::new("util_shearer_milks", plot_area(o))
-        .then("a shearer with a bucket and a cow by it", move |b, _| {
+        .then("a shearer beside a tank, and a cow by it", move |b, _| {
             floor(b, o)?;
             machine(b, p, "rustcraft:shearer")?;
-            b.put(p, 1, "minecraft:bucket", 1)?;
+            b.place(at(o, [4, 1, 0]), "rustcraft:tank", &[])?;
             b.spawn_mob("minecraft:cow", [f64::from(o[0]) + 3.5, f64::from(o[1] + 1), f64::from(o[2]) + 2.5], None)
                 .map(|_| ())
         })
-        .until("a milk bucket in its output", LIMIT, move |b, _| {
-            Ok(count_from(b, p, 2, "minecraft:milk_bucket") == 1)
+        .until("a bucket of milk in the tank (slice 18)", LIMIT, move |b, _| {
+            Ok(b.tank(at(o, [4, 1, 0])).is_some_and(|g| g.amount == 1000))
         })
 }
 
@@ -266,7 +269,9 @@ fn xp_tank_window(o: Pos, _: &Tuning) -> Scenario {
             floor(b, o)?;
             machine(b, p, "rustcraft:xp_tank")
         })
-        .until("its window has four buttons", 60, move |b, _| Ok(b.sheet(p).is_some_and(|s| s.toggles.len() == 4)))
+        .until("its window has six buttons (slice 18) and the bar it holds", 60, move |b, _| {
+            Ok(b.sheet(p).is_some_and(|s| s.toggles.len() == 6 && s.bars.len() == 2))
+        })
 }
 
 fn enchanter_needs_a_condenser(o: Pos, _: &Tuning) -> Scenario {

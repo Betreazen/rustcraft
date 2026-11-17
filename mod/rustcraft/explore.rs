@@ -99,9 +99,38 @@ fn structures_near(game: &Game<'_>, cell: Pos, side: i32) -> Vec<(String, Pos)> 
     };
     let mut out: Vec<(String, Pos)> = Vec::new();
     for p in rules::structure_samples(cell, side, turn, rules::SAMPLE_BUDGET) {
-        for (id, _) in game.structures_reaching(p) {
+        for id in structures_over_column(game, p[0], p[2]) {
             if !out.iter().any(|(o, _)| *o == id) {
                 out.push((id, p));
+            }
+        }
+    }
+    out
+}
+
+/// Wave 2 (rail-worker «глубокие постройки»): the structures whose box spans the column (x, z) at
+/// any height — an ancient city or a stronghold far under the rail too — from the chunk's
+/// structure references and their starts, as `structures_reaching` reads them
+/// (SRC game/structures.rs:14-44) without its height test. A `/place structure` leaves no start
+/// in the chunk, here as in vanilla's PlaceCommand (SRC game/commands/place.rs:203-216), so such
+/// a structure is no structure to the game, the cartographer or `/locate`.
+fn structures_over_column(game: &Game<'_>, x: i32, z: i32) -> Vec<String> {
+    let Some(chunk) = game.world.chunks.get(&(x >> 4, z >> 4)) else {
+        return Vec::new();
+    };
+    if chunk.structure_refs.is_empty() {
+        return Vec::new();
+    }
+    let Some(locator) = game.end.locator() else {
+        return Vec::new();
+    };
+    let mut out: Vec<String> = Vec::new();
+    for (id, (sx, sz)) in &chunk.structure_refs {
+        for start in locator.starts_at(*sx, *sz) {
+            let b = &start.bounding_box;
+            let spans = b.min[0] <= x && x <= b.max[0] && b.min[2] <= z && z <= b.max[2];
+            if *start.name == **id && spans && !out.iter().any(|o| *o == *start.name) {
+                out.push(start.name.to_string());
             }
         }
     }
@@ -153,17 +182,30 @@ pub(super) fn map(game: &mut Game<'_>, dimension: &str, w: &mut Worker, cell: Po
             }
         }
     }
+    // Slice 18: after a whole stretch with nothing new it says so («Вокруг пути всё нанесено»).
+    w.found_as(reports.len(), MAP_IDLE_CELLS, rustcraft_rules::worker::Note::AllMapped);
     for r in reports {
         base::report(r);
     }
 }
 
+/// Rail cells in a row with nothing new before the cartographer says all is mapped: a loop of
+/// a few chunks.
+const MAP_IDLE_CELLS: u32 = 64;
+
+
 /// Twice a second for a player of this level: their biome and the structures round their feet
-/// are visited; the compass speaks.
-pub(super) fn player(game: &mut Game<'_>, p: &horizon_client::mod_api::NativeServerPlayer, holds_compass: bool) {
+/// are visited; the compass speaks. Slice 18: `compass` is the held compass's mode (structures or
+/// biomes, rustcraft_rules::gear::compass), and its target comes back for its needle.
+pub(super) fn player(
+    game: &mut Game<'_>,
+    p: &horizon_client::mod_api::NativeServerPlayer,
+    compass: Option<rustcraft_rules::gear::compass::Mode>,
+) -> Option<[i32; 3]> {
+    let holds_compass = compass.is_some();
     let at = p.position;
     let cell = at.map(|v| v.floor() as i32);
-    let Some(biome) = game.native_biome(cell) else { return };
+    let Some(biome) = game.native_biome(cell) else { return None };
     let inside = game.structures_at(cell);
     let target = {
         let mut s = state();
@@ -173,15 +215,16 @@ pub(super) fn player(game: &mut Game<'_>, p: &horizon_client::mod_api::NativeSer
             s.dirty = true;
         }
         for id in &inside {
-            if s.atlas.enter(p.uuid, id) {
+            if s.atlas.enter_at(p.uuid, &p.dimension, id, cell) {
                 s.dirty = true;
             }
         }
-        if holds_compass { s.atlas.target(p.uuid, &p.dimension, at) } else { None }
+        compass.and_then(|mode| rustcraft_rules::gear::compass::target(&s.atlas, mode, p.uuid, &p.dimension, at))
     };
     if !holds_compass {
-        return;
+        return None;
     }
+    let needle = target.as_ref().map(|t| t.at);
     let text = match target {
         Some(target) => {
             let way = rules::direction(at, target.at);
@@ -193,12 +236,15 @@ pub(super) fn player(game: &mut Game<'_>, p: &horizon_client::mod_api::NativeSer
                     &[],
                 ),
             };
+            // In-game check w3: «31 блок», not «31 блоков».
+            let blocks = target.distance.round().max(0.0) as u64;
+            let form = rustcraft_rules::machines::panel::plural_form(blocks);
             line(
-                "rustcraft.compass.target",
-                "%s · %s blocks %s",
+                "rustcraft.compass.target_counted",
+                "%s · %s %s",
                 &[
                     name,
-                    Text::literal(format!("{:.0}", target.distance)),
+                    line(&format!("rustcraft.window.blocks.{form}"), "%s blocks", &[Text::literal(blocks.to_string())]),
                     line(&format!("rustcraft.compass.{way}"), way, &[]),
                 ],
             )
@@ -206,4 +252,24 @@ pub(super) fn player(game: &mut Game<'_>, p: &horizon_client::mod_api::NativeSer
         None => line("rustcraft.compass.none", "No new places on the map", &[]),
     };
     tell(game, p.uuid, text);
+    needle
+}
+
+/// Slice 18 (guide `tool_map`: «Найденные биомы и постройки … появляются на схеме в окне любой
+/// станции»): the biomes and the structures found in `dimension`, each `(id, block)`, and how many
+/// chunks of it the cartographers charted.
+pub(super) fn found_in(game: &Game<'_>, dimension: &str) -> (Vec<(String, Pos)>, Vec<(String, Pos)>, u32) {
+    let mut s = state();
+    load(&mut s, game);
+    let biomes = s.atlas.found.get(dimension).cloned().unwrap_or_default();
+    let sites = s.atlas.sites.get(dimension).cloned().unwrap_or_default();
+    let charted: std::collections::BTreeSet<(i32, i32)> = s
+        .atlas
+        .chunks
+        .values()
+        .flatten()
+        .filter(|c| c.0 == dimension)
+        .map(|c| (c.1, c.2))
+        .collect();
+    (biomes, sites, charted.len() as u32)
 }

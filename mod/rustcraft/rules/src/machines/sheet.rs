@@ -22,8 +22,10 @@ use serde_json::Value;
 pub const CHANNEL: &str = "rustcraft:sheet";
 /// The largest message a mod may send.
 pub const MAX_BYTES: usize = 30_000;
-/// Module sockets of a slice-7 or slice-8 block.
+/// Module sockets of a slice-7 or slice-8 block of the first tiers; the window has room for
+/// [`MAX_SOCKETS`] (slice 18: tiers 3 and 4 have four, rustcraft_rules::tiers::sockets).
 pub const SOCKETS: usize = 3;
+pub const MAX_SOCKETS: usize = crate::tiers::MAX_SOCKETS;
 
 /// The blocks with a sheet window.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -46,6 +48,28 @@ pub enum Kind {
     Butcher,
     /// Slice 12: the last blocks of the guide.
     Util(crate::utility::Util),
+    /// Slice 18: a crystal or crystal structure (guide `structure`, ui.js).
+    Structure,
+}
+
+/// Slice 18, wave 2: the windows the guide draws part by part (`ui.js` trash, disintegrator,
+/// charger), on top of a slice-12 window's shape.
+fn guide_shape(u: crate::utility::Util, s: Shape) -> Shape {
+    use crate::utility::Util;
+    match u {
+        // Its joint's filter, «самый низкий» priority, the minute's count and the throughput; the
+        // fluid and energy bars; «Сгорает сейчас»: the nine cells it burns from and the arrow of
+        // its batch (its old filter cells 0..9 hidden). The throughput is a line, not a gauge,
+        // and the cells' name is their tooltip: the window keeps to 240 pixels.
+        Util::Trash => Shape { rows: 4, bars: 2, shown: Some((9, 18)), lead: 9, work: true, ..s },
+        // The share (and «чары теряются»), the kept fractions; durability and energy bars; its
+        // input, the arrow and «Разборка», what comes out; the nine output cells.
+        Util::Disintegrator => Shape { rows: 2, bars: 2, lead: 1, work: true, preview: 4, ..s },
+        // «Броня»: four cells (the output, which the net takes, hidden); the charge and energy
+        // bars; no work mode in the guide's window.
+        Util::Charger => Shape { rows: 0, bars: 2, mode: false, shown: Some((0, 4)), lead: 4, label: true, ..s },
+        _ => s,
+    }
 }
 
 /// Which parts a window has, and how many of each it has room for.
@@ -62,10 +86,31 @@ pub struct Shape {
     pub toggles: usize,
     /// The block's own slots, in rows of nine.
     pub slots: usize,
+    /// Slice 18, wave 2: the menu's slots the window shows (the rest are hidden: the trash's old
+    /// filter cells, the charger's output); all when none.
+    pub shown: Option<(usize, usize)>,
+    /// Slice 18, wave 2: the first shown slots on a row of their own from the left (the mixer's
+    /// ingredients, the disintegrator's input, the trash's cells, the charger's «Броня»), the
+    /// work arrow after them (`ui.js` `work`) and ghost cells of what comes out after it.
+    pub lead: usize,
+    pub work: bool,
+    pub preview: usize,
+    /// A label line over the lead row.
+    pub label: bool,
+}
+
+impl Shape {
+    /// The menu slots shown, in order.
+    pub fn shown_range(&self) -> std::ops::Range<usize> {
+        match self.shown {
+            Some((a, b)) => a.min(self.slots)..b.min(self.slots),
+            None => 0..self.slots,
+        }
+    }
 }
 
 impl Kind {
-    pub const ALL: [Kind; 14] = [
+    pub const ALL: [Kind; 15] = [
         Kind::Turret,
         Kind::Anchor,
         Kind::DockUnload,
@@ -80,6 +125,7 @@ impl Kind {
         Kind::DockLoad,
         Kind::Turbine,
         Kind::Butcher,
+        Kind::Structure,
     ];
 
     pub fn block(self) -> &'static str {
@@ -97,6 +143,7 @@ impl Kind {
             Kind::Mixer => "rustcraft:mixer",
             Kind::DockLoad => "rustcraft:dock_load",
             Kind::Turbine => "rustcraft:turbine",
+            Kind::Structure => "rustcraft:crystal",
             Kind::Butcher => crate::butcher::BLOCK,
             Kind::Util(u) => u.spec().block,
         }
@@ -126,18 +173,23 @@ impl Kind {
 
     /// Its window's parts: what its server menu showed, part by part.
     pub fn shape(self) -> Shape {
-        let sockets = self.holder().is_some();
+        let sockets = self.holder().is_some_and(|h| h.has_sockets());
         match self {
+            // Slice 18 (base and gear): the targets as chips; the support window's players in
+            // range, the one healed and the role's working modules.
             Kind::Turret => Shape {
                 sockets,
                 role: true,
-                rows: 4,
+                rows: 5,
                 bars: 1,
+                toggles: 4,
                 ..Shape::default()
             },
+            // Slice 18: its owner and area, then the energy bar.
             Kind::Anchor => Shape {
                 sockets,
-                rows: 3,
+                rows: 2,
+                bars: 1,
                 ..Shape::default()
             },
             Kind::DockUnload => Shape {
@@ -159,9 +211,11 @@ impl Kind {
                 rows: 2,
                 ..Shape::default()
             },
+            // Slice 18 (ui.js `gen_lava`): the lava and output bars, the hint and the circuit's
+            // balance.
             Kind::LavaGenerator => Shape {
-                rows: 1,
-                bars: 1,
+                rows: 1 + BALANCE_ROWS,
+                bars: 2,
                 ..Shape::default()
             },
             Kind::Miner => Shape {
@@ -179,18 +233,30 @@ impl Kind {
                 slots: 9,
                 ..Shape::default()
             },
-            // Energy, water and product bars, a line of progress, its three input slots.
+            // Energy, water and product bars, a line of progress (slice 18: and one of its queue
+            // cells), its three input slots.
+            // Slice 18, wave 2 (`ui.js` mixer): its three ingredient slots and the work arrow
+            // after them; one line, its pace (and its queue cells).
             Kind::Mixer => Shape {
                 sockets,
                 mode: true,
                 rows: 1,
                 bars: 3,
                 slots: 3,
+                lead: 3,
+                work: true,
                 ..Shape::default()
             },
             Kind::DockLoad => Shape {
                 rows: 1,
                 slots: 9,
+                ..Shape::default()
+            },
+            // Slice 18 (ui.js `structure`): crystals and form, the output and solution bars, the
+            // circuit's balance.
+            Kind::Structure => Shape {
+                rows: 2 + BALANCE_ROWS,
+                bars: 2,
                 ..Shape::default()
             },
             Kind::Turbine => Shape {
@@ -211,15 +277,28 @@ impl Kind {
             Kind::Util(u) => {
                 let spec = u.spec();
                 let count = u.slots().count;
-                Shape {
+                // Slice 18: the living vein has the work modes and a progress bar (ui.js `vein`).
+                let vein = u == crate::utility::Util::Vein;
+                guide_shape(u, Shape {
                     sockets,
-                    mode: false,
+                    // Slice 18 (UT7): every machine that works in steps has the three modes;
+                    // the ones whose pace is the animals' or the water's do not. The living vein
+                    // and the craft machines the guide lists (stream 5) have them too.
+                    mode: vein
+                        || u.has_modes()
+                        || crate::modules::Holder::Util(u).takes(crate::modules::Module::Speed),
+                    // Slice 18: the guide's windows' rows and bars (`ui.js` trash, disintegrator,
+                    // charger, vein, and each craft machine's own bars).
                     rows: spec.rows,
-                    bars: 1,
+                    bars: if vein {
+                        2
+                    } else {
+                        u.bars().max(1 + usize::from(u == crate::utility::Util::Charger))
+                    },
                     toggles: spec.toggles,
                     slots: if count > 1 { count } else { 0 },
                     ..Shape::default()
-                }
+                })
             }
         }
     }
@@ -292,6 +371,14 @@ pub struct Sheet {
     pub toggles: Vec<Toggle>,
     /// How many of the block's slots it uses now (the miner's grow with storage modules).
     pub usable: Option<u8>,
+    /// Slice 18, wave 2: the work arrow's share done, the ghost cells (item, count text) and the
+    /// lead row's label.
+    #[serde(default)]
+    pub work: Option<f64>,
+    #[serde(default)]
+    pub preview: Vec<(String, String)>,
+    #[serde(default)]
+    pub label: Option<Value>,
     pub status: Option<Status>,
 }
 
@@ -317,6 +404,10 @@ pub fn decode(bytes: &[u8]) -> Option<Sheet> {
 pub const WIDTH: f32 = 214.0;
 /// A window must fit 240 GUI pixels: a 1280 × 720 screen at GUI scale 3.
 pub const MAX_HEIGHT: f32 = 240.0;
+
+/// The circuit balance of ui.js `balance`: Производство, Потребление, В запасе, Хватает, one row
+/// each, a label on the left and its value on the right (a row of `key	value`).
+pub const BALANCE_ROWS: usize = 4;
 /// Where the parts start: under the title's rule.
 const TOP: f32 = 16.0;
 const LEFT: f32 = 8.0;
@@ -326,6 +417,8 @@ const BAR_STEP: f32 = 18.0;
 const TOGGLE: f32 = 20.0;
 const TOGGLE_GAP: f32 = 2.0;
 const STATUS_H: f32 = 12.0;
+/// Slice 18, wave 2: the work arrow's width.
+const WORK_W: f32 = 22.0;
 /// The player's inventory: three rows, a gap and the hotbar.
 const INVENTORY_H: f32 = 76.0;
 const INVENTORY_X: f32 = 26.0;
@@ -343,8 +436,13 @@ pub struct Layout {
     /// Each bar's label line and its well.
     pub bars: Vec<(f32, Rect)>,
     pub toggles: Vec<Rect>,
-    /// Where each of the block's slots has its item.
+    /// Where each of the block's shown slots has its item.
     pub slots: Vec<[f32; 2]>,
+    /// Slice 18, wave 2: every menu slot's place, none for a hidden one.
+    pub menu_slots: Vec<Option<[f32; 2]>>,
+    pub work: Option<Rect>,
+    pub preview: Vec<[f32; 2]>,
+    pub label_y: Option<f32>,
     pub status: Rect,
     pub inventory: [f32; 2],
     pub inventory_label_y: f32,
@@ -361,6 +459,10 @@ pub fn layout(shape: Shape) -> Layout {
         bars: Vec::new(),
         toggles: Vec::new(),
         slots: Vec::new(),
+        menu_slots: Vec::new(),
+        work: None,
+        preview: Vec::new(),
+        label_y: None,
         status: [0.0; 4],
         inventory: [0.0; 2],
         inventory_label_y: 0.0,
@@ -368,11 +470,11 @@ pub fn layout(shape: Shape) -> Layout {
     };
     if shape.sockets || shape.mode || shape.role {
         if shape.sockets {
-            out.sockets = (0..SOCKETS)
+            out.sockets = (0..MAX_SOCKETS)
                 .map(|k| [LEFT + 1.0 + 20.0 * k as f32, y + 1.0])
                 .collect();
         }
-        let x = if shape.sockets { LEFT + 64.0 } else { LEFT };
+        let x = if shape.sockets { LEFT + 84.0 } else { LEFT };
         if shape.mode {
             out.mode = segment_rects([x, y + 2.0, RIGHT - x, 14.0], WorkMode::ALL.len());
         } else if shape.role {
@@ -397,17 +499,35 @@ pub fn layout(shape: Shape) -> Layout {
             .collect();
         y += TOGGLE + TOGGLE_GAP;
     }
-    if shape.slots > 0 {
-        out.slots = (0..shape.slots)
-            .map(|i| {
-                [
-                    INVENTORY_X + 18.0 * (i % 9) as f32,
-                    y + 1.0 + 18.0 * (i / 9) as f32,
-                ]
-            })
-            .collect();
-        y += 18.0 * shape.slots.div_ceil(9) as f32 + 2.0;
+    let shown = shape.shown_range();
+    let lead = shape.lead.min(shown.len());
+    if shape.label {
+        out.label_y = Some(y);
+        y += ROW;
     }
+    if lead > 0 || shape.work {
+        out.slots = (0..lead).map(|k| [LEFT + 1.0 + 18.0 * k as f32, y + 1.0]).collect();
+        let mut x = LEFT + 18.0 * lead as f32 + 4.0;
+        if shape.work {
+            out.work = Some([x, y + 3.0, WORK_W, 12.0]);
+            x += WORK_W + 4.0;
+        }
+        out.preview = (0..shape.preview).map(|k| [x + 1.0 + 18.0 * k as f32, y + 1.0]).collect();
+        y += 18.0 + 2.0;
+    }
+    let rest = shown.len() - lead;
+    if rest > 0 {
+        out.slots.extend((0..rest).map(|i| {
+            [
+                INVENTORY_X + 18.0 * (i % 9) as f32,
+                y + 1.0 + 18.0 * (i / 9) as f32,
+            ]
+        }));
+        y += 18.0 * rest.div_ceil(9) as f32 + 2.0;
+    }
+    out.menu_slots = (0..shape.slots)
+        .map(|i| shown.contains(&i).then(|| out.slots[i - shown.start]))
+        .collect();
     out.status = [LEFT, y, RIGHT - LEFT, STATUS_H];
     y += STATUS_H + 2.0;
     out.inventory_label_y = y;
@@ -442,7 +562,7 @@ impl Press {
     pub fn of(id: i32) -> Option<Press> {
         match id {
             SOCKET_BUTTON..MODE_BUTTON => Some(Press::Socket((id - SOCKET_BUTTON) as usize))
-                .filter(|p| matches!(p, Press::Socket(k) if *k < SOCKETS)),
+                .filter(|p| matches!(p, Press::Socket(k) if *k < MAX_SOCKETS)),
             MODE_BUTTON..TOGGLE_BUTTON => u8::try_from(id - MODE_BUTTON)
                 .ok()
                 .and_then(WorkMode::from_code)
@@ -492,11 +612,23 @@ pub fn press_socket(
     holder: Holder,
     carried: Option<&Cursor>,
 ) -> Option<Option<Cursor>> {
-    if k >= SOCKETS {
+    press_socket_in(slots, k, holder, SOCKETS, carried)
+}
+
+/// [`press_socket`] on a block with `open` sockets (slice 18: by its tier); a socket past them
+/// takes nothing, but a module left there (a block taken down a tier) still comes out.
+pub fn press_socket_in(
+    slots: &mut Vec<Option<Module>>,
+    k: usize,
+    holder: Holder,
+    open: usize,
+    carried: Option<&Cursor>,
+) -> Option<Option<Cursor>> {
+    if k >= MAX_SOCKETS || (k >= open && carried.is_some()) {
         return None;
     }
-    if slots.len() < SOCKETS {
-        slots.resize(SOCKETS, None);
+    if slots.len() < MAX_SOCKETS {
+        slots.resize(MAX_SOCKETS, None);
     }
     let one = |m: Module| Cursor {
         item: m.item().to_owned(),
@@ -531,13 +663,19 @@ pub fn press_socket(
 /// A shift-click on a module in the inventory: into the first free socket, if the holder takes
 /// it; whether it went in.
 pub fn put_free(slots: &mut Vec<Option<Module>>, holder: Holder, item: &str) -> bool {
+    put_free_in(slots, holder, SOCKETS, item)
+}
+
+/// [`put_free`] on a block with `open` sockets.
+pub fn put_free_in(slots: &mut Vec<Option<Module>>, holder: Holder, open: usize, item: &str) -> bool {
     let Some(m) = Module::of(item).filter(|m| holder.takes(*m)) else {
         return false;
     };
-    if slots.len() < SOCKETS {
-        slots.resize(SOCKETS, None);
+    let open = open.min(MAX_SOCKETS);
+    if slots.len() < open {
+        slots.resize(open, None);
     }
-    match slots.iter().take(SOCKETS).position(Option::is_none) {
+    match slots.iter().take(open).position(Option::is_none) {
         Some(free) => {
             slots[free] = Some(m);
             true
@@ -562,6 +700,9 @@ mod tests {
         }
         out.extend(l.toggles.iter().copied());
         out.extend(l.slots.iter().map(|p| slot_frame(*p)));
+        out.extend(l.work);
+        out.extend(l.preview.iter().map(|p| slot_frame(*p)));
+        out.extend(l.label_y.map(|y| [LEFT, y, RIGHT - LEFT, ROW - 1.0]));
         out.push(l.status);
         out
     }
@@ -571,8 +712,17 @@ mod tests {
     }
 
     #[test]
+    fn the_structure_and_the_lava_generator_have_the_guides_four_balance_rows() {
+        // ui.js `balance`: Производство, Потребление, В запасе, Хватает, one row each (the
+        // in-game check found them squeezed into two cut lines).
+        assert_eq!(Kind::Structure.shape().rows, 2 + BALANCE_ROWS);
+        assert_eq!(Kind::LavaGenerator.shape().rows, 1 + BALANCE_ROWS);
+    }
+
+    #[test]
     fn every_window_fits_the_screen_and_its_parts_do_not_overlap() {
-        for kind in Kind::ALL {
+        let utils = crate::utility::Util::ALL.into_iter().map(Kind::Util);
+        for kind in Kind::ALL.into_iter().chain(utils) {
             let l = layout(kind.shape());
             assert!(l.height <= MAX_HEIGHT, "{kind:?} is {} high", l.height);
             let parts = rects(&l);
@@ -590,20 +740,36 @@ mod tests {
             }
             // The inventory, nine slots wide, inside the window.
             assert!(l.inventory[0] + 9.0 * 18.0 <= WIDTH);
-            assert_eq!(l.slots.len(), kind.shape().slots);
+            assert_eq!(l.slots.len(), kind.shape().shown_range().len());
+            assert_eq!(l.menu_slots.len(), kind.shape().slots);
         }
     }
 
     #[test]
     fn the_miner_has_everything_its_server_menu_had() {
         let l = layout(Kind::Miner.shape());
-        assert_eq!(l.sockets.len(), SOCKETS);
+        assert_eq!(l.sockets.len(), MAX_SOCKETS);
         assert_eq!(l.mode.len(), 3);
         assert_eq!(l.toggles.len(), 9);
         assert_eq!(l.slots.len(), 27);
         assert_eq!(l.rows.len(), 2);
         let turret = layout(Kind::Turret.shape());
         assert!(turret.role.is_some() && turret.mode.is_empty());
+    }
+
+    #[test]
+    fn a_socket_past_the_tiers_count_takes_nothing_but_gives_back() {
+        let speed = Cursor { item: Module::Speed.item().into(), count: 1 };
+        let mut slots = vec![None; MAX_SOCKETS];
+        assert_eq!(press_socket_in(&mut slots, 3, Holder::Placer, 3, Some(&speed)), None);
+        assert!(press_socket_in(&mut slots, 3, Holder::Placer, 4, Some(&speed)).is_some());
+        assert_eq!(slots[3], Some(Module::Speed));
+        // Down a tier: the fourth module still comes out.
+        assert_eq!(press_socket_in(&mut slots, 3, Holder::Placer, 3, None), Some(Some(speed.clone())));
+        let mut slots = vec![Some(Module::Speed), Some(Module::Speed), Some(Module::Speed)];
+        assert!(!put_free_in(&mut slots, Holder::Placer, 3, Module::Economy.item()));
+        assert!(put_free_in(&mut slots, Holder::Placer, 4, Module::Economy.item()));
+        assert_eq!(slots[3], Some(Module::Economy));
     }
 
     #[test]
@@ -635,7 +801,8 @@ mod tests {
         ] {
             assert_eq!(Press::of(p.id()), Some(p));
         }
-        assert_eq!(Press::of(SOCKET_BUTTON + 3), None);
+        assert_eq!(Press::of(SOCKET_BUTTON + 3), Some(Press::Socket(3)));
+        assert_eq!(Press::of(SOCKET_BUTTON + 4), None);
         assert_eq!(Press::of(0), None);
         assert_eq!(Press::of(MODE_BUTTON + 7), None);
     }
@@ -720,6 +887,55 @@ mod tests {
         assert!(!put_free(&mut slots, Holder::Miner, Module::Poison.item()));
         assert!(put_free(&mut slots, Holder::Miner, Module::Storage.item()));
         assert!(!put_free(&mut slots, Holder::Miner, Module::Speed.item()));
+    }
+
+    #[test]
+    fn a_lead_row_has_its_slots_the_arrow_and_the_preview_in_turn() {
+        let shape = Shape { slots: 10, lead: 1, work: true, preview: 4, label: true, ..Shape::default() };
+        let l = layout(shape);
+        let w = l.work.expect("an arrow");
+        assert!(w[0] > l.slots[0][0] + 16.0);
+        assert!(l.preview[0][0] > w[0] + w[2]);
+        assert_eq!(l.preview.len(), 4);
+        assert_eq!(l.slots.len(), 10);
+        // The rest of the slots go under the lead row.
+        assert!(l.slots[1][1] > l.slots[0][1] + 16.0);
+        assert!(l.label_y.unwrap() < l.slots[0][1]);
+        let hidden = layout(Shape { slots: 8, shown: Some((0, 4)), lead: 4, ..Shape::default() });
+        assert_eq!(hidden.slots.len(), 4);
+        assert!(hidden.menu_slots[..4].iter().all(Option::is_some));
+        assert!(hidden.menu_slots[4..].iter().all(Option::is_none));
+    }
+
+    #[test]
+    fn the_guides_trash_disintegrator_and_charger_windows() {
+        use crate::utility::Util;
+        let trash = layout(Kind::Util(Util::Trash).shape());
+        assert_eq!(trash.slots.len(), 9);
+        assert!(trash.menu_slots[..9].iter().all(Option::is_none));
+        assert!(trash.work.is_some() && trash.rows.len() == 4 && trash.bars.len() == 2);
+        assert!(!trash.mode.is_empty());
+        let dis = layout(Kind::Util(Util::Disintegrator).shape());
+        assert_eq!((dis.preview.len(), dis.slots.len()), (4, 10));
+        assert!(dis.work.is_some());
+        let mixer = layout(Kind::Mixer.shape());
+        assert!(mixer.work.is_some_and(|w| w[0] > mixer.slots[2][0] + 16.0));
+        let charger = Kind::Util(Util::Charger).shape();
+        assert!(!charger.mode && charger.label);
+        let l = layout(charger);
+        assert_eq!(l.slots.len(), 4);
+        assert!(l.menu_slots[4..].iter().all(Option::is_none));
+    }
+
+    #[test]
+    fn blocks_without_modules_draw_no_sockets() {
+        use crate::utility::Util;
+        for u in [Util::ChargePlate, Util::XpTank, Util::Projector, Util::PortalDock] {
+            assert!(!Kind::Util(u).shape().sockets, "{u:?}");
+            assert!(layout(Kind::Util(u).shape()).sockets.is_empty(), "{u:?}");
+        }
+        assert!(Kind::Util(Util::Trash).shape().sockets);
+        assert!(Kind::Miner.shape().sockets);
     }
 
     #[test]
