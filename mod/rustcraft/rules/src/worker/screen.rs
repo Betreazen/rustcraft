@@ -164,16 +164,12 @@ pub fn layout(sockets: usize, cargo: usize, height: bool) -> Layout {
     let rows = cargo.div_ceil(COLUMNS).max(1);
     let grid_bottom = CARGO_AT[1] + rows as f32 * PITCH - 1.0;
     let filter_y = GAUGES_Y[1] + 20.0;
-    let mut y = filter_y + 12.0;
-    let height_y = height.then(|| {
-        let at = y;
-        y += 14.0;
-        at
-    });
-    let status_y = y;
+    let height_y = height.then_some(filter_y + 12.0);
     let inventory_label_y = grid_bottom + 5.0;
     let inventory = [8.0, inventory_label_y + 11.0];
-    let bottom = (inventory[1] + 58.0 + 17.0 + 7.0).max(status_y + 14.0 + 6.0);
+    // The status line across the window under the inventory: in the panel its text was cut.
+    let status_y = inventory[1] + 58.0 + 18.0 + 2.0;
+    let bottom = status_y + 14.0 + 6.0;
     Layout { sockets, cargo, filter_y, height_y, status_y, inventory_label_y, inventory, size: [WIDTH, bottom] }
 }
 

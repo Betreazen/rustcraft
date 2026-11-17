@@ -1210,7 +1210,7 @@ pub(super) fn draw_chassis(game: &Game<'_>, batch: &mut HudBatch, screen: &Nativ
         worker_wire::Mood::Waiting => Severity::Warn,
         worker_wire::Mood::Stopped => Severity::Bad,
     };
-    kit::status_line(game, batch, o, [px - 4.0, l.status_y, pw + 8.0, 14.0], severity, &tr(key, fallback));
+    kit::status_line(game, batch, o, [4.0, l.status_y, worker_screen::WIDTH - 8.0, 14.0], severity, &tr(key, fallback));
     kit::inventory(game, batch, o, l.inventory, l.inventory_label_y);
     for i in 0..worker_screen::INVENTORY {
         let at = l.inventory_slot(i);
