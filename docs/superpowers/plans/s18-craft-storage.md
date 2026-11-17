@@ -182,7 +182,7 @@
 
 ### Task 26: O11 — an order's product goes straight to the next machine
 - Today an intermediate product rides to the storage and from there to the next step's machine (`orders.rs` `pull` with `own`, `queue.rs` `keep_for`). The product of a step whose next step runs on another machine goes from the first machine to the second.
-- [ ] done
+- [ ] not started. Way: in `follow_jobs`, when `own` and the order's next step needs that product, start the next step's job at once on a free machine of its kind and send the product as `Leg::Machine` of that job instead of `Leg::Products { own: true }` (queue: a `Queue::chain_next` that hands back the next step as a Job).
 
 ### Task 27: O12 — the order brings its water
 - A mixer step's water (and any fluid input) comes with the order from the storage's tanks / the line's fluid net, not only from the mixer's own tank (`orders::reachable`).
@@ -198,4 +198,4 @@
 
 ### Task 30: order items visible in the housings
 - The items of an order's shipment drawn moving through the housings along their route (`rules/src/orders/ship.rs` gives the route and the time), as the client can draw them (block-entity drawing of the housings).
-- [ ] done
+- [ ] not started. Way: the server writes each housing's riding items (item, progress 0..1, direction) into the housing's update tag each second from `ship::advance`; the housing's block-entity draw (stream 1's transport.rs owns the housing's drawing) draws `native_draw_item` at the interpolated place.
