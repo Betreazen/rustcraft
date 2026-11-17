@@ -6853,5 +6853,8 @@
   "rustcraft.miner.outlet_row": "Куда складывает\t",
   "rustcraft.vein.grown_row": "Выращено всего: %s",
   "rustcraft.power.lava_bar": "%s из %s вёдер",
-  "rustcraft.util.portal_dock.fluid_short": " · %s из %s вёдер"
+  "rustcraft.util.portal_dock.fluid_short": " · %s из %s вёдер",
+  "rustcraft.compass.target_counted": "%s · %s %s",
+  "rustcraft.turret.range_counted": "Радиус: %s",
+  "rustcraft.monorail.look_counted": "Монорельс · ступень %s · %s в секунду"
 }

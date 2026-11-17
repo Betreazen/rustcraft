@@ -1401,12 +1401,15 @@ pub(super) fn diagnosis(
     if block == content::MONORAIL {
         let rail = read_rail(game, pos)?;
         let speed = tuning.rail_spec().speed_of(rail.tier);
+        // In-game check w3: «22 блока в секунду», not «22 блоков».
+        let blocks = speed.round().max(0.0) as u64;
+        let form = rustcraft_rules::machines::panel::plural_form(blocks);
         return Some(line(
-            "rustcraft.monorail.look",
-            "Monorail · tier %s · %s blocks a second",
+            "rustcraft.monorail.look_counted",
+            "Monorail · tier %s · %s a second",
             &[
                 Text::literal(rail.tier.to_string()),
-                Text::literal(format!("{speed}")),
+                line(&format!("rustcraft.window.blocks.{form}"), "%s blocks", &[Text::literal(blocks.to_string())]),
             ],
         ));
     }

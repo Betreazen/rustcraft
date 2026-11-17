@@ -236,12 +236,15 @@ pub(super) fn player(
                     &[],
                 ),
             };
+            // In-game check w3: «31 блок», not «31 блоков».
+            let blocks = target.distance.round().max(0.0) as u64;
+            let form = rustcraft_rules::machines::panel::plural_form(blocks);
             line(
-                "rustcraft.compass.target",
-                "%s · %s blocks %s",
+                "rustcraft.compass.target_counted",
+                "%s · %s %s",
                 &[
                     name,
-                    Text::literal(format!("{:.0}", target.distance)),
+                    line(&format!("rustcraft.window.blocks.{form}"), "%s blocks", &[Text::literal(blocks.to_string())]),
                     line(&format!("rustcraft.compass.{way}"), way, &[]),
                 ],
             )

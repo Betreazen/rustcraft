@@ -1849,10 +1849,13 @@ fn turret_sheet(game: &Game<'_>, dimension: &str, pos: Pos, t: &Tuning, s: &mut 
         )),
     ];
     s.toggles = target_chips();
-    let range = Text::literal(format!("{:.0}", l.range(t)));
+    // In-game check w3: «24 блока», not «24 блоков».
+    let blocks = l.range(t).round().max(0.0) as u64;
+    let form = rustcraft_rules::machines::panel::plural_form(blocks);
+    let range = line(&format!("rustcraft.window.blocks.{form}"), "%s blocks", &[Text::literal(blocks.to_string())]);
     s.rows.push(v(&line(
-        "rustcraft.turret.range",
-        "Range: %s blocks",
+        "rustcraft.turret.range_counted",
+        "Range: %s",
         &[range],
     )));
     if support {
