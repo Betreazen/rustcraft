@@ -232,7 +232,7 @@ Audit: zipline «Перед установкой виден контур яко�
 
 - [x] Checked SRC: `native_world_primitives` (`docs/native-mods.md` «World primitives», `native_hooks.rs:3001`, no trait gate at `world_primitives.rs:43`) draws translucent filled boxes. Not a limit: the ghost is the anchor model's three boxes in translucent green (`traversal::ghost_boxes`, test), drawn with the outline. Not a textured model: primitives are coloured boxes, lines, beams and text only.
 - [x] `mod/README.md` «Что проверить в игре: срез 18 — база и снаряжение» (20dc394).
-- [ ] Final `try`; report.
+- [x] Final `try` at d59c508: RustCraft 149 passed / 0 failed (143 before + 6 of this stream), Path-of-craft-tree 42 / 0, SoulsCraft 87 / 0; rules crate 484 tests.
 
 ## Left to other streams
 
