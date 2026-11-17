@@ -538,7 +538,7 @@
   "rustcraft.util.builder_no_plan": "Проектор ничего не помнит",
   "rustcraft.util.builder_no_blocks": "Нет блоков на складе",
   "rustcraft.util.builder_done": "Постройка готова",
-  "rustcraft.util.dock_unpaired": "Нет пары: кликни ключом по двум докам",
+  "rustcraft.util.dock_unpaired": "Нет пары: ключом по двум докам",
   "rustcraft.util.dock_no_portal": "Док стоит не у портала",
   "rustcraft.util.dock_idle": "Нечего передавать",
   "rustcraft.util.xp_tank.stored": "Хранит %s очков из %s",

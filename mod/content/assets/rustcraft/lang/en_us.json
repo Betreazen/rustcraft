@@ -538,7 +538,7 @@
   "rustcraft.util.builder_no_plan": "The projector remembers nothing",
   "rustcraft.util.builder_no_blocks": "No blocks in storage",
   "rustcraft.util.builder_done": "The building is done",
-  "rustcraft.util.dock_unpaired": "No pair: click two docks with the wrench",
+  "rustcraft.util.dock_unpaired": "No pair: wrench two docks",
   "rustcraft.util.dock_no_portal": "Not by a portal",
   "rustcraft.util.dock_idle": "Nothing to send",
   "rustcraft.util.xp_tank.stored": "Holds %s points of %s",
