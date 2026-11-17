@@ -164,6 +164,10 @@ struct Base {
     index: Option<anchor::Index>,
     /// Slice 18: the share of its draw each anchor got last second, for its window's bar.
     anchor_shares: HashMap<(String, Pos), f64>,
+    /// Wave 2: each charge dock's meter (when, its buffer then, what it gave since, E/s taken).
+    dock_meters: HashMap<(String, Pos), (std::time::Instant, f64, f64, f64)>,
+    /// Wave 2: the charge each dock gave its workers since its meter last read.
+    dock_given: HashMap<Pos, f64>,
     /// Blocks placed by a player, owners due.
     owners_due: Vec<(u128, String, Pos)>,
     broken: Vec<(String, Pos)>,
@@ -2151,18 +2155,19 @@ fn dock_sheet(
     }
     if machine == Machine::DockCharge {
         let e = machines::buffer_energy(game, pos);
+        // Wave 2 (ui.js `dock_charge`): «Энергия · получает N из 16 Е/с».
+        let taken = dock_intake(dimension, pos, e, t);
         s.bars.push(SheetBar {
             label: v(&line("rustcraft.window.energy", "Energy", &[])),
-            value: v(&Text::literal(format!("{e:.0} / {:.0} E", t.dock_buffer))),
-            share: e / t.dock_buffer.max(1.0),
+            value: v(&line(
+                "rustcraft.anchor.gets",
+                "gets %s of %s E/s",
+                &[Text::literal(format!("{taken:.0}")), Text::literal(format!("{:.0}", t.dock_draw))],
+            )),
+            share: taken / t.dock_draw.max(1.0),
             energy: true,
             colour: None,
         });
-        s.rows.push(v(&line(
-            "rustcraft.dock.draw",
-            "Draws up to %s E/s",
-            &[Text::literal(format!("{:.0}", t.dock_draw))],
-        )));
         let severity = if e > 0.0 { Severity::Ok } else { Severity::Bad };
         s.status = status(severity, &text);
     } else {
@@ -2482,4 +2487,32 @@ pub(super) fn forget_area(game: &mut Game<'_>, dimension: &str, min: Pos, max: P
     s.turrets.retain(|(d, p), _| d != dimension || !inside(*p));
     s.anchor_states
         .retain(|(d, p), _| d != dimension || !inside(*p));
+}
+
+// ---- Wave 2: what a charge dock takes ----
+
+/// The charge dock at `pos` gave a worker `amount` (rustcraft_workers::charge_from).
+pub(super) fn dock_gave(pos: Pos, amount: f64) {
+    *state().dock_given.entry(pos).or_default() += amount;
+}
+
+/// E a second the charge dock at `pos`, holding `buffer` now, took in its last second
+/// (rustcraft_rules::worker::dock_intake); read again once a second has passed.
+fn dock_intake(dimension: &str, pos: Pos, buffer: f64, t: &Tuning) -> f64 {
+    let now = std::time::Instant::now();
+    let mut s = state();
+    let key = (dimension.to_owned(), pos);
+    let Some(&(since, before, _, rate)) = s.dock_meters.get(&key) else {
+        s.dock_given.remove(&pos);
+        s.dock_meters.insert(key, (now, buffer, 0.0, 0.0));
+        return 0.0;
+    };
+    let seconds = now.duration_since(since).as_secs_f64();
+    if seconds < 1.0 {
+        return rate;
+    }
+    let gave = s.dock_given.remove(&pos).unwrap_or(0.0);
+    let rate = rustcraft_rules::worker::dock_intake(before, buffer, gave, seconds, t.dock_draw);
+    s.dock_meters.insert(key, (now, buffer, 0.0, rate));
+    rate
 }
