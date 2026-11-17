@@ -152,4 +152,12 @@ slots). Not an engine limit: a layout one; the lines stay («Молоко в б�
 
 ## Try status
 
-(filled in)
+- try-w2-craft-1 (a84edb9, tasks 1–8): RC 226/228 — `orders18_bread_through_the_kitchen` passes
+  now; failing `w2_craft_machines_up_to_tier_four` (the scenario read the wrong window row, fixed
+  in 37a4b90) and `s18_placer_and_breaker_by_tier` (not this stream's; fixed on
+  feat/handbook-parity). PCT 42/42, SC 105/105.
+- try-w2-craft-2/3/4: the server's tick stood still 60 s (watchdog). Traced (try 4, snapshot
+  only): inside the self-test's tick; cause — the bench reads a window holding the server's level
+  map, and the projector's rows asked that map again (`server::with_level` twice on one thread).
+  Fixed in 63f6781: the projector's rows take the level (they never found the storage in game
+  either, the window's tick has the level out of the map).
