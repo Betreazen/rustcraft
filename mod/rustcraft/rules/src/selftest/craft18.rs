@@ -72,20 +72,15 @@ fn storage_keeps_component_stacks(o: Pos, _: &Tuning) -> Scenario {
             same("book in", b.insert_snbt(a, BOOK)?, 1)?;
             same("stone in", b.insert_snbt(a, NAMED)?, 5)
         })
-        .until("the storage holds both", SETTLE, move |b, _| {
-            Ok(b.stored_stacks(t).len() == 2)
-        })
-        .check("each comes out with its components", move |b, _| {
+        .until("the storage holds both, each with its components", SETTLE, move |b, _| {
+            // The net brings them a few at a time: wait for all five stones.
             let mut got = b.stored_stacks(t);
             got.sort();
-            same(
-                "stacks",
-                got,
-                vec![
+            Ok(got
+                == vec![
                     "minecraft:enchanted_book x1 minecraft:sharpness 3".to_owned(),
                     "minecraft:stone x5 \"Plan\"".to_owned(),
-                ],
-            )
+                ])
         })
         .check("its record comes back the same from a save", move |b, _| {
             b.round_trip(t)
