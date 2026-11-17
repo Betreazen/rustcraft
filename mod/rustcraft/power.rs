@@ -750,11 +750,8 @@ pub(super) fn sinks(game: &Game<'_>, s: &Sources, t: &Tuning) -> Vec<Sink> {
             blocks: vec![p],
             fluid: rules::SOLUTION,
             held: seed.solution.floor() as u64,
-            capacity: if seed.progress >= 1.0 {
-                0
-            } else {
-                grow::buffer(t) as u64
-            },
+            // Only what its growth still needs: a grown druse has drunk 4 buckets, not 5.
+            capacity: seed.room(t).ceil() as u64,
         }
     }));
     out

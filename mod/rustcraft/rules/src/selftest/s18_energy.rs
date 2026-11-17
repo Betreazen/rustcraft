@@ -5,7 +5,7 @@ use super::{Build, Scenario, at, plot_area, same};
 use crate::grow::{self, DRUSE, SEED, SHARD, STAGE};
 use crate::tuning::Tuning;
 
-pub const ALL: [Build; 11] = [
+pub const ALL: [Build; 12] = [
     shard_recipes,
     druse_breaks_into_shards,
     seed_grows_on_solution,
@@ -17,6 +17,7 @@ pub const ALL: [Build; 11] = [
     structure_three_by_three,
     structure_cube,
     generator_windows,
+    seed_drinks_only_what_it_needs,
 ];
 
 const TANK: &str = "rustcraft:tank";
@@ -345,5 +346,36 @@ fn seed_stands_without_solution(o: crate::geom::Pos, _t: &Tuning) -> Scenario {
         })
         .check("broken, it gives its one shard back", move |b, _| {
             same("shards", shards_in(&b.break_block(seed, None)?), 1)
+        })
+}
+
+/// Game check (w3): a seed takes from its tank only what its growth still needs, so a grown
+/// druse has drunk 4 buckets and keeps none (before, it topped up a whole bucket to the end).
+fn seed_drinks_only_what_it_needs(o: crate::geom::Pos, t: &Tuning) -> Scenario {
+    let tank = at(o, [2, 0, 2]);
+    let seed = at(o, [2, 1, 2]);
+    let left = (0.05 * t.grow_buckets * 1000.0) as u64;
+    Scenario::new("s18_seed_drinks_only_what_it_needs", plot_area(o))
+        .then("a tank of solution and a seed on it, 95% grown", move |b, _| {
+            b.place(tank, TANK, &[])?;
+            b.set_tank(tank, grow::SOLUTION, 8000)?;
+            b.place(seed, SEED, &[])?;
+            b.set_seed(seed, 0.95)
+        })
+        .until("grown, it shows the druse (stage 2)", 1200, move |b, _| {
+            Ok(b.property(seed, STAGE).as_deref() == Some("2"))
+        })
+        .wait(40)
+        .check("the tank lost only the last 5% of 4 buckets", move |b, _| {
+            let amount = b.tank(tank).map(|g| g.amount).ok_or("no tank")?;
+            let lost = 8000 - amount;
+            if lost > left + 2 {
+                return Err(format!("the tank lost {lost} mB, the growth needed {left}"));
+            }
+            let s = b.seed(seed).ok_or("no seed")?;
+            if s.solution > 2.0 {
+                return Err(format!("the grown seed still holds {:.0} mB", s.solution));
+            }
+            Ok(())
         })
 }

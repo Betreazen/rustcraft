@@ -65,6 +65,13 @@ pub enum Shown {
 }
 
 impl Seed {
+    /// The most solution the seed takes from its tank, mB: the buffer, but never more than its
+    /// growth still needs, so a grown druse has drunk exactly `grow_buckets` (README CR2).
+    pub fn room(&self, t: &Tuning) -> f64 {
+        let left = (1.0 - self.progress).max(0.0) * t.grow_buckets * BUCKET;
+        buffer(t).min(left)
+    }
+
     /// `dt` seconds of growth: it drinks from what it holds and grows by what it drank; with too
     /// little it grows that much less, with none it stands.
     pub fn grow(&mut self, dt: f64, t: &Tuning) -> Shown {
@@ -126,6 +133,34 @@ mod tests {
         assert!(matches!(s.grow(1.0, &t), Shown::Growing(_)));
         let grown = s.progress - before;
         assert!((grown * 4000.0 - drink_per_second(&t) / 2.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn a_seed_takes_from_the_tank_only_what_its_growth_still_needs() {
+        let t = Tuning::default();
+        let fresh = Seed::default();
+        assert!((fresh.room(&t) - buffer(&t)).abs() < 1e-9);
+        // 0.9 grown: 400 mB of the 4 buckets are left to drink, less than the buffer.
+        let late = Seed {
+            progress: 0.9,
+            solution: 0.0,
+        };
+        assert!((late.room(&t) - 400.0).abs() < 1e-6);
+        let grown = Seed {
+            progress: 1.0,
+            solution: 0.0,
+        };
+        assert_eq!(grown.room(&t), 0.0);
+        // Grown from nothing on a full tank, the tank loses exactly 4 buckets.
+        let mut s = Seed::default();
+        let mut tank = 8000.0;
+        while s.grow(1.0, &t) != Shown::Grown {
+            let take = (s.room(&t) - s.solution).max(0.0).min(tank);
+            tank -= take;
+            s.solution += take;
+        }
+        assert!((8000.0 - tank - 4000.0).abs() < 1e-6, "tank lost {}", 8000.0 - tank);
+        assert!(s.solution.abs() < 1e-6);
     }
 
     #[test]
