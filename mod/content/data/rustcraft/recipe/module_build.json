@@ -8,7 +8,7 @@
   ],
   "key": {
     "a": "rustcraft:crystallite",
-    "x": "minecraft:bricks",
+    "x": "minecraft:dropper",
     "s": "minecraft:amethyst_shard"
   },
   "result": {

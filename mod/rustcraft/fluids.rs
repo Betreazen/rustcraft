@@ -123,9 +123,32 @@ pub(super) fn default_mode(block: &str) -> Option<Mode> {
         Some(TANK_DEFAULT)
     } else if block == content::MIXER {
         Some(Mode::Both)
+    } else if block == TRASH {
+        // Slice 18 (guide `trash`): the trash destroys fluids its joint's filter lets in.
+        Some(TANK_DEFAULT)
     } else {
         None
     }
+}
+
+/// Slice 18: the trash block, a fluid sink of the fluid nets.
+const TRASH: &str = "rustcraft:trash";
+
+/// Slice 18: how much fluid (mB) each trash of the level may destroy this pass: its tier's rate
+/// a second, in buckets, over the pass, as far as its buffer pays 1 E a bucket (guide `trash`).
+fn trash_room(game: &Game<'_>, level: &LevelNet) -> BTreeMap<Pos, u64> {
+    level
+        .machines
+        .iter()
+        .filter(|(_, m)| **m == Machine::Util(rustcraft_rules::utility::Util::Trash))
+        .map(|(&p, _)| {
+            let tier = crate::game::rustcraft_tiers::tier_at(game, p);
+            let rate = u64::from(rustcraft_rules::machines::tiered::trash_batch(tier));
+            let pass = rate * BUCKET * EVERY / 20;
+            let paid = (machines::buffer_energy(game, p).max(0.0) * BUCKET as f64) as u64;
+            (p, pass.min(paid))
+        })
+        .collect()
 }
 
 /// Builds the fluid nets' joints again after a rescan.
@@ -238,6 +261,9 @@ struct Inventories<'a> {
     /// Slice 11: the furnaces' and crushers' catalyst tanks.
     catalysts: &'a mut BTreeMap<Pos, CatalystTank>,
     tuning: &'a Tuning,
+    /// Slice 18: what each trash may still destroy this pass, mB, and what it destroyed.
+    trash: BTreeMap<Pos, u64>,
+    destroyed: BTreeMap<Pos, u64>,
 }
 
 impl FluidInventories for Inventories<'_> {
@@ -258,6 +284,9 @@ impl FluidInventories for Inventories<'_> {
     }
 
     fn room_for(&self, block: Pos, fluid: &str) -> u64 {
+        if let Some(room) = self.trash.get(&block) {
+            return *room;
+        }
         if let Some(c) = self.catalysts.get(&block) {
             return c.room_for(fluid, self.tuning);
         }
@@ -303,6 +332,12 @@ impl FluidInventories for Inventories<'_> {
     }
 
     fn put(&mut self, block: Pos, fluid: &str, amount: u64) -> u64 {
+        if let Some(room) = self.trash.get_mut(&block) {
+            let n = (*room).min(amount);
+            *room -= n;
+            *self.destroyed.entry(block).or_default() += n;
+            return n;
+        }
         if let Some(c) = self.catalysts.get_mut(&block) {
             return c.put(fluid, amount, self.tuning);
         }
@@ -429,6 +464,8 @@ fn catalysts_from_tanks(
 /// One move of the level's fluids: pumps into the tanks they touch, then every fluid net.
 pub(super) fn tick(game: &mut Game<'_>, level: &mut LevelNet, tuning: &Tuning) {
     let now = level.ticks;
+    // Slice 18: the trashes' room this pass, read before the nets borrow the level.
+    let trash = trash_room(game, level);
     let pumps_at: Vec<Pos> = level
         .machines
         .iter()
@@ -535,6 +572,8 @@ pub(super) fn tick(game: &mut Game<'_>, level: &mut LevelNet, tuning: &Tuning) {
         mixer_tank,
         catalysts: &mut catalysts,
         tuning,
+        trash,
+        destroyed: BTreeMap::new(),
     };
     f.no_lane.retain(|_, (_, until)| *until > now);
     for net in &f.nets {
@@ -569,6 +608,14 @@ pub(super) fn tick(game: &mut Game<'_>, level: &mut LevelNet, tuning: &Tuning) {
             f.no_lane
                 .insert(joints[n.joint].block, (n.fluid, now + NOTE_HOLD));
         }
+    }
+    // Slice 18: each trash pays 1 E a bucket it destroyed.
+    let destroyed = std::mem::take(&mut inv.destroyed);
+    for (pos, mb) in destroyed {
+        let dimension = game.native_dimension().to_owned();
+        crate::game::rustcraft_utility::note_burnt(&dimension, pos, (mb / BUCKET) as u32);
+        let e = machines::buffer_energy(game, pos);
+        machines::set_buffer_energy(game, pos, e - mb as f64 / BUCKET as f64);
     }
     write_back(game, &before, &groups, per_block);
     power::write_sinks(game, &sinks_before, &sinks);
@@ -661,6 +708,20 @@ pub struct PumpHeld {
     under: Under,
     pub request: f64,
     data: Vec<i32>,
+    /// Slice 18: its modules and tier, and the ticks and E/s a bucket takes on them.
+    fitted: machines::Fitted,
+    ticks: f64,
+    energy: f64,
+}
+
+/// A8, A7: a higher tier and speed modules pump faster; economy modules cost less.
+fn pump_numbers(fitted: &machines::Fitted, tuning: &Tuning) -> (f64, f64) {
+    let tier = fitted.speed(Machine::Pump, tuning);
+    let (work, energy) = rustcraft_rules::modules::factors(&fitted.modules, tuning);
+    (
+        (tuning.pump_ticks / (tier * work)).max(1.0),
+        tuning.pump_energy * tier * energy,
+    )
 }
 
 /// What is under the pump at `pos`.
@@ -702,11 +763,16 @@ pub(super) fn read_pump(game: &Game<'_>, pos: Pos, tuning: &Tuning) -> Option<Pu
         held: read_held(&entity.nbt),
     };
     let under = under(game, pos);
+    let fitted = machines::fitted(game, pos, entity);
+    let (ticks, energy) = pump_numbers(&fitted, tuning);
     Some(PumpHeld {
-        request: pump.request(&under, tuning.pump_energy),
+        request: pump.request(&under, energy),
         pump,
         under,
         data: entity.data.clone(),
+        fitted,
+        ticks,
+        energy,
     })
 }
 
@@ -725,9 +791,12 @@ pub(super) fn run_pump(
         under,
         request,
         data: shown_data,
+        fitted,
+        ticks,
+        energy,
     } = held;
     let before = pump.clone();
-    let tick = pump.tick(&under, share, tuning.pump_ticks);
+    let tick = pump.tick(&under, share, ticks);
     let shown = Pump::shown(tick, share);
     if let Some(source) = tick.pumped
         && !under.endless()
@@ -739,14 +808,18 @@ pub(super) fn run_pump(
         endless: under.endless(),
         progress: pump.progress,
         got: if request > 0.0 { share * request } else { 0.0 },
-        asked: tuning.pump_energy,
+        asked: energy,
         shown,
         no_lane,
     });
-    if pump == before && shown_data == data {
+    let mut data = data;
+    data.extend(fitted.extras(game, &[], 0, &None));
+    data.push(ticks.round() as i32);
+    if pump == before && shown_data == data && fitted.tier_saved() {
         return Some(shown);
     }
     game.native_with_mod_block_entity(pos, move |e| {
+        fitted.save_tier(&mut e.nbt);
         if pump.progress != before.progress {
             write_f64(&mut e.nbt, PROGRESS_KEY, pump.progress);
         }
@@ -899,5 +972,82 @@ pub(super) fn bucket_text(mb: u64) -> String {
         (tenths / 10).to_string()
     } else {
         format!("{},{}", tenths / 10, tenths % 10)
+    }
+}
+
+// ---- Slice 18, stream 3: a bucket on a tank (guide `tank`) ----
+
+/// A bucket `held` used on the tank at `pos`: the tank group changes and the bucket the player
+/// holds after it; why not, else (a translation key's tail and its fallback).
+pub(super) fn bucket_on_tank(
+    game: &mut Game<'_>,
+    dimension: &str,
+    pos: Pos,
+    held: &str,
+) -> Result<&'static str, (&'static str, &'static str)> {
+    use rustcraft_rules::machines::bucket::{self, Use};
+    let tuning = crate::game::rustcraft_server::tuning();
+    let per_block = tuning.tank_buckets * BUCKET;
+    let group = crate::game::rustcraft_server::with_level(dimension, |level| {
+        group_at(game, level, pos, tuning)
+    })
+    .flatten()
+    .ok_or(("tank.no_group", "The tank is not ready yet"))?;
+    let mut after = group.clone();
+    let result = match bucket::use_on(held, &group) {
+        Use::Pour { fluid } => {
+            after.put(fluid, BUCKET);
+            bucket::EMPTY
+        }
+        Use::Fill { fluid, filled } => {
+            after.take(fluid, BUCKET);
+            filled
+        }
+        Use::NoRoom => return Err(("tank.bucket_no_room", "No room in the tank for a bucket of it")),
+        Use::Empty => return Err(("tank.bucket_empty", "Less than a bucket in the tank")),
+        Use::NoBucket(_) => {
+            return Err(("tank.bucket_no_bucket", "No bucket takes it: it lives in tanks and channels"));
+        }
+        Use::Other => return Err(("", "")),
+    };
+    write_back(game, &[group], &[after], per_block);
+    Ok(result)
+}
+
+/// `native_right_click_block`: a water, lava or empty bucket on a tank pours or fills, before
+/// the tank's window opens.
+pub(super) fn on_right_click_block(game: &mut Game<'_>, pos: Pos, canceled: &mut bool) {
+    if *canceled || game.native_block(pos) != content::TANK {
+        return;
+    }
+    let Some(player) = game.native_acting_player() else {
+        return;
+    };
+    let Some((held, _, true)) = game.native_held() else {
+        return;
+    };
+    if rustcraft_rules::machines::bucket::use_on(&held, &Default::default())
+        == rustcraft_rules::machines::bucket::Use::Other
+    {
+        return;
+    }
+    *canceled = true;
+    match bucket_on_tank(game, &player.dimension, pos, &held) {
+        Ok(result) => {
+            if player.game_mode != 1 {
+                game.native_take_items(&held, 1);
+                if game.native_give_items(result, 1) == 0 {
+                    log::warn!("rustcraft: no room for {result} from the tank at {pos:?}");
+                }
+            }
+        }
+        Err((key, fallback)) if !key.is_empty() => {
+            crate::game::rustcraft_server::tell(
+                game,
+                player.uuid,
+                line(&format!("rustcraft.{key}"), fallback, &[]),
+            );
+        }
+        Err(_) => {}
     }
 }

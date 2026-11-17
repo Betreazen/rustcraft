@@ -242,6 +242,10 @@ pub struct Tuning {
     pub grow_minutes: f64,
     pub grow_buckets: f64,
     pub seed_buffer: f64,
+    // ---- Slice 18, stream 3 (machines) ----
+    /// A8: how much faster each tier above a machine's first works (guide `swap`: «работает
+    /// быстрее»; the guide names no number for most machines). **Proposal.**
+    pub tier_speed_step: f64,
 }
 
 impl Default for Tuning {
@@ -362,7 +366,8 @@ impl Default for Tuning {
             ],
             mixer_energy: 8.0,
             mixer_ticks: 100.0,
-            mixer_buckets: 4,
+            // Slice 18: 16 buckets a tank, as the guide's window shows (`ui.js` mixer).
+            mixer_buckets: 16,
             cargo_hold: 45,
             load_dock_slots: 9,
             load_items_per_second: 32.0,
@@ -396,6 +401,8 @@ impl Default for Tuning {
             grow_minutes: 10.0,
             grow_buckets: 4.0,
             seed_buffer: 1.0,
+            // Slice 18, stream 3 (machines).
+            tier_speed_step: 0.5,
         }
     }
 }

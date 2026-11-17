@@ -252,7 +252,13 @@ pub mod pump {
     pub const LABEL_ENERGY_Y: f32 = 50.0;
     pub const ENERGY_BAR: Rect = [8.0, 59.0, 198.0, 5.0];
     pub const LABEL_MODULES_Y: f32 = 68.0;
-    pub const MODULE_SLOTS: [[f32; 2]; 3] = [[9.0, 78.0], [27.0, 78.0], [45.0, 78.0]];
+    /// The module sockets (A5: three on tiers 1–2, four on 3–4).
+    pub const MODULE_SLOTS: [[f32; 2]; 4] = [[9.0, 78.0], [27.0, 78.0], [45.0, 78.0], [63.0, 78.0]];
+    /// Slice 18: the window's own data slots, then the extras (its sockets), then the ticks a
+    /// bucket takes now on full energy (its tier and modules).
+    pub const EXTRAS_AT: usize = DATA_SLOTS;
+    pub const TICKS_AT: usize = DATA_SLOTS + crate::machines::extras::DATA;
+    pub const ALL_DATA_SLOTS: usize = TICKS_AT + 1;
     pub const STATUS: Rect = [8.0, 100.0, 198.0, 22.0];
     pub const INVENTORY: [f32; 2] = [26.0, 136.0];
     pub const INVENTORY_LABEL_Y: f32 = INVENTORY[1] - 10.0;

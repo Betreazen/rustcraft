@@ -40,6 +40,11 @@ pub struct AlloySmelter {
     pub progress: f64,
     /// AL1: take an alloy back from the output when a recipe needs it.
     pub take_own: bool,
+    /// Slice 18: the hidden queue cells of its capacity and stack modules
+    /// (rustcraft_rules::machines::queue), taken from after the inputs.
+    pub queue: Vec<Option<(ItemKey, u32)>>,
+    /// Slice 18: the recipe it finishes next gives one more alloy (the yield module).
+    pub lucky: bool,
 }
 
 impl Default for AlloySmelter {
@@ -51,6 +56,8 @@ impl Default for AlloySmelter {
             burn_left: 0.0,
             progress: 0.0,
             take_own: true,
+            queue: Vec::new(),
+            lucky: false,
         }
     }
 }
@@ -106,7 +113,7 @@ impl AlloySmelter {
         } else {
             0
         };
-        count_in(&self.inputs, item) + own
+        count_in(&self.inputs, item) + count_in(&self.queue, item) + own
     }
 
     /// The first recipe it can run, if its output has room once the ingredients are taken.
@@ -148,6 +155,7 @@ impl AlloySmelter {
     fn take_ingredients(&mut self, recipe: &AlloyRecipe) {
         for (item, n) in &recipe.inputs {
             let left = take_from(&mut self.inputs, item, *n);
+            let left = take_from(&mut self.queue, item, left);
             if left > 0 && self.take_own {
                 take_from(&mut self.outputs, item, left);
             }
@@ -162,6 +170,17 @@ impl AlloySmelter {
     fn apply(&mut self, recipe: &AlloyRecipe, spec: &AlloySpec) {
         self.take_ingredients(recipe);
         self.place(&recipe.output, spec);
+        // The yield module: one more alloy, when there is room for it.
+        if std::mem::take(&mut self.lucky) {
+            self.place(&(recipe.output.0.clone(), 1), spec);
+        }
+    }
+
+    /// What a burnt-out fuel leaves (a lava bucket's empty bucket) goes to the outputs, where the
+    /// magistral takes it, so new fuel can come in; false when they have no room (it then stays
+    /// in the fuel slot, as in a furnace).
+    pub fn put_remainder(&mut self, item: &str) -> bool {
+        slots::place(&mut self.outputs, item, 1, 1)
     }
 }
 
@@ -266,6 +285,36 @@ mod tests {
             .filter(|(i, _)| i == item)
             .map(|(_, n)| n)
             .sum()
+    }
+
+    #[test]
+    fn the_queue_counts_with_the_inputs() {
+        let mut s = AlloySmelter {
+            inputs: [None, slot("minecraft:gold_ingot", 1), slot("minecraft:redstone", 1), None],
+            queue: vec![slot("rc:coppersteel", 3)],
+            ..AlloySmelter::default()
+        };
+        run(&mut s, 1.0, 100);
+        assert_eq!(count(&s.outputs, "rc:sparksteel"), 1, "the copper-steel came from the queue");
+        assert_eq!(count(&s.queue, "rc:coppersteel"), 2);
+    }
+
+    #[test]
+    fn a_lucky_recipe_gives_one_more() {
+        let mut s = sparksteel_kit();
+        s.lucky = true;
+        run(&mut s, 1.0, 100);
+        assert_eq!(count(&s.outputs, "rc:sparksteel"), 2);
+        assert!(!s.lucky);
+    }
+
+    #[test]
+    fn a_fuel_remainder_goes_to_the_outputs() {
+        let mut s = AlloySmelter::default();
+        assert!(s.put_remainder("minecraft:bucket"));
+        assert_eq!(count(&s.outputs, "minecraft:bucket"), 1);
+        s.outputs = [slot("a", 64), slot("b", 64), slot("c", 64)];
+        assert!(!s.put_remainder("minecraft:bucket"));
     }
 
     #[test]

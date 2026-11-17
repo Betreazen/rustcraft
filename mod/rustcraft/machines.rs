@@ -31,6 +31,13 @@ use horizon_client::{
     items::ItemStack,
 };
 use horizon_world::nbt::{Compound, JavaString, Tag};
+use rustcraft_rules::machines::{
+    extras::{self, Extras},
+    queue,
+    sheet::{Cursor, press_socket_in},
+    sockets,
+};
+use rustcraft_rules::tiers;
 use rustcraft_rules::{
     geom::Pos,
     machines::{
@@ -42,6 +49,7 @@ use rustcraft_rules::{
         processor::{Processor, Recipe, Shown, Spec, State, WorkMode},
         slots::{self, Slot},
     },
+    modules::{self, Holder, Module},
     net::{
         energy::{Circuit, Consumer, Ledger, Producer, supply_with_storage},
         joints::{self, Port},
@@ -637,6 +645,21 @@ struct Held {
     data: Vec<i32>,
     /// Slice 11: its catalyst tank.
     catalyst: CatalystTank,
+    /// Slice 18: its modules, tier and hidden cells (rustcraft_rules::machines::queue).
+    fitted: Fitted,
+    /// The input slot after the intake moved it into the queue, as read and as now.
+    intake_before: Slot,
+    intake: Slot,
+    cells_before: Vec<Slot>,
+    cells: Vec<Slot>,
+    open_cells: usize,
+    /// The queue cell the processor works from this tick; none: the input slot.
+    front: Option<usize>,
+    /// The result slot and its reserve as read.
+    output_before: Slot,
+    reserve_before: Slot,
+    /// How many of the result one real slot holds.
+    output_max: u32,
 }
 
 /// Slice 11: the catalyst tank a furnace's or a crusher's saved compound holds.
@@ -677,7 +700,7 @@ pub(super) fn set_catalyst(game: &mut Game<'_>, pos: Pos, tank: &CatalystTank) {
 }
 
 /// A number in [0, 1) for the enricher's chance: xorshift over a seed from the clock.
-fn roll() -> f64 {
+pub(super) fn roll() -> f64 {
     use std::sync::atomic::{AtomicU64, Ordering};
     static SEED: AtomicU64 = AtomicU64::new(0);
     let mut x = SEED.load(Ordering::Relaxed);
@@ -701,6 +724,7 @@ fn job_of(
     input: &ItemStack,
     recipes: &MachineRecipes,
     tuning: &Tuning,
+    fitted: &Fitted,
 ) -> Option<Job> {
     let (result, ticks, energy) = match machine {
         Machine::Furnace => {
@@ -717,7 +741,10 @@ fn job_of(
         }
         _ => return None,
     };
-    let output_capacity = max_stack(game, &result.item);
+    // A8: a higher tier works faster for the same energy a recipe; the stack module's 256.
+    let speed = fitted.speed(machine, tuning);
+    let (ticks, energy) = ((ticks / speed).max(1.0), energy * speed);
+    let output_capacity = modules::machine_stack(&fitted.modules, max_stack(game, &result.item));
     Some(Job {
         recipe: Recipe {
             input: input.item.to_string(),
@@ -742,7 +769,9 @@ fn base_energy(machine: Machine, tuning: &Tuning) -> f64 {
     }
 }
 
-/// The machine at `pos` as its block entity holds it, and the recipe its input has.
+/// The machine at `pos` as its block entity holds it, and the recipe its input has. Slice 18:
+/// its input slot moves into its queue cells first, and it works from the first cell with a
+/// recipe; its result counts with its reserve.
 fn read(
     game: &Game<'_>,
     pos: Pos,
@@ -751,27 +780,67 @@ fn read(
     tuning: &Tuning,
 ) -> Option<Held> {
     let entity = entity(game, pos)?;
+    let fitted = fitted(game, pos, entity);
     let slot = |i: usize| entity.items.get(i).and_then(Option::as_ref);
-    let input = slot(content::MACHINE_INPUT);
-    let output = slot(content::MACHINE_OUTPUT);
     let catalyst = read_catalyst(&entity.nbt);
+    let intake_before = slot_of(entity, content::MACHINE_INPUT);
+    let output_before = slot_of(entity, content::MACHINE_OUTPUT);
+    let reserve_before: Slot = crate::game::rustcraft_utility::read_json(&entity.nbt, RESERVE_KEY);
+    let cells_before: Vec<Slot> =
+        crate::game::rustcraft_utility::read_json(&entity.nbt, QUEUE_KEY);
+    let open_cells = fitted.open_cells();
+    let mut intake = intake_before.clone();
+    let mut cells = cells_before.clone();
+    if let Some((item, _)) = &intake {
+        let size = modules::machine_stack(&fitted.modules, max_stack(game, item));
+        queue::intake(&mut intake, &mut cells, open_cells, size);
+    }
+    queue::spill(&mut intake, &mut cells, open_cells, |i| max_stack(game, i));
+    let has_job = |item: &str| {
+        job_of(game, machine, &ItemStack::new(item, 1), recipes, tuning, &fitted).is_some()
+    };
+    let front = queue::front(&cells, has_job);
+    let work: Slot = front.map_or_else(|| intake.clone(), |k| cells[k].clone());
+    // The real stack (components and all) when the processor works from the input slot.
+    let input_stack = match (front, slot(content::MACHINE_INPUT)) {
+        (None, Some(s)) if intake.is_some() => Some(s.clone()),
+        _ => work.as_ref().map(|(i, n)| ItemStack::new(i, *n)),
+    };
     let processor = Processor {
-        input: input.map(|s| (s.item.to_string(), s.count)),
-        output: output.map(|s| (s.item.to_string(), s.count)),
+        input: work,
+        output: queue::join(&output_before, &reserve_before),
         progress: read_f64(&entity.nbt, PROGRESS_KEY).clamp(0.0, 1.0),
         mode: read_work(&entity.nbt),
-        modules: Vec::new(),
+        modules: fitted.processor_modules(),
         catalyst: catalyst.active().map(|c| c.factors(tuning)),
         lucky: false,
     };
-    let job = input.and_then(|input| job_of(game, machine, input, recipes, tuning));
-    let nominal = base_energy(machine, tuning) * processor.factors().1;
+    let job =
+        input_stack.and_then(|input| job_of(game, machine, &input, recipes, tuning, &fitted));
+    let output_max = processor
+        .output
+        .as_ref()
+        .map(|(i, _)| i.as_str())
+        .or(job.as_ref().map(|j| &*j.result.item))
+        .map_or(FALLBACK_STACK, |i| max_stack(game, i));
+    let nominal =
+        base_energy(machine, tuning) * fitted.speed(machine, tuning) * processor.factors().1;
     Some(Held {
         processor,
         job,
         nominal,
         data: entity.data.clone(),
         catalyst,
+        fitted,
+        intake_before,
+        intake,
+        cells_before,
+        cells,
+        open_cells,
+        front,
+        output_before,
+        reserve_before,
+        output_max,
     })
 }
 
@@ -792,6 +861,16 @@ fn run(
         nominal,
         data: shown_data,
         mut catalyst,
+        fitted,
+        intake_before,
+        mut intake,
+        cells_before,
+        mut cells,
+        open_cells,
+        front,
+        output_before,
+        reserve_before,
+        output_max,
     } = held;
     let recipes: Vec<Recipe> = job.iter().map(|j| j.recipe.clone()).collect();
     // Without a job any spec does: the processor only resets its progress.
@@ -806,7 +885,8 @@ fn run(
     // The enricher: each finished recipe has its chance of one more product.
     processor.lucky = catalyst
         .active()
-        .is_some_and(|c| roll() < c.extra_chance(tuning));
+        .is_some_and(|c| roll() < c.extra_chance(tuning))
+        || modules::yield_lucky(&fitted.modules, roll());
     let before = processor.clone();
     let state = processor.tick(&recipes, &spec, share);
     let working = state == State::Working;
@@ -815,28 +895,48 @@ fn run(
         catalyst.spend(1.0 / tuning.ticks_per_second, share, tuning);
     }
     let shown = Shown::of(state, share);
-    let data = panel::encode(&Panel {
+    // Slice 18: what the processor worked from goes back to its cell, the result to its slot and
+    // reserve.
+    match front {
+        Some(k) => cells[k] = processor.input.clone(),
+        None => intake = processor.input.clone(),
+    }
+    let (output, reserve) = queue::split(&processor.output, output_max);
+    let mut data = panel::encode(&Panel {
         progress: processor.progress,
         got: if working { share * request } else { 0.0 },
         asked: nominal,
         mode: processor.mode,
         shown,
     });
+    data.extend(fitted.extras(game, &cells, open_cells, &reserve));
     // An idle machine changes nothing: leave its chunk alone (each call marks it for saving,
     // native_hooks.rs:10719-10739).
-    if processor == before && shown_data == data && catalyst == catalyst_before {
+    let hidden_moved = cells != cells_before || reserve != reserve_before;
+    if processor == before
+        && shown_data == data
+        && catalyst == catalyst_before
+        && intake == intake_before
+        && !hidden_moved
+        && fitted.tier_saved()
+    {
         return Some(shown);
     }
     let result: Vec<ItemStack> = job.map(|j| j.result).into_iter().collect();
-    let moved = processor.input != before.input || processor.output != before.output;
+    let moved = intake != intake_before || output != output_before;
     change_entity(game, pos, moved, move |entity| {
         write_slots(
             entity,
             [content::MACHINE_INPUT, content::MACHINE_OUTPUT],
-            &[before.input.clone(), before.output.clone()],
-            &[processor.input.clone(), processor.output.clone()],
+            &[intake_before, output_before],
+            &[intake, output],
             &result,
         );
+        if hidden_moved {
+            crate::game::rustcraft_utility::write_json(&mut entity.nbt, QUEUE_KEY, &cells);
+            crate::game::rustcraft_utility::write_json(&mut entity.nbt, RESERVE_KEY, &reserve);
+        }
+        fitted.save_tier(&mut entity.nbt);
         if processor.progress != before.progress {
             write_f64(&mut entity.nbt, PROGRESS_KEY, processor.progress);
         }
@@ -880,7 +980,7 @@ pub(super) fn on_menu_button(entity: &mut ModBlockEntity, id: i32, tuning: &Tuni
             write_work(&mut entity.nbt, mode);
             let mut shown = panel::decode(&entity.data);
             shown.mode = mode;
-            entity.data = panel::encode(&shown);
+            replace_front(&mut entity.data, panel::encode(&shown));
         }
         Kind::Alloy => alloy::on_menu_button(entity, id),
         Kind::Crafter => crafter::on_menu_button(entity, id, tuning),
@@ -893,9 +993,13 @@ pub(super) fn on_menu_button(entity: &mut ModBlockEntity, id: i32, tuning: &Tuni
 pub(super) fn on_menu_button_v2(
     entity: &mut ModBlockEntity,
     id: i32,
-    carried: &Option<ItemStack>,
+    carried: &mut Option<ItemStack>,
     tuning: &Tuning,
 ) {
+    // Slice 18: a socket of a drawn window takes or gives a module, as a sheet's does.
+    if press_socket(entity, id, carried) {
+        return;
+    }
     if Machine::of(&entity.id) == Some(Machine::Crafter) {
         crafter::on_cell_button(entity, id, carried, tuning);
     }
@@ -956,6 +1060,11 @@ pub(super) fn slot_takes(
                 .filter(|s| s.count > 0)
                 .map(|s| s.item.to_string())
                 .collect();
+            // Slice 18 (guide `trash`): with no filter cells of its own, the trash's joints'
+            // filters decide what reaches it.
+            if u == rustcraft_rules::utility::Util::Trash && filter.is_empty() {
+                return u.slots().inputs.contains(&slot);
+            }
             u.takes(slot, item, &filter)
         }
         Machine::Mixer => {
@@ -1120,4 +1229,191 @@ pub(super) fn teach_slot_rules(game: &Game<'_>, recipes: &MachineRecipes) {
         next.alloying.len(),
         next.fuels.len()
     );
+}
+
+// ---- Slice 18, stream 3: modules, tiers, the queue and the reserve of the drawn windows ----
+
+/// A machine's hidden queue cells and its result's reserve (rustcraft_rules::machines::queue).
+pub(super) const QUEUE_KEY: &str = "queue";
+pub(super) const RESERVE_KEY: &str = "reserve";
+/// A drawn window's socket `k` is button SOCKET_BUTTON + k, as on the sheets.
+pub(super) const SOCKET_BUTTON: i32 = 40;
+
+/// What a machine is fitted with: its modules (the sheets' key, rustcraft_base), its tier from
+/// its block's state, and the tier its block entity saved.
+pub(super) struct Fitted {
+    pub modules: Vec<Option<Module>>,
+    pub tier: u8,
+    pub saved_tier: Option<i32>,
+}
+
+pub(super) fn fitted(game: &Game<'_>, pos: Pos, entity: &ModBlockEntity) -> Fitted {
+    Fitted {
+        modules: modules::read(&base::read_module_items(&entity.nbt)),
+        tier: crate::game::rustcraft_tiers::tier_of(game, pos, &entity.id),
+        saved_tier: read_int(&entity.nbt, sockets::TIER_KEY),
+    }
+}
+
+impl Fitted {
+    /// A8: how much faster its tier works than its first.
+    pub fn speed(&self, machine: Machine, tuning: &Tuning) -> f64 {
+        tiers::family_of_block(machine.block())
+            .map_or(1.0, |f| tiers::speed(f, self.tier, tuning.tier_speed_step))
+    }
+
+    /// The speed and economy modules as the processor's rules take them.
+    pub fn processor_modules(&self) -> Vec<rustcraft_rules::machines::processor::Module> {
+        use rustcraft_rules::machines::processor::Module as P;
+        self.modules
+            .iter()
+            .flatten()
+            .filter_map(|m| match m {
+                Module::Speed => Some(P::Speed),
+                Module::Economy => Some(P::Economy),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Queue cells open: two a capacity module, one with a stack module.
+    pub fn open_cells(&self) -> usize {
+        queue::open_cells(
+            modules::capacity_slots(&self.modules),
+            modules::stack_tier(&self.modules) > 0,
+        )
+        .min(extras::MAX_CELLS)
+    }
+
+    pub fn tier_saved(&self) -> bool {
+        self.saved_tier == Some(i32::from(self.tier))
+    }
+
+    /// Its block entity's copy of the tier, for the buttons that see only the block entity.
+    pub fn save_tier(&self, nbt: &mut Compound) {
+        if !self.tier_saved() {
+            write_int(nbt, sockets::TIER_KEY, i32::from(self.tier));
+        }
+    }
+
+    /// The window's extras: its sockets, its queue cells and its reserve.
+    pub fn extras(
+        &self,
+        game: &Game<'_>,
+        cells: &[Slot],
+        open_cells: usize,
+        reserve: &Slot,
+    ) -> Vec<i32> {
+        let mut e = Extras {
+            open: tiers::sockets(self.tier),
+            open_cells,
+            reserve: reserve.as_ref().map_or(0, |(_, n)| *n),
+            ..Extras::default()
+        };
+        for (k, m) in self.modules.iter().take(tiers::MAX_SOCKETS).enumerate() {
+            e.modules[k] = *m;
+        }
+        for (k, c) in cells.iter().take(extras::MAX_CELLS).enumerate() {
+            if let Some((item, n)) = c {
+                let number = content::item_number(game, item).map_or(0, |n| n as i32 + 1);
+                e.cells[k] = (number, *n);
+            }
+        }
+        extras::encode(&e)
+    }
+}
+
+/// The modules' holder of a drawn window's block (the sheets have their own).
+pub(super) fn socket_holder(block: &str) -> Option<Holder> {
+    match Machine::of(block)? {
+        Machine::Furnace | Machine::Crusher | Machine::Alloy => Some(Holder::Processor),
+        Machine::Pump => Some(Holder::Pump),
+        Machine::Crafter => Some(Holder::Crafter),
+        _ => None,
+    }
+}
+
+/// A press on socket `id − SOCKET_BUTTON` of a drawn window with `carried` on the cursor; whether
+/// it was one.
+fn press_socket(entity: &mut ModBlockEntity, id: i32, carried: &mut Option<ItemStack>) -> bool {
+    let Some(holder) = socket_holder(&entity.id) else {
+        return false;
+    };
+    let Some(k) = usize::try_from(id - SOCKET_BUTTON)
+        .ok()
+        .filter(|k| *k < tiers::MAX_SOCKETS)
+    else {
+        return false;
+    };
+    let open = sockets::open(&entity.id, read_int(&entity.nbt, sockets::TIER_KEY));
+    let mut slots = modules::read(&base::read_module_items(&entity.nbt));
+    let cursor = carried.as_ref().map(|c| Cursor {
+        item: c.item.to_string(),
+        count: c.count,
+    });
+    let Some(after) = press_socket_in(&mut slots, k, holder, open, cursor.as_ref()) else {
+        return true;
+    };
+    *carried = after.map(|c| {
+        let mut stack = carried
+            .clone()
+            .filter(|x| *x.item == *c.item)
+            .unwrap_or_else(|| ItemStack::new(c.item.as_str(), c.count));
+        stack.count = c.count;
+        stack
+    });
+    let items: Vec<Option<String>> = slots
+        .iter()
+        .map(|m| m.map(|m| m.item().to_owned()))
+        .collect();
+    base::write_module_items(&mut entity.nbt, &items);
+    true
+}
+
+/// `data`'s first slots replaced by `front`, the rest (the extras) kept.
+pub(super) fn replace_front(data: &mut Vec<i32>, front: Vec<i32>) {
+    if data.len() < front.len() {
+        data.resize(front.len(), 0);
+    }
+    data[..front.len()].copy_from_slice(&front);
+}
+
+/// `native_destroy_block` of a drawn-window machine (the sheets give theirs in rustcraft_base):
+/// its modules, its queue cells and its reserve fall out as items, as its slots do.
+pub(super) fn on_destroyed(game: &mut Game<'_>, dimension: &str, pos: Pos, creative: bool) {
+    let Some(entity) = entity(game, pos) else {
+        return;
+    };
+    if socket_holder(&entity.id).is_none() || creative {
+        return;
+    }
+    let modules = modules::read(&base::read_module_items(&entity.nbt));
+    let cells: Vec<Slot> = crate::game::rustcraft_utility::read_json(&entity.nbt, QUEUE_KEY);
+    let reserve: Slot = crate::game::rustcraft_utility::read_json(&entity.nbt, RESERVE_KEY);
+    let mut lying: Vec<(String, u32)> = modules
+        .iter()
+        .flatten()
+        .map(|m| (m.item().to_owned(), 1))
+        .collect();
+    let hidden: Vec<Slot> = cells.into_iter().chain([reserve]).collect();
+    lying.extend(queue::spilled(&hidden, |i| max_stack(game, i)));
+    for (item, count) in lying {
+        drop_stack(game, dimension, pos, &item, count);
+    }
+}
+
+/// `count` of `item` as an item entity at the middle of the block at `pos`.
+fn drop_stack(game: &mut Game<'_>, dimension: &str, pos: Pos, item: &str, count: u32) {
+    let stack = Tag::compound([
+        ("id", Tag::String(JavaString::from(item))),
+        ("count", Tag::Int(count as i32)),
+    ]);
+    let nbt = Compound::from([(JavaString::from("Item"), stack)]);
+    let at = pos.map(|c| f64::from(c) + 0.5);
+    if game
+        .native_summon(dimension, "minecraft:item", at, nbt)
+        .is_none()
+    {
+        log::warn!("rustcraft: {count} {item} from the machine at {pos:?} were lost");
+    }
 }

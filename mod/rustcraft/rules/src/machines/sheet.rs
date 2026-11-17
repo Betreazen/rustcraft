@@ -22,8 +22,10 @@ use serde_json::Value;
 pub const CHANNEL: &str = "rustcraft:sheet";
 /// The largest message a mod may send.
 pub const MAX_BYTES: usize = 30_000;
-/// Module sockets of a slice-7 or slice-8 block.
+/// Module sockets of a slice-7 or slice-8 block of the first tiers; the window has room for
+/// [`MAX_SOCKETS`] (slice 18: tiers 3 and 4 have four, rustcraft_rules::tiers::sockets).
 pub const SOCKETS: usize = 3;
+pub const MAX_SOCKETS: usize = crate::tiers::MAX_SOCKETS;
 
 /// The blocks with a sheet window.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -48,6 +50,15 @@ pub enum Kind {
     Util(crate::utility::Util),
     /// Slice 18: a crystal or crystal structure (guide `structure`, ui.js).
     Structure,
+}
+
+/// Slice 18: the rows a slice-12 window adds to its spec's: the trash's filter and burnt count,
+/// the disintegrator's item, share and kept fractions.
+fn extra_rows(u: crate::utility::Util) -> usize {
+    match u {
+        crate::utility::Util::Trash | crate::utility::Util::Disintegrator => 2,
+        _ => 0,
+    }
 }
 
 /// Which parts a window has, and how many of each it has room for.
@@ -190,11 +201,12 @@ impl Kind {
                 slots: 9,
                 ..Shape::default()
             },
-            // Energy, water and product bars, a line of progress, its three input slots.
+            // Energy, water and product bars, a line of progress (slice 18: and one of its queue
+            // cells), its three input slots.
             Kind::Mixer => Shape {
                 sockets,
                 mode: true,
-                rows: 1,
+                rows: 2,
                 bars: 3,
                 slots: 3,
                 ..Shape::default()
@@ -233,9 +245,19 @@ impl Kind {
                 let vein = u == crate::utility::Util::Vein;
                 Shape {
                     sockets,
-                    mode: vein,
-                    rows: spec.rows,
-                    bars: if vein { 2 } else { 1 },
+                    // Slice 18 (UT7): every machine that works in steps has the three modes;
+                    // the ones whose pace is the animals' or the water's do not. The living vein
+                    // has them too (ui.js `vein`).
+                    mode: vein
+                        || crate::modules::Holder::Util(u).takes(crate::modules::Module::Speed),
+                    // Slice 18: the guide's windows' rows and bars (`ui.js` trash, disintegrator,
+                    // charger, vein).
+                    rows: spec.rows + extra_rows(u),
+                    bars: if vein {
+                        2
+                    } else {
+                        1 + usize::from(u == crate::utility::Util::Charger)
+                    },
                     toggles: spec.toggles,
                     slots: if count > 1 { count } else { 0 },
                     ..Shape::default()
@@ -388,11 +410,11 @@ pub fn layout(shape: Shape) -> Layout {
     };
     if shape.sockets || shape.mode || shape.role {
         if shape.sockets {
-            out.sockets = (0..SOCKETS)
+            out.sockets = (0..MAX_SOCKETS)
                 .map(|k| [LEFT + 1.0 + 20.0 * k as f32, y + 1.0])
                 .collect();
         }
-        let x = if shape.sockets { LEFT + 64.0 } else { LEFT };
+        let x = if shape.sockets { LEFT + 84.0 } else { LEFT };
         if shape.mode {
             out.mode = segment_rects([x, y + 2.0, RIGHT - x, 14.0], WorkMode::ALL.len());
         } else if shape.role {
@@ -462,7 +484,7 @@ impl Press {
     pub fn of(id: i32) -> Option<Press> {
         match id {
             SOCKET_BUTTON..MODE_BUTTON => Some(Press::Socket((id - SOCKET_BUTTON) as usize))
-                .filter(|p| matches!(p, Press::Socket(k) if *k < SOCKETS)),
+                .filter(|p| matches!(p, Press::Socket(k) if *k < MAX_SOCKETS)),
             MODE_BUTTON..TOGGLE_BUTTON => u8::try_from(id - MODE_BUTTON)
                 .ok()
                 .and_then(WorkMode::from_code)
@@ -512,11 +534,23 @@ pub fn press_socket(
     holder: Holder,
     carried: Option<&Cursor>,
 ) -> Option<Option<Cursor>> {
-    if k >= SOCKETS {
+    press_socket_in(slots, k, holder, SOCKETS, carried)
+}
+
+/// [`press_socket`] on a block with `open` sockets (slice 18: by its tier); a socket past them
+/// takes nothing, but a module left there (a block taken down a tier) still comes out.
+pub fn press_socket_in(
+    slots: &mut Vec<Option<Module>>,
+    k: usize,
+    holder: Holder,
+    open: usize,
+    carried: Option<&Cursor>,
+) -> Option<Option<Cursor>> {
+    if k >= MAX_SOCKETS || (k >= open && carried.is_some()) {
         return None;
     }
-    if slots.len() < SOCKETS {
-        slots.resize(SOCKETS, None);
+    if slots.len() < MAX_SOCKETS {
+        slots.resize(MAX_SOCKETS, None);
     }
     let one = |m: Module| Cursor {
         item: m.item().to_owned(),
@@ -551,13 +585,19 @@ pub fn press_socket(
 /// A shift-click on a module in the inventory: into the first free socket, if the holder takes
 /// it; whether it went in.
 pub fn put_free(slots: &mut Vec<Option<Module>>, holder: Holder, item: &str) -> bool {
+    put_free_in(slots, holder, SOCKETS, item)
+}
+
+/// [`put_free`] on a block with `open` sockets.
+pub fn put_free_in(slots: &mut Vec<Option<Module>>, holder: Holder, open: usize, item: &str) -> bool {
     let Some(m) = Module::of(item).filter(|m| holder.takes(*m)) else {
         return false;
     };
-    if slots.len() < SOCKETS {
-        slots.resize(SOCKETS, None);
+    let open = open.min(MAX_SOCKETS);
+    if slots.len() < open {
+        slots.resize(open, None);
     }
-    match slots.iter().take(SOCKETS).position(Option::is_none) {
+    match slots.iter().take(open).position(Option::is_none) {
         Some(free) => {
             slots[free] = Some(m);
             true
@@ -617,13 +657,28 @@ mod tests {
     #[test]
     fn the_miner_has_everything_its_server_menu_had() {
         let l = layout(Kind::Miner.shape());
-        assert_eq!(l.sockets.len(), SOCKETS);
+        assert_eq!(l.sockets.len(), MAX_SOCKETS);
         assert_eq!(l.mode.len(), 3);
         assert_eq!(l.toggles.len(), 9);
         assert_eq!(l.slots.len(), 27);
         assert_eq!(l.rows.len(), 2);
         let turret = layout(Kind::Turret.shape());
         assert!(turret.role.is_some() && turret.mode.is_empty());
+    }
+
+    #[test]
+    fn a_socket_past_the_tiers_count_takes_nothing_but_gives_back() {
+        let speed = Cursor { item: Module::Speed.item().into(), count: 1 };
+        let mut slots = vec![None; MAX_SOCKETS];
+        assert_eq!(press_socket_in(&mut slots, 3, Holder::Placer, 3, Some(&speed)), None);
+        assert!(press_socket_in(&mut slots, 3, Holder::Placer, 4, Some(&speed)).is_some());
+        assert_eq!(slots[3], Some(Module::Speed));
+        // Down a tier: the fourth module still comes out.
+        assert_eq!(press_socket_in(&mut slots, 3, Holder::Placer, 3, None), Some(Some(speed.clone())));
+        let mut slots = vec![Some(Module::Speed), Some(Module::Speed), Some(Module::Speed)];
+        assert!(!put_free_in(&mut slots, Holder::Placer, 3, Module::Economy.item()));
+        assert!(put_free_in(&mut slots, Holder::Placer, 4, Module::Economy.item()));
+        assert_eq!(slots[3], Some(Module::Economy));
     }
 
     #[test]
@@ -655,7 +710,8 @@ mod tests {
         ] {
             assert_eq!(Press::of(p.id()), Some(p));
         }
-        assert_eq!(Press::of(SOCKET_BUTTON + 3), None);
+        assert_eq!(Press::of(SOCKET_BUTTON + 3), Some(Press::Socket(3)));
+        assert_eq!(Press::of(SOCKET_BUTTON + 4), None);
         assert_eq!(Press::of(0), None);
         assert_eq!(Press::of(MODE_BUTTON + 7), None);
     }

@@ -125,6 +125,13 @@ file = "crates/horizon-client/src/game.rs"
 name = "rustcraft_panels"
 source = "panels.rs"
 
+# Slice 18, stream 3: machine tiers and the right-click replacement (U2).
+[[module]]
+id = "tiers"
+file = "crates/horizon-client/src/game.rs"
+name = "rustcraft_tiers"
+source = "tiers.rs"
+
 # Slice 5: the storage on the server, the terminal's window on the client, the tanks, the pumps
 # and the fluid nets, and the tank's and the pump's windows.
 [[module]]

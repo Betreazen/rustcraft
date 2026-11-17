@@ -23,9 +23,10 @@ use crate::game::{
     Game,
     rustcraft_content::{self as content, item_number},
     rustcraft_machines::{
-        self as machines, MachineRecipes, read_f64, read_int, read_work, slot_of, write_f64,
-        write_int, write_work,
+        self as machines, Fitted, MachineRecipes, QUEUE_KEY, read_f64, read_int, read_work,
+        slot_of, write_f64, write_int, write_work,
     },
+    rustcraft_utility::{read_json, write_json},
 };
 use horizon_client::{containers::ModBlockEntity, items::ItemStack};
 use horizon_world::nbt::{Compound, JavaString, Tag};
@@ -34,9 +35,11 @@ use rustcraft_rules::{
     machines::{
         crafter::{CraftRecipe, Crafter, CrafterSpec, Page, Product},
         processor::{Shown, WorkMode},
+        queue,
         slots::{self, Slot},
         windows::crafter::{self as window, CELLS, CrafterPanel, MAX_PAGES},
     },
+    modules::{self, Module},
     tuning::Tuning,
 };
 
@@ -94,12 +97,22 @@ fn write_patterns(nbt: &mut Compound, patterns: &[Pattern]) {
     nbt.insert(JavaString::from(PAGES_KEY), Tag::List(list));
 }
 
-/// Pages it has now: the base, and one a capacity module in its module slots (C2).
+/// Pages it has now: the base, and one a capacity module in its sockets (C2) or, from a world
+/// saved before slice 18, in its old module slots.
 pub(super) fn allowed_pages(entity: &ModBlockEntity, tuning: &Tuning) -> usize {
-    let modules = content::CRAFTER_MODULES
-        .filter(|&i| slot_of(entity, i).is_some_and(|(item, _)| item == content::MODULE_CAPACITY))
-        .count();
-    (tuning.crafter_pages + modules).clamp(1, MAX_PAGES)
+    let mut fitted = modules::read(&crate::game::rustcraft_base::read_module_items(&entity.nbt));
+    fitted.extend(legacy_modules(entity).into_iter().map(|(_, m)| Some(m)));
+    (tuning.crafter_pages + modules::capacity_pages(&fitted)).clamp(1, MAX_PAGES)
+}
+
+/// Slice 18: modules still in the old module slots 12–14 (a world saved before), with their slot.
+fn legacy_modules(entity: &ModBlockEntity) -> Vec<(usize, Module)> {
+    content::CRAFTER_MODULES
+        .filter_map(|i| {
+            let (item, _) = slot_of(entity, i)?;
+            Module::of(&item).map(|m| (i, m))
+        })
+        .collect()
 }
 
 /// The page the window shows, within the pages it has.
@@ -178,18 +191,28 @@ pub(super) struct Held {
     results: Vec<Option<ItemStack>>,
     /// The temporary page's result stack.
     temp_result: Option<ItemStack>,
-    /// The buffer's slots as the rules see them.
+    /// The buffer's slots as the rules see them: the real ones, then the queue cells (slice 18).
     buffer: Vec<Slot>,
+    /// The real buffer slots as the block entity holds them, and the queue as saved.
+    raw_buffer: Vec<Slot>,
+    queue_before: Vec<Slot>,
+    open_cells: usize,
+    fitted: Fitted,
+    /// Modules still in the old module slots, to move into the sockets.
+    legacy: Vec<(usize, Module)>,
     /// E a second it asks for this tick, and in its mode when it has work.
     pub request: f64,
     nominal: f64,
     data: Vec<i32>,
 }
 
-fn spec(tuning: &Tuning) -> CrafterSpec {
+/// Its numbers on its tier and modules (A8, A7).
+fn spec(tuning: &Tuning, fitted: &Fitted) -> CrafterSpec {
+    let tier = fitted.speed(content::Machine::Crafter, tuning);
+    let (work, energy) = modules::factors(&fitted.modules, tuning);
     CrafterSpec {
-        ticks: tuning.crafter_ticks,
-        energy: tuning.crafter_energy,
+        ticks: (tuning.crafter_ticks / (tier * work)).max(1.0),
+        energy: tuning.crafter_energy * tier * energy,
     }
 }
 
@@ -225,9 +248,32 @@ pub(super) fn read(
         });
     }
     let page_count = pages.len();
-    let buffer: Vec<Slot> = content::CRAFTER_BUFFER
+    let raw_buffer: Vec<Slot> = content::CRAFTER_BUFFER
         .map(|i| slot_of(&entity, i))
         .collect();
+    // Slice 18: the real buffer moves into the capacity and stack modules' queue cells; the
+    // crafter counts both.
+    let fitted = machines::fitted(game, pos, entity);
+    let legacy = legacy_modules(entity);
+    let queue_before: Vec<Slot> = read_json(&entity.nbt, QUEUE_KEY);
+    let open_cells = fitted.open_cells();
+    let mut visible = raw_buffer.clone();
+    let mut cells = queue_before.clone();
+    for slot in visible.iter_mut() {
+        if let Some((item, _)) = slot.clone() {
+            let size = modules::machine_stack(&fitted.modules, machines::max_stack(game, &item));
+            queue::intake(slot, &mut cells, open_cells, size);
+        }
+    }
+    let mut spare: Slot = None;
+    queue::spill(&mut spare, &mut cells, open_cells, |i| machines::max_stack(game, i));
+    if let Some(back) = spare {
+        match visible.iter_mut().find(|s| s.is_none()) {
+            Some(free) => *free = Some(back),
+            None => cells.push(Some(back)),
+        }
+    }
+    let buffer: Vec<Slot> = visible.into_iter().chain(cells).collect();
     let mut stock: Vec<(String, u32)> = Vec::new();
     for (item, n) in buffer.iter().flatten() {
         match stock.iter_mut().find(|(i, _)| i == item) {
@@ -253,7 +299,7 @@ pub(super) fn read(
         progress: read_f64(nbt, PROGRESS_KEY).clamp(0.0, 1.0),
         mode: read_work(nbt),
     };
-    let spec = spec(tuning);
+    let spec = spec(tuning, &fitted);
     Some(Held {
         request: crafter.request(&spec),
         nominal: spec.energy * crafter.mode.factors().1,
@@ -263,6 +309,11 @@ pub(super) fn read(
         results,
         temp_result,
         buffer,
+        raw_buffer,
+        queue_before,
+        open_cells,
+        fitted,
+        legacy,
         data: entity.data.clone(),
     })
 }
@@ -284,18 +335,31 @@ pub(super) fn run(
         results,
         temp_result,
         mut buffer,
+        raw_buffer,
+        queue_before,
+        open_cells,
+        fitted,
+        legacy,
         request,
         nominal,
         data: shown_data,
     } = held;
     let before = crafter.clone();
-    let state = crafter.tick(&spec(tuning), share);
+    let state = crafter.tick(&spec(tuning, &fitted), share);
     // O4: the crafts the order's page still owes; none once it is gone.
     if let Some(t) = temp {
         t.owed = crafter.pages.iter().find_map(|p| p.order).unwrap_or(0);
     }
     let shown = Shown::of(state, share);
-    let data = window::encode(&panel(
+    for (item, n) in &before.buffer {
+        let used = n.saturating_sub(crafter.has(item));
+        if used > 0 {
+            slots::take_from(&mut buffer, item, used);
+        }
+    }
+    let real = content::CRAFTER_BUFFER.len();
+    let cells: Vec<Slot> = buffer.split_off(real.min(buffer.len()));
+    let mut data = window::encode(&panel(
         game,
         &crafter,
         &patterns,
@@ -305,16 +369,18 @@ pub(super) fn run(
         share * request,
         nominal,
     ));
-    if crafter == before && data == shown_data {
+    data.extend(fitted.extras(game, &cells, open_cells, &None));
+    let hidden_moved = cells != queue_before;
+    if crafter == before
+        && data == shown_data
+        && buffer == raw_buffer
+        && !hidden_moved
+        && legacy.is_empty()
+        && fitted.tier_saved()
+    {
         return Some(shown);
     }
-    let buffer_before = buffer.clone();
-    for (item, n) in &before.buffer {
-        let used = n.saturating_sub(crafter.has(item));
-        if used > 0 {
-            slots::take_from(&mut buffer, item, used);
-        }
-    }
+    let buffer_before = raw_buffer;
     let made: Vec<ItemStack> = results.into_iter().chain([temp_result]).flatten().collect();
     game.native_with_mod_block_entity(pos, move |entity| {
         machines::write_slots(
@@ -331,6 +397,23 @@ pub(super) fn run(
             &crafter.output,
             &made,
         );
+        if hidden_moved {
+            write_json(&mut entity.nbt, QUEUE_KEY, &cells);
+        }
+        fitted.save_tier(&mut entity.nbt);
+        // Slice 18: a module in an old module slot moves into a free socket.
+        if !legacy.is_empty() {
+            let mut items = crate::game::rustcraft_base::read_module_items(&entity.nbt);
+            for (slot, m) in &legacy {
+                if let Some(free) = items.iter_mut().find(|i| i.is_none()) {
+                    *free = Some(m.item().to_owned());
+                    if let Some(s) = entity.items.get_mut(*slot) {
+                        *s = None;
+                    }
+                }
+            }
+            crate::game::rustcraft_base::write_module_items(&mut entity.nbt, &items);
+        }
         let nbt = &mut entity.nbt;
         if crafter.progress != before.progress {
             write_f64(nbt, PROGRESS_KEY, crafter.progress);

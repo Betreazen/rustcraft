@@ -1,0 +1,6 @@
+{
+  "type": "rustcraft:crushing",
+  "ingredient": ["minecraft:gold_ore", "minecraft:deepslate_gold_ore"],
+  "result": { "id": "rustcraft:dust_gold", "count": 2 },
+  "time": 100
+}

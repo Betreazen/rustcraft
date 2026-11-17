@@ -23,6 +23,7 @@ pub mod reports;
 pub mod selftest;
 pub mod storage;
 pub mod traversal;
+pub mod tiers;
 pub mod tuning;
 pub mod utility;
 pub mod turret;

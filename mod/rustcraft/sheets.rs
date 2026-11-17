@@ -220,7 +220,9 @@ pub(super) fn draw(game: &Game<'_>, block: &str, batch: &mut HudBatch, o: [f32; 
     };
     let l = layout_of(kind);
     kit::background(game, batch, o, [WIDTH, l.height]);
-    kit::title_line(game, batch, o, &block_name(block), None, WIDTH);
+    // Slice 18, stream 3: a tiered block's title says its tier, read from the block.
+    let tier = kit::tier_label(game, block);
+    kit::title_line(game, batch, o, &block_name(block), tier.as_deref(), WIDTH);
     let Some(s) = sheet_now(game) else {
         let waiting = tr("rustcraft.window.waiting", "Waiting for the server…");
         text(game, batch, &waiting, o, [8.0, 18.0], LABEL);
@@ -260,7 +262,19 @@ pub(super) fn draw(game: &Game<'_>, block: &str, batch: &mut HudBatch, o: [f32; 
 }
 
 fn sockets(game: &Game<'_>, batch: &mut HudBatch, o: [f32; 2], l: &Layout, s: &Sheet) {
+    // Slice 18, stream 3: the sockets its tier opens (A5: 3 / 3 / 4 / 4), and past them any that
+    // still holds a module (a block taken down a tier).
+    let open = game.native_screen_pos().map_or(sheet::SOCKETS, |pos| {
+        let block = game.native_block(pos);
+        rustcraft_rules::machines::sockets::open(
+            &block,
+            Some(i32::from(crate::game::rustcraft_tiers::tier_of(game, pos, &block))),
+        )
+    });
     for (k, p) in l.sockets.iter().enumerate() {
+        if k >= open && s.modules.get(k).cloned().flatten().is_none() {
+            continue;
+        }
         let module = s.modules.get(k).cloned().flatten();
         socket(game, batch, o, *p, module.is_none());
         if let Some(id) = module {

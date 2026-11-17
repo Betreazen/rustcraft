@@ -1,0 +1,18 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    "bbb",
+    "btb",
+    "brb"
+  ],
+  "key": {
+    "b": "rustcraft:crystallite",
+    "t": "minecraft:crafting_table",
+    "r": "minecraft:redstone"
+  },
+  "result": {
+    "id": "rustcraft:crafter_3",
+    "count": 1
+  }
+}

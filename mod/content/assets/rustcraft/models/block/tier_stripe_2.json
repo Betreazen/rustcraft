@@ -1,0 +1,67 @@
+{
+  "textures": {
+    "stripe": "rustcraft:block/tier_stripe_2",
+    "particle": "rustcraft:block/tier_stripe_2"
+  },
+  "elements": [
+    {
+      "from": [
+        0,
+        0,
+        -0.5
+      ],
+      "to": [
+        16,
+        2.5,
+        0
+      ],
+      "faces": {
+        "north": {
+          "uv": [
+            0,
+            0,
+            16,
+            2.5
+          ],
+          "texture": "#stripe"
+        },
+        "east": {
+          "uv": [
+            0,
+            0,
+            0.5,
+            2.5
+          ],
+          "texture": "#stripe"
+        },
+        "west": {
+          "uv": [
+            0,
+            0,
+            0.5,
+            2.5
+          ],
+          "texture": "#stripe"
+        },
+        "up": {
+          "uv": [
+            0,
+            0,
+            16,
+            0.5
+          ],
+          "texture": "#stripe"
+        },
+        "down": {
+          "uv": [
+            0,
+            0,
+            16,
+            0.5
+          ],
+          "texture": "#stripe"
+        }
+      }
+    }
+  ]
+}

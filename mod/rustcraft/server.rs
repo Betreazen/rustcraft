@@ -362,6 +362,11 @@ pub(super) fn on_right_click_block(
     base::on_right_click_block(game, pos, canceled);
     transport::on_right_click_block(game, pos, face, canceled);
     crate::game::rustcraft_crystals::on_right_click_block(game, pos, face, canceled);
+    // Slice 18, stream 3: after the guards above, a higher tier's item on a lower tier machine
+    // replaces it (U2).
+    crate::game::rustcraft_tiers::on_right_click_block(game, pos, canceled);
+    // Slice 18, stream 3: a bucket on a tank pours or fills.
+    fluids::on_right_click_block(game, pos, canceled);
 }
 
 /// `native_menu_clicked` and `native_menu_closed`: the joint window (rustcraft_window).
@@ -423,6 +428,8 @@ pub(super) fn on_container_accepts(
 /// magistral or the machines, and any block placed beside a housing may be a new joint.
 pub(super) fn on_place_block(game: &mut Game<'_>, stack: &ItemStack, pos: [i32; 3]) {
     base::on_place_block(game, stack, pos);
+    // Slice 18, stream 3: a trash's joints start empty and last (guide `trash`).
+    crate::game::rustcraft_utility::on_placed(game, pos);
     let Some(player) = game.native_acting_player() else {
         mark_all_stale();
         return;
@@ -449,6 +456,8 @@ pub(super) fn on_destroy_block(game: &mut Game<'_>, pos: [i32; 3]) {
         return;
     };
     base::on_destroy_block(game, pos, &player.dimension, player.game_mode == CREATIVE);
+    // Slice 18, stream 3: a drawn-window machine's modules, queue and reserve fall out.
+    machines::on_destroyed(game, &player.dimension, pos, player.game_mode == CREATIVE);
     crate::game::rustcraft_utility::forget_grown(game, &player.dimension, pos);
     if block == rustcraft_rules::traversal::ANCHOR {
         zipline::on_anchor_broken(game, &player.dimension, pos);

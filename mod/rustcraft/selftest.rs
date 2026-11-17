@@ -921,6 +921,19 @@ impl Bench for GameBench<'_, '_> {
             .contains_key(&horizon_world::nbt::JavaString::from(base::AIM_KEYS[0]))
             .then(|| base::aim_of(&e.nbt))
     }
+
+    // Slice 18, stream 3 (machines).
+    fn swap_tier(&mut self, pos: Pos, item: &str) -> Result<String, String> {
+        crate::game::rustcraft_tiers::swap_in_place(self.game, pos, item)
+            .map(|(old, _, _)| old)
+            .map_err(str::to_owned)
+    }
+
+    fn use_bucket(&mut self, pos: Pos, held: &str) -> Result<String, String> {
+        fluids::bucket_on_tank(self.game, DIMENSION, pos, held)
+            .map(str::to_owned)
+            .map_err(|(_, why)| why.to_owned())
+    }
 }
 
 /// The slice-7 half of the bench.

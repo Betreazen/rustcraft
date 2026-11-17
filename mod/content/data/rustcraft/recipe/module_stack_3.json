@@ -1,0 +1,17 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    "b b",
+    " c ",
+    "b b"
+  ],
+  "key": {
+    "b": "rustcraft:starsteel",
+    "c": "minecraft:chest"
+  },
+  "result": {
+    "id": "rustcraft:module_stack_3",
+    "count": 1
+  }
+}

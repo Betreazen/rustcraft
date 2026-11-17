@@ -29,6 +29,7 @@ pub mod slice12;
 pub mod slice13;
 pub mod slice14;
 pub mod slice15;
+pub mod slice18_machine;
 pub mod explore2;
 pub mod sources;
 pub mod storage;
@@ -371,6 +372,18 @@ pub trait Bench {
     fn age_rope(&mut self, _id: u64, _ms: u64) -> Result<(), String> {
         Err("not on this bench".to_owned())
     }
+    // ---- Slice 18, stream 3 (machines) ----
+    /// A right click with `item` on the tiered block at `pos` (U2, rustcraft_tiers): the old
+    /// tier's item it gives back, or why nothing was replaced.
+    fn swap_tier(&mut self, pos: Pos, item: &str) -> Result<String, String> {
+        let _ = (pos, item);
+        Err("no tiers on this bench".into())
+    }
+    /// A bucket `held` used on the tank at `pos` (guide `tank`): the bucket it leaves in the hand.
+    fn use_bucket(&mut self, pos: Pos, held: &str) -> Result<String, String> {
+        let _ = (pos, held);
+        Err("no buckets on this bench".into())
+    }
 }
 
 /// A mob as the self-test reads it.
@@ -554,6 +567,8 @@ pub fn catalog() -> Vec<Build> {
     all.extend(s18_rail::ALL);
     // Slice 18, base and gear (stream 7).
     all.extend(gear18::ALL);
+    // Slice 18, stream 3.
+    all.extend(slice18_machine::ALL);
     all
 }
 
