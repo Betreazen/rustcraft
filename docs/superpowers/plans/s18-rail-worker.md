@@ -149,6 +149,7 @@ Audit lines: chassis «Ставится на монорельс», «Ездит 
 
 - [x] `mod/README.md` «Что проверить в игре: срез 18» — this stream's part.
 - [x] Last `try` green: 35ceb15, RustCraft 156 passed 0 failed, PCT 42/0, SoulsCraft 87/0 (exit 0).
+- [x] Resumed run's `try` green: 486206f, RustCraft 160 passed 0 failed (4 new), PCT 42/0, SoulsCraft 87/0 (exit 0).
 
 ## Commits
 
