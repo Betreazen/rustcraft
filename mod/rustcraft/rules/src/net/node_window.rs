@@ -232,6 +232,8 @@ const AXIS_GAP: f32 = 2.0;
 /// The balance's four rows, then the line's three.
 pub const BALANCE_Y: f32 = 47.0;
 pub const LINE_ROWS_Y: f32 = 90.0;
+/// Wave 2: the balance's rows (ui.js `balance`: Производство, Потребление, В запасе, Хватает).
+pub const BALANCE_ROWS: usize = 4;
 pub const ROW: f32 = 10.0;
 /// The «Модули» label and the sockets' items.
 pub const MODULES_LABEL_Y: f32 = 123.0;
@@ -379,6 +381,7 @@ mod tests {
         assert_eq!(press_at([s[0] + 8.0, s[1] + 8.0], false), Some(Press::Socket(2)));
         assert_eq!(press_at([1.0, 1.0], false), None);
         assert!(STATUS[1] + STATUS[3] <= HEIGHT);
+        assert!(BALANCE_Y + ROW * BALANCE_ROWS as f32 <= LINE_ROWS_Y, "the four balance rows fit");
     }
 
     #[test]
