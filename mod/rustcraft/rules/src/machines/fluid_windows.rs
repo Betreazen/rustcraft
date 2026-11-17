@@ -4,7 +4,7 @@
 //! hundredths of a bucket a second, energy in tenths of E a second.
 
 use crate::machines::panel::{ENERGY_SCALE, PROGRESS_SCALE, Rect, scaled, shown_code, shown_of};
-use crate::machines::processor::Shown;
+use crate::machines::processor::{Shown, WorkMode};
 use crate::machines::pump::Source;
 use crate::net::fluids::BUCKET;
 
@@ -258,7 +258,39 @@ pub mod pump {
     /// bucket takes now on full energy (its tier and modules).
     pub const EXTRAS_AT: usize = DATA_SLOTS;
     pub const TICKS_AT: usize = DATA_SLOTS + crate::machines::extras::DATA;
-    pub const ALL_DATA_SLOTS: usize = TICKS_AT + 1;
+    /// Owner 2026-11-17: the pump's work mode (`WorkMode::code`), after the ticks.
+    pub const MODE_AT: usize = TICKS_AT + 1;
+    pub const ALL_DATA_SLOTS: usize = MODE_AT + 1;
+    /// The work mode switch beside the sockets, as on the processors' windows (`panel`): its
+    /// label over one well with the three modes' segments, in `WorkMode::ALL` order.
+    pub const LABEL_MODE: [f32; 2] = [92.0, LABEL_MODULES_Y];
+    pub const MODE_WELL: Rect = [92.0, 77.0, 114.0, 14.0];
+    pub const MODE_BUTTONS: [Rect; 3] = [
+        [93.0, 78.0, 37.0, 12.0],
+        [131.0, 78.0, 37.0, 12.0],
+        [169.0, 78.0, 36.0, 12.0],
+    ];
+
+    /// The work mode whose button is at `at`.
+    pub fn mode_button_at(at: [f32; 2]) -> Option<WorkMode> {
+        MODE_BUTTONS
+            .iter()
+            .position(|&r| crate::machines::panel::inside(r, at))
+            .map(|i| WorkMode::ALL[i])
+    }
+
+    /// The data slot of `mode`: its code plus one, so a slot not sent yet (0) reads as normal.
+    pub fn mode_slot(mode: WorkMode) -> i32 {
+        i32::from(mode.code()) + 1
+    }
+
+    /// The mode the window's data slots name; normal when none.
+    pub fn mode(data: &[i32]) -> WorkMode {
+        u8::try_from(at(data, MODE_AT) - 1)
+            .ok()
+            .and_then(WorkMode::from_code)
+            .unwrap_or_default()
+    }
     pub const STATUS: Rect = [8.0, 100.0, 198.0, 22.0];
     pub const INVENTORY: [f32; 2] = [26.0, 136.0];
     pub const INVENTORY_LABEL_Y: f32 = INVENTORY[1] - 10.0;
@@ -300,6 +332,32 @@ mod tests {
         let data = pump::encode(&p);
         assert_eq!(data.len(), pump::DATA_SLOTS);
         assert_eq!(pump::decode(&data), p);
+    }
+
+    #[test]
+    fn a_pump_mode_button_is_inside_the_window_and_apart_from_the_sockets() {
+        use crate::machines::panel::{inside, slot_frame};
+        assert_eq!(pump::mode_button_at([94.0, 80.0]), Some(WorkMode::Economy));
+        assert_eq!(pump::mode_button_at([140.0, 80.0]), Some(WorkMode::Normal));
+        assert_eq!(pump::mode_button_at([204.0, 89.0]), Some(WorkMode::Boost));
+        assert_eq!(pump::mode_button_at([30.0, 80.0]), None);
+        assert_eq!(
+            crate::machines::style::segment_rects(pump::MODE_WELL, 3),
+            pump::MODE_BUTTONS.to_vec()
+        );
+        for b in pump::MODE_BUTTONS {
+            assert!(b[0] + b[2] <= WIDTH - 8.0 && b[1] + b[3] <= pump::STATUS[1]);
+            for s in pump::MODULE_SLOTS {
+                let f = slot_frame(s);
+                assert!(!inside(b, [f[0], f[1]]) && f[0] + f[2] <= pump::MODE_WELL[0]);
+            }
+        }
+        let mut data = vec![0; pump::ALL_DATA_SLOTS];
+        assert_eq!(pump::mode(&data), WorkMode::Normal);
+        for m in WorkMode::ALL {
+            data[pump::MODE_AT] = pump::mode_slot(m);
+            assert_eq!(pump::mode(&data), m);
+        }
     }
 
     #[test]

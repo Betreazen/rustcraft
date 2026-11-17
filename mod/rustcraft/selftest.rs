@@ -961,8 +961,17 @@ impl Bench for GameBench<'_, '_> {
         {
             Some(Tag::Long(v)) => v,
             Some(Tag::Int(v)) => i64::from(v),
+            // Slice 18, cross-stream agent: a byte (a machine's work mode).
+            Some(Tag::Byte(v)) => i64::from(v),
             _ => 0,
         }
+    }
+
+    fn menu_data(&self, pos: Pos) -> Vec<i32> {
+        self.game
+            .native_mod_block_entity(pos)
+            .map(|e| e.data)
+            .unwrap_or_default()
     }
 
     fn int_array(&self, pos: Pos, key: &str) -> Vec<i32> {

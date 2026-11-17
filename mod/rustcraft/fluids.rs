@@ -36,8 +36,8 @@ use rustcraft_rules::{
             tank::{self as tank_window, Note, TankPanel},
         },
         catalyst::{Catalyst, Tank as CatalystTank},
-        processor::Shown,
-        pump::{Pump, Source, Under, WATER},
+        processor::{Shown, WorkMode},
+        pump::{self, Pump, Source, Under, WATER},
     },
     net::{
         fluids::{self as fluid_net, BUCKET, FluidInventories, FluidKey, FluidNetState},
@@ -712,16 +712,15 @@ pub struct PumpHeld {
     fitted: machines::Fitted,
     ticks: f64,
     energy: f64,
+    mode: WorkMode,
 }
 
-/// A8, A7: a higher tier and speed modules pump faster; economy modules cost less.
-fn pump_numbers(fitted: &machines::Fitted, tuning: &Tuning) -> (f64, f64) {
+/// A8, A7: a higher tier and speed modules pump faster; economy modules cost less. Owner
+/// 2026-11-17: its work mode too (A1, `pump::numbers`).
+fn pump_numbers(fitted: &machines::Fitted, mode: WorkMode, tuning: &Tuning) -> (f64, f64) {
     let tier = fitted.speed(Machine::Pump, tuning);
-    let (work, energy) = rustcraft_rules::modules::factors(&fitted.modules, tuning);
-    (
-        (tuning.pump_ticks / (tier * work)).max(1.0),
-        tuning.pump_energy * tier * energy,
-    )
+    let modules = rustcraft_rules::modules::factors(&fitted.modules, tuning);
+    pump::numbers(tuning.pump_ticks, tuning.pump_energy, tier, modules, mode)
 }
 
 /// What is under the pump at `pos`.
@@ -764,7 +763,8 @@ pub(super) fn read_pump(game: &Game<'_>, pos: Pos, tuning: &Tuning) -> Option<Pu
     };
     let under = under(game, pos);
     let fitted = machines::fitted(game, pos, entity);
-    let (ticks, energy) = pump_numbers(&fitted, tuning);
+    let mode = machines::read_work(&entity.nbt);
+    let (ticks, energy) = pump_numbers(&fitted, mode, tuning);
     Some(PumpHeld {
         request: pump.request(&under, energy),
         pump,
@@ -773,6 +773,7 @@ pub(super) fn read_pump(game: &Game<'_>, pos: Pos, tuning: &Tuning) -> Option<Pu
         fitted,
         ticks,
         energy,
+        mode,
     })
 }
 
@@ -794,6 +795,7 @@ pub(super) fn run_pump(
         fitted,
         ticks,
         energy,
+        mode,
     } = held;
     let before = pump.clone();
     let tick = pump.tick(&under, share, ticks);
@@ -815,6 +817,7 @@ pub(super) fn run_pump(
     let mut data = data;
     data.extend(fitted.extras(game, &[], 0, &None));
     data.push(ticks.round() as i32);
+    data.push(pump_window::mode_slot(mode));
     if pump == before && shown_data == data && fitted.tier_saved() {
         return Some(shown);
     }

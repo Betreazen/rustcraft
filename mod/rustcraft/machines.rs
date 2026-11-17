@@ -986,6 +986,18 @@ pub(super) fn on_menu_button(entity: &mut ModBlockEntity, id: i32, tuning: &Tuni
         }
         Kind::Alloy => alloy::on_menu_button(entity, id),
         Kind::Crafter => crafter::on_menu_button(entity, id, tuning),
+        Kind::Pump => {
+            // Owner 2026-11-17: the pump's work modes, as a processor's; its window's mode slot
+            // shows the press at once.
+            let Some(mode) = u8::try_from(id).ok().and_then(WorkMode::from_code) else {
+                return;
+            };
+            write_work(&mut entity.nbt, mode);
+            use rustcraft_rules::machines::fluid_windows::pump as pw;
+            if entity.data.len() > pw::MODE_AT {
+                entity.data[pw::MODE_AT] = pw::mode_slot(mode);
+            }
+        }
         _ => {}
     }
 }

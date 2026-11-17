@@ -78,6 +78,7 @@ pub const WINDOWS: &[(&str, &[Widget])] = &[
     ("pump", &[
         Widget::Rows { n: 2 },
         Widget::Bar { pct: 100, rgb: 0xffe14a },
+        Widget::Mode { active: 1 },
         Widget::Sockets { filled: &[0x000000, 0x000000, 0x000000] },
         Widget::Status { tone: 0 },
     ]),

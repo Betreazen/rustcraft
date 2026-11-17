@@ -267,6 +267,9 @@ pub(super) fn draw_pump(game: &Game<'_>, data: &[i32], batch: &mut HudBatch, o: 
     // Slice 18: the sockets its tier opens, with their modules.
     let ex = extras::decode(data, pw::EXTRAS_AT);
     kit::sockets_part(game, batch, o, &ex, &pw::MODULE_SLOTS, None);
+    // Owner 2026-11-17: the work mode beside the sockets, as on the processors' windows.
+    label(game, batch, &tr("rustcraft.window.mode", "Work mode"), o, pw::LABEL_MODE);
+    kit::modes_part(game, batch, o, pw::mode(data), &pw::MODE_BUTTONS, None);
     if p.no_lane {
         let s = tr(
             "rustcraft.fluid.no_lane.short",
@@ -299,6 +302,11 @@ fn pump_rate(p: &PumpPanel, ticks: Option<i32>) -> String {
 pub(super) const PUMP_EXTRAS_AT: usize = pw::EXTRAS_AT;
 pub(super) const PUMP_SOCKETS: [[f32; 2]; 4] = pw::MODULE_SLOTS;
 
+/// Owner 2026-11-17: the pump's work mode button at `at`.
+pub(super) fn pump_mode_at(at: [f32; 2]) -> Option<rustcraft_rules::machines::processor::WorkMode> {
+    pw::mode_button_at(at)
+}
+
 /// Seconds a bucket takes on full energy, as rustcraft_rules::tuning says (200 ticks).
 const PUMP_SECONDS: f64 = 10.0;
 
@@ -307,7 +315,9 @@ pub(super) fn pump_tooltip(game: &Game<'_>, data: &[i32], at: [f32; 2], lines: &
     if kit::extras_tooltip(game, "rustcraft:pump", &ex, &pw::MODULE_SLOTS, |_| [-99.0, -99.0], [-99.0, -99.0], at, lines) {
         return;
     }
-    if inside(pw::ENERGY_BAR, at) {
+    if let Some(mode) = pw::mode_button_at(at) {
+        kit::mode_tooltip(mode, lines);
+    } else if inside(pw::ENERGY_BAR, at) {
         kit::energy_tooltip(lines);
     } else if inside([8.0, pw::ROWS[0], RIGHT - 8.0, 22.0], at) {
         lines.push(tr(

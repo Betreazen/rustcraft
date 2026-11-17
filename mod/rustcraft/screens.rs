@@ -871,6 +871,10 @@ pub(super) fn on_click(
             // Slice 18: the pump's sockets.
             let ex = extras::decode(data, fluid_panels::PUMP_EXTRAS_AT);
             *button = socket_at(&ex, &fluid_panels::PUMP_SOCKETS, at).map(|k| SOCKET_BUTTON + k as i32);
+            // Owner 2026-11-17: its work mode buttons.
+            if button.is_none() {
+                *button = fluid_panels::pump_mode_at(at).map(|m| i32::from(m.code()));
+            }
             return;
         }
         _ => {

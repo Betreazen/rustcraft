@@ -5,7 +5,7 @@
 //! else, is gone once pumped. The pump holds one bucket: until it has given it away it takes no
 //! more, so no source is lost for want of room (M6).
 
-use crate::machines::processor::{Shown, State};
+use crate::machines::processor::{Shown, State, WorkMode};
 use crate::net::fluids::{BUCKET, FluidKey};
 
 pub const WATER: &str = "minecraft:water";
@@ -107,6 +107,25 @@ impl Pump {
     }
 }
 
+/// Slice 18 (guide `pump`: «быстрее со ступенью насоса и в форсаже»): the ticks a bucket takes and
+/// the E a second the pump asks for on its tier speed, its modules' work and energy factors and
+/// its work mode (A1), from the first tier's `base_ticks` and `base_energy`. A higher tier works
+/// faster for as much more energy, as the other machines do (A8).
+pub fn numbers(
+    base_ticks: f64,
+    base_energy: f64,
+    tier: f64,
+    modules: (f64, f64),
+    mode: WorkMode,
+) -> (f64, f64) {
+    let (speed, draw) = mode.factors();
+    let work = tier * modules.0 * speed;
+    (
+        (base_ticks / work).max(1.0),
+        base_energy * tier * modules.1 * draw,
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -173,5 +192,16 @@ mod tests {
         p.held = Some((WATER.into(), BUCKET));
         assert_eq!(p.request(&WATER_POND, 4.0), 0.0);
         assert_eq!(p.tick(&WATER_POND, 0.0, 200.0).state, State::OutputFull);
+    }
+    #[test]
+    fn boost_pumps_a_bucket_in_five_seconds_for_three_times_the_energy() {
+        // Owner 2026-11-17: the pump has the work modes, boost as the processors' (×2, ×3 E).
+        assert_eq!(numbers(200.0, 4.0, 1.0, (1.0, 1.0), WorkMode::Normal), (200.0, 4.0));
+        assert_eq!(numbers(200.0, 4.0, 1.0, (1.0, 1.0), WorkMode::Boost), (100.0, 12.0));
+        let (ticks, energy) = numbers(200.0, 4.0, 1.0, (1.0, 1.0), WorkMode::Economy);
+        assert_eq!(ticks, 400.0);
+        assert!((energy - 1.4).abs() < 1e-9);
+        // The tier and the modules join the mode.
+        assert_eq!(numbers(200.0, 4.0, 2.0, (1.0, 1.0), WorkMode::Boost), (50.0, 24.0));
     }
 }

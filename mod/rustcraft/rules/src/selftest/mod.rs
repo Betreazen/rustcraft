@@ -33,6 +33,8 @@ pub mod slice13;
 pub mod slice14;
 pub mod slice15;
 pub mod slice18_machine;
+// Slice 18, cross-stream agent.
+pub mod s18_cross;
 pub mod explore2;
 pub mod sources;
 pub mod storage;
@@ -405,6 +407,11 @@ pub trait Bench {
     fn int_array(&self, pos: Pos, key: &str) -> Vec<i32>;
     /// The long (or int) under `key` in the saved compound of the mod block entity at `pos`.
     fn long(&self, pos: Pos, key: &str) -> i64;
+    // Slice 18, cross-stream agent.
+    /// The data slots the mod block entity at `pos` sends its window.
+    fn menu_data(&self, _pos: Pos) -> Vec<i32> {
+        Vec::new()
+    }
 }
 
 /// A mob as the self-test reads it.
@@ -598,6 +605,8 @@ pub fn catalog() -> Vec<Build> {
     // Slice 18, the module stream.
     all.extend(modules18::ALL);
     all.extend(craft18::ALL);
+    // Slice 18, cross-stream agent.
+    all.extend(s18_cross::ALL);
     all
 }
 

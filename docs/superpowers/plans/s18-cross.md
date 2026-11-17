@@ -43,9 +43,9 @@
 
 **Interfaces:** Produces — `fluid_windows::pump::{MODE_AT, MODE_BUTTONS, mode_button_at(at) -> Option<WorkMode>}`.
 
-- [ ] RED: `pump.rs` тест `boost_pumps_a_bucket_in_five_seconds_for_three_times_the_energy` (режим «Форсаж»: тики/2, энергия ×3 через `WorkMode::Boost.factors()`); `fluid_windows` тест `a_pump_mode_button_is_inside_the_window_and_apart_from_the_sockets`.
-- [ ] GREEN; бандл; ui.js; самотест: насос над водой, кнопка режима 2 → данные окна говорят «Форсаж» и тики ведра 100.
-- [ ] Коммит `feat: the pump's work modes, boost pumps twice as fast for three times the energy`.
+- [x] RED: `pump.rs` тест `boost_pumps_a_bucket_in_five_seconds_for_three_times_the_energy` (режим «Форсаж»: тики/2, энергия ×3 через `WorkMode::Boost.factors()`); `fluid_windows` тест `a_pump_mode_button_is_inside_the_window_and_apart_from_the_sockets`.
+- [x] GREEN; бандл; ui.js; самотест `s18_pump_boost_mode` (`selftest/s18_cross.rs`): насос над лавой, кнопка режима 2 → в NBT `work`=2, окно говорит «Форсаж», тики ведра 100, просит 12 Е/с. Ячейка режима в данных окна — код+1 (0 = ещё не прислано = обычный). Скамье добавлен `menu_data` (свой блок в `selftest/mod.rs`), `long` читает и байт.
+- [x] Коммит `feat: the pump's work modes, boost pumps twice as fast for three times the energy`.
 
 ### Task 2: осколок кристалла во всех рецептах
 
