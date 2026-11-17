@@ -97,11 +97,20 @@ fn placer_and_breaker_by_tier(o: Pos, t: &Tuning) -> Scenario {
             }
             Ok(())
         })
-        .until("each window gives the pace of its tier", 40, move |b, _| {
-            Ok(cells.iter().all(|&(_, tier, ticks, p)| {
+        .wait(40)
+        .check("each window gives the pace of its tier", move |b, _| {
+            for &(block, tier, ticks, p) in &cells {
                 let above = f64::from(tier.parse::<u8>().unwrap_or(2) - 2);
-                pace_shown(b, p, &secs(ticks / (1.0 + step * above) / tps))
-            }))
+                let want = secs(ticks / (1.0 + step * above) / tps);
+                if !pace_shown(b, p, &want) {
+                    let rows: Vec<String> = b.sheet(p).map(|s| s.rows.iter().map(|r| r.to_string()).collect()).unwrap_or_default();
+                    return Err(format!(
+                        "{block} tier {tier} (placed {:?}): not «{want} s» in {rows:?}",
+                        b.property(p, "tier")
+                    ));
+                }
+            }
+            Ok(())
         })
 }
 

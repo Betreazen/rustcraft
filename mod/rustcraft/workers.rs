@@ -910,7 +910,7 @@ fn bore(game: &mut Game<'_>, dimension: &str, net: &Network, w: &mut Worker, cel
     };
     let (ahead, _) = bore::next_cell(level_ahead, open, has(M::Height) > 0);
     let heading = [ahead[0] - cell[0], ahead[2] - cell[2]];
-    let (side, height) = bore::size(has(M::Tunnel), has(M::Radius) > 0);
+    let (side, height) = bore::size(has(M::Tunnel));
     let (lava_module, build_module) = (has(M::Lava) > 0, has(M::Build) > 0);
     let cells = bore::cells(ahead, heading, side, height);
     w.aim = Some(ahead);

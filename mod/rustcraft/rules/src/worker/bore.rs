@@ -64,11 +64,13 @@ pub fn ahead(from: Pos, cell: Pos) -> Option<Pos> {
     Some([cell[0] + d[0], cell[1], cell[2] + d[1]])
 }
 
-/// The tunnel's size with `tunnel` corridor modules and a radius module: (cells to each side,
-/// height). Each corridor module widens it by a cell each way and raises it by two, up to 9 × 9.
-pub fn size(tunnel: u32, radius: bool) -> (i32, i32) {
+/// The tunnel's size with `tunnel` corridor modules: (cells to each side, height). Each corridor
+/// module widens it by a cell each way and raises it by two, up to 9 × 9. Slice 18 (cross): the
+/// radius module is not the bore's (guide `mod_radius`, `modules::tool_uses`), only the corridor
+/// widens it.
+pub fn size(tunnel: u32) -> (i32, i32) {
     let n = tunnel.min(4) as i32;
-    let side = n.max(i32::from(radius));
+    let side = n;
     let height = if n == 0 { HEIGHT } else { (2 * n + 1).max(HEIGHT) };
     (side, height)
 }
@@ -103,9 +105,10 @@ mod tests {
         assert_eq!(ahead([0, 5, 0], [1, 4, 0]), Some([2, 4, 0]), "after a step down");
         let c = cells([2, 5, 0], [1, 0], 1, 2);
         assert_eq!(c.len(), 6);
-        assert_eq!(size(0, false), (0, 2));
-        assert_eq!(size(0, true), (1, 2));
-        assert_eq!(size(4, false), (4, 9), "9 × 9 at most");
+        assert_eq!(size(0), (0, 2));
+        assert_eq!(size(1), (1, 3));
+        assert_eq!(size(4), (4, 9), "9 × 9 at most");
+        assert!(!crate::modules::tool_uses(super::super::Tool::Bore, crate::modules::Module::Radius));
         assert_eq!(shell([0, 5, 0], [1, 0], 0, 2).len(), 6);
         assert!(c.contains(&[2, 6, 1]) && c.contains(&[2, 5, -1]));
         assert!(is_filler("minecraft:cobblestone") && !is_filler(RAIL));

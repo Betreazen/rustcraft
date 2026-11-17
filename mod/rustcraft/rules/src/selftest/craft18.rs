@@ -197,12 +197,10 @@ fn order_bread_through_the_kitchen(o: Pos, _: &Tuning) -> Scenario {
             Ok(b.order(terminal_at(o), BREAD, 1).is_ok())
         })
         .until("the bread is back in the storage", 1200, move |b, _| Ok(held(b, o, BREAD)? == 1))
-        .check("the wheat went into it and the order is done", move |b, _| {
-            same("wheat", held(b, o, WHEAT)?, 0)?;
-            // Slice 18 (cross): what is left of an order that stays, to see why.
-            let left = b.orders(terminal_at(o));
-            if left.is_empty() { Ok(()) } else { Err(format!("orders left: {left:?}")) }
-        })
+        .check("the wheat went into it", move |b, _| same("wheat", held(b, o, WHEAT)?, 0))
+        // Slice 18 (cross): the line's own joints can bring the bread into the storage before the
+        // orders' round (once a second) sees the kitchen's job done, so the order is waited for.
+        .until("and the order is done", 60, move |b, _| Ok(b.orders(terminal_at(o)).is_empty()))
 }
 
 fn util_work_mode_switch(o: Pos, _: &Tuning) -> Scenario {
