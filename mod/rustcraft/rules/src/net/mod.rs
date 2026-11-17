@@ -13,3 +13,5 @@ pub mod node_tier;
 pub mod node_window;
 pub mod topology;
 pub mod wrench;
+// s18/pipe: the joint window drawn as the guide's table.
+pub mod joint_screen;

@@ -95,8 +95,9 @@ Files: housing update tag with `slots`, `native_block_entity_submit` draws tinte
 ### Task 11: Joint window as the handbook panel
 Files: `window.rs` (rows «Гнездо / Канал / Направление / Фильтр / Приоритет»), fluid channel filter and priority, closes when the player walks away (> 8 blocks).
 - [x] RED/GREEN `joint_window` tests for distance and fluid filter rows (7d65877, 1f3b98c).
-- [ ] the drawn table panel instead of the chest menu (see Пределы / left).
-- [ ] commit.
+- [x] the drawn table panel instead of the chest menu: `rules/src/net/joint_screen.rs` (view, presses → the chest page's `Action`, layout; 6 tests), `joint_screen.rs` (client: mod screen `rustcraft:joint`), `window.rs` (sessions with `SCREEN_WINDOW`, views each second, presses from `native_net_from_client`). Filter item: the **off hand** (the wrench is in the main hand; ui.js draws no inventory, so no hotbar row). Face tabs over the table when a housing has several joints. The chest page stays for vanilla clients and a single-player / LAN owner (Пределы).
+- [x] self-test `pipe_joint_window_is_the_guides_table` (bench actions `joint_view`, `joint_press`).
+- [x] commit.
 
 ### Task 12: Housing channels drop on explosion; XP reports; catalysts
 - [x] channels of a housing broken by an explosion drop (rescan finds it gone) — 2b3ae75.
@@ -110,10 +111,10 @@ Files: `window.rs` (rows «Гнездо / Канал / Направление / 
 
 ### Left (resume here)
 
-- [ ] Joint window as the drawn ui.js table (L): an own mod screen like the node's (`node_window.rs` is the pattern: view message, client tick sends presses), rows «Гнездо / Канал / Направление / Фильтр / Приоритет», «Скопировать / Вставить». The server chest menu stays until then.
+- [x] Joint window as the drawn ui.js table (Task 11).
 - [ ] XP reports of the electric furnace (кузнец; повар for food), alloy smelter and autocrafter to Path-of-craft-tree (machines.rs / alloy.rs / crafter.rs are stream 3's: additive block, `Report::Craft` pattern of utility.rs:745).
 - [ ] Catalysts in every machine where they make sense (machines.rs:652, rules machines/catalyst.rs: stream 3's files).
-- [ ] Orders: autocrafter asks the storage itself; O11 straight to the next machine; O12 water; all machines; items seen in the housings (M each, orders.rs is stream 5's).
+- [-] Orders: autocrafter asks the storage itself; O11 straight to the next machine; O12 water; all machines; items seen in the housings — moved to stream 5 (integrator, 2026-11-17).
 - [ ] Line boost on fluid and energy nets (fluids.rs stream 3, net/energy.rs stream 2): `node_window::net_boost` is ready.
 - [x] Facade F2: only whole blocks give a look (by name: the engine gives no item shape before placing).
 - [ ] Workers lifted whole by the wrench (stream 6, workers.rs).
@@ -125,6 +126,7 @@ Files: `window.rs` (rows «Гнездо / Канал / Направление / 
 ## Пределы движка
 
 - Node window in single-player: presses go client → server through `native_net_send_to_server`, which errors without a remote server (SRC native_net.rs:230-240); the station's rename has the same limit. On a server (the pack's case) it works.
+- Drawn windows reach only hub guests: `flush_native_net` sends mod messages to guests whose brand is `horizon` (SRC game/native_net.rs:120-137), so the owner of a single-player / LAN world never gets a view. The joint window therefore draws the table only for a Horizon guest (`native_player_client(uuid).brand == "horizon"`) and keeps the chest page for everyone else.
 - Facades are drawn each frame now (no `draw.keep()`): kept geometry is not redrawn when the held item changes (SRC native_block_entity_draw.rs:200-211), and F5 needs that. Perf note for the integrator.
 
 ## Status log

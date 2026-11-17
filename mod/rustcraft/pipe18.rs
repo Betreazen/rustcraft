@@ -270,6 +270,27 @@ pub(super) fn bench(game: &mut Game<'_>, action: &str, pos: Pos) -> Result<Strin
                 .map(|n| n.to_string())
                 .ok_or_else(|| format!("socket {i} at {pos:?} did nothing"))
         }
+        // The joint window drawn as the guide's table (rustcraft_window, rustcraft_joint_screen).
+        "joint_view" => {
+            use rustcraft_rules::geom::Face;
+            let face = arg.parse().ok().and_then(Face::from_index).ok_or_else(|| format!("face {arg:?}"))?;
+            let dimension = game.native_dimension().to_owned();
+            crate::game::rustcraft_window::screen_view(game, &dimension, pos, face)
+                .map(|v| String::from_utf8_lossy(&rustcraft_rules::net::joint_screen::encode(&v)).into_owned())
+                .ok_or_else(|| format!("no joint window at {pos:?}"))
+        }
+        "joint_press" => {
+            use rustcraft_rules::geom::Face;
+            let mut parts = arg.splitn(3, ';');
+            let (face, held, json) = (parts.next(), parts.next(), parts.next());
+            let face = face.and_then(|f| f.parse().ok()).and_then(Face::from_index).ok_or("no face")?;
+            let held = held.filter(|h| !h.is_empty());
+            let press: rustcraft_rules::net::joint_screen::Press =
+                json.and_then(|j| serde_json::from_str(j).ok()).ok_or("the press does not read")?;
+            let dimension = game.native_dimension().to_owned();
+            crate::game::rustcraft_window::screen_press(game, &dimension, pos, face, &press, held)
+                .map(|v| String::from_utf8_lossy(&rustcraft_rules::net::joint_screen::encode(&v)).into_owned())
+        }
         _ => Err(format!("no action {name}")),
     }
 }

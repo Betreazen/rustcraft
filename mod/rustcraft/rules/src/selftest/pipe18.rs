@@ -12,7 +12,7 @@ use crate::net::topology::ChannelKind;
 use crate::geom::Pos;
 use crate::tuning::Tuning;
 
-pub const ALL: [Build; 8] = [
+pub const ALL: [Build; 9] = [
     recipes_craft,
     node_tiers,
     chests_work_both_ways,
@@ -21,6 +21,7 @@ pub const ALL: [Build; 8] = [
     wrench_turns_and_lifts,
     bottlenecks_marked,
     lost_housing_drops_channels,
+    joint_window_table,
 ];
 
 /// A handbook recipe: its three rows, what each letter is, what it makes and how many.
@@ -333,6 +334,53 @@ fn lost_housing_drops_channels(o: Pos, _t: &Tuning) -> Scenario {
             let lying = b.lying([c[0] - 1.0, c[1] - 1.0, c[2] - 1.0], [c[0] + 2.0, c[1] + 2.0, c[2] + 2.0]);
             let has = |item: &str| lying.iter().any(|(i, n)| i == item && *n >= 1);
             Ok(has("rustcraft:item_channel_2") && has("rustcraft:fluid_channel"))
+        })
+}
+
+
+/// Guide `wrench` (ui.js «Стык: …»): the joint window as the drawn table. A press goes through
+/// the same rules a player's does: a direction, the off hand's item on the filter, the list and
+/// the priority, each kept in the housing.
+fn joint_window_table(o: Pos, _t: &Tuning) -> Scenario {
+    use crate::net::joint_screen::{self as js, JointView, Press};
+    let h = at(o, [1, 0, 0]);
+    let face = crate::geom::Face::ZNeg.index();
+    let press = move |b: &mut dyn Bench, held: &str, p: Press| -> Result<JointView, String> {
+        let json = serde_json::to_string(&p).map_err(|e| e.to_string())?;
+        let out = b.pipe(&format!("joint_press:{face};{held};{json}"), h)?;
+        js::decode(out.as_bytes()).ok_or_else(|| "the view does not read".to_owned())
+    };
+    Scenario::new("pipe_joint_window_is_the_guides_table", plot_area(o))
+        .then("a housing with an item channel and a chest beside it", move |b, _| item_line(b, o, 1, 1, &[1]))
+        .check("the window names the chest and shows an item row", move |b, _| {
+            let out = b.pipe(&format!("joint_view:{face}"), h)?;
+            let v = js::decode(out.as_bytes()).ok_or("the view does not read")?;
+            let r = &v.rows[0];
+            if v.block == "minecraft:chest" && r.filtered() && !v.rows[1].directed() {
+                Ok(())
+            } else {
+                Err(format!("{v:?}"))
+            }
+        })
+        .check("direction, filter from the off hand, white list and priority are kept", move |b, _| {
+            let first = press(b, "", Press::Mode { slot: 0, back: false })?.rows[0].mode;
+            press(b, "minecraft:raw_iron", Press::Add { slot: 0 })?;
+            press(b, "", Press::List { slot: 0 })?;
+            press(b, "", Press::Priority { slot: 0, delta: 1 })?;
+            let out = b.pipe(&format!("joint_view:{face}"), h)?;
+            let v = js::decode(out.as_bytes()).ok_or("the view does not read")?;
+            let r = &v.rows[0];
+            let kept = r.mode == first
+                && r.items == ["minecraft:raw_iron"]
+                && r.allow_only
+                && r.priority == 1;
+            if kept { Ok(()) } else { Err(format!("{r:?} after the presses (mode {first})")) }
+        })
+        .check("a filter press on the empty slot does nothing", move |b, _| {
+            match press(b, "minecraft:dirt", Press::Add { slot: 1 }) {
+                Err(e) if e.contains("nothing") => Ok(()),
+                other => Err(format!("{other:?}")),
+            }
         })
 }
 
