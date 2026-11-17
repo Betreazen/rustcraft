@@ -67,6 +67,7 @@ pub fn item_joints(
                 filter: s.filter,
                 priority: s.priority,
                 auto: false,
+                refiner: false,
             })
         })
         .collect()
@@ -88,6 +89,27 @@ pub fn mark_auto(
                 .get(&j.housing)
                 .is_some_and(|h| h.get(j.face, net.slot).is_some());
             j.auto = !set && auto.contains(&j.block);
+            j
+        })
+        .collect()
+}
+
+/// Slice 18 (guide `quickstart` 5: ore → crusher → furnace): the joints of `net` on a block of
+/// `refiners` (a crusher) that its housing has no setting for become refiner joints
+/// (`Joint::refiner`); a joint the player set keeps its setting.
+pub fn mark_refiners(
+    joints: Vec<Joint>,
+    net: &ChannelNet,
+    settings: &BTreeMap<Pos, HousingJoints>,
+    refiners: &BTreeSet<Pos>,
+) -> Vec<Joint> {
+    joints
+        .into_iter()
+        .map(|mut j| {
+            let set = settings
+                .get(&j.housing)
+                .is_some_and(|h| h.get(j.face, net.slot).is_some());
+            j.refiner = !set && refiners.contains(&j.block);
             j
         })
         .collect()
@@ -291,6 +313,10 @@ mod tests {
         let joints = mark_auto(joints, net, &settings, &auto);
         assert!(!joints[0].auto, "a set joint keeps its setting");
         assert!(joints[1].auto);
+        // A crusher goes first on its default joint only, the same way.
+        let joints = mark_refiners(joints, net, &settings, &auto);
+        assert!(!joints[0].refiner, "a set joint keeps its setting");
+        assert!(joints[1].refiner);
     }
 
     #[test]

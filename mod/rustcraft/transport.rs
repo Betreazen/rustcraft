@@ -227,6 +227,8 @@ pub(super) fn rebuild(game: &mut Game<'_>, dimension: &str, level: &mut LevelNet
     let mut checked: BTreeSet<Pos> = BTreeSet::new();
     // Slice 18: the vanilla containers on their default, auto joints unless a housing sets them.
     let mut auto: BTreeSet<Pos> = BTreeSet::new();
+    // Slice 18 (guide `quickstart` 5): the crushers, first for the ore on their default joints.
+    let mut refiners: BTreeSet<Pos> = BTreeSet::new();
     let item_nets = || {
         level
             .topology
@@ -246,6 +248,9 @@ pub(super) fn rebuild(game: &mut Game<'_>, dimension: &str, level: &mut LevelNet
                 let side = direction(face.opposite());
                 if let Some(mode) = default_mode(game, dimension, block, side, &saved) {
                     inventories.insert(block, mode);
+                    if Machine::of(&game.native_block(block)) == Some(Machine::Crusher) {
+                        refiners.insert(block);
+                    }
                     if is_auto_container(game, block, &saved) {
                         auto.insert(block);
                     }
@@ -256,7 +261,8 @@ pub(super) fn rebuild(game: &mut Game<'_>, dimension: &str, level: &mut LevelNet
     let nets: Vec<ItemNet> = item_nets()
         .filter_map(|net| {
             let found = joints::item_joints(net, &level.layout, &inventories, &level.joints);
-            let joints: Vec<Joint> = joints::mark_auto(found, net, &level.joints, &auto)
+            let marked = joints::mark_auto(found, net, &level.joints, &auto);
+            let joints: Vec<Joint> = joints::mark_refiners(marked, net, &level.joints, &refiners)
                     .into_iter()
                     .filter_map(|mut j| {
                         // A storage's cells and terminals are one joint, at its first cell; a

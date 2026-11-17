@@ -12,7 +12,7 @@ use crate::net::topology::ChannelKind;
 use crate::geom::Pos;
 use crate::tuning::Tuning;
 
-pub const ALL: [Build; 9] = [
+pub const ALL: [Build; 10] = [
     recipes_craft,
     node_tiers,
     chests_work_both_ways,
@@ -22,6 +22,7 @@ pub const ALL: [Build; 9] = [
     bottlenecks_marked,
     lost_housing_drops_channels,
     joint_window_table,
+    quickstart_line,
 ];
 
 /// A handbook recipe: its three rows, what each letter is, what it makes and how many.
@@ -183,6 +184,47 @@ fn chests_work_both_ways(o: Pos, _t: &Tuning) -> Scenario {
         })
         .check("the left chest gave its ore", move |b, _| {
             let n = count_of(&b.items(left), "minecraft:raw_iron");
+            if n == 0 { Ok(()) } else { Err(format!("{n} ore left in the left chest")) }
+        })
+}
+
+/// Guide `quickstart` 3–5 (in-game check w3b): the left chest, a crusher and an electric furnace
+/// beside the line, each with its own crystal, and the right chest; no joint is set. Ore goes
+/// from the left chest to the crusher (not the furnace), the dust to the furnace (never into a
+/// chest), the ingots into the right chest, the one nearest the furnace.
+fn quickstart_line(o: Pos, _t: &Tuning) -> Scenario {
+    const RAW: &str = "minecraft:raw_iron";
+    const DUST: &str = "rustcraft:dust_iron";
+    const INGOT: &str = "minecraft:iron_ingot";
+    const ORE: u32 = 2;
+    let (left, right) = (chest(o, 1), chest(o, 4));
+    let (crusher, furnace) = (at(o, [2, 0, -1]), at(o, [3, 0, -1]));
+    Scenario::new("pipe_quickstart_ore_crusher_furnace_right_chest", plot_area(o))
+        .then("chest, crusher, furnace, chest on an item line, a crystal each", move |b, _| {
+            item_line(b, o, 1, 4, &[1, 4])?;
+            b.place(crusher, "rustcraft:crusher", &[])?;
+            b.place(furnace, "rustcraft:furnace", &[])?;
+            // Apart, so they stay two crystals (guide `quickstart` 4).
+            b.place(at(o, [2, 1, -1]), "rustcraft:crystal", &[])?;
+            b.place(at(o, [3, 0, -2]), "rustcraft:crystal", &[])?;
+            fill(b, left, RAW, ORE)
+        })
+        .until("two ingots an ore reach the right chest", 2400, move |b, _| {
+            let (l, r) = (b.items(left), b.items(right));
+            let f = b.items(furnace);
+            if count_of(&l, DUST) + count_of(&r, DUST) > 0 {
+                return Err("dust went into a chest, not on to the furnace".into());
+            }
+            if count_of(&l, INGOT) > 0 {
+                return Err("an ingot went back into the left chest".into());
+            }
+            if count_of(&r, RAW) + count_of(&f, RAW) > 0 {
+                return Err("ore skipped the crusher".into());
+            }
+            Ok(count_of(&r, INGOT) >= 2 * ORE)
+        })
+        .check("the left chest gave all its ore", move |b, _| {
+            let n = count_of(&b.items(left), RAW);
             if n == 0 { Ok(()) } else { Err(format!("{n} ore left in the left chest")) }
         })
 }
