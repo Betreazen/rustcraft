@@ -832,6 +832,26 @@ impl Bench for GameBench<'_, '_> {
             .map(|e| power::drawn_of(&e.nbt))
     }
 
+    // ---- Slice 18, stream 6 (rail and workers) ----
+    fn worker_as_item(&mut self, id: u64, cell: Pos) -> Result<u64, String> {
+        workers::as_item_for_selftest(self.game, DIMENSION, id, cell, server::tuning())
+    }
+
+    fn swap_chassis(&mut self, id: u64, item: &str) -> Result<String, String> {
+        workers::swap_for_selftest(DIMENSION, id, item)
+    }
+
+    fn worker_room(&self, owner: u128, limit: u32) -> bool {
+        workers::may_place_for_selftest(owner, limit)
+    }
+
+    fn set_worker_filter(&mut self, id: u64, items: &[&str]) -> Result<(), String> {
+        workers::filter_for_selftest(DIMENSION, id, items)
+    }
+
+
+
+
     fn anim(&self, pos: Pos) -> Option<rustcraft_rules::anim::Shown> {
         self.game
             .native_mod_block_entity(pos)

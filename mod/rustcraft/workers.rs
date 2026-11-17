@@ -43,7 +43,9 @@ use rustcraft_rules::{
     reports::Report,
     tuning::Tuning,
     utility::grown,
-    worker::{BlockView, Errand, Fleet, Note, Step, Tool, Track, Worker, digging, plants, trees},
+    worker::{
+        BlockView, Errand, Fleet, Note, Step, Tool, Track, Worker, chassis, digging, plants, trees,
+    },
 };
 use std::{
     collections::{BTreeSet, HashMap},
@@ -66,12 +68,10 @@ const ROWS: u8 = 6;
 const CELLS: usize = 54;
 const MAIN_SLOTS: usize = 27;
 const INVENTORY_SLOTS: usize = 36;
-/// The window's first row: tool, upgrades, then the gauges.
+/// The window's first row: tool, the sockets (up to 7, U4), then its state with charge and hold.
 const TOOL_CELL: usize = 0;
-const UPGRADE_CELLS: std::ops::Range<usize> = 1..4;
-const CHARGE_CELL: usize = 5;
-const HOLD_CELL: usize = 6;
-const NOTE_CELL: usize = 7;
+const UPGRADE_CELLS: std::ops::Range<usize> = 1..1 + chassis::MAX_SOCKETS;
+const NOTE_CELL: usize = 8;
 const HOLD_FIRST: usize = 9;
 /// What the saw's loot is rolled for: an axe, as a player's would be.
 const SAW_TOOL: &str = "minecraft:iron_axe";
@@ -101,6 +101,8 @@ struct Click {
     uuid: u128,
     window: i32,
     slot: usize,
+    /// A shift-click (mode 1): an item of the inventory goes into the filter (H6).
+    shift: bool,
 }
 
 #[derive(Default)]
@@ -109,8 +111,9 @@ struct Workers {
     sessions: HashMap<u128, Session>,
     opening: Vec<(u128, String, u64)>,
     clicks: Vec<Click>,
-    /// Breaks to report once the level ticks (inside a player's hook no command runs).
-    placing: Vec<(u128, String, Pos)>,
+    /// Chassis placed, to become workers once the level ticks: owner, dimension, rail, and the
+    /// worker a picked-up chassis carries (W3).
+    placing: Vec<(u128, String, Pos, Option<String>, u8)>,
 }
 
 static STATE: LazyLock<Mutex<Workers>> = LazyLock::new(Mutex::default);
@@ -228,40 +231,163 @@ fn in_tag(game: &Game<'_>, block: &str, tag: &str, fallback: &str) -> bool {
 
 // ---- Hooks ----
 
-/// `native_use_item_on`: the chassis on a floor rail becomes a worker of the player (X2).
+/// `native_use_item_on`: the chassis on a monorail (any mount, slice 18) becomes a worker of the
+/// player (X2).
 pub(super) fn on_use_item_on(
     game: &mut Game<'_>,
     stack: &horizon_client::items::ItemStack,
     pos: Pos,
     claimed: &mut bool,
 ) {
-    if *claimed || &*stack.item != content::CHASSIS {
+    if *claimed {
         return;
     }
+    let Some(tier) = chassis::tier_of(&stack.item) else {
+        return;
+    };
     let Some(player) = game.native_acting_player() else {
         return;
     };
     *claimed = true;
-    let floor = game.native_block(pos) == content::MONORAIL
-        && game.native_block_property(pos, "mount").as_deref() == Some("down");
-    if !floor {
+    if game.native_block(pos) != content::MONORAIL {
         tell(
             game,
             player.uuid,
             line(
                 "rustcraft.worker.place_on_rail",
-                "Place the chassis on a floor monorail",
+                "Place the chassis on a monorail",
                 &[],
             ),
         );
         return;
     }
+    // W8: the server's limit of workers per player.
+    let limit = config();
+    if !limit.may_add(owned(player.uuid)) {
+        tell(
+            game,
+            player.uuid,
+            line(
+                "rustcraft.worker.limit",
+                "Worker limit reached: %s per player",
+                &[Text::literal(limit.workers_per_player.to_string())],
+            ),
+        );
+        return;
+    }
+    let packed = packed_of(stack);
     if player.game_mode != 1 {
-        game.native_take_items(content::CHASSIS, 1);
+        if packed.is_some() {
+            take_exact(game, player.uuid, stack);
+        } else {
+            game.native_take_items(&stack.item, 1);
+        }
     }
     state()
         .placing
-        .push((player.uuid, player.dimension.clone(), pos));
+        .push((player.uuid, player.dimension.clone(), pos, packed, tier));
+}
+
+// ---- The server settings file (W8, API 397) ----
+
+static CONFIG: Mutex<Option<rustcraft_rules::worker::config::ServerConfig>> = Mutex::new(None);
+
+/// The server's settings as last read; the defaults before the file is read.
+fn config() -> rustcraft_rules::worker::config::ServerConfig {
+    CONFIG
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .unwrap_or_default()
+}
+
+/// `native_register_configs`: RustCraft's server settings, `config/rustcraft-server.toml`.
+pub(super) fn register_configs(configs: &mut Vec<crate::game::NativeConfig>) {
+    use rustcraft_rules::worker::config;
+    configs.push(crate::game::NativeConfig::new(
+        "rustcraft",
+        crate::game::NativeConfigKind::Server,
+        config::DEFAULT_TEXT,
+    ));
+}
+
+/// `native_config_loading` and `_reloading`: RustCraft's server settings read again.
+pub(super) fn config_read(file: &crate::game::NativeConfigFile) {
+    use rustcraft_rules::worker::config;
+    if file.mod_id != "rustcraft" || file.kind != crate::game::NativeConfigKind::Server {
+        return;
+    }
+    let (read, bad) = config::parse(&file.text);
+    for key in bad {
+        log::warn!(
+            "rustcraft: {} does not read its `{key}`; it stays as it was by default",
+            file.path.display()
+        );
+    }
+    log::info!(
+        "rustcraft: server settings from {}: {} workers a player",
+        file.path.display(),
+        read.workers_per_player
+    );
+    *CONFIG.lock().unwrap_or_else(PoisonError::into_inner) = Some(read);
+}
+
+/// W8: the workers `owner` has on the server, those being placed included.
+fn owned(owner: u128) -> usize {
+    let s = state();
+    s.levels.values().map(|l| l.fleet.owned_by(owner)).sum::<usize>()
+        + s.placing.iter().filter(|p| p.0 == owner).count()
+}
+
+/// W3: custom data under which a chassis item carries the worker taken away with it.
+const PACKED: &str = "rustcraft:worker";
+
+/// The worker a chassis stack carries, packed (rustcraft_rules::worker::Worker::packed).
+fn packed_of(stack: &ItemStack) -> Option<String> {
+    match stack.custom_data()?.get(&JavaString::from(PACKED))? {
+        Tag::String(s) => Some(s.to_string_lossy()),
+        _ => None,
+    }
+}
+
+/// The chassis item carrying worker `w` with all it has (W3).
+fn worker_stack(w: &Worker) -> ItemStack {
+    let mut stack = ItemStack::new(chassis::item(w.tier), 1);
+    let mut data = Compound::new();
+    data.insert(
+        JavaString::from(PACKED),
+        Tag::String(JavaString::from(w.packed().as_str())),
+    );
+    stack
+        .data_mut()
+        .set_other(util::CUSTOM_DATA, Some(Tag::Compound(data)));
+    stack
+}
+
+/// Takes the one stack like `stack` (same item and data) from the player's inventory, the hand
+/// they hold first.
+fn take_exact(game: &mut Game<'_>, uuid: u128, stack: &ItemStack) {
+    let Some(stacks) = game.native_player_stacks(uuid) else {
+        return;
+    };
+    let selected = game.selected;
+    let slot = std::iter::once(selected)
+        .chain(0..stacks.len())
+        .find(|&i| stacks.get(i).cloned().flatten().is_some_and(|s| s == *stack));
+    let Some(slot) = slot else {
+        log::warn!("rustcraft: the placed chassis was not found in the inventory");
+        return;
+    };
+    let rest = (stack.count > 1).then(|| {
+        let mut r = stack.clone();
+        r.count -= 1;
+        r
+    });
+    if game
+        .native_set_inventory_slot(uuid, NativeInventoryKind::Player, slot, Some(stack), rest)
+        .is_err()
+    {
+        log::warn!("rustcraft: the placed chassis could not be taken");
+    }
 }
 
 /// `native_interact_entity`: a click on a worker's seat opens its window; the wrench with
@@ -289,15 +415,74 @@ pub(super) fn on_interact_entity(
         return;
     };
     let wrench = stack.is_some_and(|s| &*s.item == content::WRENCH);
+    let new_chassis =
+        stack.filter(|s| chassis::tier_of(&s.item).is_some() && packed_of(s).is_none());
     if wrench && player.sneaking {
         pick_up(game, player.uuid, &dimension, worker);
+    } else if let Some(new) = new_chassis {
+        swap_chassis(game, &player, &dimension, worker, new);
     } else {
         state().opening.push((player.uuid, dimension, worker));
     }
 }
 
-/// Takes the worker away and gives the player its chassis, tool, upgrades and load; what does
-/// not fit drops at their feet.
+/// U4: a higher chassis clicked on a worker takes its old chassis's place: tool, upgrades and
+/// hold stay, the old chassis goes to the player.
+fn swap_chassis(
+    game: &mut Game<'_>,
+    player: &horizon_client::mod_api::NativeServerPlayer,
+    dimension: &str,
+    id: u64,
+    new: &ItemStack,
+) {
+    let t = server::tuning();
+    let done = {
+        let mut s = state();
+        let Some(level) = s.levels.get_mut(dimension) else {
+            return;
+        };
+        let Some(w) = level.fleet.workers.iter_mut().find(|w| w.id == id) else {
+            return;
+        };
+        let done = chassis::swap(w, &new.item, t).map(|old| (old, chassis::sockets(w.tier)));
+        if done.is_ok() {
+            level.dirty = true;
+        }
+        done
+    };
+    match done {
+        Ok((old, sockets)) => {
+            if player.game_mode != 1 {
+                game.native_take_items(&new.item, 1);
+            }
+            if let Some(left) = game.native_give_stack(player.uuid, ItemStack::new(old, 1)) {
+                drop_item(game, dimension, player.position, &left);
+            }
+            tell(
+                game,
+                player.uuid,
+                line(
+                    "rustcraft.worker.swapped",
+                    "Chassis replaced: %s sockets, tool and load kept",
+                    &[Text::literal(sockets.to_string())],
+                ),
+            );
+        }
+        Err(_) => tell(
+            game,
+            player.uuid,
+            line(
+                "rustcraft.worker.not_higher",
+                "That chassis has no more sockets than this one",
+                &[],
+            ),
+        ),
+    }
+}
+
+/// W3: takes the worker away and gives the player its chassis as one item carrying its tool,
+/// upgrades, load and charge; placed again it is the same worker. With no room it drops at their
+/// feet.
 fn pick_up(game: &mut Game<'_>, player: u128, dimension: &str, id: u64) {
     let (taken, seat) = {
         let mut s = state();
@@ -313,21 +498,31 @@ fn pick_up(game: &mut Game<'_>, player: u128, dimension: &str, id: u64) {
     if let Some(seat) = seat {
         game.native_remove_mob(dimension, seat);
     }
-    let mut stacks = vec![(content::CHASSIS.to_owned(), 1)];
-    stacks.extend(taken.tool.map(|t| (t.item().to_owned(), 1)));
-    stacks.extend(
-        taken
-            .upgrades
-            .iter()
-            .flatten()
-            .map(|m| (m.item().to_owned(), 1)),
-    );
-    stacks.extend(taken.hold.slots.iter().flatten().cloned());
-    let at = taken.feet();
-    for (item, n) in stacks {
-        if let Some(left) = game.native_give_stack(player, util::hold_stack(&item, n)) {
-            drop_stack(game, dimension, at, &util::hold_name(&left), left.count);
-        }
+    let stack = worker_stack(&taken);
+    if let Some(left) = game.native_give_stack(player, stack) {
+        drop_item(game, dimension, taken.feet(), &left);
+    }
+}
+
+/// An item entity of `stack`, its data kept, at `at`.
+fn drop_item(game: &mut Game<'_>, dimension: &str, at: [f64; 3], stack: &ItemStack) {
+    let mut fields = vec![
+        ("id", Tag::String(JavaString::from(&*stack.item))),
+        ("count", Tag::Int(stack.count.min(99) as i32)),
+    ];
+    if let Some(data) = stack.custom_data() {
+        let components = Compound::from([(
+            JavaString::from(util::CUSTOM_DATA),
+            Tag::Compound(data.clone()),
+        )]);
+        fields.push(("components", Tag::Compound(components)));
+    }
+    let nbt = Compound::from([(JavaString::from("Item"), Tag::compound(fields))]);
+    if game
+        .native_summon(dimension, "minecraft:item", [at[0], at[1] + 0.5, at[2]], nbt)
+        .is_none()
+    {
+        log::warn!("rustcraft: a picked-up worker could not be dropped and was lost");
     }
 }
 
@@ -369,7 +564,12 @@ pub(super) fn on_menu_clicked(uuid: u128, window: i32, slot: i32, mode: i32) {
         return;
     }
     if let Ok(slot) = usize::try_from(slot) {
-        s.clicks.push(Click { uuid, window, slot });
+        s.clicks.push(Click {
+            uuid,
+            window,
+            slot,
+            shift: mode == 1,
+        });
     }
 }
 
@@ -404,16 +604,22 @@ pub(super) fn tick(game: &mut Game<'_>, dimension: &str, net_level: &LevelNet, t
     let mut level = take_level(dimension);
     load(game, &mut level);
     level.ticks += 1;
-    let placing: Vec<(u128, Pos)> = {
+    let placing: Vec<(u128, Pos, Option<String>, u8)> = {
         let mut s = state();
         let (here, later): (Vec<_>, Vec<_>) = std::mem::take(&mut s.placing)
             .into_iter()
             .partition(|p| p.1 == dimension);
         s.placing = later;
-        here.into_iter().map(|(o, _, p)| (o, p)).collect()
+        here.into_iter().map(|(o, _, p, k, tier)| (o, p, k, tier)).collect()
     };
-    for (owner, rail) in placing {
-        level.fleet.add(owner, rail, tuning);
+    for (owner, rail, packed, tier) in placing {
+        let back = packed.and_then(|k| level.fleet.put_back(owner, rail, &k, tuning));
+        if back.is_none() {
+            let id = level.fleet.add(owner, rail, tuning);
+            if let Some(w) = level.fleet.workers.iter_mut().find(|w| w.id == id) {
+                w.set_tier(tier, tuning);
+            }
+        }
         level.dirty = true;
     }
     let docks = |kind: Machine| -> BTreeSet<Pos> {
@@ -424,12 +630,18 @@ pub(super) fn tick(game: &mut Game<'_>, dimension: &str, net_level: &LevelNet, t
             .map(|(p, _)| *p)
             .collect()
     };
-    let unload = docks(Machine::DockUnload);
+    // PD2 (slice 18): a portal dock takes a cargo worker's load as an unload dock does, and hands
+    // what comes from its pair to a container beside it.
+    let portal = docks(Machine::Util(rustcraft_rules::utility::Util::PortalDock));
+    let mut unload = docks(Machine::DockUnload);
     let charge = docks(Machine::DockCharge);
     let load = docks(Machine::DockLoad);
     if level.ticks.is_multiple_of(DOCK_PUSH_EVERY) {
         push_docks(game, dimension, &unload);
+        push_docks(game, dimension, &portal);
+        pull_into_load_docks(game, dimension, &load);
     }
+    unload.extend(portal.iter().copied());
     if !level.fleet.workers.is_empty() {
         let net = monorail::network(dimension);
         let mut workers = std::mem::take(&mut level.fleet.workers);
@@ -457,7 +669,7 @@ pub(super) fn tick(game: &mut Game<'_>, dimension: &str, net_level: &LevelNet, t
         boards(game, &mut level, tuning);
     }
     if level.ticks.is_multiple_of(NOTES_EVERY) {
-        notes(game, &level);
+        notes(game, &level, &monorail::network(dimension));
     }
     if level.ticks.is_multiple_of(SWEEP_EVERY) {
         sweep(game, dimension, &level);
@@ -490,12 +702,29 @@ fn ride(
         charge: docks.charge,
         load: docks.load,
     };
-    match w.tick(&track, t) {
-        Step::Arrived(cell) => work(game, dimension, net, w, cell, t),
-        Step::AtDock(dock) => serve(game, w, dock, t),
-        Step::Busy | Step::Moved | Step::Stopped => {}
+    // T4: a fast rail takes it past more than a cell a tick; it rides on, each cell worked.
+    let mut step = w.tick(&track, t);
+    // Slice 18: a guard standing at a dock or stopped still shoots (P2).
+    if w.guards_standing(step) {
+        let cell = w.cell;
+        guard(game, dimension, w, cell, t);
+    }
+    for _ in 0..RIDE_ON_MAX {
+
+        match step {
+            Step::Arrived(cell) => work(game, dimension, net, w, cell, t),
+            Step::AtDock(dock) => serve(game, w, dock, t),
+            Step::Busy | Step::Moved | Step::Stopped => {}
+        }
+        if !w.rides_on() {
+            break;
+        }
+        step = w.ride_on(&track, t);
     }
 }
+
+/// Cells a worker may pass in one tick: the fastest rail's 32 bl/s are 1.6 a tick.
+const RIDE_ON_MAX: usize = 4;
 
 /// The tool looks round the cell it came into.
 fn work(
@@ -506,11 +735,13 @@ fn work(
     cell: Pos,
     t: &Tuning,
 ) {
+    let mount = rustcraft_rules::worker::mount(net, cell);
+    w.aim = None;
     match w.tool {
-        Some(Tool::Saw) => saw(game, dimension, w, cell, t),
-        Some(Tool::Reaper) => reap(game, dimension, w, cell, t),
-        Some(Tool::Grab) => grab(game, dimension, w, cell, t),
-        Some(Tool::Scoop) => scoop(game, dimension, net, w, cell, t),
+        Some(Tool::Saw) => saw(game, dimension, w, cell, mount, t),
+        Some(Tool::Reaper) => reap(game, dimension, w, cell, mount, t),
+        Some(Tool::Grab) => grab(game, dimension, w, cell, mount, t),
+        Some(Tool::Scoop) => scoop(game, dimension, net, w, cell, mount, t),
         Some(Tool::Shooter) => guard(game, dimension, w, cell, t),
         Some(Tool::Map) => crate::game::rustcraft_explore::map(game, dimension, w, cell, t),
         Some(Tool::Bore) => bore(game, dimension, net, w, cell, t),
@@ -531,6 +762,17 @@ fn guard(game: &mut Game<'_>, dimension: &str, w: &mut Worker, cell: Pos, t: &Tu
         f64::from(cell[2]) + 0.5,
     ];
     let range = w.guard_range(t);
+    w.aim = game
+        .mobs
+        .iter()
+        .filter(|m| !m.removed && m.alive() && m.is_enemy())
+        .map(|m| [m.position.x, m.position.y + 0.5, m.position.z])
+        .filter(|p| (0..3).map(|k| (p[k] - at[k]).powi(2)).sum::<f64>() <= range * range)
+        .min_by(|a, b| {
+            let d = |p: &[f64; 3]| (0..3).map(|k| (p[k] - at[k]).powi(2)).sum::<f64>();
+            d(a).total_cmp(&d(b))
+        })
+        .map(|p| p.map(|c| c.floor() as i32));
     if base::guard_shot(game, dimension, w.owner, at, range, t.guard_damage).is_some() {
         w.spend(t.guard_shot_ticks, t.guard_shot_energy, t);
     }
@@ -538,14 +780,15 @@ fn guard(game: &mut Game<'_>, dimension: &str, w: &mut Worker, cell: Pos, t: &Tu
 
 /// The grab (guide `tool_grab`): every ore of its zone broken into the hold, every suspicious
 /// block the vein grew there taken whole (ST4), and the items lying in its zone picked up.
-fn grab(game: &mut Game<'_>, dimension: &str, w: &mut Worker, cell: Pos, t: &Tuning) {
-    let zone = w.zone_cells(cell, t);
+fn grab(game: &mut Game<'_>, dimension: &str, w: &mut Worker, cell: Pos, mount: Face, t: &Tuning) {
+    let zone = w.zone_cells(cell, mount, t);
     let ores: Vec<Pos> = zone
         .iter()
         .copied()
         .filter(|&p| digging::is_ore(&game.native_block(p)))
         .collect();
     let mut done = 0usize;
+    w.aim = w.aim.or(ores.first().copied());
     for p in ores {
         let block = game.native_block(p);
         if take_block(game, dimension, w, p, Some(digging::GRAB_TOOL)) {
@@ -554,8 +797,8 @@ fn grab(game: &mut Game<'_>, dimension: &str, w: &mut Worker, cell: Pos, t: &Tun
         }
     }
     done += take_grown(game, dimension, w, &zone);
-    let (side, height) = w.zone(t);
-    let (lo, hi) = digging::pickup_box(cell, side, height);
+    let (lo, hi) = w.zone_box(cell, mount, t);
+    let (lo, hi) = digging::pickup_box(lo, hi);
     for e in game.native_item_entities(dimension, lo, hi) {
         let max = machines::max_stack(game, &e.stack.item);
         let left = w.hold.add(&e.stack.item, e.stack.count, max);
@@ -601,25 +844,36 @@ fn take_grown(game: &mut Game<'_>, dimension: &str, w: &mut Worker, zone: &[Pos]
     done
 }
 
-/// The scoop (guide `tool_scoop`): earth, sand, gravel and clay beside and under the way, top
-/// down; the blocks under the rails stay.
+/// The scoop (guide `tool_scoop`): earth, sand, gravel and clay beside the way and beyond its
+/// rail (under a floor rail, into a wall beside a wall rail), nearest first; the blocks that hold
+/// rails stay.
 fn scoop(
     game: &mut Game<'_>,
     dimension: &str,
     net: &Network,
     w: &mut Worker,
     cell: Pos,
+    mount: Face,
     t: &Tuning,
 ) {
     let (side, _) = w.zone(t);
     let depth = t.scoop_depth;
-    let under_rail =
-        |p: Pos| (1..=depth).any(|dy| net.rails.contains_key(&[p[0], p[1] + dy, p[2]]));
-    let cells: Vec<Pos> = digging::scoop_cells(cell, side, depth, under_rail)
+    let back = mount.opposite().offset();
+    let under_rail = |p: Pos| {
+        (1..=depth).any(|k| {
+            net.rails
+                .contains_key(&rustcraft_rules::worker::moved(p, back, k))
+        })
+    };
+    let cells: Vec<Pos> = digging::scoop_cells(cell, mount, side, depth, under_rail)
         .into_iter()
-        .filter(|&p| digging::is_scooped(&game.native_block(p)))
+        .filter(|&p| {
+            let block = game.native_block(p);
+            digging::is_scooped(&block) && digging::wanted(&block, &w.filter)
+        })
         .collect();
     let mut done = 0usize;
+    w.aim = cells.first().copied();
     for p in cells {
         let block = game.native_block(p);
         if take_block(game, dimension, w, p, Some(digging::SCOOP_TOOL)) {
@@ -638,20 +892,28 @@ fn scoop(
 /// the next rail filled, the rail laid; the monorail rescans it and the worker rides on.
 fn bore(game: &mut Game<'_>, dimension: &str, net: &Network, w: &mut Worker, cell: Pos, t: &Tuning) {
     use rustcraft_rules::worker::bore;
-    let Some(ahead) = w.from.and_then(|f| bore::ahead(f, cell)) else { return };
-    if net.rails.contains_key(&ahead) {
+    let Some(level_ahead) = w.from.and_then(|f| bore::ahead(f, cell)) else { return };
+    if net.rails.contains_key(&level_ahead) || net.rails.contains_key(&[level_ahead[0], level_ahead[1] - 1, level_ahead[2]]) {
         return;
     }
-    if w.hold.count(bore::RAIL) == 0 {
+    // Slice 18: the best rail of its hold, tiers 1 to 4.
+    let Some((rail, tier)) = bore::best_rail(|i| w.hold.count(i)) else {
         w.note = Note::NoRails;
         return;
-    }
+    };
     use rustcraft_rules::modules::Module as M;
-    let heading = [ahead[0] - cell[0], ahead[2] - cell[2]];
     let has = |m: M| w.upgrades.iter().flatten().filter(|x| **x == m).count() as u32;
+    // The height module keeps the way level; without it the way follows the ground down a step.
+    let open = |p: Pos| {
+        let b = game.native_block(p);
+        matches!(b.as_str(), "minecraft:air" | "minecraft:cave_air" | "minecraft:water") || b.contains("lava")
+    };
+    let (ahead, _) = bore::next_cell(level_ahead, open, has(M::Height) > 0);
+    let heading = [ahead[0] - cell[0], ahead[2] - cell[2]];
     let (side, height) = bore::size(has(M::Tunnel), has(M::Radius) > 0);
     let (lava_module, build_module) = (has(M::Lava) > 0, has(M::Build) > 0);
     let cells = bore::cells(ahead, heading, side, height);
+    w.aim = Some(ahead);
     let filler = |w: &Worker| w.hold.find(bore::is_filler);
     // Lava in the tunnel is closed first: with a block of the hold each, or with nothing at all
     // (it turns to air) under the lava module.
@@ -713,10 +975,14 @@ fn bore(game: &mut Game<'_>, dimension: &str, net: &Network, w: &mut Worker, cel
     }
     if let Some(state) = game.native_default_state(bore::RAIL) {
         game.native_set_block(dimension, ahead, state, 3);
-        w.hold.take(bore::RAIL, 1);
+        if tier > 1 {
+            game.native_set_block_property(ahead, content::TIER, &tier.to_string());
+        }
+        w.hold.take(rail, 1);
         crate::game::rustcraft_monorail::touched(dimension, ahead);
         done += 1;
     }
+
     w.spend(t.grab_ticks * done as f64, t.grab_energy * done as f64, t);
 }
 
@@ -781,8 +1047,8 @@ fn set_block(
 }
 
 /// The saw: the first tree with a log in the zone, felled top down, planted again.
-fn saw(game: &mut Game<'_>, dimension: &str, w: &mut Worker, cell: Pos, t: &Tuning) {
-    let zone = w.zone_cells(cell, t);
+fn saw(game: &mut Game<'_>, dimension: &str, w: &mut Worker, cell: Pos, mount: Face, t: &Tuning) {
+    let zone = w.zone_cells(cell, mount, t);
     let tree = {
         let view = View { game };
         zone.iter()
@@ -791,6 +1057,7 @@ fn saw(game: &mut Game<'_>, dimension: &str, w: &mut Worker, cell: Pos, t: &Tuni
     let Some(tree) = tree else {
         return;
     };
+    w.aim = tree.logs.last().copied();
     let mut felled = 0;
     for &log in &tree.logs {
         let block = game.native_block(log);
@@ -823,17 +1090,26 @@ fn saw(game: &mut Game<'_>, dimension: &str, w: &mut Worker, cell: Pos, t: &Tuni
 }
 
 /// The reaper: every ripe plant of the zone by its group's rule (spec 17).
-fn reap(game: &mut Game<'_>, dimension: &str, w: &mut Worker, cell: Pos, t: &Tuning) {
-    let (_, height) = w.zone(t);
-    let top = cell[1] + height - 1;
-    let zone = w.zone_cells(cell, t);
+fn reap(game: &mut Game<'_>, dimension: &str, w: &mut Worker, cell: Pos, mount: Face, t: &Tuning) {
+    let (lo, hi) = w.zone_box(cell, mount, t);
+    // On a wall rail it rides up and down beside its plants: a column is cut only from its own
+    // top, never under it, so nothing over the cut falls to the ground (guide «вверх вдоль
+    // высокого бамбука»).
+    let top = if matches!(mount, Face::YNeg | Face::YPos) {
+        hi[1]
+    } else {
+        i32::MAX
+    };
+    let zone = w.zone_cells(cell, mount, t);
     let plans: Vec<plants::Harvest> = {
         let view = View { game };
         zone.iter()
-            .filter_map(|&p| plants::plan(&view, p, top))
+            .filter(|&&p| plants::wanted(&view.block(p), &w.filter))
+            .filter_map(|&p| plants::plan(&view, p, lo[1], top))
             .collect()
     };
     let mut done = 0usize;
+    w.aim = plans.first().and_then(|h| h.breaks.first().or(h.picks.first().map(|p| &p.pos)).copied());
     for h in plans {
         for &p in &h.breaks {
             let block = game.native_block(p);
@@ -934,6 +1210,7 @@ fn unload_into(game: &mut Game<'_>, w: &mut Worker, dock: Pos, t: &Tuning) {
         .max(1.0) as u32;
     let tool = w.tool;
     let keep = |i: &str| tool.is_some_and(|t| t.keeps(i));
+    let portal_dock = game.native_block(dock) == PORTAL_DOCK;
     let mut moved = 0;
     while moved < per_tick {
         let Some(slot) = w.hold.next_to_unload(keep) else {
@@ -945,14 +1222,22 @@ fn unload_into(game: &mut Game<'_>, w: &mut Worker, dock: Pos, t: &Tuning) {
         let n = count.min(per_tick - moved);
         let stack = util::hold_stack(&item, 1);
         let max = machines::max_stack(game, &stack.item);
-        let put = game
-            .native_with_mod_block_entity(dock, |e| into_slots(&mut e.items, &stack, n, max))
-            .unwrap_or(0);
+        let put = if portal_dock {
+            // Into the slots a portal dock sends from (rustcraft_builder: 0..18).
+            let left = util::put(game, dock, PORTAL_SEND, util::hold_stack(&item, n));
+            n - left.map_or(0, |l| l.count.min(n))
+        } else {
+            game.native_with_mod_block_entity(dock, |e| into_slots(&mut e.items, &stack, n, max))
+                .unwrap_or(0)
+        };
         if put == 0 {
             break;
         }
         w.hold.take(&item, put);
         moved += put;
+    }
+    if moved > 0 {
+        dock_log().received.push((dock, std::time::Instant::now(), moved));
     }
     if w.unloaded() {
         w.back_to_work();
@@ -963,7 +1248,12 @@ fn unload_into(game: &mut Game<'_>, w: &mut Worker, dock: Pos, t: &Tuning) {
     }
 }
 
+/// The portal dock (rustcraft_builder) and the slots it sends to its pair from.
+const PORTAL_DOCK: &str = "rustcraft:portal_dock";
+const PORTAL_SEND: std::ops::Range<usize> = 0..18;
+
 /// Puts up to `count` of `like`'s item into the dock's slots; how many went in. A grown block
+
 /// stacks only with grown ones.
 fn into_slots(items: &mut Vec<Option<ItemStack>>, like: &ItemStack, count: u32, max: u32) -> u32 {
     if items.len() < content::DOCK_SLOTS {
@@ -1006,6 +1296,10 @@ fn charge_from(game: &mut Game<'_>, w: &mut Worker, dock: Pos, t: &Tuning) {
     if give > 0.0 {
         machines::set_buffer_energy(game, dock, buffer - give);
         w.charge += give;
+        let share = w.charge / cap.max(1.0);
+        dock_log()
+            .charging
+            .insert(dock, (w.tool, share, std::time::Instant::now()));
         w.note = Note::Charging;
     } else if w.charge < cap {
         w.note = Note::DockEmpty;
@@ -1016,8 +1310,107 @@ fn charge_from(game: &mut Game<'_>, w: &mut Worker, dock: Pos, t: &Tuning) {
     }
 }
 
+/// Slice 18 (guide `dock_load`: «предметами из магистрали или соседнего сундука»): each load dock
+/// takes items from a container beside it (a chest, a barrel; never a RustCraft block).
+fn pull_into_load_docks(game: &mut Game<'_>, dimension: &str, docks: &BTreeSet<Pos>) {
+    for &dock in docks {
+        for f in Face::ALL {
+            let n = step(dock, f);
+            let block = game.native_block(n);
+            if block == AIR || server::is_ours(&block) {
+                continue;
+            }
+            game.native_move_items(
+                dimension,
+                n,
+                transport::direction(f.opposite()),
+                dock,
+                transport::direction(f),
+                None,
+                DOCK_PUSH,
+            );
+        }
+    }
+}
+
+/// What the docks did lately, for their windows' lines (guide `ui.js` docks).
+#[derive(Default)]
+struct DockLog {
+    /// Items an unload dock took from workers: dock, when, how many.
+    received: Vec<(Pos, std::time::Instant, u32)>,
+    /// The worker a charge dock charges: its tool, its charge 0..1, when last.
+    charging: HashMap<Pos, (Option<Tool>, f64, std::time::Instant)>,
+}
+
+static DOCK_LOG: LazyLock<Mutex<DockLog>> = LazyLock::new(Mutex::default);
+
+fn dock_log() -> MutexGuard<'static, DockLog> {
+    let mut log = DOCK_LOG.lock().unwrap_or_else(PoisonError::into_inner);
+    let hour = std::time::Duration::from_secs(3600);
+    log.received.retain(|(_, at, _)| at.elapsed() < hour);
+    log
+}
+
+/// The lines a dock's window shows over its slots (guide `ui.js`: «Отдаёт груз · в магистраль»,
+/// «Принято за час · 312 предметов»; «Берёт груз · из сундука рядом», «Грузит · всё подряд»;
+/// «Заряжает · Лесоруб · 46%»).
+pub(super) fn dock_rows(game: &Game<'_>, pos: Pos, machine: Machine) -> Vec<Text> {
+    let beside = |pick: &dyn Fn(&str) -> bool| {
+        Face::ALL
+            .into_iter()
+            .any(|f| pick(&game.native_block(step(pos, f))))
+    };
+    let chest = beside(&|b: &str| b != AIR && !server::is_ours(b));
+    let magistral = beside(&|b: &str| b == content::HOUSING);
+    match machine {
+        Machine::DockCharge => {
+            let now = dock_log().charging.get(&pos).copied();
+            match now.filter(|(_, _, at)| at.elapsed().as_secs() < 2) {
+                Some((tool, share, _)) => {
+                    let mut who = tool_name(tool);
+                    who.push(Text::literal(format!(" · {:.0}%", share * 100.0)));
+                    vec![line("rustcraft.dock.charging", "Charges · %s", &[who])]
+                }
+                None => vec![line("rustcraft.dock.charging_none", "Charges · nobody now", &[])],
+            }
+        }
+        Machine::DockLoad => {
+            let from = if chest {
+                line("rustcraft.dock.takes_chest", "Takes cargo · from the chest beside it", &[])
+            } else {
+                line("rustcraft.dock.takes_net", "Takes cargo · from the magistral", &[])
+            };
+            vec![from, line("rustcraft.dock.loads_all", "Loads · everything", &[])]
+        }
+        _ => {
+            let to = if magistral {
+                line("rustcraft.dock.gives_net", "Gives cargo · to the magistral", &[])
+            } else if chest {
+                line("rustcraft.dock.gives_chest", "Gives cargo · to the chest beside it", &[])
+            } else {
+                line("rustcraft.dock.gives_none", "Gives cargo · nowhere yet", &[])
+            };
+            let hour: u32 = dock_log()
+                .received
+                .iter()
+                .filter(|(p, _, _)| *p == pos)
+                .map(|(_, _, n)| n)
+                .sum();
+            vec![
+                to,
+                line(
+                    "rustcraft.dock.per_hour",
+                    "Taken in an hour · %s items",
+                    &[Text::literal(hour.to_string())],
+                ),
+            ]
+        }
+    }
+}
+
 /// Each unload dock hands its load on to a container beside it (W6: «или соседний сундук»); the
 /// magistral takes it like any machine's products.
+
 fn push_docks(game: &mut Game<'_>, dimension: &str, docks: &BTreeSet<Pos>) {
     for &dock in docks {
         for f in Face::ALL {
@@ -1107,74 +1500,42 @@ fn board(w: &Worker, t: &Tuning) -> Text {
 }
 
 fn tool_name(tool: Option<Tool>) -> Text {
-    match tool {
-        Some(Tool::Saw) => line("rustcraft.worker.saw", "Lumberjack", &[]),
-        Some(Tool::Reaper) => line("rustcraft.worker.reaper", "Reaper", &[]),
-        Some(Tool::Hold) => line("rustcraft.worker.cargo", "Cargo cart", &[]),
-        Some(Tool::Grab) => line("rustcraft.worker.grab", "Collector", &[]),
-        Some(Tool::Scoop) => line("rustcraft.worker.scoop", "Digger", &[]),
-        Some(Tool::Shooter) => line("rustcraft.worker.guard", "Guard", &[]),
-        Some(Tool::Map) => line("rustcraft.worker.map", "Cartographer", &[]),
-        Some(Tool::Bore) => line("rustcraft.worker.bore", "Tunneler", &[]),
-        None => line("rustcraft.worker.bare", "Chassis", &[]),
-    }
-}
-
-pub(super) fn note_text(note: Note) -> Text {
-    let (key, fallback) = match note {
-        Note::Working => ("rustcraft.worker.working", "Working"),
-        Note::Unloading => ("rustcraft.worker.unloading", "Unloading"),
-        Note::Charging => ("rustcraft.worker.charging", "Charging"),
-        Note::ToUnload => ("rustcraft.worker.to_unload", "Going to unload"),
-        Note::ToCharge => ("rustcraft.worker.to_charge", "Going to charge"),
-        Note::NoTool => ("rustcraft.worker.no_tool", "No tool"),
-        Note::NoUnloadDock => ("rustcraft.worker.no_unload", "No unload dock on the way"),
-        Note::NoChargeDock => ("rustcraft.worker.no_charge", "No charge dock on the way"),
-        Note::Flat => ("rustcraft.worker.flat", "Battery empty"),
-        Note::NothingToSow => ("rustcraft.worker.nothing_to_sow", "Nothing to sow"),
-        Note::DockFull => (
-            "rustcraft.worker.dock_full",
-            "Waiting: the unload dock is full",
-        ),
-        Note::DockEmpty => (
-            "rustcraft.worker.dock_empty",
-            "Waiting: the charge dock has no energy",
-        ),
-        Note::NoWay => ("rustcraft.worker.no_way", "No rail to ride"),
-        Note::ToLoad => ("rustcraft.worker.to_load", "Going to load"),
-        Note::Loading => ("rustcraft.worker.loading", "Loading"),
-        Note::NoLoadDock => ("rustcraft.worker.no_load", "No load dock on the way"),
-        Note::NoCargo => ("rustcraft.worker.no_cargo", "Waiting for cargo"),
-        Note::NoRails => ("rustcraft.worker.no_rails", "Out of rails"),
-        Note::LavaAhead => ("rustcraft.worker.lava", "Lava ahead and no blocks"),
-        Note::NothingToDig => (
-            "rustcraft.worker.nothing_to_dig",
-            "Nothing to dig beside the way",
-        ),
-    };
+    let (key, fallback) = rustcraft_rules::worker::wire::tool_key(tool);
     line(key, fallback, &[])
 }
 
-/// Every client is told each seat, its heading and its tool (rustcraft_station::on_net).
-fn notes(game: &mut Game<'_>, level: &LevelFleet) {
-    let mut bytes = Vec::new();
-    for w in &level.fleet.workers {
-        let Some(&s) = level.seats.get(&w.id) else {
-            continue;
-        };
-        bytes.extend(s.to_le_bytes());
-        bytes.extend(w.yaw().unwrap_or(-90.0).to_le_bytes());
-        bytes.push(match w.tool {
-            None => 0,
-            Some(Tool::Saw) => 1,
-            Some(Tool::Reaper) => 2,
-            // The worker model has no part for the slice-10 tools: the chassis alone.
-            Some(Tool::Hold | Tool::Grab | Tool::Scoop | Tool::Shooter | Tool::Map | Tool::Bore) => 0,
-        });
-    }
-    if bytes.is_empty() {
+pub(super) fn note_text(note: Note) -> Text {
+    let (key, fallback, _) = rustcraft_rules::worker::wire::note_key(note);
+    line(key, fallback, &[])
+}
+
+/// Every client is told each seat, its heading, tool, the mount of its rail, whether its tool
+/// works and on what (rustcraft_rules::worker::wire, rustcraft_station::on_net).
+fn notes(game: &mut Game<'_>, level: &LevelFleet, net: &Network) {
+    use rustcraft_rules::worker::{pose, wire};
+    let seats: Vec<wire::Seat> = level
+        .fleet
+        .workers
+        .iter()
+        .filter_map(|w| {
+            let seat = *level.seats.get(&w.id)?;
+            let mount = rustcraft_rules::worker::mount(net, w.cell);
+            let yaw = w.yaw().or_else(|| pose::off_the_wall(mount)).unwrap_or(-90.0);
+            Some(wire::Seat {
+                seat,
+                yaw,
+                tool: w.tool,
+                mount,
+                // The cartographer's drum turns while it charts its way (poses.js `map`).
+                busy: w.busy > 0.0 || (w.tool == Some(Tool::Map) && w.note == Note::Working),
+                aim: w.aim.map(|p| p.map(|c| c as f32 + 0.5)),
+            })
+        })
+        .collect();
+    if seats.is_empty() {
         return;
     }
+    let bytes = wire::encode(&seats);
     for p in game.native_server_players() {
         let _ = game.native_net_send_to_player(p.uuid, NOTES, &bytes);
     }
@@ -1226,12 +1587,9 @@ fn windows(game: &mut Game<'_>, dimension: &str, level: &mut LevelFleet, t: &Tun
             continue;
         };
         let items = cells(game, w, t);
-        let title = line(
-            "rustcraft.worker.window",
-            "Worker chassis · sparksteel",
-            &[],
-        );
+        let title = window_title(w.tier);
         if let Some(window) = game.native_open_menu(uuid, ROWS, title, items) {
+            send_panel(game, uuid, w, t);
             state().sessions.insert(
                 uuid,
                 Session {
@@ -1254,11 +1612,12 @@ fn windows(game: &mut Game<'_>, dimension: &str, level: &mut LevelFleet, t: &Tun
             game.native_close_menu(c.uuid);
             continue;
         };
-        if click(game, c.uuid, c.slot, w, t) {
+        if click(game, c.uuid, c.slot, c.shift, w, t) {
             level.dirty = true;
         }
         let items = cells(game, w, t);
         game.native_set_menu_items(c.uuid, items);
+        send_panel(game, c.uuid, w, t);
     }
     // Open windows follow their worker each second.
     if level.ticks.is_multiple_of(BOARD_EVERY) {
@@ -1272,6 +1631,7 @@ fn windows(game: &mut Game<'_>, dimension: &str, level: &mut LevelFleet, t: &Tun
             if let Some(w) = level.fleet.workers.iter().find(|w| w.id == id) {
                 let items = cells(game, w, t);
                 game.native_set_menu_items(uuid, items);
+                send_panel(game, uuid, w, t);
             } else {
                 game.native_close_menu(uuid);
             }
@@ -1279,7 +1639,21 @@ fn windows(game: &mut Game<'_>, dimension: &str, level: &mut LevelFleet, t: &Tun
     }
 }
 
+/// The window's title by the chassis's tier (guide `chassis`: «Шасси работника · из искростали»).
+pub(super) fn window_title(tier: u8) -> Text {
+    let (key, fallback) = rustcraft_rules::worker::wire::window_key(tier);
+    line(key, fallback, &[])
+}
+
+/// The chassis window's panel to the player who has it open (rustcraft_station::draw_chassis).
+fn send_panel(game: &mut Game<'_>, uuid: u128, w: &Worker, t: &Tuning) {
+    use rustcraft_rules::worker::wire::{PANEL, Panel};
+    let _ = game.native_net_send_to_player(uuid, PANEL, &Panel::of(w, t).encode());
+}
+
 /// Gives `count` of `item` (a hold's name) to the player; how many they took.
+
+
 fn give(game: &mut Game<'_>, uuid: u128, item: &str, count: u32) -> u32 {
     match game.native_give_stack(uuid, util::hold_stack(item, count)) {
         Some(left) => count - left.count.min(count),
@@ -1290,7 +1664,18 @@ fn give(game: &mut Game<'_>, uuid: u128, item: &str, count: u32) -> u32 {
 /// A click: on the tool, an upgrade or the hold it goes to the player; on an item of the
 /// player's inventory below, that item goes in (a tool to the tool slot, an upgrade to a free
 /// slot, anything else to the hold). Whether the worker changed.
-fn click(game: &mut Game<'_>, uuid: u128, slot: usize, w: &mut Worker, t: &Tuning) -> bool {
+fn click(
+    game: &mut Game<'_>,
+    uuid: u128,
+    slot: usize,
+    shift: bool,
+    w: &mut Worker,
+    t: &Tuning,
+) -> bool {
+    // H6: a click on the state cell clears the filter.
+    if slot == NOTE_CELL {
+        return !std::mem::take(&mut w.filter).is_empty();
+    }
     if slot == TOOL_CELL {
         let Some(tool) = w.tool else { return false };
         if give(game, uuid, tool.item(), 1) == 1 {
@@ -1340,6 +1725,10 @@ fn click(game: &mut Game<'_>, uuid: u128, slot: usize, w: &mut Worker, t: &Tunin
         return false;
     };
     let item = stack.item.to_string();
+    // H6: a shift-click names the item in the filter; the item stays with the player.
+    if shift {
+        return w.filter_add(&item);
+    }
     let (keep, back): (u32, Option<String>) = if let Some(tool) = Tool::of(&item) {
         let old = w.tool.replace(tool);
         // A cargo hold changes the hold's size (guide `tool_hold`).
@@ -1416,15 +1805,15 @@ fn cells(game: &Game<'_>, w: &Worker, t: &Tuning) -> Vec<Option<ItemStack>> {
         ),
     });
     for (k, cell) in UPGRADE_CELLS.enumerate() {
-        out[cell] = Some(match w.upgrades.get(k).copied().flatten() {
-            Some(m) => named(
+        out[cell] = Some(match w.upgrades.get(k) {
+            Some(Some(m)) => named(
                 m.item(),
                 1,
                 Text::translate(&format!("item.{}", m.item().replace(':', ".")), &[]),
                 &[hint("rustcraft.worker.upgrade_hint", "Click: take it back")],
                 false,
             ),
-            None => named(
+            Some(None) => named(
                 "minecraft:gray_stained_glass_pane",
                 1,
                 line("rustcraft.worker.upgrade_slot", "Upgrade slot", &[]),
@@ -1434,44 +1823,22 @@ fn cells(game: &Game<'_>, w: &Worker, t: &Tuning) -> Vec<Option<ItemStack>> {
                 )],
                 false,
             ),
+            // U4: a socket this chassis's tier does not have.
+            None => named(
+                "minecraft:black_stained_glass_pane",
+                1,
+                line(
+                    "rustcraft.worker.socket_locked",
+                    "A socket of a crystallite or starsteel chassis",
+                    &[],
+                ),
+                &[],
+                false,
+            ),
         });
     }
     let cap = w.capacity(t);
     let percent = (100.0 * w.charge / cap.max(1.0)).round();
-    out[CHARGE_CELL] = Some(named(
-        "minecraft:redstone",
-        1,
-        line(
-            "rustcraft.worker.charge",
-            "Charge: %s",
-            &[Text::literal(format!("{percent}%"))],
-        ),
-        &[
-            Text::literal(format!("{:.0} / {:.0} E", w.charge, cap)),
-            hint(
-                "rustcraft.worker.charge_hint",
-                "Under 20% it goes to the charge dock",
-            ),
-        ],
-        false,
-    ));
-    out[HOLD_CELL] = Some(named(
-        "minecraft:chest",
-        1,
-        line(
-            "rustcraft.worker.hold",
-            "Hold: %s of %s slots",
-            &[
-                Text::literal(w.hold.used().to_string()),
-                Text::literal(w.hold.slots.len().to_string()),
-            ],
-        ),
-        &[hint(
-            "rustcraft.worker.hold_hint",
-            "A full hold goes to the unload dock",
-        )],
-        false,
-    ));
     let bad = !matches!(
         w.note,
         Note::Working | Note::Unloading | Note::Charging | Note::ToUnload | Note::ToCharge
@@ -1484,7 +1851,38 @@ fn cells(game: &Game<'_>, w: &Worker, t: &Tuning) -> Vec<Option<ItemStack>> {
         },
         1,
         note_text(w.note),
-        &[],
+        &[
+            line(
+                "rustcraft.worker.charge",
+                "Charge: %s",
+                &[Text::literal(format!(
+                    "{percent}% · {:.0} / {:.0} E",
+                    w.charge, cap
+                ))],
+            ),
+            line(
+                "rustcraft.worker.hold",
+                "Hold: %s of %s slots",
+                &[
+                    Text::literal(w.hold.used().to_string()),
+                    Text::literal(w.hold.slots.len().to_string()),
+                ],
+            ),
+            hint(
+                "rustcraft.worker.charge_hint",
+                "Under 20% it goes to the charge dock",
+            ),
+            hint(
+                "rustcraft.worker.hold_hint",
+                "A full hold goes to the unload dock",
+            ),
+            filter_line(game, &w.filter),
+
+            hint(
+                "rustcraft.worker.filter_hint",
+                "Shift-click a plant or block in your inventory: into the filter; click here: clear it",
+            ),
+        ],
         false,
     ));
     for i in 0..(CELLS - HOLD_FIRST) {
@@ -1505,6 +1903,31 @@ fn cells(game: &Game<'_>, w: &Worker, t: &Tuning) -> Vec<Option<ItemStack>> {
         };
     }
     out
+}
+
+/// H6: what the filter names, or that it takes everything.
+pub(super) fn filter_line(game: &Game<'_>, filter: &[String]) -> Text {
+    if filter.is_empty() {
+        return line("rustcraft.worker.filter_all", "Filter: takes everything", &[]);
+    }
+    let mut names = Text::literal(String::new());
+    for (i, f) in filter.iter().enumerate() {
+        if i > 0 {
+            names.push(Text::literal(", "));
+        }
+        names.push(Text::translate(&item_key(game, f), &[]));
+    }
+    line("rustcraft.worker.filter", "Filter: %s", &[names])
+}
+
+/// The translation key of `id`: a block's `block.ns.path`, else the item's `item.ns.path`.
+fn item_key(game: &Game<'_>, id: &str) -> String {
+    let path = id.replace(':', ".");
+    if game.native_default_state(id).is_some() {
+        format!("block.{path}")
+    } else {
+        format!("item.{path}")
+    }
 }
 
 fn hint(key: &str, fallback: &str) -> Text {
@@ -1543,7 +1966,71 @@ pub(super) fn spawn_for_selftest(
     id
 }
 
+/// W3 for the self-test: worker `id` taken away as its one chassis item, read back from that
+/// item and set on rail `cell`; its new id.
+pub(super) fn as_item_for_selftest(
+    game: &mut Game<'_>,
+    dimension: &str,
+    id: u64,
+    cell: Pos,
+    t: &Tuning,
+) -> Result<u64, String> {
+    let w = worker_for_selftest(dimension, id).ok_or("no such worker")?;
+    remove_for_selftest(game, dimension, id);
+    let stack = worker_stack(&w);
+    if chassis::tier_of(&stack.item) != Some(w.tier) {
+        return Err(format!("the item is {}", stack.item));
+    }
+    let packed = packed_of(&stack).ok_or("the chassis item carries no worker")?;
+    let mut level = take_level(dimension);
+    let back = level.fleet.put_back(w.owner, cell, &packed, t);
+    level.dirty = true;
+    put_level(dimension, level);
+    back.ok_or_else(|| "the packed worker does not read".to_owned())
+}
+
+/// U4 for the self-test: chassis `item` set in worker `id`'s place; the old chassis's item.
+pub(super) fn swap_for_selftest(dimension: &str, id: u64, item: &str) -> Result<String, String> {
+    let mut s = state();
+    let level = s.levels.get_mut(dimension).ok_or("no workers in this level")?;
+    let w = level
+        .fleet
+        .workers
+        .iter_mut()
+        .find(|w| w.id == id)
+        .ok_or("no such worker")?;
+    let old = chassis::swap(w, item, server::tuning()).map_err(|e| format!("{e:?}"))?;
+    level.dirty = true;
+    Ok(old.to_owned())
+}
+
+/// W8 for the self-test: whether `owner` may place one more worker under a limit of `limit`.
+pub(super) fn may_place_for_selftest(owner: u128, limit: u32) -> bool {
+    rustcraft_rules::worker::config::ServerConfig {
+        workers_per_player: limit,
+    }
+    .may_add(owned(owner))
+}
+
+/// H6 for the self-test: worker `id`'s filter set to `items`.
+pub(super) fn filter_for_selftest(dimension: &str, id: u64, items: &[&str]) -> Result<(), String> {
+    let mut s = state();
+    let level = s.levels.get_mut(dimension).ok_or("no workers in this level")?;
+    let w = level
+        .fleet
+        .workers
+        .iter_mut()
+        .find(|w| w.id == id)
+        .ok_or("no such worker")?;
+    w.filter = items.iter().map(|i| (*i).to_owned()).collect();
+    level.dirty = true;
+    Ok(())
+}
+
 /// A worker as the server holds it now.
+
+
+
 pub(super) fn worker_for_selftest(dimension: &str, id: u64) -> Option<Worker> {
     state()
         .levels
@@ -1581,8 +2068,14 @@ pub(super) fn round_trip(dimension: &str) -> Result<(), String> {
     let back = encode_saved(&text)
         .and_then(|c| decode_saved(&c))
         .map_err(|e| format!("{e:?}"))?;
+    // The tools' aim is the client's pose only and is not saved.
+    let mut live = level.fleet.clone();
+    for w in &mut live.workers {
+        w.aim = None;
+    }
     match Fleet::decode(&back) {
-        Some(f) if f == level.fleet => Ok(()),
+        Some(f) if f == live => Ok(()),
+
         other => Err(format!("the fleet came back as {other:?}")),
     }
 }

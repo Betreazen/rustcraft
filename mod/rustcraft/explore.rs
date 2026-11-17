@@ -153,10 +153,17 @@ pub(super) fn map(game: &mut Game<'_>, dimension: &str, w: &mut Worker, cell: Po
             }
         }
     }
+    // Slice 18: after a whole stretch with nothing new it says so («Вокруг пути всё нанесено»).
+    w.found_as(reports.len(), MAP_IDLE_CELLS, rustcraft_rules::worker::Note::AllMapped);
     for r in reports {
         base::report(r);
     }
 }
+
+/// Rail cells in a row with nothing new before the cartographer says all is mapped: a loop of
+/// a few chunks.
+const MAP_IDLE_CELLS: u32 = 64;
+
 
 /// Twice a second for a player of this level: their biome and the structures round their feet
 /// are visited; the compass speaks.
@@ -206,4 +213,23 @@ pub(super) fn player(game: &mut Game<'_>, p: &horizon_client::mod_api::NativeSer
         None => line("rustcraft.compass.none", "No new places on the map", &[]),
     };
     tell(game, p.uuid, text);
+}
+
+/// Slice 18 (guide `tool_map`: «Найденные биомы и постройки … появляются на схеме в окне любой
+/// станции»): the biomes and the structures found in `dimension`, each `(id, block)`, and how many
+/// chunks of it the cartographers charted.
+pub(super) fn found_in(game: &Game<'_>, dimension: &str) -> (Vec<(String, Pos)>, Vec<(String, Pos)>, u32) {
+    let mut s = state();
+    load(&mut s, game);
+    let biomes = s.atlas.found.get(dimension).cloned().unwrap_or_default();
+    let sites = s.atlas.sites.get(dimension).cloned().unwrap_or_default();
+    let charted: std::collections::BTreeSet<(i32, i32)> = s
+        .atlas
+        .chunks
+        .values()
+        .flatten()
+        .filter(|c| c.0 == dimension)
+        .map(|c| (c.1, c.2))
+        .collect();
+    (biomes, sites, charted.len() as u32)
 }

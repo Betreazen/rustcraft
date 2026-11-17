@@ -1245,7 +1245,11 @@ fn listings(
         .map(|(p, v)| (*p, v.station))
         .collect();
     for (player, station) in viewers {
-        let listing = listing(game, level, spec, tuning, station);
+        let mut listing = listing(game, level, spec, tuning, station);
+        // Slice 18 (guide `tool_map`): what the cartographers found near this network.
+        let (biomes, sites, charted) = crate::game::rustcraft_explore::found_in(game, dimension);
+        listing.marks = wire::marks_near(&biomes, &sites, &listing.segments, MARK_MARGIN);
+        listing.charted = charted;
         let order: Vec<Pos> = listing.destinations.iter().map(|d| d.station).collect();
         send(game, player, LISTING, &wire::encode_listing(&listing));
         if let Some(v) = state().viewers.get_mut(&player) {
@@ -1300,8 +1304,15 @@ fn listing(
         on_rail: rail.is_some(),
         destinations,
         segments,
+        marks: Vec::new(),
+        charted: 0,
     }
 }
+
+/// How far from its lines a station's scheme shows the cartographers' finds: the band a
+/// cartographer with a radius module charts, two chunks and a half.
+const MARK_MARGIN: i32 = 40;
+
 
 fn destination(
     game: &Game<'_>,

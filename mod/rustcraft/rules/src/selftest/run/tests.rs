@@ -311,6 +311,22 @@ impl Bench for Fake {
     fn crystal_drawn(&self, _: Pos) -> Option<(Option<[i32; 3]>, bool, bool)> {
         None
     }
+    // ---- Slice 18, stream 6 (rail and workers) ----
+    fn worker_as_item(&mut self, id: u64, _: Pos) -> Result<u64, String> {
+        Ok(id)
+    }
+    fn swap_chassis(&mut self, _: u64, _: &str) -> Result<String, String> {
+        Ok(String::new())
+    }
+    fn worker_room(&self, _: u128, _: u32) -> bool {
+        true
+    }
+    fn set_worker_filter(&mut self, _: u64, _: &[&str]) -> Result<(), String> {
+        Ok(())
+    }
+
+
+
 }
 
 const PLOT: Area = Area {

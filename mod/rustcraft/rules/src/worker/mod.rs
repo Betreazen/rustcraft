@@ -7,13 +7,20 @@
 //! so (W4.c). These rules move it and choose; the bundle breaks blocks, moves items and energy and
 //! draws it.
 //!
-//! In this slice a worker rides floor rails only: a wall or ceiling rail ends its way.
+//! Slice 18: a worker rides every rail the capsule rides (W2: «тот же монорельс»): floor, wall,
+//! ceiling and the vertical, so a reaper climbs a jungle trunk, hangs over kelp or rides a lift
+//! between floors. Its tool's zone grows away from the block its rail hangs on (`zone_cells`).
 
+pub mod chassis;
+pub mod config;
 pub mod digging;
 pub mod bore;
 pub mod hold;
 pub mod plants;
+pub mod pivots;
+pub mod pose;
 pub mod trees;
+pub mod wire;
 
 use crate::geom::{Face, Pos, step};
 use crate::modules::{self, Module};
@@ -27,6 +34,9 @@ pub const CHASSIS: &str = "rustcraft:chassis";
 pub const UNLOAD_DOCK: &str = "rustcraft:dock_unload";
 pub const CHARGE_DOCK: &str = "rustcraft:dock_charge";
 pub const LOAD_DOCK: &str = "rustcraft:dock_load";
+/// H6: how many items or blocks a worker's filter names at most.
+pub const FILTER_MAX: usize = 9;
+
 
 /// The world as the tools read it.
 pub trait BlockView {
@@ -108,7 +118,7 @@ impl Tool {
             Tool::Reaper => plants::is_seed(item),
             Tool::Hold | Tool::Grab | Tool::Scoop | Tool::Shooter | Tool::Map => false,
             // The bore keeps its rails and the blocks it fills lava and gaps with.
-            Tool::Bore => item == bore::RAIL || bore::is_filler(item),
+            Tool::Bore => bore::is_rail(item) || bore::is_filler(item),
         }
     }
 }
@@ -158,6 +168,9 @@ pub enum Note {
     /// Slice 14, the bore: no rails in its hold, and lava ahead with nothing to close it with.
     NoRails,
     LavaAhead,
+    /// Slice 18, the cartographer: nothing new along its whole way (guide «Вокруг пути всё
+    /// нанесено»).
+    AllMapped,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -180,6 +193,23 @@ pub struct Worker {
     /// Slice 10: rail cells in a row its tool found nothing at (the scoop's diagnosis).
     #[serde(default)]
     pub idle: u32,
+    /// Slice 18 (H6): what its reaper or scoop takes, items or blocks; empty takes all.
+    #[serde(default)]
+    pub filter: Vec<String>,
+    /// Slice 18: its chassis's tier, 1 to 3 (U4: 3 / 5 / 7 sockets).
+    #[serde(default = "first_tier")]
+    pub tier: u8,
+    /// Slice 18: how much of a cell it rode past its last cell this tick (T4: a fast rail takes it
+    /// more than a cell a tick); the bundle rides it on while this is left, each cell worked.
+    #[serde(default)]
+    pub carry: f64,
+    /// Slice 18: the block its tool works on now, for the client's pose (not saved).
+    #[serde(skip)]
+    pub aim: Option<Pos>,
+}
+
+fn first_tier() -> u8 {
+    1
 }
 
 /// What one tick of riding came to.
@@ -204,26 +234,42 @@ pub struct Track<'a> {
     pub load: &'a BTreeSet<Pos>,
 }
 
-/// Whether `p` is a floor rail: the rails a worker rides in this slice.
-fn floor(net: &Network, p: Pos) -> bool {
-    net.rails.get(&p).is_some_and(|r| r.mount == Face::YNeg)
+/// Whether `p` is a rail: a worker rides every rail (slice 18), floor, wall or ceiling.
+fn on_rail(net: &Network, p: Pos) -> bool {
+    net.rails.contains_key(&p)
 }
 
-/// The floor rails a worker in `p` can ride to.
+/// The side of its cell the block the rail at `p` hangs on is behind (a floor's when no rail).
+pub fn mount(net: &Network, p: Pos) -> Face {
+    net.rails.get(&p).map_or(Face::YNeg, |r| r.mount)
+}
+
+/// The rails a worker in `p` can ride to: every rail joined to it.
 pub fn ways(net: &Network, p: Pos) -> Vec<Pos> {
     neighbours(net, p)
-        .into_iter()
-        .filter(|&n| floor(net, n))
-        .collect()
 }
 
-/// The floor rail cells beside each dock of `docks`, by a face: where a worker stops for it.
+/// The two unit steps across a mount: the axes a zone spreads along beside its depth.
+pub fn across(mount: Face) -> [Pos; 2] {
+    match mount {
+        Face::XNeg | Face::XPos => [[0, 1, 0], [0, 0, 1]],
+        Face::YNeg | Face::YPos => [[1, 0, 0], [0, 0, 1]],
+        Face::ZNeg | Face::ZPos => [[1, 0, 0], [0, 1, 0]],
+    }
+}
+
+/// `p` moved by `k` steps of `d`.
+pub fn moved(p: Pos, d: Pos, k: i32) -> Pos {
+    [p[0] + d[0] * k, p[1] + d[1] * k, p[2] + d[2] * k]
+}
+
+/// The rail cells beside each dock of `docks`, by a face: where a worker stops for it.
 pub fn dock_cells(net: &Network, docks: &BTreeSet<Pos>) -> BTreeMap<Pos, Pos> {
     let mut out = BTreeMap::new();
     for &d in docks {
         for f in Face::ALL {
             let r = step(d, f);
-            if floor(net, r) {
+            if on_rail(net, r) {
                 out.entry(r).or_insert(d);
             }
         }
@@ -274,7 +320,18 @@ impl Worker {
             busy: 0.0,
             note: Note::NoTool,
             idle: 0,
+            filter: Vec::new(),
+            tier: 1,
+            carry: 0.0,
+            aim: None,
         }
+    }
+
+    /// Its chassis becomes one of `tier`: as many sockets as that tier has, its upgrades kept in
+    /// their sockets (a lower tier's extra sockets are left out: `chassis::swap` never lowers).
+    pub fn set_tier(&mut self, tier: u8, _t: &Tuning) {
+        self.tier = tier.clamp(1, 3);
+        self.upgrades.resize(chassis::sockets(self.tier), None);
     }
 
     pub fn count(&self, kind: Module) -> u32 {
@@ -308,18 +365,46 @@ impl Worker {
         (t.tool_side[i], t.tool_height[i])
     }
 
-    /// Every cell of its tool's zone round rail cell `cell`, bottom up.
-    pub fn zone_cells(&self, cell: Pos, t: &Tuning) -> Vec<Pos> {
+    /// Every cell of its tool's zone round rail cell `cell` whose rail hangs on `mount`: `height`
+    /// layers away from the block it hangs on (up from a floor rail, down from a ceiling rail, out
+    /// from a wall), `side` cells across, the layer at the rail first. A reaper on a wall rail
+    /// also reaches the wall's own layer beside the block its rail hangs on: cocoa on the trunk's
+    /// other faces (guide `tool_reaper`, «по стволу джунглей за какао»).
+    pub fn zone_cells(&self, cell: Pos, mount: Face, t: &Tuning) -> Vec<Pos> {
         let (side, height) = self.zone(t);
+        let out_dir = mount.opposite().offset();
+        let [u, v] = across(mount);
+        let wall = !matches!(mount, Face::YNeg | Face::YPos);
+        let first = if wall && self.tool == Some(Tool::Reaper) {
+            -1
+        } else {
+            0
+        };
         let mut out = Vec::new();
-        for dy in 0..height {
-            for dx in -side..=side {
-                for dz in -side..=side {
-                    out.push([cell[0] + dx, cell[1] + dy, cell[2] + dz]);
+        for depth in first..height {
+            for a in -side..=side {
+                for b in -side..=side {
+                    if depth < 0 && a == 0 && b == 0 {
+                        continue;
+                    }
+                    out.push(moved(moved(moved(cell, out_dir, depth), u, a), v, b));
                 }
             }
         }
         out
+    }
+
+    /// The corners of its zone round `cell`, both included.
+    pub fn zone_box(&self, cell: Pos, mount: Face, t: &Tuning) -> (Pos, Pos) {
+        let mut lo = cell;
+        let mut hi = cell;
+        for p in self.zone_cells(cell, mount, t) {
+            for k in 0..3 {
+                lo[k] = lo[k].min(p[k]);
+                hi[k] = hi[k].max(p[k]);
+            }
+        }
+        (lo, hi)
     }
 
     /// Ticks a job of `ticks` takes: speed upgrades make the tool faster (A9: in full).
@@ -372,11 +457,10 @@ impl Worker {
             return self.from.filter(|f| all.contains(f));
         }
         if let Some(f) = self.from {
-            let d = [self.cell[0] - f[0], self.cell[2] - f[2]];
-            if let Some(&w) = forward
-                .iter()
-                .find(|w| [w[0] - self.cell[0], w[2] - self.cell[2]] == d)
-            {
+            let d = [self.cell[0] - f[0], self.cell[1] - f[1], self.cell[2] - f[2]];
+            if let Some(&w) = forward.iter().find(|w| {
+                [w[0] - self.cell[0], w[1] - self.cell[1], w[2] - self.cell[2]] == d
+            }) {
                 return Some(w);
             }
         }
@@ -385,6 +469,18 @@ impl Worker {
 
     /// One tick of riding.
     pub fn tick(&mut self, track: &Track<'_>, t: &Tuning) -> Step {
+        self.carry = 0.0;
+        self.advance(track, t, None)
+    }
+
+    /// Rides on in the same tick with what it rode past its last cell (`rides_on`).
+    pub fn ride_on(&mut self, track: &Track<'_>, t: &Tuning) -> Step {
+        let carried = std::mem::take(&mut self.carry);
+        self.advance(track, t, Some(carried))
+    }
+
+    /// A tick's ride: `gain` of a cell, or its rail's speed for a tick.
+    fn advance(&mut self, track: &Track<'_>, t: &Tuning, gain: Option<f64>) -> Step {
         if self.busy > 0.0 {
             self.busy = (self.busy - 1.0).max(0.0);
             return Step::Busy;
@@ -435,7 +531,7 @@ impl Worker {
         let Some(to) = self.to else {
             return Step::Stopped;
         };
-        if !floor(track.net, to) {
+        if !on_rail(track.net, to) {
             // The rail ahead is gone: look again from here.
             self.to = None;
             self.progress = 0.0;
@@ -446,10 +542,13 @@ impl Worker {
             self.note = Note::Flat;
             return Step::Stopped;
         }
-        self.progress += t.worker_speed / t.ticks_per_second;
+        // T4: as fast as the rail it rides onto (guide `monorail`: 8 / 14 / 22 / 32 bl/s); what
+        // it rode past a cell last tick comes first.
+        self.progress += gain.unwrap_or_else(|| self.speed(track.net, to, t) / t.ticks_per_second);
         if self.progress < 1.0 - 1e-9 {
             return Step::Moved;
         }
+        self.carry = (self.progress - 1.0).max(0.0);
         self.from = Some(self.cell);
         self.cell = to;
         self.to = None;
@@ -460,6 +559,27 @@ impl Worker {
         } else {
             Step::Moved
         }
+    }
+
+    /// Blocks a second on the rail at `to`: its tier's speed (T4).
+    pub fn speed(&self, net: &Network, to: Pos, t: &Tuning) -> f64 {
+        let tier = net.rails.get(&to).map_or(1, |r| r.tier);
+        t.rail_spec().speed_of(tier)
+    }
+
+    /// Whether it rode past a cell this tick and rides on in the same tick.
+    pub fn rides_on(&self) -> bool {
+        self.carry > 1e-9 && self.busy <= 0.0
+    }
+
+    /// Slice 18: whether a guard looks for a target where it stands after a tick that came to
+    /// `step`: on its patrol it shoots in each cell it comes into (`Arrived`); standing at a dock,
+    /// waiting or stopped it keeps shooting between shots (guide `tool_gun`: «патрулирует свой
+    /// участок и атакует»).
+    pub fn guards_standing(&self, step: Step) -> bool {
+        self.tool == Some(Tool::Shooter)
+            && self.busy <= 0.0
+            && matches!(step, Step::AtDock(_) | Step::Stopped)
     }
 
     /// Spends a tool job: `ticks` of work and `energy` E.
@@ -495,17 +615,56 @@ impl Worker {
     /// Its tool came into a cell and found `done` things to do there: after `idle_after` cells in
     /// a row with nothing, the scoop says so (guide `tool_scoop`).
     pub fn found(&mut self, done: usize, idle_after: u32) {
+        self.found_as(done, idle_after, Note::NothingToDig);
+    }
+
+    /// `found` with the state it says after `idle_after` empty cells: the scoop's «нечего
+    /// копать», the cartographer's «всё нанесено».
+    pub fn found_as(&mut self, done: usize, idle_after: u32, idle_note: Note) {
         if done > 0 {
             self.idle = 0;
-            if self.note == Note::NothingToDig {
+            if self.note == idle_note {
                 self.note = Note::Working;
             }
             return;
         }
         self.idle = self.idle.saturating_add(1);
         if self.idle >= idle_after {
-            self.note = Note::NothingToDig;
+            self.note = idle_note;
         }
+    }
+
+    /// W3: the worker as its chassis item carries it (custom data `rustcraft:worker`): tool, upgrades,
+    /// hold, charge and the rest of what it is, as JSON.
+    pub fn packed(&self) -> String {
+        serde_json::to_string(self).unwrap_or_default()
+    }
+
+    /// A packed worker set on rail `cell` for `owner` under `id`: what it carried kept, its way
+    /// and errand started afresh. None when `packed` does not read.
+    pub fn unpack(packed: &str, id: u64, owner: u128, cell: Pos, t: &Tuning) -> Option<Worker> {
+        let old: Worker = serde_json::from_str(packed).ok()?;
+        let mut w = Worker::new(id, owner, cell, t);
+        w.tool = old.tool;
+        w.hold = old.hold;
+        w.charge = old.charge;
+        w.filter = old.filter;
+        w.set_tier(old.tier, t);
+        w.upgrades = old.upgrades;
+        w.note = if w.tool.is_some() { Note::Working } else { Note::NoTool };
+        // Its own upgrades size its hold as before it was packed: nothing is left over.
+        let over = w.refit(t);
+        debug_assert!(over.is_empty());
+        Some(w)
+    }
+
+    /// H6: `item` goes into its filter (at most `FILTER_MAX` entries, each once); whether it did.
+    pub fn filter_add(&mut self, item: &str) -> bool {
+        if self.filter.len() >= FILTER_MAX || self.filter.iter().any(|f| f == item) {
+            return false;
+        }
+        self.filter.push(item.to_owned());
+        true
     }
 
     /// Back to work once the errand is done.
@@ -547,6 +706,21 @@ impl Fleet {
         let id = self.next_id;
         self.workers.push(Worker::new(id, owner, cell, t));
         id
+    }
+
+    /// W8: how many workers `owner` has in this level.
+    pub fn owned_by(&self, owner: u128) -> usize {
+        self.workers.iter().filter(|w| w.owner == owner).count()
+    }
+
+    /// W3: a worker taken away as one item set on rail `cell` again for `owner`, with all it
+    /// carried; its new id. None when `packed` does not read.
+    pub fn put_back(&mut self, owner: u128, cell: Pos, packed: &str, t: &Tuning) -> Option<u64> {
+        let id = self.next_id + 1;
+        let w = Worker::unpack(packed, id, owner, cell, t)?;
+        self.next_id = id;
+        self.workers.push(w);
+        Some(id)
     }
 }
 
@@ -640,7 +814,7 @@ pub(crate) mod tests {
             load: &none,
         };
         let mut w = worker(&t);
-        let per_cell = (t.ticks_per_second / t.worker_speed).ceil() as usize;
+        let per_cell = (t.ticks_per_second / t.rail_spec().speed_of(1)).ceil() as usize;
         let mut cells = Vec::new();
         for s in ride(&mut w, &track, &t, per_cell * 5) {
             if let Step::Arrived(p) = s {
@@ -649,6 +823,46 @@ pub(crate) mod tests {
         }
         assert_eq!(cells, vec![1, 2, 1, 0, 1]);
         assert!(w.charge < t.worker_battery);
+    }
+
+    #[test]
+    fn a_worker_rides_as_fast_as_its_rail_tier() {
+        // One second on a long line of each tier, riding on while it carries, as the bundle does:
+        // the tier's blocks a second, every cell arrived at.
+        let t = Tuning::default();
+        let none = BTreeSet::new();
+        for tier in 1..=4u8 {
+            let mut net = line(80);
+            for r in net.rails.values_mut() {
+                r.tier = tier;
+            }
+            let track = Track {
+                net: &net,
+                unload: &none,
+                charge: &none,
+                load: &none,
+            };
+            let mut w = worker(&t);
+            let mut arrived = 0;
+            for _ in 0..t.ticks_per_second as usize {
+                let mut step = w.tick(&track, &t);
+                loop {
+                    if let Step::Arrived(_) = step {
+                        arrived += 1;
+                    }
+                    if !w.rides_on() {
+                        break;
+                    }
+                    step = w.ride_on(&track, &t);
+                }
+            }
+            let speed = t.rail_spec().speed_of(tier);
+            assert!(
+                (arrived as f64 - speed).abs() <= 1.0,
+                "tier {tier}: {arrived} cells in a second, wanted {speed}"
+            );
+            assert_eq!(w.cell[0], arrived);
+        }
     }
 
     #[test]
@@ -780,7 +994,24 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn the_cartographer_says_when_all_is_mapped() {
+        let t = Tuning::default();
+        let mut w = Worker::new(1, 7, [0, 0, 0], &t);
+        w.tool = Some(Tool::Map);
+        w.note = Note::Working;
+        for _ in 0..5 {
+            w.found_as(0, 6, Note::AllMapped);
+        }
+        assert_eq!(w.note, Note::Working);
+        w.found_as(0, 6, Note::AllMapped);
+        assert_eq!(w.note, Note::AllMapped);
+        w.found_as(3, 6, Note::AllMapped);
+        assert_eq!(w.note, Note::Working);
+    }
+
+    #[test]
     fn a_fleet_survives_its_json() {
+
         let t = Tuning::default();
         let mut f = Fleet::default();
         let id = f.add(0xabc, [1, 2, 3], &t);
@@ -793,6 +1024,155 @@ pub(crate) mod tests {
         let old = f.encode().replace(",\"idle\":0", "");
         assert!(!old.contains("idle"));
         assert_eq!(Fleet::decode(&old), Some(f));
+    }
+
+    fn rail(net: &mut Network, p: Pos, mount: Face) {
+        net.rails.insert(p, Rail { tier: 1, mount });
+    }
+
+    #[test]
+    fn a_worker_rides_up_a_wall_rail_and_onto_the_ceiling() {
+        // A floor rail, a wall rail up three blocks (the wall at x = -1), a ceiling rail on top.
+        let t = Tuning::default();
+        let mut net = Network::default();
+        rail(&mut net, [1, 0, 0], Face::YNeg);
+        rail(&mut net, [0, 0, 0], Face::XNeg);
+        for y in 1..=3 {
+            rail(&mut net, [0, y, 0], Face::XNeg);
+        }
+        rail(&mut net, [1, 3, 0], Face::YPos);
+        let none = BTreeSet::new();
+        let track = Track {
+            net: &net,
+            unload: &none,
+            charge: &none,
+            load: &none,
+        };
+        let mut w = Worker::new(1, 7, [1, 0, 0], &t);
+        w.tool = Some(Tool::Reaper);
+        let mut cells = Vec::new();
+        for _ in 0..2000 {
+            if let Step::Arrived(p) = w.tick(&track, &t) {
+                cells.push(p);
+            }
+            if cells.len() == 6 {
+                break;
+            }
+        }
+        assert_eq!(
+            cells,
+            vec![[0, 0, 0], [0, 1, 0], [0, 2, 0], [0, 3, 0], [1, 3, 0], [0, 3, 0]],
+            "up the wall, onto the ceiling, back at its end"
+        );
+    }
+
+    #[test]
+    fn the_zone_grows_away_from_the_mount() {
+        let t = Tuning::default();
+        let mut w = Worker::new(1, 7, [0, 0, 0], &t);
+        w.tool = Some(Tool::Saw);
+        let (side, height) = w.zone(&t);
+        // A floor rail: up from the rail, as before slice 18.
+        let floor = w.zone_cells([0, 10, 0], Face::YNeg, &t);
+        assert_eq!(floor.len() as i32, height * (2 * side + 1).pow(2));
+        assert!(floor.iter().all(|p| p[1] >= 10 && p[1] < 10 + height));
+        // A ceiling rail: down from it.
+        let ceiling = w.zone_box([0, 10, 0], Face::YPos, &t);
+        assert_eq!((ceiling.0[1], ceiling.1[1]), (10 - height + 1, 10));
+        // A wall rail on a wall to the west: out east, across y and z.
+        let wall = w.zone_box([0, 10, 0], Face::XNeg, &t);
+        assert_eq!((wall.0[0], wall.1[0]), (0, height - 1));
+        assert_eq!((wall.0[1], wall.1[1]), (10 - side, 10 + side));
+        // A reaper on a wall rail also reaches the wall's layer, never the block it hangs on.
+        w.tool = Some(Tool::Reaper);
+        let reach = w.zone_cells([0, 10, 0], Face::XNeg, &t);
+        assert!(reach.contains(&[-1, 10, 1]), "a pod on the trunk's side face");
+        assert!(!reach.contains(&[-1, 10, 0]), "the trunk itself");
+        assert!(!w.zone_cells([0, 10, 0], Face::YNeg, &t).contains(&[0, 9, 1]));
+    }
+
+    #[test]
+    fn docks_beside_a_wall_rail_serve() {
+        let t = Tuning::default();
+        let mut net = Network::default();
+        for y in 0..4 {
+            rail(&mut net, [0, y, 0], Face::XNeg);
+        }
+        let unload = BTreeSet::from([[1, 3, 0]]);
+        let none = BTreeSet::new();
+        let track = Track {
+            net: &net,
+            unload: &unload,
+            charge: &none,
+            load: &none,
+        };
+        let mut w = worker(&t);
+        w.cell = [0, 0, 0];
+        for _ in 0..t.worker_hold {
+            w.hold.add("x", 1, 1);
+        }
+        let steps = ride(&mut w, &track, &t, 400);
+        assert_eq!(steps.last(), Some(&Step::AtDock([1, 3, 0])));
+        assert_eq!(w.cell, [0, 3, 0]);
+    }
+
+    #[test]
+    fn a_guard_aims_while_standing() {
+        let t = Tuning::default();
+        let mut w = Worker::new(1, 7, [0, 0, 0], &t);
+        w.tool = Some(Tool::Shooter);
+        assert!(w.guards_standing(Step::AtDock([0, 0, 1])));
+        assert!(w.guards_standing(Step::Stopped));
+        assert!(!w.guards_standing(Step::Arrived([1, 0, 0])), "it shoots there anyway");
+        w.busy = 3.0;
+        assert!(!w.guards_standing(Step::Stopped), "between shots");
+        w.busy = 0.0;
+        w.tool = Some(Tool::Saw);
+        assert!(!w.guards_standing(Step::Stopped));
+    }
+
+    #[test]
+    fn the_limit_refuses_one_more() {
+
+        let t = Tuning::default();
+        let mut f = Fleet::default();
+        let limit = config::ServerConfig {
+            workers_per_player: 2,
+        };
+        for _ in 0..2 {
+            assert!(limit.may_add(f.owned_by(7)));
+            f.add(7, [0, 0, 0], &t);
+        }
+        f.add(8, [0, 0, 0], &t);
+        assert_eq!(f.owned_by(7), 2);
+        assert!(!limit.may_add(f.owned_by(7)));
+        assert!(limit.may_add(f.owned_by(8)));
+    }
+
+    #[test]
+    fn a_worker_packs_into_its_chassis_and_back() {
+
+        let t = Tuning::default();
+        let mut f = Fleet::default();
+        let id = f.add(7, [1, 2, 3], &t);
+        let w = &mut f.workers[0];
+        w.tool = Some(Tool::Reaper);
+        w.upgrades[1] = Some(Module::Storage);
+        w.refit(&t);
+        w.hold.add("minecraft:wheat_seeds", 40, 64);
+        w.charge = 123.0;
+        w.errand = Errand::Unload;
+        let packed = w.packed();
+        f.workers.clear();
+        let back = f.put_back(9, [5, 6, 7], &packed, &t).unwrap();
+        assert_ne!(back, id);
+        let w = &f.workers[0];
+        assert_eq!((w.owner, w.cell, w.tool), (9, [5, 6, 7], Some(Tool::Reaper)));
+        assert_eq!(w.upgrades[1], Some(Module::Storage));
+        assert_eq!(w.hold.count("minecraft:wheat_seeds"), 40);
+        assert_eq!(w.hold.slots.len(), t.worker_hold + t.worker_hold_per_storage);
+        assert_eq!((w.charge, w.errand), (123.0, Errand::Work));
+        assert!(f.put_back(9, [0, 0, 0], "not json", &t).is_none());
     }
 
     #[test]

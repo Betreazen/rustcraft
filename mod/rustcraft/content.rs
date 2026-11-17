@@ -798,6 +798,15 @@ pub fn declare_items(items: &mut Vec<Item>) {
             ..Item::default()
         });
     }
+    // Slice 18, stream 6: the chassis of tiers 2 and 3 (U4: 5 and 7 sockets), one to a stack.
+    for id in &rustcraft_rules::worker::chassis::ITEMS[1..] {
+        items.push(Item {
+            id: (*id).into(),
+            template: "minecraft:iron_ingot".into(),
+            max_stack_size: Some(1),
+            ..Item::default()
+        });
+    }
     // Slice 10: the backpacks, one to a stack; their use opens them (rustcraft_backpack).
     for id in BACKPACKS {
         items.push(Item {

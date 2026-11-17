@@ -37,6 +37,8 @@ pub mod transport;
 pub mod turret;
 pub mod windows;
 pub mod workers;
+// Slice 18, stream 6 (rail and workers).
+pub mod s18_rail;
 
 use std::collections::BTreeMap;
 
@@ -333,6 +335,16 @@ pub trait Bench {
     /// How clients are told to draw the crystal at `pos`: a merged structure's box (its anchor),
     /// hidden (another block of it), and lit with solution.
     fn crystal_drawn(&self, pos: Pos) -> Option<(Option<[i32; 3]>, bool, bool)>;
+    // ---- Slice 18, stream 6 (rail and workers) ----
+    /// W3: worker `id` taken away as its one chassis item and that item placed on rail `cell`;
+    /// the new worker's id.
+    fn worker_as_item(&mut self, id: u64, cell: Pos) -> Result<u64, String>;
+    /// U4: chassis `item` clicked on worker `id`; the old chassis's item it gives back.
+    fn swap_chassis(&mut self, id: u64, item: &str) -> Result<String, String>;
+    /// W8: whether `owner` may place one more worker under a server limit of `limit`.
+    fn worker_room(&self, owner: u128, limit: u32) -> bool;
+    /// H6: worker `id`'s filter set to `items`.
+    fn set_worker_filter(&mut self, id: u64, items: &[&str]) -> Result<(), String>;
 }
 
 /// A mob as the self-test reads it.
@@ -512,6 +524,8 @@ pub fn catalog() -> Vec<Build> {
     all.extend(rest::ALL);
     // Slice 18, energy stream.
     all.extend(s18_energy::ALL);
+    // Slice 18, stream 6 (rail and workers).
+    all.extend(s18_rail::ALL);
     all
 }
 

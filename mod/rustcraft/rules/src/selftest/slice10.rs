@@ -472,10 +472,12 @@ fn load_dock_window(o: Pos, _: &Tuning) -> Scenario {
             b.place(dock, DOCK_LOAD, &[])?;
             b.put(dock, 0, COBBLE, 10)
         })
-        .until("its sheet: a line and a state", 60, move |b, _| {
+        .until("its sheet: its lines and a state", 60, move |b, _| {
             let s = sheet(b, dock)?;
-            Ok(s.rows.len() == 1 && s.status.is_some())
+            // Slice 18: «Берёт груз · …» and «Грузит · всё подряд», as the guide's window.
+            Ok(s.rows.len() == 2 && s.status.is_some())
         })
+
 }
 
 fn turbine_window(o: Pos, _: &Tuning) -> Scenario {
