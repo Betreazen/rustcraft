@@ -8,6 +8,7 @@
 //!   `craft`).
 //! - The alloy smelter, the autocrafter and the pump take a catalyst from a tank they touch, and
 //!   the accelerator speeds the pump up (guide `fluids`).
+//! - A slice-12 machine that opens on tier 3 or 4 has four module sockets (A5).
 //! - A broken tiered block drops its own tier's item: the loot tables in 26.3's form
 //!   (`match_block`), which the old `block_state_property` list was not.
 
@@ -18,13 +19,14 @@ use crate::machines::panel::ENERGY_SCALE;
 use crate::machines::processor::WorkMode;
 use crate::tuning::Tuning;
 
-pub const ALL: [Build; 6] = [
+pub const ALL: [Build; 7] = [
     pump_boost_mode,
     placer_and_breaker_by_tier,
     tiered_blocks_drop_their_tier,
     line_boost_on_a_fluid_net,
     machines_report_smelt_and_craft,
     catalysts_in_more_machines,
+    craft_machines_sockets_by_tier,
 ];
 
 const STONE: &str = "minecraft:stone";
@@ -275,6 +277,29 @@ fn catalysts_in_more_machines(o: Pos, t: &Tuning) -> Scenario {
         .wait(10)
         .check("the pump's bucket takes the accelerator's time", move |b, _| {
             same("ticks a bucket", b.menu_data(pump).get(pw::TICKS_AT).copied(), Some(fast))
+        })
+}
+
+fn craft_machines_sockets_by_tier(o: Pos, _: &Tuning) -> Scenario {
+    let cells = [
+        ("rustcraft:kitchen", 3usize, at(o, [1, 1, 0])),
+        ("rustcraft:brewer", 4, at(o, [3, 1, 0])),
+        ("rustcraft:enchanter", 4, at(o, [5, 1, 0])),
+    ];
+    Scenario::new("s18_craft_machines_sockets_by_tier", plot_area(o))
+        .then("a kitchen (tier 2), a brewer (tier 3) and an enchanter (tier 4)", move |b, _| {
+            for (block, _, p) in cells {
+                b.place(at(p, [0, -1, 0]), STONE, &[])?;
+                b.place(p, block, &[])?;
+            }
+            Ok(())
+        })
+        .wait(10)
+        .check("their windows have 3, 4 and 4 sockets", move |b, _| {
+            for (block, n, p) in cells {
+                same(block, b.sheet(p).map(|s| s.modules.len()), Some(n))?;
+            }
+            Ok(())
         })
 }
 

@@ -15,11 +15,15 @@ pub const TIER_KEY: &str = "tier";
 pub const DATA: usize = 1 + tiers::MAX_SOCKETS;
 
 /// How many sockets the block `block` has open, its block entity saying `saved` for its tier:
-/// 3 / 3 / 4 / 4 by tier for a tiered block, 3 for any other.
+/// 3 / 3 / 4 / 4 by tier for a tiered block, a slice-12 machine by the tier it opens on, 3 for
+/// any other.
 pub fn open(block: &str, saved: Option<i32>) -> usize {
     match tiers::family_of_block(block) {
         Some(f) => tiers::sockets(f.tier_from(saved.map(|t| t.to_string()).as_deref())),
-        None => crate::machines::sheet::SOCKETS,
+        // Slice 18 (cross): a slice-12 machine without tiers of its own, by its opening tier.
+        None => crate::utility::Util::of(block).map_or(crate::machines::sheet::SOCKETS, |u| {
+            crate::utility::sockets_for_tier(u.opening_tier())
+        }),
     }
 }
 
@@ -66,6 +70,15 @@ mod tests {
         assert_eq!(open("rustcraft:furnace", Some(3)), 4);
         assert_eq!(open("rustcraft:disintegrator", None), 4, "it opens on tier 3");
         assert_eq!(open("rustcraft:turret", Some(4)), 3, "no tiers: three");
+    }
+
+    #[test]
+    fn a_slice_12_machine_of_tier_3_or_4_has_four_sockets() {
+        // Slice 18 (cross): a craft machine with no tiers of its own has its opening tier's
+        // sockets (guide `SLOTS_BY_TIER`, `utility::sockets_for_tier`).
+        assert_eq!(open("rustcraft:kitchen", None), 3, "tier 2");
+        assert_eq!(open("rustcraft:brewer", None), 4, "tier 3");
+        assert_eq!(open("rustcraft:enchanter", None), 4, "tier 4");
     }
 
     #[test]

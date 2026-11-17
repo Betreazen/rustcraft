@@ -108,11 +108,11 @@
 
 ### Task 12: рецепт книги рецептов `aba|tst|aba`
 
-- [ ] `recipe/module_recipes.json` по `data.js:976`.
+- [x] Уже так: `recipe/module_recipes.json` — `aba|tst|aba` (кристаллит, книга, верстак, осколок), тест `every_module_has_a_recipe_and_the_slice_18_ones_are_the_handbooks` это держит. Кода нет.
 
 ### Task 13: четвёртое гнездо машин крафта среза 12 на ступенях 3–4
 
-- [ ] `Util::opening_tier`, `sockets_for_tier`, гнёзда листа `sheet.rs`.
+- [x] `machines::sockets::open`: машина среза 12 без своих ступеней — по `utility::sockets_for_tier(u.opening_tier())` (все пути гнёзд — нажатие, Shift-клик, окно — идут через `open`). Тест `a_slice_12_machine_of_tier_3_or_4_has_four_sockets`, самотест `s18_craft_machines_sockets_by_tier`.
 
 ### Task 14: модуль стака в машинах (256 в ячейке, запас в NBT как у печи)
 
