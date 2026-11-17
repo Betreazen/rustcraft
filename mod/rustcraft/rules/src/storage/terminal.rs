@@ -22,11 +22,13 @@ use crate::storage::{Limit, Store};
 pub const WIDTH: f32 = 214.0;
 pub const TITLE: [f32; 2] = [8.0, 6.0];
 /// The quick filter's tabs, in `Tab::ALL` order (slice 18: «своя» last).
+/// In-game check w3: «инструменты» (66 px) ran out of its 62 into «броня»; the tabs share the
+/// row by their words.
 pub const TABS: [Rect; 5] = [
-    [8.0, 16.0, 28.0, 12.0],
-    [38.0, 16.0, 36.0, 12.0],
-    [76.0, 16.0, 62.0, 12.0],
-    [140.0, 16.0, 36.0, 12.0],
+    [8.0, 16.0, 24.0, 12.0],
+    [34.0, 16.0, 34.0, 12.0],
+    [70.0, 16.0, 70.0, 12.0],
+    [142.0, 16.0, 34.0, 12.0],
     [178.0, 16.0, 28.0, 12.0],
 ];
 pub const SEARCH: Rect = [8.0, 30.0, 64.0, 12.0];
