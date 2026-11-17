@@ -248,7 +248,7 @@ pub(super) fn on_use_item_on(
     let Some(tier) = chassis::tier_of(&stack.item) else {
         return;
     };
-    let Some(player) = game.native_acting_player() else {
+    let Some(player) = crate::game::rustcraft_server::acting(game) else {
         return;
     };
     *claimed = true;
@@ -424,7 +424,7 @@ pub(super) fn on_interact_entity(
         return;
     };
     *claimed = true;
-    let Some(player) = game.native_acting_player() else {
+    let Some(player) = crate::game::rustcraft_server::acting(game) else {
         return;
     };
     let wrench = stack.is_some_and(|s| &*s.item == content::WRENCH);

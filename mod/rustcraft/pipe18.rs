@@ -51,7 +51,7 @@ pub(super) fn on_use_item_on(game: &mut Game<'_>, stack: &ItemStack, pos: Pos, c
     // The sneaking wrench lifts a machine with its contents (guide `wrench`).
     if !*claimed
         && &*stack.item == content::WRENCH
-        && let Some(player) = game.native_acting_player()
+        && let Some(player) = crate::game::rustcraft_server::acting(game)
         && player.sneaking
         && lift_to_player(game, &player, pos)
     {
@@ -64,7 +64,7 @@ pub(super) fn on_use_item_on(game: &mut Game<'_>, stack: &ItemStack, pos: Pos, c
     let Some(held) = node_tier::tier_of_item(&stack.item) else {
         return;
     };
-    let Some(player) = game.native_acting_player() else {
+    let Some(player) = crate::game::rustcraft_server::acting(game) else {
         return;
     };
     // A sneaking click places a node beside it, as any block does.

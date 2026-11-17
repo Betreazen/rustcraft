@@ -378,7 +378,7 @@ pub(super) fn look(nbt: &Compound) -> Option<String> {
 pub(super) fn on_use_item_on(game: &mut Game<'_>, player: u128, sneaking: bool, stack: &ItemStack, pos: Pos) -> bool {
     // Slice 18: the wrench sets a projector's corners, and lifts it with its plan.
     if &*stack.item == content::WRENCH
-        && let Some(dimension) = game.native_acting_player().map(|p| p.dimension)
+        && let Some(dimension) = crate::game::rustcraft_server::acting(game).map(|p| p.dimension)
         && crate::game::rustcraft_projector::on_wrench(game, player, &dimension, sneaking, pos)
     {
         return true;

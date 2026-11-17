@@ -1246,7 +1246,7 @@ pub(super) fn on_right_click_block(game: &mut Game<'_>, pos: Pos, canceled: &mut
     if *canceled || game.native_block(pos) != content::TANK {
         return;
     }
-    let Some(player) = game.native_acting_player() else {
+    let Some(player) = crate::game::rustcraft_server::acting(game) else {
         return;
     };
     let Some((held, _, true)) = game.native_held() else {

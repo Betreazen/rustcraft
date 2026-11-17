@@ -460,6 +460,23 @@ pub trait Bench {
         let _ = (id, modules);
         Err("no workers on this bench".into())
     }
+
+    // ---- Slice 18, final: a player's click ----
+    /// A player's right click with `held` (an item id, or `got:<id>` for a stack an earlier click
+    /// gave the player) on face `face` of the block at `pos`, sneaking or not, through the game's
+    /// own use, as a player's click reaches the server: every mod's right_click_block in its order,
+    /// then the block's own use, then the item's use_item_on and its placement. The ids of the
+    /// stacks the click gave the player.
+    fn click_block(
+        &mut self,
+        pos: Pos,
+        face: crate::geom::Face,
+        held: &str,
+        sneaking: bool,
+    ) -> Result<Vec<String>, String> {
+        let _ = (pos, face, held, sneaking);
+        Err("no player clicks on this bench".into())
+    }
 }
 
 /// A mob as the self-test reads it.

@@ -53,7 +53,7 @@ pub(super) fn on_key(game: &mut Game<'_>, key: &str, pressed: bool) {
         if let Err(e) = game.native_net_send_to_server(CHANNEL, &[k.byte()]) {
             log::warn!("rustcraft: the {} key was not sent: {e}", k.name());
         }
-    } else if let Some(p) = game.native_acting_player() {
+    } else if let Some(p) = crate::game::rustcraft_server::acting(game) {
         DUE.lock().unwrap_or_else(PoisonError::into_inner).push((p.uuid, k));
     }
 }

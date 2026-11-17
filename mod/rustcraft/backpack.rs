@@ -339,7 +339,7 @@ pub(super) fn on_use_item(game: &mut Game<'_>, stack: &ItemStack, claimed: &mut 
     let Some(slots) = rules::slots(&stack.item, t) else {
         return;
     };
-    let Some(player) = game.native_acting_player() else {
+    let Some(player) = crate::game::rustcraft_server::acting(game) else {
         return;
     };
     *claimed = true;
@@ -376,7 +376,7 @@ fn put_on(game: &mut Game<'_>, slot: i32) {
     let Some(id) = game.native_carried_stack(slot).filter(|s| *s.item == *rules::STAR).and_then(|s| id_of(s)) else {
         return;
     };
-    let Some(player) = game.native_acting_player() else { return };
+    let Some(player) = crate::game::rustcraft_server::acting(game) else { return };
     {
         let mut s = state();
         let Some(i) = s.wear.iter().position(|w| *w == (player.uuid, id)) else { return };

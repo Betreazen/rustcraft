@@ -463,7 +463,7 @@ fn point_compass(game: &mut Game<'_>, slot: i32) {
     if !holds {
         return;
     }
-    let Some(player) = game.native_acting_player() else { return };
+    let Some(player) = crate::game::rustcraft_server::acting(game) else { return };
     let needle = state().needles.get(&player.uuid).cloned();
     let want = needle.map(|(dimension, pos)| {
         Tag::Compound(horizon_world::nbt::Compound::from([
@@ -505,14 +505,14 @@ pub(super) fn on_use_item(game: &mut Game<'_>, stack: &ItemStack, claimed: &mut 
         return;
     }
     if *stack.item == *crate::game::rustcraft_explore::COMPASS {
-        if let Some(player) = game.native_acting_player() {
+        if let Some(player) = crate::game::rustcraft_server::acting(game) {
             *claimed = true;
             switch_compass(game, player.uuid);
         }
         return;
     }
     let Some(g) = Gear::of(&stack.item) else { return };
-    let Some(player) = game.native_acting_player() else { return };
+    let Some(player) = crate::game::rustcraft_server::acting(game) else { return };
     if player.sneaking {
         *claimed = true;
         // Slice 18: a weapon has no sockets: its books go on at the anvil.
@@ -934,7 +934,7 @@ pub(super) fn client_tick(game: &mut Game<'_>) {
             if let Err(e) = game.native_net_send_to_server(rules::RIFLE_SHOT_CHANNEL, &[]) {
                 log::warn!("rustcraft: a rifle shot was not sent: {e}");
             }
-        } else if let Some(p) = game.native_acting_player() {
+        } else if let Some(p) = crate::game::rustcraft_server::acting(game) {
             RIFLE_SHOTS.lock().unwrap_or_else(PoisonError::into_inner).push(p.uuid);
         }
     }

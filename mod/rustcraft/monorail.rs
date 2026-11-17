@@ -458,7 +458,7 @@ pub(super) fn on_button(game: &Game<'_>, pos: Pos, entity: &ModBlockEntity, id: 
     if entity.id != content::STATION {
         return;
     }
-    let (Some(index), Some(player)) = (window::go_index(id), game.native_acting_player()) else {
+    let (Some(index), Some(player)) = (window::go_index(id), crate::game::rustcraft_server::acting(game)) else {
         return;
     };
     state()
@@ -1447,7 +1447,7 @@ pub(super) fn on_right_click_block(game: &mut Game<'_>, pos: Pos, canceled: &mut
     if *canceled {
         return;
     }
-    let Some(player) = game.native_acting_player() else {
+    let Some(player) = crate::game::rustcraft_server::acting(game) else {
         return;
     };
     if player.sneaking {

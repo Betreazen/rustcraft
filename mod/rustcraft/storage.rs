@@ -1054,7 +1054,7 @@ pub(super) fn on_container_close(player: u128, menu: &str) {
 
 /// The storage the terminal at `terminal` shows, and the level it is in, for the acting player.
 fn terminal_storage(game: &Game<'_>, terminal: Pos) -> Option<(String, u32)> {
-    let player = game.native_acting_player()?;
+    let player = crate::game::rustcraft_server::acting(game)?;
     let id = with_level(&player.dimension, |level| {
         level.terminals.get(&terminal).copied().flatten()
     })
@@ -1080,7 +1080,7 @@ pub(super) fn on_button(
     };
     if let Press::Socket(k) = press {
         press_socket(entity, usize::from(k), carried);
-        match game.native_acting_player() {
+        match crate::game::rustcraft_server::acting(game) {
             Some(player) => {
                 orders::touch(&player.dimension);
                 let id = with_level(&player.dimension, |l| l.terminals.get(&pos).copied().flatten());
@@ -1109,7 +1109,7 @@ pub(super) fn on_button(
             } else {
                 Some(NO_BOOK)
             };
-            if let (Some((key, fallback)), Some(player)) = (refused, game.native_acting_player()) {
+            if let (Some((key, fallback)), Some(player)) = (refused, crate::game::rustcraft_server::acting(game)) {
                 tell(game, player.uuid, line(key, fallback, &[]));
             }
         }
@@ -1499,7 +1499,7 @@ pub(super) fn on_quick_move(
         one.count = 1;
         set_socket(&mut entity.nbt, k, Some(one));
         stack.count -= 1;
-        if let Some(player) = game.native_acting_player() {
+        if let Some(player) = crate::game::rustcraft_server::acting(game) {
             orders::touch(&player.dimension);
             let id = with_level(&player.dimension, |l| l.terminals.get(&pos).copied().flatten());
             if k == sockets::SOCKET_STACK

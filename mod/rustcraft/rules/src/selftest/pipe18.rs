@@ -9,7 +9,7 @@ use super::transport::{COBBLE, chest, fill, item_line, joint};
 use super::{Bench, Build, Scenario, at, count_of, plot_area};
 use crate::housing::Diagnosis;
 use crate::net::topology::ChannelKind;
-use crate::geom::Pos;
+use crate::geom::{Face, Pos};
 use crate::tuning::Tuning;
 
 pub const ALL: [Build; 10] = [
@@ -311,27 +311,53 @@ fn node_window_and_boost(o: Pos, t: &Tuning) -> Scenario {
 }
 
 /// Guide `wrench`: a click turns a machine a quarter clockwise; a sneaking click lifts it as one
-/// item that, placed again, holds what the machine held.
+/// item that, placed again, holds what the machine held. Every click is a player's click through
+/// the game's own use (`Bench::click_block`), so a handler that claims the click first fails it.
 fn wrench_turns_and_lifts(o: Pos, _t: &Tuning) -> Scenario {
+    const WRENCH: &str = "rustcraft:wrench";
+    const FURNACE: &str = "rustcraft:furnace";
     let f = at(o, [1, 0, 0]);
+    let c = at(o, [3, 0, 0]);
+    let under = at(o, [1, -1, 0]);
     Scenario::new("pipe_wrench_turns_and_lifts_machines", plot_area(o))
-        .then("an electric furnace facing north with 5 raw iron", move |b, _| {
-            b.place(f, "rustcraft:furnace", &[("facing", "north")])?;
+        .then("a furnace with 5 raw iron and a crusher facing north, stone under the furnace", move |b, _| {
+            b.place(under, "minecraft:stone", &[])?;
+            b.place(f, FURNACE, &[("facing", "north")])?;
+            b.place(c, "rustcraft:crusher", &[("facing", "north")])?;
             b.put(f, 0, "minecraft:raw_iron", 5)
         })
-        .check("a click turns it east", move |b, _| {
-            let to = b.pipe("rotate", f)?;
-            let now = b.property(f, "facing");
-            if to == "east" && now.as_deref() == Some("east") {
+        .then("a wrench click on each one's front", move |b, _| {
+            b.click_block(f, Face::ZNeg, WRENCH, false)?;
+            b.click_block(c, Face::ZNeg, WRENCH, false).map(|_| ())
+        })
+        .check("both turned east, the furnace still holding its iron", move |b, _| {
+            let now = [b.property(f, "facing"), b.property(c, "facing")];
+            let iron = count_of(&b.items(f), "minecraft:raw_iron");
+            if now.iter().all(|p| p.as_deref() == Some("east")) && iron == 5 {
                 Ok(())
             } else {
-                Err(format!("turned to {to}, facing {now:?}"))
+                Err(format!("facing {now:?}, {iron} raw iron"))
             }
         })
-        .then("lifted and placed back", move |b, _| b.pipe("lift_and_place", f).map(|_| ()))
-        .check("it holds its 5 raw iron again", move |b, _| {
+        .then("a sneaking wrench click lifts the furnace into the hand", move |b, _| {
+            let got = b.click_block(f, Face::ZNeg, WRENCH, true)?;
+            if got == [FURNACE] { Ok(()) } else { Err(format!("the click gave {got:?}")) }
+        })
+        .check("its place is empty", move |b, _| {
+            let now = b.block(f);
+            if now == "minecraft:air" { Ok(()) } else { Err(format!("{now} stayed")) }
+        })
+        .then("the lifted furnace placed back on the stone", move |b, _| {
+            b.click_block(under, Face::YPos, &format!("got:{FURNACE}"), true).map(|_| ())
+        })
+        .check("it stands there holding its 5 raw iron again", move |b, _| {
+            let block = b.block(f);
             let n = count_of(&b.items(f), "minecraft:raw_iron");
-            if n == 5 { Ok(()) } else { Err(format!("{n} raw iron after the lift")) }
+            if block == FURNACE && n == 5 {
+                Ok(())
+            } else {
+                Err(format!("{block} with {n} raw iron after the lift"))
+            }
         })
 }
 

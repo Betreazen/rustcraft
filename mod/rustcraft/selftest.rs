@@ -27,7 +27,7 @@ use crate::game::{
     rustcraft_storage as storage, rustcraft_window as window, rustcraft_workers as workers,
 };
 use crate::mod_api::NativeCommand;
-use horizon_client::{items::ItemStack, text::Text};
+use horizon_client::{items::ItemStack, mod_api::NativeUseTarget, text::Text};
 use horizon_core::geometry::Direction;
 use horizon_world::nbt::{Compound, Limits, Tag, read_network, write_network};
 use rustcraft_rules::{
@@ -73,6 +73,21 @@ struct Pending {
 
 static PENDING: LazyLock<Mutex<Option<Pending>>> = LazyLock::new(Mutex::default);
 static EPOCH: LazyLock<Instant> = LazyLock::new(Instant::now);
+
+/// Slice 18, final: the stacks the bench's clicks gave the fake player (`Bench::click_block`), for a
+/// later click to hold (`got:<id>`).
+static GOT: LazyLock<Mutex<Vec<ItemStack>>> = LazyLock::new(Mutex::default);
+
+fn got() -> MutexGuard<'static, Vec<ItemStack>> {
+    GOT.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+/// The first stack of `item` an earlier click gave, taken out of the store.
+fn take_got(item: &str) -> Option<ItemStack> {
+    let mut g = got();
+    let i = g.iter().position(|s| &*s.item == item)?;
+    Some(g.remove(i))
+}
 
 fn pending() -> MutexGuard<'static, Option<Pending>> {
     PENDING.lock().unwrap_or_else(PoisonError::into_inner)
@@ -944,6 +959,42 @@ impl Bench for GameBench<'_, '_> {
         fluids::bucket_on_tank(self.game, DIMENSION, pos, held)
             .map(str::to_owned)
             .map_err(|(_, why)| why.to_owned())
+    }
+
+    // Slice 18, final: a player's click through the game's own use.
+    fn click_block(&mut self, pos: Pos, face: Face, held: &str, sneaking: bool) -> Result<Vec<String>, String> {
+        let stack = match held.strip_prefix("got:") {
+            Some(item) => take_got(item).ok_or_else(|| format!("no {item} from an earlier click"))?,
+            None => ItemStack::new(held, 1),
+        };
+        let n = face.offset().map(f64::from);
+        let centre = pos.map(|c| f64::from(c) + 0.5);
+        let point: [f64; 3] = std::array::from_fn(|k| centre[k] + 0.5 * n[k]);
+        // The eye a block out from the face, looking at it (yaw 0 south, 90 west, 180 north).
+        let eye: [f64; 3] = std::array::from_fn(|k| centre[k] + 1.5 * n[k]);
+        let (yaw, pitch) = match face {
+            Face::ZNeg => (0.0, 0.0),
+            Face::ZPos => (180.0, 0.0),
+            Face::XNeg => (-90.0, 0.0),
+            Face::XPos => (90.0, 0.0),
+            Face::YPos => (0.0, 90.0),
+            Face::YNeg => (0.0, -90.0),
+        };
+        let target = NativeUseTarget::Block {
+            pos,
+            face: crate::game::rustcraft_transport::direction(face),
+            point,
+        };
+        // `native_give_stack` fills the fake inventory for the acting id (native_server.rs:1118).
+        let uuid = self.game.native_acting_id();
+        let game = &mut *self.game;
+        let used = server::as_bench_actor(uuid, DIMENSION, || {
+            game.native_use_as_player(stack, eye, yaw, pitch, target, sneaking)
+        })
+        .ok_or("the fake player could not act")?;
+        let ids = used.other.iter().map(|s| s.item.to_string()).collect();
+        got().extend(used.other);
+        Ok(ids)
     }
 
     // ---- Wave 2, w2-craft ----

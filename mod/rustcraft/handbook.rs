@@ -151,7 +151,7 @@ pub(super) fn on_use_item(game: &mut Game<'_>, stack: &ItemStack, claimed: &mut 
     if *claimed || &*stack.item != rules::ITEM {
         return;
     }
-    let Some(player) = game.native_acting_player() else {
+    let Some(player) = crate::game::rustcraft_server::acting(game) else {
         return;
     };
     *claimed = true;

@@ -184,6 +184,62 @@ pub(super) fn tell(game: &mut Game<'_>, player: u128, text: Text) {
     show(game, player, text);
 }
 
+// ---- Slice 18, final: the player whose click a hook hears ----
+//
+// Every handler asks `acting` instead of `native_acting_player`. In play both are the same. The
+// self-test's clicks go through the game's own use as `native_use_as_player`'s fake player
+// (rustcraft_selftest::click_block), which has no uuid of its own, so `native_acting_player`
+// reads None for it (game/native_server.rs:661-671); while the bench's click runs, `acting`
+// answers with that fake player instead, so the click meets every handler a player's would.
+
+/// The fake player of the bench's click under way: its uuid (the one `native_give_stack` fills
+/// the fake inventory for) and its dimension.
+static BENCH_ACTOR: Mutex<Option<(u128, String)>> = Mutex::new(None);
+
+/// The player whose action the hook hears: the acting player, or the bench's fake player.
+pub(super) fn acting(game: &Game<'_>) -> Option<NativeServerPlayer> {
+    if let Some(p) = game.native_acting_player() {
+        return Some(p);
+    }
+    let (uuid, dimension) = BENCH_ACTOR.lock().unwrap_or_else(PoisonError::into_inner).clone()?;
+    Some(NativeServerPlayer {
+        uuid,
+        name: "rustcraft_selftest".to_owned(),
+        permission: 0,
+        dimension,
+        position: [0.0; 3],
+        game_mode: 0,
+        health: 20.0,
+        yaw: 0.0,
+        pitch: 0.0,
+        entity_id: -1,
+        address: String::new(),
+        latency: 0,
+        protocol: 0,
+        xp_level: 0,
+        xp_progress: 0.0,
+        on_ground: true,
+        flying: false,
+        may_fly: false,
+        invulnerable: false,
+        walk_speed: 0.1,
+        fly_speed: 0.05,
+        sneaking: game.native_sneaking(),
+        eye_height: 1.62,
+        selected_slot: 0,
+        nickname: None,
+        hidden: None,
+    })
+}
+
+/// Runs `f` (a fake player's use) with `acting` answering for the fake player `uuid`.
+pub(super) fn as_bench_actor<R>(uuid: u128, dimension: &str, f: impl FnOnce() -> R) -> R {
+    *BENCH_ACTOR.lock().unwrap_or_else(PoisonError::into_inner) = Some((uuid, dimension.to_owned()));
+    let out = f();
+    *BENCH_ACTOR.lock().unwrap_or_else(PoisonError::into_inner) = None;
+    out
+}
+
 fn show(game: &mut Game<'_>, player: u128, text: Text) {
     if !game.native_action_bar(player, text) {
         log::warn!("rustcraft: no action bar line for {player:032x}: not on the server");
@@ -319,7 +375,7 @@ pub(super) fn on_use_item_on(
     // Spec 26: the wrench with sneaking lifts suspicious sand or gravel (rustcraft_utility).
     if !*claimed
         && item == content::WRENCH
-        && let Some(player) = game.native_acting_player()
+        && let Some(player) = acting(game)
         && rustcraft_rules::utility::found::wrench_lifts(&game.native_block(pos), player.sneaking)
     {
         *claimed = true;
@@ -328,7 +384,7 @@ pub(super) fn on_use_item_on(
     }
     // Slice 12: the facade on a housing or a node; the wrench pairs portal docks.
     if !*claimed
-        && let Some(player) = game.native_acting_player()
+        && let Some(player) = acting(game)
     {
         if item == content::WRENCH && game.native_block(pos) == "rustcraft:portal_dock" {
             *claimed = true;
@@ -350,7 +406,7 @@ pub(super) fn on_use_item_on(
         return;
     }
     // None outside a player's hook on a server: a client predicting its own click does nothing.
-    let Some(player) = game.native_acting_player() else {
+    let Some(player) = acting(game) else {
         return;
     };
     if let Some(channel) = channel {
@@ -452,7 +508,7 @@ pub(super) fn on_place_block(game: &mut Game<'_>, stack: &ItemStack, pos: [i32; 
     crate::game::rustcraft_utility::on_placed(game, pos);
     // s18/pipe: a machine lifted by the wrench gets its contents back.
     crate::game::rustcraft_pipe18::on_place_block(game, stack, pos);
-    let Some(player) = game.native_acting_player() else {
+    let Some(player) = acting(game) else {
         mark_all_stale();
         return;
     };
@@ -476,7 +532,7 @@ pub(super) fn on_place_block(game: &mut Game<'_>, stack: &ItemStack, pos: [i32; 
 /// vanilla container's slice-2 joint mode goes with it.
 pub(super) fn on_destroy_block(game: &mut Game<'_>, pos: [i32; 3]) {
     let block = game.native_block(pos);
-    let Some(player) = game.native_acting_player() else {
+    let Some(player) = acting(game) else {
         return;
     };
     base::on_destroy_block(game, pos, &player.dimension, player.game_mode == CREATIVE);

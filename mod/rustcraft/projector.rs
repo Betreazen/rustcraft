@@ -272,7 +272,7 @@ fn storage_of(dimension: &str, pos: Pos) -> Option<u32> {
 /// «В руку»: a stack of the first missing block from the storage on the projector's magistral
 /// into the pressing player's inventory.
 fn to_hand(game: &mut Game<'_>, pos: Pos, entity: &ModBlockEntity) {
-    let Some(player) = game.native_acting_player() else { return };
+    let Some(player) = crate::game::rustcraft_server::acting(game) else { return };
     let Some(id) = storage_of(&player.dimension, pos) else {
         tell(game, player.uuid, line("rustcraft.util.projector_no_storage", "No storage on the magistral", &[]));
         return;

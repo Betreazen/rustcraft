@@ -413,7 +413,7 @@ pub(super) fn on_place_block(game: &mut Game<'_>, stack: &ItemStack, pos: Pos) {
     if !has_owner(&stack.item) {
         return;
     }
-    let Some(player) = game.native_acting_player() else {
+    let Some(player) = crate::game::rustcraft_server::acting(game) else {
         return;
     };
     state()
@@ -462,7 +462,7 @@ pub(super) fn on_right_click_block(game: &mut Game<'_>, pos: Pos, canceled: &mut
     if !has_server_window(&block) || *canceled {
         return;
     }
-    let Some(player) = game.native_acting_player() else {
+    let Some(player) = crate::game::rustcraft_server::acting(game) else {
         return;
     };
     if player.sneaking {
