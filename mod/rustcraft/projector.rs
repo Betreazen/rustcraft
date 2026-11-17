@@ -190,8 +190,10 @@ fn place_state(game: &mut Game<'_>, dimension: &str, at: Pos, state: &str) -> bo
 
 // ---- The projector ----
 
-/// Each tick a projector steps: 4 E/s while its ghost shows; without it the ghost goes out.
-pub(super) fn projector_step(game: &mut Game<'_>, pos: Pos, cost: f64) -> Shown {
+/// Each tick a projector steps: 4 E/s while its ghost shows; without it the ghost goes out. Wave 2
+/// (guide `projector` diagnoses): a ghost with no storage on the projector's magistral says
+/// «Нет склада на магистрали» (it still shows: the blocks can come by hand).
+pub(super) fn projector_step(game: &mut Game<'_>, dimension: &str, level: &crate::game::rustcraft_server::LevelNet, pos: Pos, cost: f64) -> Shown {
     let Some(e) = game.native_mod_block_entity(pos) else {
         return Shown::Idle("idle");
     };
@@ -208,7 +210,13 @@ pub(super) fn projector_step(game: &mut Game<'_>, pos: Pos, cost: f64) -> Shown 
     }
     let powered = spend(game, pos, cost);
     set_lit(game, pos, lit, powered);
-    if powered { Shown::Working } else { Shown::NoEnergy }
+    if !powered {
+        return Shown::NoEnergy;
+    }
+    if storage::storage_by(dimension, pos, &level.topology).is_none() {
+        return Shown::Idle("projector_no_storage");
+    }
+    Shown::Working
 }
 
 fn set_lit(game: &mut Game<'_>, pos: Pos, was: bool, now: bool) {

@@ -61,7 +61,7 @@ fn state() -> MutexGuard<'static, State> {
 pub(super) fn step(game: &mut Game<'_>, dimension: &str, level: &crate::game::rustcraft_server::LevelNet, pos: Pos, u: Util, cost: f64, _now: u64) -> Shown {
     // Slice 18: the projector and the building machine are rustcraft_projector's.
     match u {
-        Util::Projector => crate::game::rustcraft_projector::projector_step(game, pos, cost),
+        Util::Projector => crate::game::rustcraft_projector::projector_step(game, dimension, level, pos, cost),
         Util::Builder => crate::game::rustcraft_projector::build(game, dimension, level, pos, cost),
         _ => dock(game, pos, cost),
     }

@@ -7,6 +7,8 @@
 //! - Two fishing stations on one 5 × 5 of water: the second says the water is another's.
 //! - The craft machines of tier 2 go up to tier 4: a feeder swapped to tier 4 has four sockets
 //!   and its fourth takes a module; a kitchen of tier 4 cooks twice as fast as one of tier 2.
+//! - A projector showing its ghost with no storage on its magistral says «Нет склада на
+//!   магистрали».
 
 use super::craft18::{basin, socket, status_key, storage_on_a_net};
 use crate::storage::modules::{SOCKET_STACK, STACK_MODULES};
@@ -14,11 +16,12 @@ use super::{Build, Scenario, at, plot_area, same};
 use crate::geom::Pos;
 use crate::tuning::Tuning;
 
-pub const ALL: [Build; 4] = [
+pub const ALL: [Build; 5] = [
     projector_is_not_turned_by_the_wrench,
     terminal_takes_the_crystallite_stack_module,
     two_fisheries_on_one_patch,
     craft_machines_up_to_tier_four,
+    projector_says_no_storage,
 ];
 
 fn projector_is_not_turned_by_the_wrench(o: Pos, _: &Tuning) -> Scenario {
@@ -108,5 +111,21 @@ fn craft_machines_up_to_tier_four(o: Pos, _: &Tuning) -> Scenario {
             } else {
                 Err(format!("tier 2 {l}, tier 4 {h}"))
             }
+        })
+}
+
+fn projector_says_no_storage(o: Pos, _: &Tuning) -> Scenario {
+    use crate::machines::sheet::Press;
+    let p = at(o, [3, 1, 0]);
+    Scenario::new("w2_projector_says_no_storage", plot_area(o))
+        .then("a projector with energy remembers a stone beside it", move |b, _| {
+            b.place(at(o, [3, 0, 0]), "minecraft:stone", &[])?;
+            b.place(p, "rustcraft:projector", &[])?;
+            b.set_buffer(p, 400.0)?;
+            b.place(at(p, [1, 1, 0]), "minecraft:stone", &[])?;
+            b.press_cursor(p, Press::Toggle(0).id(), None).map(|_| ())
+        })
+        .until("its ghost shows and it says there is no storage on its magistral", 60, move |b, _| {
+            Ok(status_key(b, p) == "rustcraft.util.projector_no_storage")
         })
 }
