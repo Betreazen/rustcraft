@@ -51,8 +51,8 @@
 
 **Files:** `mod/content/data/rustcraft/recipe/*.json` (все 70 с `minecraft:amethyst_shard`: в `data.js` предмета аметиста нет, ключ `shard` везде — «Осколок кристалла»), `rules/src/modules.rs:578-580` (тест рецептов модулей), самотест `recipes_take_the_crystal_shard` (сетка зарядника и модуля скорости с `rustcraft:crystal_shard` даёт предмет, с аметистом — нет).
 
-- [ ] RED: тест в `modules.rs` ждёт `rustcraft:crystal_shard`.
-- [ ] Замена во всех рецептах, GREEN, коммит `fix: every recipe takes the crystal shard, as the handbook says`.
+- [x] RED: тест в `modules.rs` ждёт `rustcraft:crystal_shard`; новый тест `no_recipe_takes_the_amethyst_shard` обходит все рецепты контента (самотест не нужен: рецепты читает тест правил).
+- [x] Замена во всех рецептах, GREEN, коммит `fix: every recipe takes the crystal shard, as the handbook says`.
 - Узел (`recipe/node.json`) живёт на `s18/pipe`: при слиянии потока 1 заменить там тоже.
 
 ### Task 3a: шасси на `rustcraft_rules::tiers`

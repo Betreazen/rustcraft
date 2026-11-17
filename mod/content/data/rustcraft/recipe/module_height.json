@@ -10,7 +10,7 @@
     "a": "rustcraft:crystallite",
     "c": "minecraft:compass",
     "r": "minecraft:redstone",
-    "s": "minecraft:amethyst_shard"
+    "s": "rustcraft:crystal_shard"
   },
   "result": {
     "id": "rustcraft:module_height",

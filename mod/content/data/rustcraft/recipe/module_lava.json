@@ -9,7 +9,7 @@
   "key": {
     "a": "rustcraft:crystallite",
     "x": "minecraft:obsidian",
-    "s": "minecraft:amethyst_shard"
+    "s": "rustcraft:crystal_shard"
   },
   "result": {
     "id": "rustcraft:module_lava",

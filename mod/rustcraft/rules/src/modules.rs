@@ -571,13 +571,28 @@ mod tests {
     }
 
     #[test]
+    fn no_recipe_takes_the_amethyst_shard() {
+        // Slice 18: data.js has no amethyst; every `shard` of its recipes is the crystal shard.
+        let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../../content/data/rustcraft/recipe");
+        let amethyst: Vec<String> = std::fs::read_dir(dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| {
+                std::fs::read_to_string(e.path()).is_ok_and(|t| t.contains("minecraft:amethyst_shard"))
+            })
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .collect();
+        assert!(amethyst.is_empty(), "{amethyst:?}");
+    }
+
+    #[test]
     fn every_module_has_a_recipe_and_the_slice_18_ones_are_the_handbooks() {
         for (_, item) in ITEMS {
             recipe(item);
         }
-        // data.js; the shard is the amethyst one until the crystal shard is merged (stream 2).
+        // data.js; its shard is the crystal shard (stream 2's `rustcraft:crystal_shard`).
         let (a2, a3, a4) = ("rustcraft:sparksteel", "rustcraft:crystallite", "rustcraft:starsteel");
-        let shard = "minecraft:amethyst_shard";
+        let shard = "rustcraft:crystal_shard";
         let modr = |a: &str, x: &str| (vec!["axa", "xsx", "axa"], keyed(&[("a", a), ("x", x), ("s", shard)]));
         type Shaped<'a> = (Vec<&'a str>, Vec<(String, String)>);
         let cases: Vec<(Module, Shaped)> = vec![

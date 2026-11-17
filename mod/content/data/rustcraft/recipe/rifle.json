@@ -9,7 +9,7 @@
   "key": {
     "a": "rustcraft:starsteel",
     "r": "minecraft:redstone",
-    "s": "minecraft:amethyst_shard",
+    "s": "rustcraft:crystal_shard",
     "b": "minecraft:bow"
   },
   "result": {

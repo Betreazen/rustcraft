@@ -8,7 +8,7 @@
   ],
   "key": {
     "c": "rustcraft:crystallite",
-    "s": "minecraft:amethyst_shard",
+    "s": "rustcraft:crystal_shard",
     "x": "minecraft:iron_ingot"
   },
   "result": {

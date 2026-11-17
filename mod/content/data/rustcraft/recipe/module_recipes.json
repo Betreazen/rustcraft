@@ -10,7 +10,7 @@
     "a": "rustcraft:crystallite",
     "b": "minecraft:book",
     "t": "minecraft:crafting_table",
-    "s": "minecraft:amethyst_shard"
+    "s": "rustcraft:crystal_shard"
   },
   "result": {
     "id": "rustcraft:module_recipes",

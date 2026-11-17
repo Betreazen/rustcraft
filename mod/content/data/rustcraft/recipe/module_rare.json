@@ -9,7 +9,7 @@
   "key": {
     "a": "rustcraft:starsteel",
     "x": "minecraft:diamond",
-    "s": "minecraft:amethyst_shard"
+    "s": "rustcraft:crystal_shard"
   },
   "result": {
     "id": "rustcraft:module_rare",

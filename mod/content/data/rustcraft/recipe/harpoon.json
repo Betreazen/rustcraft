@@ -9,7 +9,7 @@
   "key": {
     "c": "rustcraft:crystallite",
     "b": "minecraft:crossbow",
-    "s": "minecraft:amethyst_shard"
+    "s": "rustcraft:crystal_shard"
   },
   "result": {
     "id": "rustcraft:harpoon",

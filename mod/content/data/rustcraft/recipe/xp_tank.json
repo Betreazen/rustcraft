@@ -9,7 +9,7 @@
   "key": {
     "c": "rustcraft:crystallite",
     "g": "minecraft:glass",
-    "s": "minecraft:amethyst_shard",
+    "s": "rustcraft:crystal_shard",
     "l": "minecraft:lapis_lazuli"
   },
   "result": {
