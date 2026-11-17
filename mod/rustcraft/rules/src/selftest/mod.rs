@@ -49,6 +49,8 @@ pub mod workers;
 pub mod s18_rail;
 // Slice 18, base and gear (stream 7).
 pub mod gear18;
+// Slice 18, last leftovers: the backpack.
+pub mod s18_last_pack;
 
 use std::collections::BTreeMap;
 
@@ -417,6 +419,13 @@ pub trait Bench {
     fn menu_data(&self, _pos: Pos) -> Vec<i32> {
         Vec::new()
     }
+    // Slice 18, last leftovers: the backpack's store.
+    /// The backpack's store without a player: a deposit past 99 with a stack module, the module
+    /// kept while a slot is past a plain stack, the store saved and read back, a slice-10 file
+    /// read, the window's message (rustcraft_backpack::self_test_store).
+    fn backpack_store(&mut self) -> Result<(), String> {
+        Err("no backpack store on this bench".into())
+    }
 }
 
 /// A mob as the self-test reads it.
@@ -614,6 +623,8 @@ pub fn catalog() -> Vec<Build> {
     all.extend(pipe18::ALL);
     // Slice 18, cross-stream agent.
     all.extend(s18_cross::ALL);
+    // Slice 18, last leftovers: the backpack.
+    all.extend(s18_last_pack::ALL);
     all
 }
 
