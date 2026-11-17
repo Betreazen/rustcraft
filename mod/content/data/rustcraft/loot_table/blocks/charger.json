@@ -12,15 +12,13 @@
             {
               "type": "minecraft:item",
               "name": "rustcraft:charger_4",
-              "conditions": [
-                {
-                  "condition": "minecraft:block_state_property",
-                  "block": "rustcraft:charger",
-                  "properties": {
-                    "tier": "4"
-                  }
+              "condition": {
+                "type": "minecraft:match_block",
+                "blocks": "rustcraft:charger",
+                "state": {
+                  "tier": "4"
                 }
-              ]
+              }
             },
             {
               "type": "minecraft:item",

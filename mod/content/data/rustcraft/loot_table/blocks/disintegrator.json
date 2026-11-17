@@ -12,15 +12,13 @@
             {
               "type": "minecraft:item",
               "name": "rustcraft:disintegrator_4",
-              "conditions": [
-                {
-                  "condition": "minecraft:block_state_property",
-                  "block": "rustcraft:disintegrator",
-                  "properties": {
-                    "tier": "4"
-                  }
+              "condition": {
+                "type": "minecraft:match_block",
+                "blocks": "rustcraft:disintegrator",
+                "state": {
+                  "tier": "4"
                 }
-              ]
+              }
             },
             {
               "type": "minecraft:item",

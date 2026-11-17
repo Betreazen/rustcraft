@@ -12,41 +12,35 @@
             {
               "type": "minecraft:item",
               "name": "rustcraft:furnace_2",
-              "conditions": [
-                {
-                  "condition": "minecraft:block_state_property",
-                  "block": "rustcraft:furnace",
-                  "properties": {
-                    "tier": "2"
-                  }
+              "condition": {
+                "type": "minecraft:match_block",
+                "blocks": "rustcraft:furnace",
+                "state": {
+                  "tier": "2"
                 }
-              ]
+              }
             },
             {
               "type": "minecraft:item",
               "name": "rustcraft:furnace_3",
-              "conditions": [
-                {
-                  "condition": "minecraft:block_state_property",
-                  "block": "rustcraft:furnace",
-                  "properties": {
-                    "tier": "3"
-                  }
+              "condition": {
+                "type": "minecraft:match_block",
+                "blocks": "rustcraft:furnace",
+                "state": {
+                  "tier": "3"
                 }
-              ]
+              }
             },
             {
               "type": "minecraft:item",
               "name": "rustcraft:furnace_4",
-              "conditions": [
-                {
-                  "condition": "minecraft:block_state_property",
-                  "block": "rustcraft:furnace",
-                  "properties": {
-                    "tier": "4"
-                  }
+              "condition": {
+                "type": "minecraft:match_block",
+                "blocks": "rustcraft:furnace",
+                "state": {
+                  "tier": "4"
                 }
-              ]
+              }
             },
             {
               "type": "minecraft:item",

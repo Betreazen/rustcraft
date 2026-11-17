@@ -438,7 +438,11 @@ mod tests {
         for tier in 1..=4u8 {
             let child = children
                 .iter()
-                .find(|c| c["conditions"][0]["properties"]["tier"] == tier.to_string())
+                // Slice 18 (cross): 26.3's form, one `match_block` condition on the tier.
+                .find(|c| {
+                    c["condition"]["type"] == "minecraft:match_block"
+                        && c["condition"]["state"]["tier"] == tier.to_string()
+                })
                 .unwrap_or_else(|| panic!("no loot for tier {tier}"));
             assert_eq!(child["name"], crate::net::node_tier::item_of_tier(tier));
         }

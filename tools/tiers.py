@@ -71,9 +71,9 @@ def loot(block, first):
         {
             "type": "minecraft:item",
             "name": item(block, first, tier),
-            "conditions": [
-                {"condition": "minecraft:block_state_property", "block": block, "properties": {"tier": str(tier)}}
-            ],
+            # 26.3's form (SRC crates/horizon-port-pack/src/carry.rs:1270-1276): one `condition`
+            # object; the old `conditions` list with `block_state_property` never holds there.
+            "condition": {"type": "minecraft:match_block", "blocks": block, "state": {"tier": str(tier)}},
         }
         for tier in range(first + 1, 5)
     ]

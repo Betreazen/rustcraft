@@ -12,28 +12,24 @@
             {
               "type": "minecraft:item",
               "name": "rustcraft:crafter_3",
-              "conditions": [
-                {
-                  "condition": "minecraft:block_state_property",
-                  "block": "rustcraft:crafter",
-                  "properties": {
-                    "tier": "3"
-                  }
+              "condition": {
+                "type": "minecraft:match_block",
+                "blocks": "rustcraft:crafter",
+                "state": {
+                  "tier": "3"
                 }
-              ]
+              }
             },
             {
               "type": "minecraft:item",
               "name": "rustcraft:crafter_4",
-              "conditions": [
-                {
-                  "condition": "minecraft:block_state_property",
-                  "block": "rustcraft:crafter",
-                  "properties": {
-                    "tier": "4"
-                  }
+              "condition": {
+                "type": "minecraft:match_block",
+                "blocks": "rustcraft:crafter",
+                "state": {
+                  "tier": "4"
                 }
-              ]
+              }
             },
             {
               "type": "minecraft:item",

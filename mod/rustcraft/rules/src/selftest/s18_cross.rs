@@ -3,6 +3,8 @@
 //! - The pump has the work modes (owner 2026-11-17): boost pumps a bucket in half the time for
 //!   three times the energy, and its window shows the mode.
 //! - The placer and the breaker work faster on a higher tier (A8): their windows' pace.
+//! - A broken tiered block drops its own tier's item: the loot tables in 26.3's form
+//!   (`match_block`), which the old `block_state_property` list was not.
 
 use super::{Build, Scenario, at, plot_area, same};
 use crate::geom::Pos;
@@ -11,7 +13,7 @@ use crate::machines::panel::ENERGY_SCALE;
 use crate::machines::processor::WorkMode;
 use crate::tuning::Tuning;
 
-pub const ALL: [Build; 2] = [pump_boost_mode, placer_and_breaker_by_tier];
+pub const ALL: [Build; 3] = [pump_boost_mode, placer_and_breaker_by_tier, tiered_blocks_drop_their_tier];
 
 const STONE: &str = "minecraft:stone";
 const LAVA: &str = "minecraft:lava";
@@ -89,4 +91,52 @@ fn placer_and_breaker_by_tier(o: Pos, t: &Tuning) -> Scenario {
                 pace_shown(b, p, &secs(ticks / (1.0 + step * above) / tps))
             }))
         })
+}
+
+fn tiered_blocks_drop_their_tier(o: Pos, _: &Tuning) -> Scenario {
+    // Every machine family on its top tier, and the node and the monorail (their own tables).
+    let blocks: Vec<&'static str> = crate::tiers::FAMILIES
+        .iter()
+        .map(|f| f.block)
+        .chain(["rustcraft:node", "rustcraft:monorail"])
+        .collect();
+    let cell = move |i: usize| at(o, [(i % 7) as i32, 1, (i / 7) as i32 * 2 - 1]);
+    let placed = blocks.clone();
+    Scenario::new("s18_tiered_blocks_drop_their_tier", plot_area(o))
+        .then("each tiered block placed on tier 4", move |b, _| {
+            for (i, block) in placed.iter().enumerate() {
+                b.place(at(cell(i), [0, -1, 0]), STONE, &[])?;
+                b.place(cell(i), block, &[("tier", "4")])?;
+            }
+            Ok(())
+        })
+        .check("broken with a pickaxe, each drops its tier 4 item", move |b, _| {
+            for (i, block) in blocks.iter().enumerate() {
+                let drops = b.break_block(cell(i), Some("minecraft:iron_pickaxe"))?;
+                let want = format!("{block}_4");
+                if !drops.iter().any(|(item, n)| *item == want && *n == 1) {
+                    return Err(format!("{block} on tier 4 dropped {drops:?}, not {want}"));
+                }
+            }
+            Ok(())
+        })
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn no_loot_table_keeps_the_old_condition_list() {
+        // 26.3 reads one `condition` object; `conditions` with `block_state_property` never held.
+        let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../../content/data/rustcraft/loot_table/blocks");
+        let old: Vec<String> = std::fs::read_dir(dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| {
+                std::fs::read_to_string(e.path())
+                    .is_ok_and(|t| t.contains("block_state_property") || t.contains("\"conditions\""))
+            })
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .collect();
+        assert!(old.is_empty(), "{old:?}");
+    }
 }

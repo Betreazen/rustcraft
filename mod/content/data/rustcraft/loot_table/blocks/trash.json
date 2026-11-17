@@ -12,41 +12,35 @@
             {
               "type": "minecraft:item",
               "name": "rustcraft:trash_2",
-              "conditions": [
-                {
-                  "condition": "minecraft:block_state_property",
-                  "block": "rustcraft:trash",
-                  "properties": {
-                    "tier": "2"
-                  }
+              "condition": {
+                "type": "minecraft:match_block",
+                "blocks": "rustcraft:trash",
+                "state": {
+                  "tier": "2"
                 }
-              ]
+              }
             },
             {
               "type": "minecraft:item",
               "name": "rustcraft:trash_3",
-              "conditions": [
-                {
-                  "condition": "minecraft:block_state_property",
-                  "block": "rustcraft:trash",
-                  "properties": {
-                    "tier": "3"
-                  }
+              "condition": {
+                "type": "minecraft:match_block",
+                "blocks": "rustcraft:trash",
+                "state": {
+                  "tier": "3"
                 }
-              ]
+              }
             },
             {
               "type": "minecraft:item",
               "name": "rustcraft:trash_4",
-              "conditions": [
-                {
-                  "condition": "minecraft:block_state_property",
-                  "block": "rustcraft:trash",
-                  "properties": {
-                    "tier": "4"
-                  }
+              "condition": {
+                "type": "minecraft:match_block",
+                "blocks": "rustcraft:trash",
+                "state": {
+                  "tier": "4"
                 }
-              ]
+              }
             },
             {
               "type": "minecraft:item",

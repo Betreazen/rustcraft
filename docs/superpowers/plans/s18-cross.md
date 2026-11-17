@@ -93,9 +93,9 @@
 
 ### Task 9: таблицы добычи в форме 26.3
 
-**Files:** Modify `tools/tiers.py` (`loot`: у записи `"condition": {"type": "minecraft:match_block", "blocks": <блок>, "state": {"tier": "N"}}`, форма из `SRC/crates/horizon-port-pack/src/carry.rs:1270-1276`), перегенерировать; вручную `loot_table/blocks/monorail.json`, `disintegrator.json`, `trash.json` (то, что не из `tiers.py`); самотест `tiered_blocks_drop_their_tier` (`break_block` каждого семейства на ступени 3 даёт `<блок>_3`).
+**Files:** Modify `tools/tiers.py` (`loot`: у записи `"condition": {"type": "minecraft:match_block", "blocks": <блок>, "state": {"tier": "N"}}`, форма из `SRC/crates/horizon-port-pack/src/carry.rs:1270-1276`), перегенерировать; вручную `loot_table/blocks/monorail.json`, `node.json` (не из `tiers.py`); самотест `tiered_blocks_drop_their_tier` (`break_block` каждого семейства на ступени 3 даёт `<блок>_3`).
 
-- [ ] Коммит `fix: loot tables in 26.3's form, a broken machine drops its own tier`.
+- [x] `tools/tiers.py` пишет `match_block`, 11 таблиц семейств перегенерированы; `monorail.json` и `node.json` (поток 1) переведены скриптом; тест правил `no_loot_table_keeps_the_old_condition_list`, тест узла в `pipe18.rs` читает новую форму; самотест `s18_tiered_blocks_drop_their_tier` (каждое семейство, узел и монорельс на ступени 4 → предмет `_4`). Коммит `fix: loot tables in 26.3's form, a broken machine drops its own tier`.
 
 ### Task 10: передачи потока 4
 

@@ -12,54 +12,46 @@
             {
               "type": "minecraft:item",
               "name": "rustcraft:monorail",
-              "conditions": [
-                {
-                  "condition": "minecraft:block_state_property",
-                  "block": "rustcraft:monorail",
-                  "properties": {
-                    "tier": "1"
-                  }
+              "condition": {
+                "type": "minecraft:match_block",
+                "blocks": "rustcraft:monorail",
+                "state": {
+                  "tier": "1"
                 }
-              ]
+              }
             },
             {
               "type": "minecraft:item",
               "name": "rustcraft:monorail_2",
-              "conditions": [
-                {
-                  "condition": "minecraft:block_state_property",
-                  "block": "rustcraft:monorail",
-                  "properties": {
-                    "tier": "2"
-                  }
+              "condition": {
+                "type": "minecraft:match_block",
+                "blocks": "rustcraft:monorail",
+                "state": {
+                  "tier": "2"
                 }
-              ]
+              }
             },
             {
               "type": "minecraft:item",
               "name": "rustcraft:monorail_3",
-              "conditions": [
-                {
-                  "condition": "minecraft:block_state_property",
-                  "block": "rustcraft:monorail",
-                  "properties": {
-                    "tier": "3"
-                  }
+              "condition": {
+                "type": "minecraft:match_block",
+                "blocks": "rustcraft:monorail",
+                "state": {
+                  "tier": "3"
                 }
-              ]
+              }
             },
             {
               "type": "minecraft:item",
               "name": "rustcraft:monorail_4",
-              "conditions": [
-                {
-                  "condition": "minecraft:block_state_property",
-                  "block": "rustcraft:monorail",
-                  "properties": {
-                    "tier": "4"
-                  }
+              "condition": {
+                "type": "minecraft:match_block",
+                "blocks": "rustcraft:monorail",
+                "state": {
+                  "tier": "4"
                 }
-              ]
+              }
             }
           ]
         }

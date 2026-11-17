@@ -12,28 +12,24 @@
             {
               "type": "minecraft:item",
               "name": "rustcraft:breaker_3",
-              "conditions": [
-                {
-                  "condition": "minecraft:block_state_property",
-                  "block": "rustcraft:breaker",
-                  "properties": {
-                    "tier": "3"
-                  }
+              "condition": {
+                "type": "minecraft:match_block",
+                "blocks": "rustcraft:breaker",
+                "state": {
+                  "tier": "3"
                 }
-              ]
+              }
             },
             {
               "type": "minecraft:item",
               "name": "rustcraft:breaker_4",
-              "conditions": [
-                {
-                  "condition": "minecraft:block_state_property",
-                  "block": "rustcraft:breaker",
-                  "properties": {
-                    "tier": "4"
-                  }
+              "condition": {
+                "type": "minecraft:match_block",
+                "blocks": "rustcraft:breaker",
+                "state": {
+                  "tier": "4"
                 }
-              ]
+              }
             },
             {
               "type": "minecraft:item",
