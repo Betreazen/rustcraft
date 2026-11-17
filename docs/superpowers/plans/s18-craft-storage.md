@@ -182,7 +182,7 @@
 ## Part E — hand-off
 
 ### Task 25: `mod/README.md` «Что проверить в игре: срез 18» (stream 5 section), last try green, report
-- [ ] done
+- [x] done 47f1831 (README section), try green 2e5b7a1
 
 ## Part F — orders handed over from stream 1 (orders.rs is this stream's)
 
