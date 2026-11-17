@@ -57,7 +57,8 @@ const PUSH_TO_CHEST: u32 = 27 * 64;
 
 #[derive(Default)]
 struct State {
-    ticks: u64,
+    /// Wave 2: each machine's own tick count, for its pushes.
+    pushes: HashMap<(String, Pos), u64>,
     shown: HashMap<(String, Pos), Shown>,
     /// Slice 18: where each miner and breaker puts what it dug (MN1), what it got and asked, E/s,
     /// and each miner's count of the ores ahead (its window's «Осталось»).
@@ -178,7 +179,7 @@ pub(super) fn read(game: &Game<'_>, pos: Pos, machine: Machine, t: &Tuning) -> O
             let total = rules::cells(pos, side, min_y);
             let m = read_miner(&entity.nbt);
             // Slice 18: past the window's 27 slots the miner keeps hidden cells.
-            let (usable, hidden) = rules::split_slots(rules::slots_of(&slots, t));
+            let (usable, hidden) = miner_split(game, pos, &slots, t);
             let room = has_room(&entity.items, usable)
                 || rules::hidden_room(&read_cells(&entity.nbt), hidden);
             Held {
@@ -243,6 +244,13 @@ pub(super) fn read(game: &Game<'_>, pos: Pos, machine: Machine, t: &Tuning) -> O
     Some(held)
 }
 
+/// The miner at `pos`'s window slots and hidden cells with its modules `slots` (storage modules
+/// add cells, a stack module adds hidden cells for what a window slot cannot hold).
+fn miner_split(game: &Game<'_>, pos: Pos, slots: &[Option<rustcraft_rules::modules::Module>], t: &Tuning) -> (usize, usize) {
+    let (usable, hidden) = rules::split_slots(rules::slots_of(slots, t));
+    (usable, rules::stacked_hidden(&base::module_items(game, pos), usable, hidden))
+}
+
 /// Slice 18 (cross, A8): how much faster the placer or the breaker at `pos` works on its tier
 /// than on its first; 1 for the miner, which has no tiers.
 fn tier_speed(game: &Game<'_>, pos: Pos, machine: Machine, entity: &ModBlockEntity, t: &Tuning) -> f64 {
@@ -267,6 +275,8 @@ pub(super) fn run(
         work,
         what,
     } = held;
+    // Wave 2 (MN1): whether it dug or broke something this tick.
+    let mut acted = false;
     let shown = match what {
         What::Miner {
             mut m,
@@ -296,6 +306,7 @@ pub(super) fn run(
             };
             if let Step::Dig(p) = step {
                 dig(game, &dimension, pos, p, off, (usable, hidden), t);
+                acted = true;
             }
             if m != before {
                 game.native_with_mod_block_entity(pos, |e| write_miner(&mut e.nbt, &m));
@@ -335,7 +346,7 @@ pub(super) fn run(
             Some(cell) if target && room => {
                 let before = cycle;
                 if cycle.tick(share, work, t.breaker_ticks) {
-                    take(
+                    acted = take(
                         game,
                         &dimension,
                         pos,
@@ -351,20 +362,31 @@ pub(super) fn run(
             _ => Shown::Nothing,
         },
     };
-    let push = {
+    let due = {
         let mut s = state();
-        s.ticks += 1;
         s.shown.insert((dimension.clone(), pos), shown);
         s.energy.insert((dimension.clone(), pos), (share * request, request));
-        s.ticks.is_multiple_of(PUSH_EVERY)
+        // Wave 2: each machine on its own count, so each pushes every PUSH_EVERY of its ticks
+        // (one count of them all left some never on a multiple).
+        let n = s.pushes.entry((dimension.clone(), pos)).or_insert(0);
+        *n += 1;
+        rules::push_due(*n, PUSH_EVERY)
     };
-    if push && machine != Machine::Placer {
-        let outlet = push_out(game, &dimension, pos);
-        state().outlets.insert((dimension, pos), outlet);
-        if machine == Machine::Miner {
-            settle_cells(game, pos, t);
+    if machine == Machine::Placer || !(due || acted) {
+        return;
+    }
+    // MN1 (guide `miner`: «если рядом сундук, всё идёт в него»): what it dug goes to a chest
+    // beside it the tick it was dug, and again after the hidden cells refill the slots, so the
+    // magistral never finds it in its slots while the chest has room.
+    // A load dock is still filled on its turn only.
+    let mut outlet = push_out(game, &dimension, pos, !due);
+    if machine == Machine::Miner && due {
+        settle_cells(game, pos, t);
+        if outlet == Outlet::Chest {
+            outlet = push_out(game, &dimension, pos, true);
         }
     }
+    state().outlets.insert((dimension, pos), outlet);
 }
 
 // ---- Slice 18: the miner's hidden cells (guide `mod_storage`: ×2 a module, past 27) ----
@@ -394,8 +416,7 @@ fn settle_cells(game: &mut Game<'_>, pos: Pos, t: &Tuning) {
     if before.iter().all(Option::is_none) {
         return;
     }
-    let (usable, hidden) = rules::split_slots(rules::slots_of(&base::modules_at(game, pos), t));
-    let modules = base::module_items(game, pos);
+    let (usable, hidden) = miner_split(game, pos, &base::modules_at(game, pos), t);
     let plain = |s: &ItemStack| s.damage == 0 && s.extra.is_none() && s.count > 0;
     let visible_before: Vec<Slot> = (0..usable)
         .map(|i| {
@@ -411,7 +432,8 @@ fn settle_cells(game: &mut Game<'_>, pos: Pos, t: &Tuning) {
         .collect();
     let mut visible = visible_before.clone();
     let mut cells = before.clone();
-    rules::settle(&mut visible, &mut cells, hidden, |i| rules::slot_max(&modules, machines::max_stack(game, i)));
+    // Wave 2: a window slot takes its item's own stack (a menu slot holds no more than 99).
+    rules::settle(&mut visible, &mut cells, hidden, |i| rules::window_max(machines::max_stack(game, i)));
     if cells == before {
         return;
     }
@@ -507,11 +529,12 @@ fn take(
         return false;
     };
     crate::game::rustcraft_utility::forget_grown(game, dimension, cell);
-    // Slice 18: a stack module makes the slots hold four times as much (guide `mod_stack`).
+    // Slice 18: a stack module makes the slots hold four times as much (guide `mod_stack`); wave 2:
+    // a window slot keeps to its item's stack, the rest goes into the hidden cells.
     let modules = base::module_items(game, at);
     let maxes: Vec<u32> = drops
         .iter()
-        .map(|d| rules::slot_max(&modules, machines::max_stack(game, &d.item)))
+        .map(|d| rules::window_max(machines::max_stack(game, &d.item)))
         .collect();
     let left: Vec<ItemStack> = game
         .native_with_mod_block_entity(at, |e| {
@@ -659,8 +682,9 @@ fn place(game: &mut Game<'_>, dimension: &str, pos: Pos, slot: usize, face: Face
 
 /// MN1 (slice 18: the guide's order): a miner's or a breaker's slots go to a chest beside it; with
 /// none, the magistral takes from them as from any machine's products (a housing beside it); with
-/// neither, they go into a load dock beside it for a cargo worker. Where they go now.
-fn push_out(game: &mut Game<'_>, dimension: &str, pos: Pos) -> Outlet {
+/// neither, they go into a load dock beside it for a cargo worker (not when `chest_only`: a push
+/// between its turns, right after it dug). Where they go now.
+fn push_out(game: &mut Game<'_>, dimension: &str, pos: Pos, chest_only: bool) -> Outlet {
     let mut chests = Vec::new();
     let mut docks = Vec::new();
     let mut magistral = false;
@@ -678,7 +702,7 @@ fn push_out(game: &mut Game<'_>, dimension: &str, pos: Pos) -> Outlet {
     let (faces, max) = match outlet {
         // The chest first: it takes all it can, before the magistral's next pull.
         Outlet::Chest => (chests, PUSH_TO_CHEST),
-        Outlet::LoadDock => (docks, PUSH),
+        Outlet::LoadDock if !chest_only => (docks, PUSH),
         _ => (Vec::new(), 0),
     };
     for f in faces {
@@ -848,7 +872,7 @@ pub(super) fn sheet(
             })
             .collect();
         // Slice 18: the window's slots, and the hidden cells past them counted.
-        let (shown_slots, hidden) = rules::split_slots(rules::slots_of(&slots, t));
+        let (shown_slots, hidden) = miner_split(game, pos, &slots, t);
         s.usable = u8::try_from(shown_slots).ok();
         if hidden > 0 {
             let (stacks, items) = hidden_counts(&entity.nbt);

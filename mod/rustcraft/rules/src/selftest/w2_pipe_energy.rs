@@ -7,13 +7,16 @@ use crate::net::topology::ChannelKind;
 use crate::geom::Pos;
 use crate::tuning::Tuning;
 
-pub const ALL: [Build; 6] = [
+pub const ALL: [Build; 9] = [
     wrench_lifts_a_tier_3_machine,
     energy_channel_caps_all_its_passes,
     windmill_blades_where_the_rotor_turns,
     broken_node_gives_back,
     lost_housing_drops_its_facade,
     node_window_shows_what_is_stored,
+    miner_with_chest_and_magistral,
+    two_miners_both_fill_their_docks,
+    miner_stack_module_keeps_to_the_menu,
 ];
 
 /// Guide `wrench`: a machine of a higher tier lifted by the wrench comes off as its tier's item
@@ -155,5 +158,106 @@ fn node_window_shows_what_is_stored(o: Pos, t: &Tuning) -> Scenario {
             let json = b.pipe("node_view:0", o)?;
             let v = crate::net::node_window::decode(json.as_bytes()).ok_or("the view does not read")?;
             Ok(v.stored > 4_000.0 && (v.capacity - capacity).abs() < 1e-6)
+        })
+}
+
+/// Two iron ores under a miner at `m`, each walled in stone (so no air reaches them).
+fn ores_under(b: &mut dyn super::Bench, ores: &[Pos]) -> Result<(), String> {
+    for &p in ores {
+        for d in [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]] {
+            b.place(at(p, d), "minecraft:stone", &[])?;
+        }
+        b.place(p, "minecraft:iron_ore", &[])?;
+    }
+    Ok(())
+}
+
+fn raw_iron(b: &dyn super::Bench, p: Pos) -> u32 {
+    count_of(&b.items(p), "minecraft:raw_iron")
+}
+
+/// MN1 (guide `miner`: «если рядом сундук, всё идёт в него»): a miner with a chest beside it and
+/// a housing of an item net beside it too puts all it digs into the chest; the net's chest gets
+/// none of it.
+fn miner_with_chest_and_magistral(o: Pos, _t: &Tuning) -> Scenario {
+    let m = at(o, [5, 6, 6]);
+    let chest = at(m, [0, 0, 1]);
+    let net_chest = at(m, [1, 0, -2]);
+    let ores = [at(m, [2, -6, -1]), at(m, [-2, -6, 1])];
+    Scenario::new("w2_miner_with_a_chest_beside_fills_only_the_chest", plot_area(o))
+        .then("a miner on two crystals, a chest and an item net beside it, two iron ores", move |b, _| {
+            b.place(m, "rustcraft:miner", &[])?;
+            b.place(at(m, [1, 0, 0]), "rustcraft:crystal", &[])?;
+            b.place(at(m, [-1, 0, 0]), "rustcraft:crystal", &[])?;
+            b.place(chest, "minecraft:chest", &[])?;
+            super::magistral::place_node(b, at(m, [0, 0, -3]), 1)?;
+            for k in [1, 2] {
+                let h = at(m, [0, 0, -k]);
+                b.place(h, super::magistral::HOUSING, &[])?;
+                b.set_channels(h, [channel(ChannelKind::Item, 1), None, None, None])?;
+            }
+            b.place(net_chest, "minecraft:chest", &[])?;
+            ores_under(b, &ores)?;
+            b.refresh();
+            Ok(())
+        })
+        .until("both raw iron are in the chest beside it", 1500, move |b, _| Ok(raw_iron(b, chest) >= 2))
+        .wait(40)
+        .check("the net's chest got none", move |b, _| {
+            let n = raw_iron(b, net_chest);
+            if n == 0 { Ok(()) } else { Err(format!("{n} raw iron went into the magistral")) }
+        })
+}
+
+/// MN1, wave 2: two miners side by side, each with a load dock on it, each fill their own dock
+/// (one push count for every machine left one of two never on its turn).
+fn two_miners_both_fill_their_docks(o: Pos, _t: &Tuning) -> Scenario {
+    let a = at(o, [5, 6, 6]);
+    let c = at(o, [22, 6, 6]);
+    let ores = [at(a, [2, -6, -1]), at(c, [-2, -6, 1])];
+    Scenario::new("w2_two_miners_both_fill_their_load_docks", plot_area(o))
+        .then("two miners on crystals, a load dock on each, an iron ore under each", move |b, _| {
+            for m in [a, c] {
+                b.place(m, "rustcraft:miner", &[])?;
+                b.place(at(m, [1, 0, 0]), "rustcraft:crystal", &[])?;
+                b.place(at(m, [-1, 0, 0]), "rustcraft:crystal", &[])?;
+                b.place(at(m, [0, 1, 0]), "rustcraft:dock_load", &[])?;
+            }
+            ores_under(b, &ores)
+        })
+        .until("each load dock has its miner's raw iron", 1500, move |b, _| {
+            Ok(raw_iron(b, at(a, [0, 1, 0])) >= 1 && raw_iron(b, at(c, [0, 1, 0])) >= 1)
+        })
+}
+
+/// Guide `mod_stack` against the menu's 99 a slot: a miner with a stack module and its nine
+/// window slots full of 64 raw iron puts the next raw iron into a hidden cell, not a window slot
+/// of 65; its window counts the stack module's seven hidden cells.
+fn miner_stack_module_keeps_to_the_menu(o: Pos, _t: &Tuning) -> Scenario {
+    let m = at(o, [5, 6, 6]);
+    let ores = [at(m, [2, -6, -1])];
+    let hidden_row = move |b: &dyn super::Bench| -> Option<(u64, u64)> {
+        let s = b.sheet(m)?;
+        let r = s.rows.iter().find(|r| r["translate"] == "rustcraft.miner.hidden")?;
+        let n = |i: usize| r["with"][i].as_u64().or_else(|| r["with"][i].as_str()?.parse().ok());
+        Some((n(0)?, n(2)?))
+    };
+    Scenario::new("w2_miner_stack_module_keeps_the_window_to_a_stack", plot_area(o))
+        .then("a miner on two crystals with a stack module, its slots full, an iron ore", move |b, _| {
+            b.place(m, "rustcraft:miner", &[])?;
+            b.place(at(m, [1, 0, 0]), "rustcraft:crystal", &[])?;
+            b.place(at(m, [-1, 0, 0]), "rustcraft:crystal", &[])?;
+            b.set_modules(m, &["rustcraft:module_stack"])?;
+            for slot in 0..9 {
+                b.put(m, slot, "minecraft:raw_iron", 64)?;
+            }
+            ores_under(b, &ores)
+        })
+        .until("the raw iron went into a hidden cell of the seven", 1500, move |b, _| {
+            Ok(hidden_row(b).is_some_and(|(items, cells)| items >= 1 && cells == 7))
+        })
+        .check("no window slot holds more than a stack", move |b, _| {
+            let most = b.items(m).into_iter().flatten().map(|(_, n)| n).max().unwrap_or(0);
+            if most <= 64 { Ok(()) } else { Err(format!("a window slot holds {most}")) }
         })
 }
