@@ -970,8 +970,12 @@ impl Bench for GameBench<'_, '_> {
         let n = face.offset().map(f64::from);
         let centre = pos.map(|c| f64::from(c) + 0.5);
         let point: [f64; 3] = std::array::from_fn(|k| centre[k] + 0.5 * n[k]);
-        // The eye a block out from the face, looking at it (yaw 0 south, 90 west, 180 north).
-        let eye: [f64; 3] = std::array::from_fn(|k| centre[k] + 1.5 * n[k]);
+        // The eye out from the face, looking at it (yaw 0 south, 90 west, 180 north): far enough
+        // that the player's body is clear of the cell a placed block takes (a body 0.6 wide and
+        // 1.8 high next to the face would stand in it, and the game refuses such a placement),
+        // and within reach.
+        let out = if matches!(face, Face::YPos | Face::YNeg) { 3.5 } else { 2.5 };
+        let eye: [f64; 3] = std::array::from_fn(|k| centre[k] + out * n[k]);
         let (yaw, pitch) = match face {
             Face::ZNeg => (0.0, 0.0),
             Face::ZPos => (180.0, 0.0),
