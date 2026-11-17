@@ -981,7 +981,9 @@ fn run(
 /// Slice 18 (cross): the `smelt` report of the electric furnace at `pos` for what its output
 /// gained (docs/design/path-of-craft-tree-contract.md); the crusher reports nothing.
 fn report_smelt(game: &Game<'_>, pos: Pos, before: &Option<(String, u32)>, after: &Option<(String, u32)>) {
-    let as_ref = |o: &Option<(String, u32)>| o.as_ref().map(|(i, n)| (i.as_str(), *n)).into_iter().collect::<Vec<_>>();
+    fn as_ref(o: &Option<(String, u32)>) -> Vec<(&str, u32)> {
+        o.as_ref().map(|(i, n)| (i.as_str(), *n)).into_iter().collect()
+    }
     let gained = rustcraft_rules::reports::gained(as_ref(before), as_ref(after));
     if gained.is_empty() || game.native_block(pos) != content::FURNACE {
         return;

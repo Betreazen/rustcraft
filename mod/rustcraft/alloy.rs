@@ -220,7 +220,9 @@ pub(super) fn run(
     }
     // Slice 18 (cross): what it gave goes to Path-of-craft-tree (`smelt`); PCT gives nothing for
     // alloys today but takes the report (docs/design/path-of-craft-tree-contract.md).
-    let outs = |o: &[Option<(String, u32)>]| o.iter().flatten().map(|(i, n)| (i.as_str(), *n)).collect::<Vec<_>>();
+    fn outs(o: &[Option<(String, u32)>]) -> Vec<(&str, u32)> {
+        o.iter().flatten().map(|(i, n)| (i.as_str(), *n)).collect()
+    }
     let gained = rustcraft_rules::reports::gained(outs(&before.outputs), outs(&smelter.outputs));
     if !gained.is_empty()
         && let Some(owner) = crate::game::rustcraft_base::owner_at(game, pos)
