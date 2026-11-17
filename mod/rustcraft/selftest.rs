@@ -938,6 +938,68 @@ impl Bench for GameBench<'_, '_> {
             .map(str::to_owned)
             .map_err(|(_, why)| why.to_owned())
     }
+
+    // ---- Slice 18, stream 5 (craft and storage) ----
+
+    fn insert_snbt(&mut self, pos: Pos, snbt: &str) -> Result<u32, String> {
+        let (tag, _) = horizon_world::nbt::parse_snbt(snbt)?;
+        let stack = horizon_client::save::item_from_nbt(&tag)
+            .ok_or_else(|| format!("no item in {snbt}"))?;
+        let count = stack.count;
+        let left = self
+            .game
+            .native_insert_item(pos, Direction::Up, stack)
+            .map_or(0, |s| s.count);
+        Ok(count - left.min(count))
+    }
+
+    fn long(&self, pos: Pos, key: &str) -> i64 {
+        match self
+            .game
+            .native_mod_block_entity(pos)
+            .and_then(|e| e.nbt.get(&horizon_world::nbt::JavaString::from(key)).cloned())
+        {
+            Some(Tag::Long(v)) => v,
+            Some(Tag::Int(v)) => i64::from(v),
+            _ => 0,
+        }
+    }
+
+    fn int_array(&self, pos: Pos, key: &str) -> Vec<i32> {
+        match self
+            .game
+            .native_mod_block_entity(pos)
+            .and_then(|e| e.nbt.get(&horizon_world::nbt::JavaString::from(key)).cloned())
+        {
+            Some(Tag::IntArray(v)) => v,
+            _ => Vec::new(),
+        }
+    }
+
+    fn storage_diagnosis(&self, pos: Pos) -> Option<String> {
+        let block = self.game.native_block(pos);
+        let text = storage::diagnosis(self.game, DIMENSION, pos, &block)?;
+        text.component()
+            .get("translate")
+            .and_then(|t| t.as_str())
+            .map(str::to_owned)
+    }
+
+    fn stored_stacks(&self, pos: Pos) -> Vec<String> {
+        storage::stored_stacks_at(DIMENSION, pos)
+            .into_iter()
+            .map(|s| {
+                let mut out = format!("{} x{}", s.item, s.count);
+                if let Some(name) = s.custom_name() {
+                    out.push_str(&format!(" {name:?}"));
+                }
+                for (id, level) in s.enchantments().iter().chain(s.stored_enchantments()) {
+                    out.push_str(&format!(" {id} {level}"));
+                }
+                out
+            })
+            .collect()
+    }
 }
 
 /// The slice-7 half of the bench.

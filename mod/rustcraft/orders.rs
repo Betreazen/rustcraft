@@ -351,6 +351,10 @@ fn build_book(game: &Game<'_>, recipes: &machines::MachineRecipes) -> Book {
             continue;
         }
         if let Some(r) = PlanRecipe::crafting(width, &cells, (item.to_owned(), result.count)) {
+            // Slice 18: a food recipe runs on the kitchen too.
+            if let Some(k) = rustcraft_rules::orders::kitchen_copy(&r, &rustcraft_rules::utility::KITCHEN_RECIPES) {
+                book.push(k);
+            }
             book.push(r);
         }
     }
@@ -546,6 +550,19 @@ fn line_of(game: &Game<'_>, o: &Order) -> Option<OrderLine> {
         Wait::Busy(kind) => OrderWait::Busy(kind_code(kind)),
         Wait::Energy(kind) => OrderWait::Energy(kind_code(kind)),
     };
+    // Slice 18: its chain of steps, the running ones marked.
+    let steps = o
+        .chain
+        .iter()
+        .filter_map(|(kind, item, current)| {
+            Some(rustcraft_rules::storage::wire::OrderStep {
+                kind: kind_code(kind),
+                item: number(game, item)?,
+                current: *current,
+            })
+        })
+        .take(rustcraft_rules::storage::wire::MAX_STEPS)
+        .collect();
     Some(OrderLine {
         id: o.id,
         item: number(game, &o.item)?,
@@ -553,6 +570,7 @@ fn line_of(game: &Game<'_>, o: &Order) -> Option<OrderLine> {
         done: o.done,
         keep: o.keep,
         wait,
+        steps,
     })
 }
 
@@ -596,8 +614,20 @@ fn kind_of(machine: Machine) -> Option<&'static str> {
         Machine::Crusher => Some(KINDS[2]),
         Machine::Alloy => Some(KINDS[3]),
         Machine::Mixer => Some(KINDS[4]),
+        Machine::Util(rustcraft_rules::utility::Util::Kitchen) => Some(KINDS[5]),
         _ => None,
     }
+}
+
+/// Slice 18: what the order job on the machine at `pos` makes (the kitchen cooks it whatever its
+/// pages say).
+pub(super) fn job_output_at(dimension: &str, pos: Pos) -> Option<ItemKey> {
+    orders()
+        .jobs
+        .get(dimension)?
+        .iter()
+        .find(|r| r.job.machine == pos)
+        .map(|r| r.job.step.output.0.clone())
 }
 
 /// The slots an order's items go into, and those its products come out of (none for the mixer,
@@ -607,6 +637,11 @@ fn slots_of(machine: Machine) -> (Range<usize>, Range<usize>) {
         Machine::Crafter => (content::CRAFTER_BUFFER, content::CRAFTER_OUTPUTS),
         Machine::Alloy => (content::ALLOY_INPUTS, content::ALLOY_OUTPUTS),
         Machine::Mixer => (0..content::MIXER_SLOTS, 0..0),
+        // Slice 18: the kitchen's ingredients and dishes.
+        Machine::Util(rustcraft_rules::utility::Util::Kitchen) => {
+            let s = rustcraft_rules::utility::Util::Kitchen.slots();
+            (s.inputs, s.outputs)
+        }
         _ => (
             content::MACHINE_INPUT..content::MACHINE_INPUT + 1,
             content::MACHINE_OUTPUT..content::MACHINE_OUTPUT + 1,
@@ -1107,6 +1142,7 @@ pub(super) fn tick(game: &mut Game<'_>, dimension: &str, level: &mut LevelNet) {
             game, dimension, level, &mut state, &jobs, &mut ships, *id, *anchor, terminals,
         );
         jobs.extend(started);
+        feed_crafters(game, dimension, level, &jobs, *id, *anchor);
     }
     // Storages that are gone take their orders with them.
     let live: BTreeSet<u32> = anchors.keys().copied().collect();
@@ -1259,6 +1295,41 @@ fn stock_with_fluids(
 /// One storage's round: its line, its «держать» orders and the jobs to start, started. The jobs
 /// that went to machines. An order whose items ride the item channel counts as running.
 #[allow(clippy::too_many_arguments)]
+/// Slice 18 (handed over from stream 1): «автокрафтер просит у склада недостающий ингредиент».
+/// An autocrafter on the storage's line with no order job, whose first page short of something
+/// the storage holds all of, gets one craft's worth into its buffer straight from the storage.
+fn feed_crafters(game: &mut Game<'_>, dimension: &str, level: &LevelNet, jobs: &[Running], id: u32, anchor: Pos) {
+    let (_, machines_on_line) = line_state(level, anchor);
+    let tuning = server::tuning();
+    for (pos, machine) in machines_on_line {
+        if machine != Machine::Crafter || jobs.iter().any(|r| r.job.machine == pos) {
+            continue;
+        }
+        let Some(entity) = crate::game::rustcraft_machines::entity(game, pos) else { continue };
+        let (patterns, buffer) = crafter::pages_and_buffer(&entity, tuning);
+        drop(entity);
+        // The first page with anything in it that lacks something the storage has.
+        let short = patterns
+            .iter()
+            .filter(|p| p.iter().any(Option::is_some))
+            .map(|p| rustcraft_rules::orders::page_shortfall(p, &buffer))
+            .find(|s| !s.is_empty() && s.iter().all(|(i, n)| storage::stored_count(dimension, id, i) >= u64::from(*n)));
+        let Some(short) = short else { continue };
+        let mut taken: Vec<(ItemKey, u64)> = Vec::new();
+        for (item, n) in &short {
+            let got = storage::take_from(dimension, id, item, u64::from(*n));
+            taken.push((item.clone(), got));
+        }
+        if taken.iter().zip(&short).any(|((_, got), (_, n))| *got < u64::from(*n))
+            || !place_inputs(game, machine, pos, &taken)
+        {
+            for (item, got) in taken {
+                storage::restore_into(dimension, id, &item, got);
+            }
+        }
+    }
+}
+
 fn storage_round(
     game: &mut Game<'_>,
     dimension: &str,
@@ -1381,6 +1452,19 @@ fn storage_round(
             continue;
         }
         queue.started(&job);
+        // Slice 18 (O12): a mixer step's water comes with the order.
+        if machine == Machine::Mixer {
+            let water: u64 = job
+                .step
+                .inputs
+                .iter()
+                .filter(|(k, _)| fluid_of(k) == Some(WATER))
+                .map(|(_, n)| u64::from(*n) * u64::from(job.runs) * BUCKET)
+                .sum();
+            if water > 0 {
+                crate::game::rustcraft_fluids::bring_water(game, level, job.machine, water, server::tuning());
+            }
+        }
         // Along the channel the page comes when the items arrive.
         if machine == Machine::Crafter && sent == Sent::Placed {
             level.temp_pages.insert(

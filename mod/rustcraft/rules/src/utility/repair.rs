@@ -39,6 +39,8 @@ pub fn material_of(item: &str) -> Option<&'static [&'static str]> {
         "mace" => Some(&["minecraft:breeze_rod"]),
         "shield" => Some(PLANKS),
         "wolf_armor" => Some(&["minecraft:armadillo_scute"]),
+        // Slice 18 (guide `repair`): the rod, the bow and the crossbow with string.
+        "fishing_rod" | "bow" | "crossbow" => Some(&["minecraft:string"]),
         _ => None,
     }
 }
@@ -58,6 +60,7 @@ pub fn is_material(item: &str) -> bool {
         "minecraft:elytra",
         "minecraft:mace",
         "minecraft:wolf_armor",
+        "minecraft:bow",
     ]
     .iter()
     .filter_map(|i| material_of(i))
@@ -80,6 +83,11 @@ mod tests {
         assert_eq!(material_of("minecraft:stick"), None);
         assert!(is_material("minecraft:diamond"));
         assert!(!is_material("minecraft:dirt"));
+        // Slice 18: string for the rod, the bow and the crossbow.
+        for i in ["minecraft:fishing_rod", "minecraft:bow", "minecraft:crossbow"] {
+            assert_eq!(material_of(i), Some(&["minecraft:string"][..]));
+        }
+        assert!(is_material("minecraft:string"));
     }
 
     #[test]

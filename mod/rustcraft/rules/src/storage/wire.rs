@@ -121,7 +121,21 @@ pub struct OrderLine {
     pub done: u32,
     pub keep: bool,
     pub wait: OrderWait,
+    /// Slice 18: its chain of steps, at most MAX_STEPS (in the tail).
+    pub steps: Vec<OrderStep>,
 }
+
+/// Slice 18: one step of an order's chain: its machine kind (`orders::KINDS` place), what it
+/// makes (a number) and whether it runs now.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct OrderStep {
+    pub kind: u8,
+    pub item: u16,
+    pub current: bool,
+}
+
+/// The steps of an order's chain a list carries.
+pub const MAX_STEPS: usize = 6;
 
 /// What a terminal's window shows.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -142,7 +156,35 @@ pub struct Listing {
     pub orders: Vec<OrderLine>,
     /// O2: items the recipe book can make, as numbers.
     pub orderable: Vec<u16>,
+    /// Slice 18: the component stacks among `lines` (a line's damage with `terminal::VARIANT`),
+    /// each with its saved form so the window draws and names it.
+    pub variants: Vec<Variant>,
+    /// Slice 18: the item in each of the terminal's sockets (`storage::modules::SOCKET_*`), by
+    /// number, NO_ITEM for an empty one; empty when unknown.
+    pub sockets: Vec<u16>,
+    /// Slice 18: the items the filter module in the terminal marks (the «своя» tab), by number.
+    pub own: Vec<u16>,
 }
+
+/// A socket without a module.
+pub const NO_ITEM: u16 = u16::MAX;
+
+/// Slice 18: a component stack of the list: its item, its place among the item's
+/// (`Store::variants_of`), and its saved stack in hex (`keys::payload`).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Variant {
+    pub item: u16,
+    pub index: u16,
+    pub payload: String,
+}
+
+/// The tail sections after the orderable items, each `tag, length (u16), bytes`; a reader skips
+/// the tags it does not know, and a message without a tail (versions 2 and 3 before slice 18)
+/// has none of them.
+const TAIL_VARIANTS: u8 = 1;
+const TAIL_SOCKETS: u8 = 2;
+const TAIL_OWN: u8 = 3;
+const TAIL_STEPS: u8 = 4;
 
 /// How many lines fit in one message.
 pub const MAX_LINES: usize = (MAX_BYTES - HEADER - MAX_HOLES * HOLE - ORDERS - 2) / ENTRY;
@@ -193,13 +235,122 @@ pub fn encode(listing: &Listing) -> Vec<u8> {
     for o in orders {
         encode_order(&mut out, o);
     }
-    let room = MAX_BYTES.saturating_sub(out.len() + 2) / 2;
+    let tail = encode_tail(listing, MAX_BYTES.saturating_sub(out.len() + 2));
+    let room = MAX_BYTES.saturating_sub(out.len() + 2 + tail.len()) / 2;
     let orderable = &listing.orderable[..listing.orderable.len().min(room)];
     out.extend((orderable.len() as u16).to_le_bytes());
     for n in orderable {
         out.extend(n.to_le_bytes());
     }
+    out.extend(tail);
     out
+}
+
+/// A tail section of u16 numbers.
+fn numbers_section(out: &mut Vec<u8>, tag: u8, numbers: &[u16]) {
+    if numbers.is_empty() {
+        return;
+    }
+    out.push(tag);
+    out.extend(((numbers.len() * 2) as u16).to_le_bytes());
+    for n in numbers {
+        out.extend(n.to_le_bytes());
+    }
+}
+
+/// The tail sections, in at most `room` bytes: the sockets, the filter's items, then the
+/// variants that fit.
+fn encode_tail(listing: &Listing, room: usize) -> Vec<u8> {
+    let mut out = Vec::new();
+    numbers_section(&mut out, TAIL_SOCKETS, &listing.sockets);
+    let own = &listing.own[..listing.own.len().min(64)];
+    numbers_section(&mut out, TAIL_OWN, own);
+    let orders = &listing.orders[..listing.orders.len().min(MAX_ORDERS)];
+    if orders.iter().any(|o| !o.steps.is_empty()) {
+        let mut body = Vec::new();
+        for o in orders {
+            let steps = &o.steps[..o.steps.len().min(MAX_STEPS)];
+            body.push(steps.len() as u8);
+            for s in steps {
+                body.push(s.kind);
+                body.extend(s.item.to_le_bytes());
+                body.push(u8::from(s.current));
+            }
+        }
+        out.push(TAIL_STEPS);
+        out.extend((body.len() as u16).to_le_bytes());
+        out.extend(body);
+    }
+    let room = room.saturating_sub(out.len());
+    let mut body = Vec::new();
+    let mut n: u16 = 0;
+    for v in &listing.variants {
+        let len = 2 + 2 + 2 + v.payload.len();
+        if 3 + 2 + body.len() + len > room.min(usize::from(u16::MAX)) {
+            break;
+        }
+        body.extend(v.item.to_le_bytes());
+        body.extend(v.index.to_le_bytes());
+        body.extend((v.payload.len() as u16).to_le_bytes());
+        body.extend(v.payload.as_bytes());
+        n += 1;
+    }
+    if n > 0 {
+        out.push(TAIL_VARIANTS);
+        out.extend(((body.len() + 2) as u16).to_le_bytes());
+        out.extend(n.to_le_bytes());
+        out.extend(body);
+    }
+    out
+}
+
+/// Reads the tail sections into `listing`; a cut one ends the reading.
+fn decode_tail(r: &mut Reader<'_>, listing: &mut Listing) {
+    while let (Some(tag), Some(len)) = (r.u8(), r.u16()) {
+        let Some((section, rest)) = r.0.split_at_checked(usize::from(len)) else {
+            return;
+        };
+        r.0 = rest;
+        let mut s = Reader(section);
+        if tag == TAIL_STEPS {
+            for o in &mut listing.orders {
+                let n = s.u8().unwrap_or(0);
+                for _ in 0..n {
+                    let (Some(kind), Some(item), Some(current)) = (s.u8(), s.u16(), s.u8()) else {
+                        break;
+                    };
+                    o.steps.push(OrderStep {
+                        kind,
+                        item,
+                        current: current == 1,
+                    });
+                }
+            }
+        } else if tag == TAIL_SOCKETS || tag == TAIL_OWN {
+            let numbers: Vec<u16> = std::iter::from_fn(|| s.u16()).collect();
+            if tag == TAIL_SOCKETS {
+                listing.sockets = numbers;
+            } else {
+                listing.own = numbers;
+            }
+        } else if tag == TAIL_VARIANTS {
+            let n = s.u16().unwrap_or(0);
+            for _ in 0..n {
+                let (Some(item), Some(index), Some(len)) = (s.u16(), s.u16(), s.u16()) else {
+                    break;
+                };
+                let Some((text, rest)) = s.0.split_at_checked(usize::from(len)) else {
+                    break;
+                };
+                s.0 = rest;
+                listing.variants.push(Variant {
+                    item,
+                    index,
+                    payload: String::from_utf8_lossy(text).into_owned(),
+                });
+            }
+        }
+    }
 }
 
 fn encode_order(out: &mut Vec<u8>, o: &OrderLine) {
@@ -288,6 +439,7 @@ impl Reader<'_> {
             done,
             keep,
             wait,
+            steps: Vec::new(),
         })
     }
 }
@@ -339,7 +491,7 @@ pub fn decode(bytes: &[u8]) -> Option<Listing> {
     let orderable = (0..orderable_count)
         .map(|_| r.u16())
         .collect::<Option<Vec<_>>>()?;
-    Some(Listing {
+    let mut listing = Listing {
         terminal,
         state,
         cells,
@@ -352,7 +504,12 @@ pub fn decode(bytes: &[u8]) -> Option<Listing> {
         smart,
         orders,
         orderable,
-    })
+        variants: Vec::new(),
+        sockets: Vec::new(),
+        own: Vec::new(),
+    };
+    decode_tail(&mut r, &mut listing);
+    Some(listing)
 }
 
 #[cfg(test)]
@@ -390,6 +547,18 @@ mod tests {
                     done: 2,
                     keep: false,
                     wait: OrderWait::Running,
+                    steps: vec![
+                        OrderStep {
+                            kind: 1,
+                            item: 30,
+                            current: false,
+                        },
+                        OrderStep {
+                            kind: 0,
+                            item: 812,
+                            current: true,
+                        },
+                    ],
                 },
                 OrderLine {
                     id: 4,
@@ -398,6 +567,7 @@ mod tests {
                     done: 0,
                     keep: true,
                     wait: OrderWait::Items(vec![(5, 2), (6, 7)]),
+                    steps: Vec::new(),
                 },
                 OrderLine {
                     id: 5,
@@ -406,6 +576,7 @@ mod tests {
                     done: 0,
                     keep: false,
                     wait: OrderWait::Machines(vec![3]),
+                    steps: Vec::new(),
                 },
                 OrderLine {
                     id: 6,
@@ -414,6 +585,7 @@ mod tests {
                     done: 0,
                     keep: false,
                     wait: OrderWait::Busy(0),
+                    steps: Vec::new(),
                 },
                 OrderLine {
                     id: 7,
@@ -422,10 +594,28 @@ mod tests {
                     done: 0,
                     keep: false,
                     wait: OrderWait::Energy(4),
+                    steps: Vec::new(),
                 },
             ],
             orderable: vec![1, 2, 812],
+            variants: vec![Variant {
+                item: 3,
+                index: 1,
+                payload: "0a0b0c".to_owned(),
+            }],
+            sockets: vec![NO_ITEM, 900, NO_ITEM],
+            own: vec![4, 5],
         }
+    }
+
+    #[test]
+    fn variants_ride_in_the_tail_and_a_cut_tail_is_left_out() {
+        let l = listing(2);
+        let bytes = encode(&l);
+        assert_eq!(decode(&bytes).unwrap().variants, l.variants);
+        let cut = decode(&bytes[..bytes.len() - 1]).unwrap();
+        assert!(cut.variants.is_empty());
+        assert_eq!(cut.sockets, l.sockets, "the sections before the cut one stay");
     }
 
     #[test]
@@ -442,6 +632,7 @@ mod tests {
         l.orders = vec![
             OrderLine {
                 wait: OrderWait::Items(vec![(1, 1); MAX_WANTS]),
+                steps: Vec::new(),
                 ..OrderLine::default()
             };
             MAX_ORDERS
@@ -466,6 +657,12 @@ mod tests {
         // v0.15.0 sent the same layout under version 2, with no wait for energy.
         let mut l = listing(3);
         l.orders.retain(|o| !matches!(o.wait, OrderWait::Energy(_)));
+        l.variants.clear();
+        l.sockets.clear();
+        l.own.clear();
+        for o in &mut l.orders {
+            o.steps.clear();
+        }
         let mut bytes = encode(&l);
         bytes[0] = 2;
         assert_eq!(decode(&bytes), Some(l));
@@ -475,7 +672,14 @@ mod tests {
 
     #[test]
     fn a_cut_message_reads_as_none() {
-        let bytes = encode(&listing(3));
+        let mut l = listing(3);
+        l.variants.clear();
+        l.sockets.clear();
+        l.own.clear();
+        for o in &mut l.orders {
+            o.steps.clear();
+        }
+        let bytes = encode(&l);
         assert_eq!(decode(&bytes[..bytes.len() - 1]), None);
         assert_eq!(decode(&[9]), None);
     }

@@ -12,6 +12,7 @@
 //! `{"mod","done","passed","failed","timings"}`.
 
 pub mod anchor;
+pub mod craft18;
 pub mod energy;
 pub mod expect;
 pub mod fluids;
@@ -389,6 +390,21 @@ pub trait Bench {
         let _ = (pos, held);
         Err("no buckets on this bench".into())
     }
+    // ---- Slice 18, stream 5 (craft and storage) ----
+
+    /// An item written as SNBT (`{id:..,count:..,components:{..}}`) put into the container at
+    /// `pos` as a hopper would: how many went in.
+    fn insert_snbt(&mut self, pos: Pos, snbt: &str) -> Result<u32, String>;
+    /// The stacks the storage the cell or terminal at `pos` belongs to holds, each as the stack
+    /// its key makes: `item xCOUNT`, then its own name in quotes and its (stored) enchantments
+    /// `id level`, space-separated.
+    fn stored_stacks(&self, pos: Pos) -> Vec<String>;
+    /// The translation key of what a player looking at the cell or terminal at `pos` reads.
+    fn storage_diagnosis(&self, pos: Pos) -> Option<String>;
+    /// The int array under `key` in the saved compound of the mod block entity at `pos`.
+    fn int_array(&self, pos: Pos, key: &str) -> Vec<i32>;
+    /// The long (or int) under `key` in the saved compound of the mod block entity at `pos`.
+    fn long(&self, pos: Pos, key: &str) -> i64;
 }
 
 /// A mob as the self-test reads it.
@@ -581,6 +597,7 @@ pub fn catalog() -> Vec<Build> {
     all.extend(slice18_machine::ALL);
     // Slice 18, the module stream.
     all.extend(modules18::ALL);
+    all.extend(craft18::ALL);
     all
 }
 

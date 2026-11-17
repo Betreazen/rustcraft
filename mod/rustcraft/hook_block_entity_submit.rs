@@ -13,6 +13,9 @@ fn rustcraft_block_entity_submit(
         crate::game::rustcraft_zipline::draw_anchor(game, pos, entity, draw);
         return;
     }
+    if block == "rustcraft:terminal" {
+        crate::game::rustcraft_storage::draw_holes(game, pos, entity, draw);
+    }
     if block == "rustcraft:projector" {
         crate::game::rustcraft_builder::draw_ghost(game, pos, entity, draw);
     }

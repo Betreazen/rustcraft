@@ -72,6 +72,17 @@ pub fn lift(
 
 /// The loot table the archaeology table brushes a block with: the one it was found with, else the
 /// one its toggle chose.
+/// Slice 18 (guide `archeo`: «по таблице того места, где блок лежал»): the table of a block
+/// that remembers no place (a creative one): the desert temple's for sand, the trail ruins' for
+/// gravel, where most of each is found.
+pub fn default_table(block: &str) -> &'static str {
+    if block == "minecraft:suspicious_gravel" {
+        "minecraft:archaeology/trail_ruins_common"
+    } else {
+        "minecraft:archaeology/desert_pyramid"
+    }
+}
+
 pub fn brush_table<'a>(found: Option<&'a Found>, chosen: &'a str) -> &'a str {
     found
         .and_then(|f| f.loot_table.as_deref())

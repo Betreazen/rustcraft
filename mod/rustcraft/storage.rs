@@ -46,12 +46,13 @@ use horizon_client::{
     text::Text,
 };
 use horizon_core::geometry::Direction;
-use horizon_world::nbt::{Compound, JavaString, Tag};
+use horizon_client::save;
+use horizon_world::nbt::{self, Compound, JavaString, Tag};
 use rustcraft_rules::{
     geom::Pos,
     net::{items::ItemKey, stock::NetStore},
     storage::{
-        self, Limit, Shape, Store, cells, keys,
+        self, Limit, Shape, Store, cells, keys, modules as sockets,
         terminal::{self as term, Press, Take},
         wire::{self, Line, Listing, State},
     },
@@ -419,8 +420,160 @@ pub(super) fn rescan(
         .collect();
     level.found = found;
     level.cell_of = cell_of;
+    let holes: Vec<(Pos, Vec<Pos>)> = level
+        .terminals
+        .iter()
+        .map(|(&t, id)| {
+            let h = id
+                .and_then(|id| level.found.get(&id))
+                .map(|f| match &f.shape {
+                    Shape::Solid => Vec::new(),
+                    Shape::Holes(h) => h.iter().copied().take(HOLES_SHOWN).collect(),
+                })
+                .unwrap_or_default();
+            (t, h)
+        })
+        .collect();
+    let ids: Vec<u32> = level.found.keys().copied().collect();
     storages().levels.insert(dimension.to_owned(), level);
+    // S3: each storage's stack from its terminals' stack modules.
+    for id in ids {
+        refresh_stack_module(game, dimension, id, None);
+    }
+    // S8: each terminal shows its storage's missing cells in the world.
+    for (t, h) in holes {
+        write_holes(game, t, &h);
+    }
     save(game, dimension);
+}
+
+/// S6 (slice 18): after the level's topology is made, each terminal that touches no cell shows
+/// the storage on an item net a housing beside it is on (rustcraft_rules::storage::cells::
+/// terminal_on_net).
+pub(super) fn link_far_terminals(
+    game: &Game<'_>,
+    dimension: &str,
+    topology: &rustcraft_rules::net::topology::Topology,
+) {
+    let linked = with_level(dimension, |level| {
+        let mut blocks: BTreeMap<u32, Vec<Pos>> = BTreeMap::new();
+        for (&c, &id) in &level.cell_of {
+            blocks.entry(id).or_default().push(c);
+        }
+        for (&t, id) in &level.terminals {
+            if let Some(id) = id {
+                blocks.entry(*id).or_default().push(t);
+            }
+        }
+        let far: Vec<Pos> = level
+            .terminals
+            .iter()
+            .filter(|(_, id)| id.is_none())
+            .map(|(t, _)| *t)
+            .collect();
+        let mut linked = Vec::new();
+        for t in far {
+            let found = cells::terminal_on_net(t, &blocks, topology);
+            if let Some(id) = found {
+                level.terminals.insert(t, found);
+                linked.push(id);
+            }
+        }
+        linked
+    })
+    .unwrap_or_default();
+    // S3: a far terminal's stack module counts too.
+    for id in linked {
+        refresh_stack_module(game, dimension, id, None);
+    }
+}
+
+// ---- Slice 18 (S8): the missing cells drawn in the world from the terminal ----
+
+/// A terminal's compound keeps its storage's missing cells, as offsets from it, under this key
+/// (three ints a cell); clients draw red glass there.
+const HOLES_KEY: &str = "holes";
+/// The most missing cells a terminal draws.
+const HOLES_SHOWN: usize = 64;
+
+/// The missing cells into the terminal at `t`, and the clients told when they changed.
+fn write_holes(game: &mut Game<'_>, t: Pos, holes: &[Pos]) {
+    let flat: Vec<i32> = holes
+        .iter()
+        .flat_map(|h| [h[0] - t[0], h[1] - t[1], h[2] - t[2]])
+        .collect();
+    let changed = game
+        .native_with_mod_block_entity(t, |e| {
+            let key = JavaString::from(HOLES_KEY);
+            let old = match e.nbt.get(&key) {
+                Some(Tag::IntArray(v)) => v.clone(),
+                _ => Vec::new(),
+            };
+            if old == flat {
+                return false;
+            }
+            if flat.is_empty() {
+                e.nbt.remove(&key);
+            } else {
+                e.nbt.insert(key, Tag::IntArray(flat.clone()));
+            }
+            true
+        })
+        .unwrap_or(false);
+    if changed {
+        game.native_block_entity_sync(t);
+    }
+}
+
+fn holes_of(entity: &ModBlockEntity) -> Vec<[i32; 3]> {
+    match entity.nbt.get(&JavaString::from(HOLES_KEY)) {
+        Some(Tag::IntArray(v)) => v.chunks_exact(3).map(|c| [c[0], c[1], c[2]]).collect(),
+        _ => Vec::new(),
+    }
+}
+
+/// `native_block_entity_update_tag`: clients get a terminal's missing cells.
+pub(super) fn update_tag(entity: &ModBlockEntity, tag: &mut Option<Compound>) {
+    if entity.id != content::TERMINAL {
+        return;
+    }
+    if let Some(v) = entity.nbt.get(&JavaString::from(HOLES_KEY)) {
+        tag.get_or_insert_with(Compound::new)
+            .insert(JavaString::from(HOLES_KEY), v.clone());
+    }
+}
+
+/// On a client: red glass in each missing cell of the terminal's storage, a little smaller than
+/// a block, where the world has air.
+pub(super) fn draw_holes(
+    game: &Game<'_>,
+    pos: Pos,
+    entity: &ModBlockEntity,
+    draw: &mut crate::game::native_block_entity_draw::BlockEntityDraw,
+) {
+    const SCALE: f32 = 0.9;
+    for h in holes_of(entity) {
+        let at = [pos[0] + h[0], pos[1] + h[1], pos[2] + h[2]];
+        if !matches!(game.native_block(at).as_str(), "minecraft:air" | "minecraft:cave_air") {
+            continue;
+        }
+        draw.push();
+        let k = (1.0 - SCALE) / 2.0;
+        draw.translate([h[0] as f32 + k, h[1] as f32 + k, h[2] as f32 + k]);
+        draw.scale([SCALE; 3]);
+        game.native_draw_block(draw, "minecraft:red_stained_glass", &[]);
+        draw.pop();
+    }
+}
+
+/// The terminal's culling box takes in its missing cells.
+pub(super) fn hole_bounds(entity: &ModBlockEntity, bounds: &mut [f32; 6]) {
+    for h in holes_of(entity) {
+        for k in 0..3 {
+            bounds[k] = bounds[k].min(h[k] as f32);
+            bounds[k + 3] = bounds[k + 3].max(h[k] as f32 + 1.0);
+        }
+    }
 }
 
 fn write_id(game: &mut Game<'_>, cell: Pos, id: u32) {
@@ -494,19 +647,47 @@ pub(super) fn stock(
 
 // ---- Items in and out ----
 
-/// The stack a key and a count make.
+/// The stack a key and a count make: a component key's saved stack with every component back.
 fn stack_of(key: &str, count: u32) -> ItemStack {
+    if let Some(stack) = keys::payload(key).and_then(|p| saved_stack(p, count)) {
+        return stack;
+    }
     let (item, damage) = keys::parse(key);
     let mut stack = ItemStack::new(item, count);
     stack.damage = damage;
     stack
 }
 
-/// The key a stack goes under; none for a stack the storage cannot keep: one with components
-/// besides its damage, or worn further than a press can name.
+/// Slice 18: the stack a component key's payload saved, `count` of it.
+fn saved_stack(payload: &str, count: u32) -> Option<ItemStack> {
+    let bytes = keys::unhex(payload)?;
+    let (tag, _) = nbt::read_network(&bytes, nbt::Limits::saved()).ok()?;
+    let mut stack = save::item_from_nbt(&tag)?;
+    stack.count = count;
+    Some(stack)
+}
+
+/// The key a stack goes under on the nets and in the storage: its id and damage, or, with other
+/// components or worn further than a press names, its id and its whole saved form (one item).
+pub(super) fn net_key(stack: &ItemStack) -> ItemKey {
+    // An all-default component box is no component (`ItemStack::tidy`).
+    if stack.extra.as_ref().is_none_or(|d| d.is_empty()) && term::addressable(stack.damage) {
+        return keys::key(&stack.item, stack.damage);
+    }
+    let mut one = stack.clone();
+    one.count = 1;
+    let payload = nbt::write_network(&save::item_to_nbt(&one), nbt::Limits::saved())
+        .map(|b| keys::hex(&b))
+        .unwrap_or_default();
+    keys::component_key(&stack.item, &payload)
+}
+
+/// The key a stack goes under; none for a stack the storage cannot keep (its saved form too long).
 fn key_of(stack: &ItemStack) -> Option<ItemKey> {
-    (stack.extra.is_none() && term::addressable(stack.damage) && stack.count > 0)
-        .then(|| keys::key(&stack.item, stack.damage))
+    if stack.count == 0 {
+        return None;
+    }
+    Some(net_key(stack)).filter(|k| keys::storable(k))
 }
 
 /// The storage behind `anchor`: what it takes of `key` now.
@@ -739,6 +920,7 @@ fn listing(game: &Game<'_>, dimension: &str, terminal: Pos, id: Option<u32>) -> 
         };
     };
     let mut lines: Vec<(u64, Line)> = Vec::new();
+    let mut variants: Vec<wire::Variant> = Vec::new();
     let mut keys: BTreeSet<&ItemKey> = store.items.keys().collect();
     keys.extend(store.limits.keys());
     keys.extend(store.keep.keys());
@@ -747,8 +929,25 @@ fn listing(game: &Game<'_>, dimension: &str, terminal: Pos, id: Option<u32>) -> 
         let Some(number) = item_number(game, item).and_then(|n| u16::try_from(n).ok()) else {
             continue;
         };
-        let Ok(damage) = u16::try_from(damage) else {
-            continue;
+        // Slice 18: a component stack goes by its place among its item's, with its saved form.
+        let damage = match keys::payload(key) {
+            Some(payload) => {
+                let Some(index) = store.variant_index(key).filter(|i| u32::from(*i) <= term::MAX_DAMAGE) else {
+                    continue;
+                };
+                variants.push(wire::Variant {
+                    item: number,
+                    index,
+                    payload: payload.to_owned(),
+                });
+                term::VARIANT | index
+            }
+            None => {
+                let Ok(damage) = u16::try_from(damage) else {
+                    continue;
+                };
+                damage
+            }
         };
         let count = store.count(key);
         lines.push((
@@ -782,7 +981,28 @@ fn listing(game: &Game<'_>, dimension: &str, terminal: Pos, id: Option<u32>) -> 
         smart: view.as_ref().map_or_else(Default::default, |v| v.smart),
         orders: view.as_ref().map_or_else(Vec::new, |v| v.orders.clone()),
         orderable: view.map_or_else(Vec::new, |v| v.orderable),
+        variants,
+        sockets: socket_numbers(game, terminal),
+        own: own_items(game, terminal)
+            .iter()
+            .filter_map(|i| item_number(game, i).and_then(|n| u16::try_from(n).ok()))
+            .collect(),
     }
+}
+
+/// Slice 18: the items in the terminal's sockets, by number.
+fn socket_numbers(game: &Game<'_>, terminal: Pos) -> Vec<u16> {
+    let entity = crate::game::rustcraft_machines::entity(game, terminal);
+    (0..sockets::SOCKETS)
+        .map(|k| {
+            entity
+                .as_ref()
+                .and_then(|e| socket_stack(&e.nbt, k))
+                .and_then(|s| item_number(game, &s.item))
+                .and_then(|n| u16::try_from(n).ok())
+                .unwrap_or(wire::NO_ITEM)
+        })
+        .collect()
 }
 
 /// `native_player_container_open`: a player who opens a terminal is sent its list next.
@@ -835,10 +1055,18 @@ pub(super) fn on_button(
     let Some(press) = term::decode(id) else {
         return;
     };
-    if press == Press::Book {
-        press_book(entity, carried);
+    if let Press::Socket(k) = press {
+        press_socket(entity, usize::from(k), carried);
         match game.native_acting_player() {
-            Some(player) => orders::touch(&player.dimension),
+            Some(player) => {
+                orders::touch(&player.dimension);
+                let id = with_level(&player.dimension, |l| l.terminals.get(&pos).copied().flatten());
+                if let Some(id) = id.flatten() {
+                    let own = socket_stack(&entity.nbt, sockets::SOCKET_STACK)
+                        .map_or(0, |s| sockets::stack_tier(&s.item));
+                    refresh_stack_module(game, &player.dimension, id, Some((pos, own)));
+                }
+            }
             None => orders::touch_all(),
         }
         return;
@@ -848,7 +1076,7 @@ pub(super) fn on_button(
         return;
     };
     match press {
-        Press::Book => {}
+        Press::Socket(_) => {}
         Press::Order { item, count } => {
             let refused = if book {
                 // A fluid (O12) by its number past the item table, in buckets.
@@ -863,7 +1091,7 @@ pub(super) fn on_button(
             }
         }
         Press::Keep { item, change } => {
-            if let Some(key) = key_of_ref(game, (item, 0)).filter(|_| book) {
+            if let Some(key) = key_of_ref(game, &dimension, storage, (item, 0)).filter(|_| book) {
                 apply_keep(&dimension, storage, &key, change);
             }
         }
@@ -877,30 +1105,137 @@ pub(super) fn on_button(
         } => take_out(game, &dimension, storage, item, take, carried),
         Press::Place { item: None, .. } => {}
         Press::Limit { item, change } => {
-            if let Some(key) = key_of_ref(game, item) {
+            if let Some(key) = key_of_ref(game, &dimension, storage, item) {
                 apply_limit(&dimension, storage, &key, change);
             }
         }
     }
 }
 
-/// O1: a press on the recipe book's socket, as a slot would take it: the book on the cursor goes
-/// in, an empty cursor takes it out.
-fn press_book(entity: &mut ModBlockEntity, carried: &mut Option<ItemStack>) {
-    let book = orders::book_item();
+// ---- Slice 18: the terminal's three sockets ----
+
+/// A terminal's compound keeps the stack module's id and the filter module's whole saved stack
+/// (its list is in it) under these keys; the recipe book is rustcraft_orders' `book` byte.
+const STACK_SOCKET_KEY: &str = "stack_module";
+const FILTER_SOCKET_KEY: &str = "filter_module";
+
+/// What socket `k` of a terminal's compound holds.
+pub(super) fn socket_stack(nbt: &Compound, k: usize) -> Option<ItemStack> {
+    match k {
+        sockets::SOCKET_STACK => as_string(field(nbt, STACK_SOCKET_KEY))
+            .filter(|s| !s.is_empty())
+            .map(|id| ItemStack::new(id.as_str(), 1)),
+        sockets::SOCKET_BOOK => orders::has_book(nbt).then(|| ItemStack::new(orders::book_item(), 1)),
+        sockets::SOCKET_FILTER => field(nbt, FILTER_SOCKET_KEY).and_then(save::item_from_nbt),
+        _ => None,
+    }
+}
+
+fn set_socket(nbt: &mut Compound, k: usize, stack: Option<ItemStack>) {
+    match k {
+        sockets::SOCKET_STACK => {
+            let id = stack.map_or_else(String::new, |s| s.item.to_string());
+            nbt.insert(JavaString::from(STACK_SOCKET_KEY), string(&id));
+        }
+        sockets::SOCKET_BOOK => orders::set_book(nbt, stack.is_some()),
+        sockets::SOCKET_FILTER => match stack {
+            Some(s) => {
+                nbt.insert(JavaString::from(FILTER_SOCKET_KEY), save::item_to_nbt(&s));
+            }
+            None => {
+                nbt.remove(&JavaString::from(FILTER_SOCKET_KEY));
+            }
+        },
+        _ => {}
+    }
+}
+
+/// A press on socket `k`, as a slot of one item takes it (storage::modules::socket_move).
+fn press_socket(entity: &mut ModBlockEntity, k: usize, carried: &mut Option<ItemStack>) {
+    let held = socket_stack(&entity.nbt, k);
     let cursor = carried.as_ref().map(|c| (&*c.item, c.count));
-    let Some((held, after)) = term::press_book(orders::has_book(&entity.nbt), cursor, book) else {
+    let Some(m) = sockets::socket_move(k, held.as_ref().map(|h| &*h.item), cursor) else {
         return;
     };
-    orders::set_book(&mut entity.nbt, held);
-    *carried = after.map(|(item, n)| {
-        let mut stack = carried
-            .clone()
-            .filter(|c| *c.item == *item)
-            .unwrap_or_else(|| ItemStack::new(item.as_str(), n));
-        stack.count = n;
-        stack
+    match m {
+        sockets::SocketMove::In => {
+            let Some(c) = carried.as_mut() else { return };
+            let mut one = c.clone();
+            one.count = 1;
+            c.count -= 1;
+            if c.count == 0 {
+                *carried = None;
+            }
+            set_socket(&mut entity.nbt, k, Some(one));
+        }
+        sockets::SocketMove::Out => {
+            set_socket(&mut entity.nbt, k, None);
+            *carried = held;
+        }
+        sockets::SocketMove::Swap => {
+            let into = carried.take();
+            set_socket(&mut entity.nbt, k, into);
+            *carried = held;
+        }
+    }
+}
+
+/// S3: the stack of the storage `id` from the best stack module of its terminals; `fresh` is a
+/// terminal whose block entity is out of the world now, with the tier it holds.
+fn refresh_stack_module(game: &Game<'_>, dimension: &str, id: u32, fresh: Option<(Pos, u8)>) {
+    let terminals: Vec<Pos> = with_level(dimension, |level| {
+        level
+            .terminals
+            .iter()
+            .filter(|(_, s)| **s == Some(id))
+            .map(|(t, _)| *t)
+            .collect()
+    })
+    .unwrap_or_default();
+    let tier = terminals
+        .iter()
+        .map(|&t| match fresh {
+            Some((p, tier)) if p == t => tier,
+            _ => crate::game::rustcraft_machines::entity(game, t)
+                .and_then(|e| socket_stack(&e.nbt, sockets::SOCKET_STACK))
+                .map_or(0, |s| sockets::stack_tier(&s.item)),
+        })
+        .max()
+        .unwrap_or(0);
+    with_level(dimension, |level| {
+        if let Some(store) = level.stores.get_mut(&id)
+            && store.stack_module != tier
+        {
+            store.stack_module = tier;
+            level.changed(id);
+        }
     });
+}
+
+/// The items the filter module in the terminal at `terminal` marks (the «своя» tab).
+fn own_items(game: &Game<'_>, terminal: Pos) -> Vec<String> {
+    crate::game::rustcraft_machines::entity(game, terminal)
+        .and_then(|e| socket_stack(&e.nbt, sockets::SOCKET_FILTER))
+        .map(|s| crate::game::rustcraft_filter::marked(&s))
+        .unwrap_or_default()
+}
+
+/// A terminal broken in survival gives back its stack and filter modules (the book is
+/// rustcraft_server's), into the inventory of `player` or onto the ground.
+pub(super) fn give_back_sockets(game: &mut Game<'_>, dimension: &str, pos: Pos, player: u128) {
+    let Some(nbt) = crate::game::rustcraft_machines::entity(game, pos).map(|e| e.nbt.clone()) else {
+        return;
+    };
+    for k in [sockets::SOCKET_STACK, sockets::SOCKET_FILTER] {
+        let Some(stack) = socket_stack(&nbt, k) else { continue };
+        if let Some(rest) = game.native_give_stack(player, stack) {
+            let nbt = Compound::from([(JavaString::from("Item"), save::item_to_nbt(&rest))]);
+            let at = pos.map(|c| f64::from(c) + 0.5);
+            if game.native_summon(dimension, "minecraft:item", at, nbt).is_none() {
+                log::warn!("rustcraft: the terminal's {} at {pos:?} was lost", rest.item);
+            }
+        }
+    }
 }
 
 /// O14: a «держать» button on the storage `storage`: the N of `key` changed.
@@ -1046,9 +1381,21 @@ pub(super) fn restart_orders(
     Ok(())
 }
 
-/// The key a press names.
-fn key_of_ref(game: &Game<'_>, (number, damage): term::ItemRef) -> Option<ItemKey> {
+/// The key a press names; a component stack's by its place in the storage `storage`.
+fn key_of_ref(
+    game: &Game<'_>,
+    dimension: &str,
+    storage: u32,
+    (number, damage): term::ItemRef,
+) -> Option<ItemKey> {
     let item = item_of_number(game, u32::from(number))?;
+    if damage & term::VARIANT != 0 {
+        let index = damage & !term::VARIANT;
+        return with_level(dimension, |level| {
+            level.stores.get(&storage)?.variant(item, index)
+        })
+        .flatten();
+    }
     Some(keys::key(item, u32::from(damage)))
 }
 
@@ -1083,7 +1430,7 @@ fn take_out(
     take: Take,
     carried: &mut Option<ItemStack>,
 ) {
-    let Some(key) = key_of_ref(game, item) else {
+    let Some(key) = key_of_ref(game, dimension, storage, item) else {
         return;
     };
     let stack_size = max_stack(game, keys::item_of(&key));
@@ -1120,12 +1467,24 @@ pub(super) fn on_quick_move(
     if slot < container_slots {
         return;
     }
-    // Slice 15: the recipe book goes into the empty socket, one of the stack.
-    if *stack.item == *orders::book_item() && stack.count > 0 && !orders::has_book(&entity.nbt) {
-        orders::set_book(&mut entity.nbt, true);
+    // Slice 15, 18: a module goes into its empty socket, one of the stack.
+    let free = (0..sockets::SOCKETS).find(|&k| {
+        stack.count > 0 && sockets::socket_takes(k, &stack.item) && socket_stack(&entity.nbt, k).is_none()
+    });
+    if let Some(k) = free {
+        let mut one = stack.clone();
+        one.count = 1;
+        set_socket(&mut entity.nbt, k, Some(one));
         stack.count -= 1;
         if let Some(player) = game.native_acting_player() {
             orders::touch(&player.dimension);
+            let id = with_level(&player.dimension, |l| l.terminals.get(&pos).copied().flatten());
+            if k == sockets::SOCKET_STACK
+                && let Some(id) = id.flatten()
+            {
+                let tier = sockets::stack_tier(&stack.item);
+                refresh_stack_module(game, &player.dimension, id, Some((pos, tier)));
+            }
         }
         return;
     }
@@ -1236,6 +1595,15 @@ pub(super) fn diagnosis(game: &Game<'_>, dimension: &str, pos: Pos, block: &str)
         let found = level.found.get(&id)?;
         let store = level.stores.get(&id)?;
         Some(match &found.shape {
+            // Slice 18: «Склад полон».
+            Shape::Solid if store.total_slots() > 0 && store.used_slots(&stack) >= store.total_slots() => line(
+                "rustcraft.storage.full_at",
+                "The storage is full: %s of %s slots used",
+                &[
+                    Text::literal(store.used_slots(&stack).to_string()),
+                    Text::literal(store.total_slots().to_string()),
+                ],
+            ),
             Shape::Solid => line(
                 "rustcraft.storage.works",
                 "Storage: %s cells, %s of %s slots used",
@@ -1302,6 +1670,165 @@ pub(super) fn tablet_items(dimension: &str, id: u32) -> Vec<(ItemKey, u64)> {
             .stores
             .get(&id)
             .map(|s| storage::tablet::entries(&s.items))
+    })
+    .flatten()
+    .unwrap_or_default()
+}
+
+// ---- Slice 18: the projector's and the building machine's storage ----
+
+/// The storage on the item net a housing beside the block at `pos` is on (S6's rule for
+/// terminals): the projector's «В руку», the building machine's blocks.
+pub(super) fn storage_by(dimension: &str, pos: Pos, topology: &rustcraft_rules::net::topology::Topology) -> Option<u32> {
+    with_level(dimension, |level| {
+        if let Some(id) = level.cell_of.get(&pos).copied().or_else(|| level.terminals.get(&pos).copied().flatten()) {
+            return Some(id);
+        }
+        let mut blocks: BTreeMap<u32, Vec<Pos>> = BTreeMap::new();
+        for (&c, &id) in &level.cell_of {
+            blocks.entry(id).or_default().push(c);
+        }
+        for (&t, id) in &level.terminals {
+            if let Some(id) = id {
+                blocks.entry(*id).or_default().push(t);
+            }
+        }
+        cells::terminal_on_net(pos, &blocks, topology).filter(|id| level.works(*id))
+    })
+    .flatten()
+}
+
+/// How many of `key` the storage `id` holds (none while it does not work).
+pub(super) fn stored_count(dimension: &str, id: u32, key: &str) -> u64 {
+    with_level(dimension, |level| {
+        level.works(id).then(|| level.stores.get(&id).map_or(0, |s| s.count(key)))
+    })
+    .flatten()
+    .unwrap_or(0)
+}
+
+/// Up to `count` of `key` from the storage `id` into the inventory of `player`; what does not
+/// fit stays in the storage. How many went.
+pub(super) fn give_from(game: &mut Game<'_>, dimension: &str, id: u32, key: &str, count: u32, player: u128) -> u32 {
+    let took = take_from(dimension, id, key, u64::from(count)) as u32;
+    if took == 0 {
+        return 0;
+    }
+    let rest = game
+        .native_give_stack(player, stack_of(key, took))
+        .map_or(0, |r| r.count.min(took));
+    restore_into(dimension, id, key, u64::from(rest));
+    took - rest
+}
+
+// ---- Slice 18: the tablet's drawn window ----
+
+/// The storage `id`'s change count: its list is sent again when it moves on.
+pub(super) fn version(dimension: &str, id: u32) -> u64 {
+    with_level(dimension, |level| level.versions.get(&id).copied().unwrap_or(0)).unwrap_or(0)
+}
+
+/// What the tablet's window shows of the storage `id`: the list a terminal of it shows (its
+/// first terminal's sockets and filter count; the cells' anchor when it has none).
+pub(super) fn tablet_listing(game: &Game<'_>, dimension: &str, id: u32) -> Listing {
+    let at = with_level(dimension, |level| {
+        level
+            .terminals
+            .iter()
+            .find(|(_, s)| **s == Some(id))
+            .map(|(t, _)| *t)
+            .or_else(|| level.found.get(&id).map(|f| f.anchor))
+    })
+    .flatten()
+    .unwrap_or_default();
+    listing(game, dimension, at, Some(id))
+}
+
+/// A press on a stored item in the tablet's window: a stack (or one) into the inventory of
+/// `player`; what does not fit stays in the storage. How many went.
+pub(super) fn tablet_take(
+    game: &mut Game<'_>,
+    dimension: &str,
+    id: u32,
+    item: term::ItemRef,
+    one: bool,
+    player: u128,
+) -> u32 {
+    let Some(key) = key_of_ref(game, dimension, id, item) else {
+        return 0;
+    };
+    let want = if one { 1 } else { max_stack(game, keys::item_of(&key)) };
+    let took = take_from(dimension, id, &key, u64::from(want)) as u32;
+    if took == 0 {
+        return 0;
+    }
+    let rest = game
+        .native_give_stack(player, stack_of(&key, took))
+        .map_or(0, |r| r.count.min(took));
+    restore_into(dimension, id, &key, u64::from(rest));
+    took - rest
+}
+
+/// A limit button in the tablet's window (S5).
+pub(super) fn tablet_limit(game: &Game<'_>, dimension: &str, id: u32, item: term::ItemRef, change: term::LimitChange) {
+    if let Some(key) = key_of_ref(game, dimension, id, item) {
+        apply_limit(dimension, id, &key, change);
+    }
+}
+
+/// The tablet's deposit: the stack in inventory slot `slot` of `player` into the storage `id`,
+/// as far as it takes it; the rest goes back to the player. How many went in.
+pub(super) fn tablet_deposit(game: &mut Game<'_>, dimension: &str, id: u32, player: u128, slot: usize) -> u32 {
+    let Some(stack) = game.native_player_stacks(player).and_then(|s| s.get(slot).cloned().flatten()) else {
+        return 0;
+    };
+    let Some(key) = key_of(&stack) else {
+        return 0;
+    };
+    let room = room_in(game, dimension, id, &key).min(u64::from(stack.count)) as u32;
+    if room == 0 {
+        return 0;
+    }
+    let rest = (room < stack.count).then(|| {
+        let mut r = stack.clone();
+        r.count -= room;
+        r
+    });
+    let taken = game.native_set_inventory_slot(
+        player,
+        crate::game::native_inventories::NativeInventoryKind::Player,
+        slot,
+        Some(&stack),
+        rest,
+    );
+    if taken.is_err() {
+        return 0;
+    }
+    let took = put_into(game, dimension, id, &key, u64::from(room)) as u32;
+    if took < room {
+        // Never lost: what the storage did not take after all goes back.
+        let mut back = stack.clone();
+        back.count = room - took;
+        if let Some(r) = game.native_give_stack(player, back) {
+            restore_into(dimension, id, &key, u64::from(r.count));
+        }
+    }
+    took
+}
+
+/// The self-test's view: every stack the storage the cell or terminal at `pos` belongs to
+/// holds, made from its key (a component key's stack with its components).
+pub(super) fn stored_stacks_at(dimension: &str, pos: Pos) -> Vec<ItemStack> {
+    let Some(id) = storage_id(dimension, pos) else {
+        return Vec::new();
+    };
+    with_level(dimension, |level| {
+        level.stores.get(&id).map(|s| {
+            s.items
+                .iter()
+                .map(|(k, n)| stack_of(k, u32::try_from(*n).unwrap_or(u32::MAX)))
+                .collect()
+        })
     })
     .flatten()
     .unwrap_or_default()

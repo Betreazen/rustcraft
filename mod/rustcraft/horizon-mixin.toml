@@ -283,6 +283,21 @@ file = "crates/horizon-client/src/game.rs"
 name = "rustcraft_tablet"
 source = "tablet.rs"
 
+# Slice 18 (stream 5): the holo-projector's plan by two corners, its turn, «В руку», the ghost; the
+# building machine from the storage (rustcraft_rules::utility::plan).
+[[module]]
+id = "projector"
+file = "crates/horizon-client/src/game.rs"
+name = "rustcraft_projector"
+source = "projector.rs"
+
+# Slice 18 (stream 5): the filter module's window, a server chest (rustcraft_rules::storage::filter).
+[[module]]
+id = "filter"
+file = "crates/horizon-client/src/game.rs"
+name = "rustcraft_filter"
+source = "filter.rs"
+
 # The zipline's saved ropes and their anchors, the aim's outline, and the harpoon on mobs
 # (rustcraft_rules::traversal; 12.5 Z1-Z3, G5).
 [[module]]

@@ -530,6 +530,18 @@ pub(super) fn on_cell_button(
 
 /// Whether buffer slot `slot` takes `item` from the net or a hopper: an item of a pattern of a
 /// page it has, one kind a slot (M17).
+/// Slice 18 (stream 5, orders): the patterns of the pages an autocrafter has, and what its
+/// buffer holds of each item.
+pub(super) fn pages_and_buffer(entity: &ModBlockEntity, tuning: &Tuning) -> (Vec<Pattern>, std::collections::BTreeMap<String, u32>) {
+    let allowed = allowed_pages(entity, tuning);
+    let patterns: Vec<Pattern> = read_patterns(&entity.nbt).into_iter().take(allowed).collect();
+    let mut buffer = std::collections::BTreeMap::new();
+    for (item, n) in content::CRAFTER_BUFFER.map(|i| slot_of(entity, i)).flatten() {
+        *buffer.entry(item).or_insert(0) += n;
+    }
+    (patterns, buffer)
+}
+
 pub(super) fn buffer_takes(
     entity: &ModBlockEntity,
     slot: usize,

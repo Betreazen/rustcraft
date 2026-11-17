@@ -10,7 +10,9 @@ use crate::geom::Pos;
 use crate::net::items::ItemKey;
 
 pub mod cells;
+pub mod filter;
 pub mod keys;
+pub mod modules;
 pub mod tablet;
 pub mod terminal;
 pub mod view;
@@ -138,6 +140,32 @@ impl Store {
         let partial = if rest == 0 { 0 } else { stack - rest };
         free * stack + partial
     }
+
+    /// Slice 18: the component keys of `item` the storage names (held, limited or kept), in key
+    /// order. A component line's index in the terminal's list is its place here.
+    pub fn variants_of(&self, item: &str) -> Vec<&ItemKey> {
+        let mut out: BTreeSet<&ItemKey> = BTreeSet::new();
+        for k in self.items.keys().chain(self.limits.keys()).chain(self.keep.keys()) {
+            if keys::payload(k).is_some() && keys::item_of(k) == item {
+                out.insert(k);
+            }
+        }
+        out.into_iter().collect()
+    }
+
+    /// The component key of `item` at `index` of `variants_of`.
+    pub fn variant(&self, item: &str, index: u16) -> Option<ItemKey> {
+        self.variants_of(item).get(usize::from(index)).map(|k| (*k).clone())
+    }
+
+    /// The index of the component key `key` among its item's `variants_of`.
+    pub fn variant_index(&self, key: &str) -> Option<u16> {
+        let item = keys::item_of(key);
+        self.variants_of(item)
+            .iter()
+            .position(|k| k.as_str() == key)
+            .and_then(|i| u16::try_from(i).ok())
+    }
 }
 
 /// S8: the cells form a solid box. Otherwise the cells to add (holes inside the box) or to remove
@@ -194,6 +222,21 @@ mod tests {
             cells,
             ..Store::default()
         }
+    }
+
+    #[test]
+    fn each_component_stack_of_an_item_has_its_place() {
+        // Slice 18: the terminal names a component stack by its item and its place.
+        let mut s = store(1);
+        let a = keys::component_key("minecraft:potion", "0a");
+        let b = keys::component_key("minecraft:potion", "0b");
+        s.put(&b, 1, &vanilla);
+        s.put(&a, 1, &vanilla);
+        s.put("minecraft:potion", 1, &vanilla);
+        assert_eq!(s.variants_of("minecraft:potion"), vec![&a, &b]);
+        assert_eq!(s.variant_index(&b), Some(1));
+        assert_eq!(s.variant("minecraft:potion", 0), Some(a));
+        assert_eq!(s.variant("minecraft:potion", 2), None);
     }
 
     #[test]

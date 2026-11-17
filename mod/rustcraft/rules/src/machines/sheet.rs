@@ -247,16 +247,17 @@ impl Kind {
                     sockets,
                     // Slice 18 (UT7): every machine that works in steps has the three modes;
                     // the ones whose pace is the animals' or the water's do not. The living vein
-                    // has them too (ui.js `vein`).
+                    // and the craft machines the guide lists (stream 5) have them too.
                     mode: vein
+                        || u.has_modes()
                         || crate::modules::Holder::Util(u).takes(crate::modules::Module::Speed),
                     // Slice 18: the guide's windows' rows and bars (`ui.js` trash, disintegrator,
-                    // charger, vein).
+                    // charger, vein, and each craft machine's own bars).
                     rows: spec.rows + extra_rows(u),
                     bars: if vein {
                         2
                     } else {
-                        1 + usize::from(u == crate::utility::Util::Charger)
+                        u.bars().max(1 + usize::from(u == crate::utility::Util::Charger))
                     },
                     toggles: spec.toggles,
                     slots: if count > 1 { count } else { 0 },

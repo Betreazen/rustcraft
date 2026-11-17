@@ -381,6 +381,7 @@ pub(super) fn on_menu_clicked(
     workers::on_menu_clicked(uuid, window_id, slot, mode);
     base::on_menu_clicked(uuid, window_id, slot, mode);
     tablet::on_menu_clicked(uuid, window_id, slot, mode);
+    crate::game::rustcraft_filter::on_menu_clicked(uuid, window_id, slot, mode);
     window::on_menu_clicked(game, uuid, window_id, slot, button, mode);
     // Slice 18, base and gear: the starsteel backpack's page arrows.
     crate::game::rustcraft_backpack::on_menu_clicked(game, uuid, window_id, slot);
@@ -390,6 +391,7 @@ pub(super) fn on_menu_closed(uuid: u128, window_id: i32) {
     workers::on_menu_closed(uuid, window_id);
     base::on_menu_closed(uuid, window_id);
     tablet::on_menu_closed(uuid, window_id);
+    crate::game::rustcraft_filter::on_menu_closed(uuid, window_id);
     window::on_menu_closed(uuid, window_id);
 }
 
@@ -438,6 +440,8 @@ pub(super) fn on_place_block(game: &mut Game<'_>, stack: &ItemStack, pos: [i32; 
     // placed again; a lifted suspicious block gets its loot back (spec 26).
     crate::game::rustcraft_utility::forget_grown(game, &player.dimension, pos);
     crate::game::rustcraft_utility::on_place_suspicious(game, &player.dimension, stack, pos);
+    // Slice 18: a lifted projector's plan back into it.
+    crate::game::rustcraft_projector::on_place(game, stack, pos);
     if is_ours(&stack.item) || touches_magistral(&player.dimension, pos) {
         mark_stale(&player.dimension);
     }
@@ -484,6 +488,8 @@ pub(super) fn on_destroy_block(game: &mut Game<'_>, pos: [i32; 3]) {
         if book && game.native_give_items(orders::book_item(), 1) == 0 {
             drop_item(game, &player.dimension, pos, orders::book_item());
         }
+        // Slice 18: and its stack and filter modules.
+        storage::give_back_sockets(game, &player.dimension, pos, player.uuid);
     }
     if block != content::HOUSING || player.game_mode == CREATIVE {
         return;
@@ -536,6 +542,8 @@ fn rescan(game: &mut Game<'_>, dimension: &str, level: &mut LevelNet) {
     monorail::rescan(game, dimension, &found.rails, &stations);
     zipline::rescan(game, dimension, &found.anchors);
     level.topology = topology::analyse(&level.layout, &TUNING);
+    // Slice 18 (S6): extra terminals anywhere on the storage's magistral.
+    storage::link_far_terminals(game, dimension, &level.topology);
     level.recipes = machines::load_recipes(game);
     orders::forget_book();
     machines::teach_slot_rules(game, &level.recipes);

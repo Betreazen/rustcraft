@@ -933,6 +933,85 @@ pub(super) fn reachable(
     in_tanks + own
 }
 
+// ---- Slice 18 (stream 5): the kitchen and the shearer use the tank they touch ----
+
+/// The tank group touching `pos` that holds `fluid` or is empty (for `fill`), and its index.
+fn touching_group(game: &Game<'_>, level: &LevelNet, pos: Pos, fluid: &str, fill: bool, tuning: &Tuning) -> Option<(Vec<TankGroup>, usize)> {
+    let per_block = tuning.tank_buckets * BUCKET;
+    let groups = read_groups(game, &level.fluids.tanks, per_block);
+    let near: BTreeSet<Pos> = Face::ALL.into_iter().map(|f| step(pos, f)).collect();
+    let i = groups.iter().position(|g| {
+        g.blocks.iter().any(|b| near.contains(b))
+            && (g.fluid.as_deref() == Some(fluid) || (fill && g.fluid.is_none()))
+    })?;
+    Some((groups, i))
+}
+
+/// How much `fluid` (mB) the tanks touching `pos` hold, and their room for it.
+pub(super) fn touching_amount(game: &Game<'_>, level: &LevelNet, pos: Pos, fluid: &str, tuning: &Tuning) -> (u64, u64) {
+    let held = touching_group(game, level, pos, fluid, false, tuning).map_or(0, |(g, i)| g[i].amount);
+    let room = touching_group(game, level, pos, fluid, true, tuning).map_or(0, |(g, i)| g[i].room_for(fluid));
+    (held, room)
+}
+
+/// Takes up to `amount` of `fluid` from a tank touching `pos`: how much it took.
+pub(super) fn take_touching(game: &mut Game<'_>, level: &LevelNet, pos: Pos, fluid: &str, amount: u64, tuning: &Tuning) -> u64 {
+    let Some((before, i)) = touching_group(game, level, pos, fluid, false, tuning) else {
+        return 0;
+    };
+    let mut after = before.clone();
+    let took = after[i].take(fluid, amount);
+    write_back(game, &before, &after, tuning.tank_buckets * BUCKET);
+    took
+}
+
+/// Puts up to `amount` of `fluid` into a tank touching `pos`: how much went in.
+pub(super) fn put_touching(game: &mut Game<'_>, level: &LevelNet, pos: Pos, fluid: &str, amount: u64, tuning: &Tuning) -> u64 {
+    let Some((before, i)) = touching_group(game, level, pos, fluid, true, tuning) else {
+        return 0;
+    };
+    let mut after = before.clone();
+    let went = after[i].put(fluid, amount);
+    write_back(game, &before, &after, tuning.tank_buckets * BUCKET);
+    went
+}
+
+/// Slice 18 (stream 5, O12 handed over from stream 1): «заказ приносит свою воду»: an order's
+/// mixer step takes its water from the tanks `reachable` counts for it (touching it, or behind a
+/// joint that gives on a fluid net it is a joint of) into the mixer's own tank, as far as it has
+/// room. How much came.
+pub(super) fn bring_water(game: &mut Game<'_>, level: &LevelNet, mixer_at: Pos, amount: u64, tuning: &Tuning) -> u64 {
+    let Some(mut tanks) = mixer::read_tanks(game, mixer_at) else {
+        return 0;
+    };
+    let room = mixer::tank_size(tuning).saturating_sub(tanks.water).min(amount);
+    if room == 0 {
+        return 0;
+    }
+    let mut near: BTreeSet<Pos> = Face::ALL.into_iter().map(|f| step(mixer_at, f)).collect();
+    for net in &level.fluids.nets {
+        if net.joints.iter().any(|j| j.block == mixer_at && j.mode != Mode::From) {
+            near.extend(net.joints.iter().filter(|j| j.mode != Mode::Into).map(|j| j.block));
+        }
+    }
+    let per_block = tuning.tank_buckets * BUCKET;
+    let before = read_groups(game, &level.fluids.tanks, per_block);
+    let mut after = before.clone();
+    let mut got = 0;
+    for g in after.iter_mut() {
+        if got >= room {
+            break;
+        }
+        if g.fluid.as_deref() == Some(WATER) && g.blocks.iter().any(|b| near.contains(b)) {
+            got += g.take(WATER, room - got);
+        }
+    }
+    write_back(game, &before, &after, per_block);
+    tanks.water += got;
+    mixer::write_tanks(game, mixer_at, &tanks);
+    got
+}
+
 /// A tank's diagnosis: «Бак: вода, 20 из 32 вёдер», its joints and its note.
 pub(super) fn tank_text(game: &Game<'_>, level: &LevelNet, pos: Pos, tuning: &Tuning) -> Text {
     let Some(g) = group_at(game, level, pos, tuning) else {

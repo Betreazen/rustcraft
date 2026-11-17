@@ -51,7 +51,7 @@ use rustcraft_rules::{
         topology::{ChannelKind, Layout, pipe_length},
     },
     orders::ship::{self, NetKey, Route},
-    storage::{keys, terminal},
+    storage::keys,
     tuning::Tuning,
 };
 use std::collections::{BTreeMap, BTreeSet, HashMap};
@@ -372,11 +372,9 @@ fn snapshot(
         let slots: Vec<ReadSlot> = slots
             .into_iter()
             .map(|s| {
-                // Keyed as the storage keys stacks: a worn one apart, one with components marked.
-                let held = s.stack.map(|st| {
-                    let marked = st.extra.is_some() || !terminal::addressable(st.damage);
-                    (keys::stack_key(&st.item, st.damage, marked), st.count)
-                });
+                // Keyed as the storage keys stacks: a worn one apart, one with components by
+                // its saved form (slice 18).
+                let held = s.stack.map(|st| (storage::net_key(&st), st.count));
                 if let Some((item, _)) = &held {
                     seen.insert(item.clone());
                 }

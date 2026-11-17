@@ -5,11 +5,13 @@
 //!
 //! Numbers not in the spec are proposals for the playtest, like every number of the mod.
 
+pub mod brew;
 pub mod charge;
 pub mod disassembly;
 pub mod farm;
 pub mod found;
 pub mod grown;
+pub mod kitchen;
 pub mod plan;
 pub mod repair;
 pub mod transit;
@@ -122,16 +124,26 @@ impl Util {
             Util::Charger => s("rustcraft:charger", 1000.0, 128.0, 0, 2),
             Util::ChargePlate => s("rustcraft:charge_plate", 1000.0, 256.0, 0, 2),
             Util::Repair => s("rustcraft:repair", 400.0, 32.0, 0, 2),
-            Util::Kitchen => s("rustcraft:kitchen", 400.0, 16.0, KITCHEN_RECIPES.len(), 2),
+            // Slice 18: a toggle a page, its rows (the page's dish and what it takes, the milk in
+            // the tank: a line, not a bar, so the window fits 240 pixels).
+            Util::Kitchen => s("rustcraft:kitchen", 400.0, 16.0, kitchen::PAGES_MAX, 2),
+            // Slice 18: its rows: the water; the rod and the wait (18 catch slots leave room for
+            // two in 240 pixels).
             Util::Fishery => s("rustcraft:fishery", 200.0, 8.0, 0, 2),
             Util::Feeder => s("rustcraft:feeder", 200.0, 8.0, 0, 2),
             Util::Shearer => s("rustcraft:shearer", 200.0, 8.0, 0, 2),
-            Util::Apiary => s("rustcraft:apiary", 200.0, 8.0, 0, 2),
-            Util::Brewer => s("rustcraft:brewer", 400.0, 16.0, 0, 2),
-            Util::XpTank => s("rustcraft:xp_tank", 100.0, 4.0, 4, 2),
-            Util::Enchanter => s("rustcraft:enchanter", 600.0, 32.0, 3, 2),
-            Util::Archeo => s("rustcraft:archeo", 200.0, 16.0, ARCHEO_TABLES.len(), 2),
-            Util::Projector => s("rustcraft:projector", 400.0, 16.0, 3, 2),
+            // Slice 18 (guide `apiary`): «забирать: мёд / соты», a choice of two.
+            Util::Apiary => s("rustcraft:apiary", 200.0, 8.0, 2, 2),
+            // Slice 18: four page buttons and five kind buttons for the chosen page.
+            Util::Brewer => s("rustcraft:brewer", 400.0, 16.0, brew::PAGES_MAX + brew::Kind::ALL.len(), 2),
+            // Slice 18: six buttons (give 1 / 10 / all, take 1 / 10 / all).
+            Util::XpTank => s("rustcraft:xp_tank", 100.0, 4.0, xp::PRESSES.len(), 2),
+            // Slice 18: the level buttons −10, −1, +1, +10.
+            Util::Enchanter => s("rustcraft:enchanter", 600.0, 32.0, xp::LEVEL_STEPS.len(), 2),
+            // Slice 18: the table is the block's own place, a line not a choice.
+            Util::Archeo => s("rustcraft:archeo", 200.0, 16.0, 0, 2),
+            // Slice 18: remember, ghost, forget, turn, mirror, «В руку».
+            Util::Projector => s("rustcraft:projector", 400.0, 16.0, 6, 2),
             Util::Builder => s("rustcraft:builder", 400.0, 32.0, 0, 2),
             Util::PortalDock => s("rustcraft:portal_dock", 400.0, 32.0, 0, 2),
             Util::Vein => s("rustcraft:vein", 8000.0, 128.0, vein::PICKS.len(), 2),
@@ -151,18 +163,22 @@ impl Util {
             Util::Disintegrator => s(10, 0..1, 1..10),
             Util::Charger => s(8, 0..4, 4..8),
             Util::ChargePlate => s(1, 0..0, 0..0),
-            // 0 the tool, 1..5 material, 5 the repaired tool.
-            Util::Repair => s(6, 0..5, 5..6),
+            // Slice 18 (guide `repair`): 0..3 to repair, 3..5 material and two more for each
+            // capacity module (3..11), 11..14 the repaired tools.
+            Util::Repair => s(REPAIR_OUT.end, 0..REPAIR_MATERIAL.end, REPAIR_OUT),
             Util::Kitchen => s(13, 0..9, 9..13),
-            // 0 the rod, 1..10 the catch.
-            Util::Fishery => s(10, 0..1, 1..10),
-            Util::Feeder => s(9, 0..9, 0..0),
-            // 0 shears, 1 empty buckets, 2..11 wool and milk.
-            Util::Shearer => s(11, 0..2, 2..11),
+            // 0 the rod, 1..19 the catch (9 slots, 18 with a storage module).
+            Util::Fishery => s(1 + 2 * farm::FISH_BUFFER, 0..1, 1..1 + 2 * farm::FISH_BUFFER),
+            // Slice 18 (guide `feeder`): 3 food cells.
+            Util::Feeder => s(3, 0..3, 0..0),
+            // Slice 18 (guide `shearer`): its shears are built in and its milk goes to the tank
+            // it touches; 0..9 the wool.
+            Util::Shearer => s(9, 0..0, 0..9),
             // 0 glass bottles, 1..10 honey and combs.
             Util::Apiary => s(10, 0..1, 1..10),
-            // 0..3 bottles, 3 the ingredient, 4 blaze powder, 5..8 the potions.
-            Util::Brewer => s(8, 0..5, 5..8),
+            // Slice 18: 0..3 the bottles it brews, 3..7 its ingredients, 7 blaze powder, 8..11 the
+            // finished potions.
+            Util::Brewer => s(BREW_OUT.end, 0..BREW_FUEL + 1, BREW_OUT),
             Util::XpTank => s(1, 0..0, 0..0),
             // 0 the item, 1 lapis, 2 the enchanted item.
             Util::Enchanter => s(3, 0..2, 2..3),
@@ -176,6 +192,44 @@ impl Util {
         }
     }
 
+    /// Slice 18 (guide MODES): the machines with the «Экономный / Обычный / Форсаж» switch: the
+    /// repair stand, the kitchen, the brewer, the enchanting machine, the archaeology table and
+    /// the building machine. The farm machines' pace is the animals' or the water's.
+    pub fn has_modes(self) -> bool {
+        matches!(
+            self,
+            Util::Repair | Util::Kitchen | Util::Brewer | Util::Enchanter | Util::Archeo | Util::Builder
+        )
+    }
+
+    /// Slice 18 (guide SLOTS_FROM): the tier a machine opens at; a block of it saves its tier under
+    /// `tier` once stream 3's swap makes higher ones, and this is the tier of one that saved none.
+    pub fn opening_tier(self) -> u8 {
+        match self {
+            Util::Brewer | Util::XpTank | Util::Archeo | Util::Projector | Util::Builder => 3,
+            Util::Enchanter | Util::ChargePlate | Util::PortalDock => 4,
+            Util::Charger | Util::Disintegrator | Util::Vein => 3,
+            _ => 2,
+        }
+    }
+
+    /// Slice 18 (guide `ui.js`): the bars of its window: energy, and the repair stand's
+    /// durability, the shearer's milk, the condenser's experience, the building machine's
+    /// progress (the kitchen's milk and the brewer's fuel are lines: their windows have no room
+    /// for a bar in 240 pixels).
+    pub fn bars(self) -> usize {
+        match self {
+            Util::Repair | Util::Shearer | Util::XpTank | Util::Builder => 2,
+            _ => 1,
+        }
+    }
+
+    /// Slice 18: the fishing station, the feeder, the shearer and the apiary collector: the water
+    /// or the animals set their pace, so a speed module does nothing for them.
+    pub fn paced_by_nature(self) -> bool {
+        matches!(self, Util::Fishery | Util::Feeder | Util::Shearer | Util::Apiary)
+    }
+
     /// A machine that works on the animals or the world round it (radius module, K1-style).
     pub fn has_radius(self) -> bool {
         matches!(self, Util::Feeder | Util::Shearer | Util::Apiary)
@@ -187,17 +241,20 @@ impl Util {
             (Util::Trash, 0..=8) => true,
             (Util::Trash, _) => filter.iter().any(|f| f == item),
             (Util::Fishery, 0) => item == "minecraft:fishing_rod",
-            (Util::Shearer, 0) => item == "minecraft:shears",
-            (Util::Shearer, 1) => item == "minecraft:bucket",
             (Util::Apiary, 0) => item == "minecraft:glass_bottle",
-            (Util::Brewer, 0..=2) => {
+            (Util::Brewer, s) if BREW_BOTTLES.contains(&s) => {
                 matches!(item, "minecraft:potion" | "minecraft:splash_potion" | "minecraft:lingering_potion")
             }
-            (Util::Brewer, 4) => item == "minecraft:blaze_powder",
+            (Util::Brewer, BREW_FUEL) => item == "minecraft:blaze_powder",
+            (Util::Brewer, s) if BREW_INGREDIENTS.contains(&s) => brew::is_ingredient(item),
             (Util::Enchanter, 1) => item == "minecraft:lapis_lazuli",
             (Util::Archeo, 0) => matches!(item, "minecraft:suspicious_sand" | "minecraft:suspicious_gravel"),
             (Util::Archeo, 1) => item == "minecraft:brush",
-            (Util::Repair, 1..5) => repair::is_material(item),
+            // What is repaired is no material (so a hopper's string goes to the material).
+            (Util::Repair, s) if REPAIR_TOOLS.contains(&s) => !repair::is_material(item),
+            (Util::Repair, s) if REPAIR_MATERIAL.contains(&s) => {
+                s < repair_material_end(capacity_in(filter)) && repair::is_material(item)
+            }
             (Util::Feeder, _) => farm::is_feed(item),
             (Util::Vein, _) => vein::is_rock(item),
             _ => true,
@@ -205,18 +262,46 @@ impl Util {
     }
 }
 
+/// Slice 18: the brewing vat's slots.
+pub const BREW_BOTTLES: Range<usize> = 0..3;
+pub const BREW_INGREDIENTS: Range<usize> = 3..7;
+pub const BREW_FUEL: usize = 7;
+pub const BREW_OUT: Range<usize> = 8..11;
+
+/// Slice 18: the repair stand's slots: what it repairs, its material (two cells and two more a
+/// capacity module, at most three), what it repaired.
+pub const REPAIR_TOOLS: Range<usize> = 0..3;
+pub const REPAIR_MATERIAL: Range<usize> = 3..11;
+pub const REPAIR_OUT: Range<usize> = 11..14;
+
+/// The end of the material cells a stand with `capacity` capacity modules uses.
+pub fn repair_material_end(capacity: u32) -> usize {
+    (REPAIR_MATERIAL.start + 2 + 2 * capacity as usize).min(REPAIR_MATERIAL.end)
+}
+
+/// The capacity modules among a machine's module items, which its slot rule gets in `filter`
+/// (the bundle passes a capacity machine's module items there, the trash's filter otherwise).
+pub fn capacity_in(items: &[String]) -> u32 {
+    items.iter().filter(|i| i.as_str() == crate::storage::modules::CAPACITY).count() as u32
+}
+
+/// A machine whose slot rule reads its capacity modules.
+pub fn has_capacity(u: Util) -> bool {
+    matches!(u, Util::Repair | Util::Kitchen | Util::Brewer)
+}
+
 /// The kitchen's recipes (spec 22: stews, soups, bread, pies and cakes), by result: each needs a
 /// crafting recipe of the game with that result; its toggle in the window turns it on.
-pub const KITCHEN_RECIPES: [&str; 9] = [
+/// Slice 18: the handbook's dishes only (bread, cookies, pumpkin pie, cake, the soups and the
+/// rabbit stew); a page chooses one.
+pub const KITCHEN_RECIPES: [&str; 7] = [
     "minecraft:bread",
-    "minecraft:cake",
-    "minecraft:pumpkin_pie",
     "minecraft:cookie",
+    "minecraft:pumpkin_pie",
+    "minecraft:cake",
     "minecraft:mushroom_stew",
-    "minecraft:rabbit_stew",
     "minecraft:beetroot_soup",
-    "minecraft:golden_carrot",
-    "minecraft:golden_apple",
+    "minecraft:rabbit_stew",
 ];
 
 /// The archaeology table's loot tables (spec 24, ST2), one a toggle.
@@ -233,11 +318,17 @@ pub const ARCHEO_TABLES: [&str; 5] = [
 pub fn step_ticks(u: Util) -> u64 {
     match u {
         Util::Trash => 20,
-        Util::Disintegrator | Util::Repair | Util::Archeo | Util::Enchanter => 100,
-        Util::Kitchen => 200,
+        Util::Disintegrator | Util::Repair => 100,
+        // Slice 18 (guide): 10 s a block, 10 s an item.
+        Util::Archeo | Util::Enchanter => 200,
+        // Slice 18 (guide `kitchen`): 4 s a dish.
+        Util::Kitchen => 80,
         Util::Brewer => 400,
-        Util::Feeder | Util::Shearer | Util::Apiary => 100,
-        Util::Builder => 20,
+        // Slice 18 (guide `feeder`): a pair every 20 s.
+        Util::Feeder => 400,
+        Util::Shearer | Util::Apiary => 100,
+        // Slice 18 (guide `builder`): 2 blocks a second.
+        Util::Builder => 10,
         Util::PortalDock => 20,
         Util::Vein => vein::STEP_TICKS,
         Util::Charger | Util::ChargePlate | Util::XpTank | Util::Projector | Util::Fishery => 20,
@@ -255,12 +346,35 @@ pub fn step_energy(u: Util) -> f64 {
         Util::Archeo => 40.0,
         Util::Enchanter => 200.0,
         Util::Feeder | Util::Shearer | Util::Apiary => 10.0,
-        Util::Builder => 4.0,
+        // 16 E/s in the normal mode.
+        Util::Builder => 8.0,
         Util::PortalDock => 1.0,
         Util::Vein => vein::BLOCK_ENERGY,
         Util::Fishery => 20.0,
-        Util::Charger | Util::ChargePlate | Util::XpTank | Util::Projector => 0.0,
+        // Slice 18: the projector 4 E/s while its ghost shows (a step a second).
+        Util::Projector => 4.0,
+        Util::Charger | Util::ChargePlate | Util::XpTank => 0.0,
     }
+}
+
+/// Slice 18 (guide SLOTS_BY_TIER, `modules`): module sockets of a machine of `tier`: three on the
+/// first and second, four on the third and fourth.
+pub fn sockets_for_tier(tier: u8) -> usize {
+    if tier >= 3 { 4 } else { 3 }
+}
+
+/// (ticks between steps, energy a step) after the work mode and the modules: speed modules halve
+/// the wait and cost ×2.5 each, economy ×0.6 each (A7, A9); the mode's speed divides the wait
+/// and its energy factor multiplies the cost (guide MODES). A machine without modes works in
+/// `Normal`.
+pub fn paced(u: Util, mode: crate::machines::processor::WorkMode, speed: u32, economy: u32) -> (u64, f64) {
+    let mode = if u.has_modes() { mode } else { crate::machines::processor::WorkMode::Normal };
+    // The farm machines' pace is the water's or the animals' (guide: no speed module for them).
+    let speed = if u.paced_by_nature() { 0 } else { speed };
+    let (fast, dear) = mode.factors();
+    let ticks = ((step_ticks(u) >> speed.min(4)) as f64 / fast).round().max(1.0) as u64;
+    let cost = step_energy(u) * 2.5f64.powi(speed as i32) * 0.6f64.powi(economy as i32) * dear;
+    (ticks, cost)
 }
 
 /// What a slice-12 machine shows in its status line.
@@ -304,6 +418,54 @@ mod tests {
             assert_eq!(Util::of(u.spec().block), Some(u));
             assert!(u.spec().buffer > 0.0 && u.spec().draw > 0.0);
         }
+    }
+
+    #[test]
+    fn the_repair_stand_takes_material_in_two_cells_and_two_more_a_capacity_module() {
+        let none: Vec<String> = Vec::new();
+        assert!(Util::Repair.takes(3, "minecraft:iron_ingot", &none));
+        assert!(Util::Repair.takes(4, "minecraft:string", &none));
+        assert!(!Util::Repair.takes(5, "minecraft:iron_ingot", &none));
+        let one = vec![crate::storage::modules::CAPACITY.to_owned()];
+        assert!(Util::Repair.takes(6, "minecraft:iron_ingot", &one));
+        assert!(!Util::Repair.takes(7, "minecraft:iron_ingot", &one));
+        assert!(!Util::Repair.takes(3, "minecraft:dirt", &none));
+        assert_eq!(Util::Repair.slots().count, 14);
+    }
+
+    #[test]
+    fn every_machine_window_fits_the_screen() {
+        // Slice 18: a window must fit 240 GUI pixels (1280 × 720 at GUI scale 3).
+        use crate::machines::sheet::{Kind, MAX_HEIGHT, layout};
+        for u in Util::ALL {
+            let h = layout(Kind::Util(u).shape()).height;
+            assert!(h <= MAX_HEIGHT, "{u:?}: {h}");
+        }
+    }
+
+    #[test]
+    fn sockets_grow_with_the_tier() {
+        assert_eq!(sockets_for_tier(Util::Repair.opening_tier()), 3);
+        assert_eq!(sockets_for_tier(Util::Brewer.opening_tier()), 4);
+        assert_eq!(sockets_for_tier(Util::Enchanter.opening_tier()), 4);
+        assert_eq!(sockets_for_tier(2), 3);
+    }
+
+    #[test]
+    fn the_work_mode_paces_the_machines_that_have_one() {
+        use crate::machines::processor::WorkMode;
+        let (t, e) = paced(Util::Repair, WorkMode::Normal, 0, 0);
+        assert_eq!((t, e), (step_ticks(Util::Repair), step_energy(Util::Repair)));
+        let (t, e) = paced(Util::Repair, WorkMode::Boost, 0, 0);
+        assert_eq!(t, step_ticks(Util::Repair) / 2);
+        assert!((e - step_energy(Util::Repair) * 3.0).abs() < 1e-9);
+        let (t, e) = paced(Util::Repair, WorkMode::Economy, 0, 0);
+        assert_eq!(t, step_ticks(Util::Repair) * 2);
+        assert!((e - step_energy(Util::Repair) * 0.35).abs() < 1e-9);
+        // No modes: the feeder keeps its pace whatever is saved.
+        assert_eq!(paced(Util::Feeder, WorkMode::Boost, 0, 0).0, step_ticks(Util::Feeder));
+        assert!(Util::Builder.has_modes() && !Util::Fishery.has_modes());
+        assert_eq!(paced(Util::Feeder, WorkMode::Normal, 2, 0).0, step_ticks(Util::Feeder), "no speed");
     }
 
     #[test]

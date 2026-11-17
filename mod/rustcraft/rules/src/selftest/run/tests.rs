@@ -327,9 +327,22 @@ impl Bench for Fake {
     fn set_worker_filter(&mut self, _: u64, _: &[&str]) -> Result<(), String> {
         Ok(())
     }
-
-
-
+    // Slice 18, stream 5.
+    fn insert_snbt(&mut self, _: Pos, _: &str) -> Result<u32, String> {
+        Ok(0)
+    }
+    fn stored_stacks(&self, _: Pos) -> Vec<String> {
+        Vec::new()
+    }
+    fn storage_diagnosis(&self, _: Pos) -> Option<String> {
+        None
+    }
+    fn int_array(&self, _: Pos, _: &str) -> Vec<i32> {
+        Vec::new()
+    }
+    fn long(&self, _: Pos, _: &str) -> i64 {
+        0
+    }
 }
 
 const PLOT: Area = Area {

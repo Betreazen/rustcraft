@@ -198,12 +198,54 @@ fn strike(game: &mut Game<'_>, dimension: &str, pos: Pos, t: &Tuning) -> Shown {
         Ok(a) => (a.id, a.kind.clone()),
         Err(shown) => return shown,
     };
+    // Slice 18: 4 E/s, from its buffer (×0.6 an economy module); a blade needs its charge.
+    let economy = modules::count(&base::modules_at(game, pos), Module::Economy);
+    let cost = rules::strike_energy(t.butcher_ticks, economy);
+    let energy = machines::buffer_energy(game, pos);
+    if energy + 1e-9 < cost {
+        return Shown::NoEnergy;
+    }
+    let blade = sword.as_ref().filter(|s| rules::is_blade(&s.item)).cloned();
+    if let Some(b) = &blade
+        && crate::game::rustcraft_gear::battery(game, b).is_none_or(|bat| bat.charge < rules::BLADE_CHARGE)
+    {
+        return Shown::NoEnergy;
+    }
+    machines::set_buffer_energy(game, pos, energy - cost);
+    // Its sword's enchantments: Fire Aspect sets the animal alight so its meat drops cooked, and
+    // Looting adds to the drops as the game's tables do (the strike itself has no attacker).
+    let fire = sword.as_ref().map_or(0, |s| s.enchantment_level("minecraft:fire_aspect"));
+    let looting = sword.as_ref().map_or(0, |s| s.enchantment_level("minecraft:looting"));
+    if fire > 0 {
+        for m in game.mobs.iter_mut().filter(|m| m.id == id) {
+            m.fire_ticks = m.fire_ticks.max(80);
+        }
+    }
     let owner = base::owner_at(game, pos);
     let struck = match owner {
         Some(owner) => base::strike(game, dimension, id, BLOW, owner, base::Striker::Butcher),
         None => game.native_hurt_entity(dimension, id, BLOW, "minecraft:generic", None),
     };
-    if struck && let Some(sword) = sword {
+    if struck {
+        let mut random = crate::game::rustcraft_utility::random;
+        for (item, n) in rules::looting_bonus(&kind, looting, fire > 0, &mut random) {
+            let max = machines::max_stack(game, &item);
+            let stack = horizon_client::items::ItemStack::new(item.as_str(), n);
+            game.native_with_mod_block_entity(pos, move |b| {
+                if b.items.len() < rules::SLOTS {
+                    b.items.resize(rules::SLOTS, None);
+                }
+                mining::store(&mut b.items[..LOOT_SLOTS], stack, max)
+            });
+        }
+        // K6 (slice 18): the kill's experience into a condenser beside it.
+        xp_to_condenser(game, pos, &kind);
+    }
+    if struck && let Some(b) = blade {
+        if let Some(bat) = crate::game::rustcraft_gear::battery(game, &b) {
+            crate::game::rustcraft_gear::charge(&b, (bat.charge - rules::BLADE_CHARGE).max(0.0));
+        }
+    } else if struck && let Some(sword) = sword {
         let max_damage = game
             .items()
             .get(&sword.item)
@@ -220,6 +262,16 @@ fn strike(game: &mut Game<'_>, dimension: &str, pos: Pos, t: &Tuning) -> Shown {
         });
     }
     Shown::Working(kind)
+}
+
+/// K6 (guide `butcher`): «опыт за убийство уходит в конденсатор опыта вплотную, без него
+/// пропадает»: the points the animal is worth (the game's 1–3 for a farm animal) into a condenser
+/// touching the butcher (a kill with no player behind it drops no orbs).
+fn xp_to_condenser(game: &mut Game<'_>, pos: Pos, kind: &str) {
+    let points = if kind == "minecraft:chicken" || kind == "minecraft:rabbit" { 1 } else { 2 };
+    if let Some(tank) = crate::game::rustcraft_utility::neighbour_of(game, pos, rustcraft_rules::utility::Util::XpTank.spec().block) {
+        crate::game::rustcraft_utility::add_xp(game, tank, points);
+    }
 }
 
 fn animal_name(kind: &str) -> Text {
@@ -244,6 +296,7 @@ fn shown_text(s: &Shown) -> Text {
             "The drops have nowhere to go",
             &[],
         ),
+        Shown::NoEnergy => line("rustcraft.butcher.no_energy", "No energy", &[]),
     }
 }
 
@@ -251,7 +304,7 @@ fn severity(s: &Shown) -> Severity {
     match s {
         Shown::Working(_) => Severity::Ok,
         Shown::NothingToCull => Severity::Warn,
-        Shown::NoSword | Shown::OutputFull => Severity::Bad,
+        Shown::NoSword | Shown::OutputFull | Shown::NoEnergy => Severity::Bad,
     }
 }
 

@@ -27,7 +27,33 @@ pub mod saved;
 pub mod ship;
 
 /// The machine kinds a step can name, in the order the terminal's list codes them.
-pub const KINDS: [&str; 5] = ["crafter", "furnace", "crusher", "alloy", "mixer"];
+/// Slice 18 adds the kitchen (guide `kitchen`: «заказ из терминала склада тоже проходит через
+/// комбайн»): it runs the food recipes of the crafting table as the autocrafter does.
+pub const KINDS: [&str; 6] = ["crafter", "furnace", "crusher", "alloy", "mixer", "kitchen"];
+
+/// Slice 18 (handed over from stream 1): what an autocrafter's page still lacks for one craft:
+/// each item of its pattern less what its buffer holds, none when the buffer has it all.
+pub fn page_shortfall(pattern: &[Option<String>], buffer: &BTreeMap<String, u32>) -> Vec<(String, u32)> {
+    let mut need: BTreeMap<&str, u32> = BTreeMap::new();
+    for c in pattern.iter().flatten() {
+        *need.entry(c.as_str()).or_insert(0) += 1;
+    }
+    need.into_iter()
+        .filter_map(|(item, n)| {
+            let short = n.saturating_sub(buffer.get(item).copied().unwrap_or(0));
+            (short > 0).then(|| (item.to_owned(), short))
+        })
+        .collect()
+}
+
+/// Slice 18: the kitchen's copy of a crafting recipe whose result it cooks (the autocrafter keeps
+/// its own): an order runs on whichever of the two the line has.
+pub fn kitchen_copy(r: &PlanRecipe, kitchen_dishes: &[&str]) -> Option<PlanRecipe> {
+    (r.machine == KINDS[0] && kitchen_dishes.contains(&r.output.0.as_str())).then(|| PlanRecipe {
+        machine: KINDS[5].into(),
+        ..r.clone()
+    })
+}
 
 /// O12: a fluid's key starts with this, so no item id (`namespace:path`) is one.
 pub const FLUID_PREFIX: &str = "fluid:";
@@ -414,6 +440,39 @@ impl Planner<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_autocrafter_asks_for_what_its_page_lacks() {
+        let pattern: Vec<Option<String>> = ["minecraft:oak_planks", "minecraft:oak_planks", "minecraft:stick"]
+            .iter()
+            .map(|s| Some((*s).to_owned()))
+            .chain(std::iter::repeat_n(None, 6))
+            .collect();
+        let buffer = BTreeMap::from([("minecraft:oak_planks".to_owned(), 1)]);
+        assert_eq!(
+            page_shortfall(&pattern, &buffer),
+            vec![("minecraft:oak_planks".to_owned(), 1), ("minecraft:stick".to_owned(), 1)]
+        );
+        let full = BTreeMap::from([("minecraft:oak_planks".to_owned(), 2), ("minecraft:stick".to_owned(), 5)]);
+        assert!(page_shortfall(&pattern, &full).is_empty());
+    }
+
+    #[test]
+    fn bread_is_ordered_through_the_kitchen_when_the_line_has_one() {
+        // Slice 18: the kitchen's copy of the crafting recipe.
+        let crafted = r("crafter", &[("minecraft:wheat", 3)], ("minecraft:bread", 1));
+        let k = kitchen_copy(&crafted, &["minecraft:bread"]).unwrap();
+        assert_eq!(k.machine, "kitchen");
+        assert!(kitchen_copy(&crafted, &["minecraft:cake"]).is_none());
+        let stock = BTreeMap::from([("minecraft:wheat".to_owned(), 9)]);
+        let book = vec![k, crafted];
+        let p = plan("minecraft:bread", 2, &stock, &book, &["kitchen"]);
+        assert!(p.ready());
+        assert_eq!(p.steps[0].machine, "kitchen");
+        let p = plan("minecraft:bread", 2, &stock, &book, &["crafter"]);
+        assert!(p.ready(), "no kitchen: the autocrafter makes it");
+        assert_eq!(p.steps[0].machine, "crafter");
+    }
 
     fn r(machine: &str, inputs: &[(&str, u32)], output: (&str, u32)) -> PlanRecipe {
         PlanRecipe::simple(machine, inputs, output)

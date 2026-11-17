@@ -9,4 +9,6 @@ fn rustcraft_screen_render_post(
 
     // Slice 18, base and gear: a gear window's charge and modules.
     crate::game::rustcraft_gear::draw_window(game, batch, screen);
+
+    crate::game::rustcraft_tablet::draw(game, batch, screen);
 }

@@ -64,6 +64,11 @@ pub struct Order {
     /// O11: what its steps made for its later steps and the storage holds for it.
     #[serde(default)]
     pub made: BTreeMap<ItemKey, u64>,
+    /// Slice 18 (guide `terminal`: «каждый заказ — цепочка шагов; выделенный шаг идёт сейчас»):
+    /// its plan's steps as the last round made them, each (machine kind, what it makes, runs
+    /// now). Not saved: the next round makes it again.
+    #[serde(skip)]
+    pub chain: Vec<(String, ItemKey, bool)>,
 }
 
 impl Order {
@@ -141,6 +146,7 @@ impl Queue {
             wait: Wait::New,
             reserved: BTreeMap::new(),
             made: BTreeMap::new(),
+            chain: Vec::new(),
         });
         Some(id)
     }
@@ -280,6 +286,11 @@ impl Queue {
             }
             free_stock.remove(&o.item);
             let p = plan(&o.item, u64::from(wanted), &free_stock, book, kinds);
+            o.chain = p
+                .steps
+                .iter()
+                .map(|s| (s.machine.clone(), s.output.0.clone(), false))
+                .collect();
             o.reserved.clear();
             if !p.missing_machines.is_empty() {
                 o.wait = Wait::Machines(p.missing_machines);
@@ -359,6 +370,11 @@ impl Queue {
                 }
             }
             avail.retain(|_, n| *n > 0);
+            for job in &jobs[before..] {
+                if let Some(c) = o.chain.iter_mut().find(|c| c.0 == job.step.machine && c.1 == job.step.output.0) {
+                    c.2 = true;
+                }
+            }
             o.reserved = avail;
             o.wait = if jobs.len() > before {
                 Wait::Running
@@ -456,6 +472,22 @@ mod tests {
             powered: false,
             ..machine(x, kind)
         }
+    }
+
+    #[test]
+    fn an_order_shows_its_chain_with_the_running_step() {
+        // Slice 18: pistons from raw iron: the furnace step runs first, the crafter's waits.
+        let mut q = Queue::default();
+        q.add(PISTON, 2, false);
+        round(&mut q, &stock(0, 8), &[machine(1, "furnace"), machine(2, "crafter")]);
+        let chain = &q.orders[0].chain;
+        assert_eq!(
+            chain,
+            &vec![
+                ("furnace".to_owned(), IRON.to_owned(), true),
+                ("crafter".to_owned(), PISTON.to_owned(), false),
+            ]
+        );
     }
 
     #[test]

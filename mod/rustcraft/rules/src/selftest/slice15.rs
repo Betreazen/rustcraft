@@ -111,7 +111,7 @@ pub(super) fn holds(b: &dyn Bench, o: Pos, parts: &[(&str, u32)]) -> Result<bool
 
 /// The recipe book goes into the terminal's socket from the cursor.
 pub(super) fn put_book(b: &mut dyn Bench, o: Pos) -> Result<(), String> {
-    let id = terminal::encode(Press::Book).ok_or("the book's press has no id")?;
+    let id = terminal::encode(Press::Socket(1)).ok_or("the book's press has no id")?;
     let after = b.press_cursor(terminal_at(o), id, Some((BOOK, 1)))?;
     same("cursor after the book went in", after, None)
 }

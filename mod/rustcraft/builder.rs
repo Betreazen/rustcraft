@@ -19,18 +19,17 @@
 //   the housing from its block entity. Not made: F4's full collision and F5's see-through panels
 //   while a wrench is held.
 use crate::game::{
-    Game, native_block_entity_draw::BlockEntityDraw, rustcraft_base as base,
+    Game, native_block_entity_draw::BlockEntityDraw,
     rustcraft_content as content,
-    rustcraft_utility::{self as util, items, read_i64, read_json, spend, with_items, write_i64, write_json},
+    rustcraft_utility::{self as util, items, read_i64, read_json, spend, with_items, write_i64},
 };
 use horizon_client::{containers::ModBlockEntity, items::ItemStack, text::Text};
 use horizon_world::nbt::{Compound, JavaString, Tag};
 use rustcraft_rules::{
     geom::Pos,
-    reports::Report,
     utility::{
         Shown, Util,
-        plan::{self, Built, Plan},
+        plan::{self, Plan},
         transit::Transit,
     },
 };
@@ -40,17 +39,11 @@ use std::{
 };
 
 const PLAN_KEY: &str = "plan";
-const GHOST_KEY: &str = "ghost";
-const BUILT_KEY: &str = "built";
 const DOCK_KEY: &str = "dock_id";
 pub(super) const FACADE_KEY: &str = "facade";
 pub(super) const LOOK_KEY: &str = "facade_state";
 pub(super) const FACADE: &str = "rustcraft:facade";
 const FACADE_PLAIN: &str = "minecraft:smooth_stone";
-/// The ghost's blocks are drawn this big, about their cell's middle.
-const GHOST_SCALE: f32 = 0.6;
-/// The most ghost blocks a projector draws in a frame.
-const GHOST_MAX: usize = 256;
 
 #[derive(Default)]
 struct State {
@@ -65,10 +58,11 @@ fn state() -> MutexGuard<'static, State> {
     STATE.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
-pub(super) fn step(game: &mut Game<'_>, dimension: &str, pos: Pos, u: Util, cost: f64, _now: u64) -> Shown {
+pub(super) fn step(game: &mut Game<'_>, dimension: &str, level: &crate::game::rustcraft_server::LevelNet, pos: Pos, u: Util, cost: f64, _now: u64) -> Shown {
+    // Slice 18: the projector and the building machine are rustcraft_projector's.
     match u {
-        Util::Projector => projector_shown(game, pos),
-        Util::Builder => build(game, dimension, pos, cost),
+        Util::Projector => crate::game::rustcraft_projector::projector_step(game, pos, cost),
+        Util::Builder => crate::game::rustcraft_projector::build(game, dimension, level, pos, cost),
         _ => dock(game, pos, cost),
     }
 }
@@ -99,72 +93,18 @@ fn util_line(key: &str, fallback: &str, args: &[Text]) -> Text {
 
 // ---- The projector ----
 
-fn projector_shown(game: &mut Game<'_>, pos: Pos) -> Shown {
-    let Some(e) = game.native_mod_block_entity(pos) else {
-        return Shown::Idle("idle");
-    };
-    let plan: Plan = read_json(&e.nbt, PLAN_KEY);
-    if plan.cells.is_empty() {
-        return Shown::Idle("projector_empty");
-    }
-    let on = read_i64(&e.nbt, GHOST_KEY) != 0;
-    if on { Shown::Working } else { Shown::Idle("projector_hidden") }
-}
 
-fn block_at(game: &Game<'_>, at: Pos) -> Option<String> {
-    let b = game.native_block(at);
-    (!matches!(b.as_str(), "minecraft:air" | "minecraft:cave_air" | "minecraft:void_air" | "minecraft:water" | "minecraft:lava"))
-        .then_some(b)
-}
-
-fn offset(pos: Pos, o: [i32; 3]) -> Pos {
-    [pos[0] + o[0], pos[1] + o[1], pos[2] + o[2]]
-}
-
-/// A press in its window: remember, ghost on or off, clear.
+/// A press in its window: slice 18's (rustcraft_projector).
 pub(super) fn projector_press(game: &mut Game<'_>, pos: Pos, entity: &mut ModBlockEntity, i: usize) {
-    match i {
-        0 => {
-            let p = Plan::read(|o| block_at(game, offset(pos, o)).filter(|b| !crate::game::rustcraft_server::is_ours(b)));
-            write_json(&mut entity.nbt, PLAN_KEY, &p);
-            write_i64(&mut entity.nbt, GHOST_KEY, 1);
-        }
-        1 => {
-            let on = read_i64(&entity.nbt, GHOST_KEY) != 0;
-            write_i64(&mut entity.nbt, GHOST_KEY, i64::from(!on));
-        }
-        _ => {
-            write_json(&mut entity.nbt, PLAN_KEY, &Plan::default());
-            write_i64(&mut entity.nbt, GHOST_KEY, 0);
-        }
-    }
-    game.native_block_entity_sync(pos);
+    crate::game::rustcraft_projector::projector_press(game, pos, entity, i);
 }
 
-/// On a client: the plan's missing blocks, smaller, where the world has air.
+
+/// On a client: slice 18's ghost (rustcraft_projector).
 pub(super) fn draw_ghost(game: &Game<'_>, pos: Pos, entity: &ModBlockEntity, draw: &mut BlockEntityDraw) -> bool {
-    if read_i64(&entity.nbt, GHOST_KEY) == 0 {
-        return false;
-    }
-    let plan: Plan = read_json(&entity.nbt, PLAN_KEY);
-    let mut drawn = 0;
-    for cell in plan.missing(|o| block_at(game, offset(pos, o))) {
-        if drawn >= GHOST_MAX {
-            break;
-        }
-        if block_at(game, offset(pos, cell.at)).is_some() {
-            continue;
-        }
-        draw.push();
-        let k = (1.0 - GHOST_SCALE) / 2.0;
-        draw.translate([cell.at[0] as f32 + k, cell.at[1] as f32 + k, cell.at[2] as f32 + k]);
-        draw.scale([GHOST_SCALE; 3]);
-        game.native_draw_block(draw, &cell.block, &[]);
-        draw.pop();
-        drawn += 1;
-    }
-    true
+    crate::game::rustcraft_projector::draw_ghost(game, pos, entity, draw)
 }
+
 
 /// The projector's area for culling.
 pub(super) fn ghost_bounds(bounds: &mut [f32; 6]) {
@@ -174,63 +114,6 @@ pub(super) fn ghost_bounds(bounds: &mut [f32; 6]) {
 
 // ---- The building machine ----
 
-fn build(game: &mut Game<'_>, dimension: &str, pos: Pos, cost: f64) -> Shown {
-    let Some(projector) = util::neighbour_of(game, pos, Util::Projector.spec().block) else {
-        return Shown::Blocked("builder_no_projector");
-    };
-    let Some(pe) = game.native_mod_block_entity(projector) else {
-        return Shown::Blocked("builder_no_projector");
-    };
-    let plan: Plan = read_json(&pe.nbt, PLAN_KEY);
-    if plan.cells.is_empty() {
-        return Shown::Blocked("builder_no_plan");
-    }
-    let slots = items(game, pos);
-    let next = plan
-        .missing(|o| block_at(game, offset(projector, o)))
-        .find(|c| {
-            block_at(game, offset(projector, c.at)).is_none()
-                && slots.iter().flatten().any(|s| s.count > 0 && *s.item == *c.block)
-        })
-        .cloned();
-    let Some(cell) = next else {
-        let done = plan.missing(|o| block_at(game, offset(projector, o))).next().is_none();
-        return if done { Shown::Idle("builder_done") } else { Shown::Blocked("builder_no_blocks") };
-    };
-    let Some(state_id) = game.native_default_state(&cell.block) else {
-        return Shown::Blocked("builder_no_blocks");
-    };
-    if !spend(game, pos, cost) {
-        return Shown::NoEnergy;
-    }
-    let at = offset(projector, cell.at);
-    game.native_set_block(dimension, at, state_id, 3);
-    let pays = game
-        .native_with_mod_block_entity(pos, |e| {
-            if let Some(slot) = e.items.iter().position(|s| s.as_ref().is_some_and(|s| *s.item == *cell.block)) {
-                util::take_one(&mut e.items, slot);
-            }
-            let mut built: Built = read_json(&e.nbt, BUILT_KEY);
-            let pays = built.pays(cell.at);
-            write_json(&mut e.nbt, BUILT_KEY, &built);
-            pays
-        })
-        .unwrap_or(false);
-    match base::owner_at(game, pos) {
-        Some(o) if pays => base::report(Report::Build {
-            owner: o,
-            dimension: dimension.to_owned(),
-            pos: at,
-            block: cell.block,
-        }),
-        _ => base::report(Report::Place {
-            dimension: dimension.to_owned(),
-            pos: at,
-            block: cell.block,
-        }),
-    }
-    Shown::Working
-}
 
 // ---- The portal dock ----
 
@@ -389,6 +272,13 @@ fn look(nbt: &Compound) -> Option<String> {
 
 /// A click with `stack` on a housing or node at `pos`: claims it when it was the facade's.
 pub(super) fn on_use_item_on(game: &mut Game<'_>, player: u128, sneaking: bool, stack: &ItemStack, pos: Pos) -> bool {
+    // Slice 18: the wrench sets a projector's corners, and lifts it with its plan.
+    if &*stack.item == content::WRENCH
+        && let Some(dimension) = game.native_acting_player().map(|p| p.dimension)
+        && crate::game::rustcraft_projector::on_wrench(game, player, &dimension, sneaking, pos)
+    {
+        return true;
+    }
     let block = game.native_block(pos);
     if block != content::HOUSING && block != content::NODE {
         return false;
