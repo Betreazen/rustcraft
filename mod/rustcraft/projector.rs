@@ -172,15 +172,20 @@ fn state_at(game: &Game<'_>, at: Pos) -> Option<String> {
     Some(plan::state_string(&id, &props))
 }
 
-/// The state id of a plan's state string.
-fn state_id_of(game: &Game<'_>, state: &str) -> Option<horizon_world::registry::BlockStateId> {
-    let mut s = game.native_default_state(plan::state_id(state))?;
-    for (k, v) in plan::state_props(state) {
-        if let Some(next) = game.native_state_with_property(s, &k, &v) {
-            s = next;
-        }
+/// A plan's state string into the world at `at`: its block's default state, then each kept
+/// property (`native_set_block_property`; `native_state_with_property` is a level hook's, not
+/// the game's). False when the block is unknown or the world refuses it.
+fn place_state(game: &mut Game<'_>, dimension: &str, at: Pos, state: &str) -> bool {
+    let Some(s) = game.native_default_state(plan::state_id(state)) else {
+        return false;
+    };
+    if !game.native_set_block(dimension, at, s, 3) {
+        return false;
     }
-    Some(s)
+    for (k, v) in plan::state_props(state) {
+        game.native_set_block_property(at, &k, &v);
+    }
+    true
 }
 
 // ---- The projector ----
@@ -509,16 +514,16 @@ pub(super) fn build(game: &mut Game<'_>, dimension: &str, level: &LevelNet, pos:
             Shown::Blocked("builder_no_blocks")
         };
     };
-    let Some(state_id) = state_id_of(game, &cell.block) else {
+    if game.native_default_state(cell.id()).is_none() {
         return Shown::Blocked("builder_no_blocks");
-    };
+    }
     if !spend(game, pos, cost) {
         return Shown::NoEnergy;
     }
     // From the storage first, else from its own slots.
     let from_storage = id.is_some_and(|id| storage::take_from(dimension, id, cell.id(), 1) == 1);
     let at = offset(projector, cell.at);
-    if !game.native_set_block(dimension, at, state_id, 3) {
+    if !place_state(game, dimension, at, &cell.block) {
         if from_storage && let Some(id) = id {
             storage::restore_into(dimension, id, cell.id(), 1);
         }

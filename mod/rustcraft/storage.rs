@@ -1223,11 +1223,11 @@ fn own_items(game: &Game<'_>, terminal: Pos) -> Vec<String> {
 /// A terminal broken in survival gives back its stack and filter modules (the book is
 /// rustcraft_server's), into the inventory of `player` or onto the ground.
 pub(super) fn give_back_sockets(game: &mut Game<'_>, dimension: &str, pos: Pos, player: u128) {
-    let Some(entity) = crate::game::rustcraft_machines::entity(game, pos) else {
+    let Some(nbt) = crate::game::rustcraft_machines::entity(game, pos).map(|e| e.nbt.clone()) else {
         return;
     };
     for k in [sockets::SOCKET_STACK, sockets::SOCKET_FILTER] {
-        let Some(stack) = socket_stack(&entity.nbt, k) else { continue };
+        let Some(stack) = socket_stack(&nbt, k) else { continue };
         if let Some(rest) = game.native_give_stack(player, stack) {
             let nbt = Compound::from([(JavaString::from("Item"), save::item_to_nbt(&rest))]);
             let at = pos.map(|c| f64::from(c) + 0.5);
