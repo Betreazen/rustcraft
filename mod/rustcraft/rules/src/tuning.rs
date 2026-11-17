@@ -284,7 +284,9 @@ impl Default for Tuning {
             worker_energy_per_block: 0.5,
             worker_hold: 27,
             worker_hold_per_storage: 9,
-            worker_hold_max: 45,
+            // Slice 18 (guide `mod_storage`): ×2 a module, up to seven of them in a starsteel chassis;
+            // the window shows 45, the rest are counted in it.
+            worker_hold_max: 27 << 7,
             worker_upgrade_slots: 3,
             tool_side: [1, 2],
             tool_height: [3, 5],
@@ -353,7 +355,8 @@ impl Default for Tuning {
             miner_scan_per_tick: 64.0,
             miner_dig_ticks: 20.0,
             miner_slots: 9,
-            miner_slots_max: 27,
+            // Slice 18: ×2 a storage module in each of its four sockets; the window shows 27.
+            miner_slots_max: 9 << 4,
             miner_tool: "minecraft:diamond_pickaxe".to_owned(),
             placer_energy: 2.0,
             placer_ticks: 20.0,

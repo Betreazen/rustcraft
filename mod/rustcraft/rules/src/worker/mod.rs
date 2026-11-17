@@ -932,6 +932,20 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn three_storage_modules_make_the_hold_216() {
+        // Guide `mod_storage`: «Хранилище ×2 за модуль», past the window's five rows.
+        let t = Tuning::default();
+        let mut w = worker(&t);
+        w.tier = 3;
+        w.upgrades = vec![Some(Module::Storage); 3];
+        assert!(w.refit(&t).is_empty());
+        assert_eq!(w.hold.slots.len(), 216);
+        w.upgrades = vec![Some(Module::Storage); 7];
+        w.refit(&t);
+        assert_eq!(w.hold.slots.len(), 27 << 7, "a starsteel chassis of seven storage modules");
+    }
+
+    #[test]
     fn a_cargo_worker_loads_then_unloads_and_comes_back() {
         // W6: the cargo hold rides to the load dock, loads, rides to the unload dock.
         let t = Tuning::default();

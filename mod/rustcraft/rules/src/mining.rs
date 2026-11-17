@@ -182,9 +182,80 @@ pub fn scout(slots: &[Option<Module>]) -> f64 {
     2f64.powi(modules::count(slots, Module::Scout) as i32)
 }
 
-/// The miner's slots: 9, ×2 a storage module (guide `mod_storage`), at most `miner_slots_max`.
+/// The miner's slots: 9, ×2 a storage module (guide `mod_storage`), at most `miner_slots_max`
+/// (its four sockets all storage modules). Slice 18: past the window's 27 they are hidden cells.
 pub fn slots_of(slots: &[Option<Module>], t: &Tuning) -> usize {
     (t.miner_slots * modules::storage_factor(slots)).min(t.miner_slots_max)
+}
+
+/// Slice 18 (guide `mod_storage`: «×2 за модуль»): the slots the miner's window has. A menu slot
+/// holds at most 99 (SRC/docs/native-mods.md:4617-4627) and the window has three rows, so the
+/// slots past these are cells the miner keeps in its block entity, counted in its window.
+pub const WINDOW_SLOTS: usize = 27;
+
+/// Of `total` slots (`slots_of`), the window's and the hidden cells'.
+pub fn split_slots(total: usize) -> (usize, usize) {
+    (total.min(WINDOW_SLOTS), total.saturating_sub(WINDOW_SLOTS))
+}
+
+/// Slice 18: what the hidden cells hold moves into the window's slots as far as they take it
+/// (onto stacks of its item, then into empty slots, `size` of an item a slot), so what the miner
+/// gives out (MN1) keeps coming; cells past `open` (a storage module taken out) only give, and
+/// empty cells past it are dropped.
+pub fn settle(
+    visible: &mut [crate::machines::slots::Slot],
+    cells: &mut Vec<crate::machines::slots::Slot>,
+    open: usize,
+    size: impl Fn(&str) -> u32,
+) {
+    for cell in cells.iter_mut() {
+        let Some((item, n)) = cell.as_mut() else { continue };
+        let max = size(item).max(1);
+        for pass in 0..2 {
+            for slot in visible.iter_mut() {
+                if *n == 0 {
+                    break;
+                }
+                match slot {
+                    Some((i, c)) if pass == 0 && i == item && *c < max => {
+                        let give = (max - *c).min(*n);
+                        *c += give;
+                        *n -= give;
+                    }
+                    None if pass == 1 => {
+                        let give = max.min(*n);
+                        *slot = Some((item.clone(), give));
+                        *n -= give;
+                    }
+                    _ => {}
+                }
+            }
+        }
+        if *n == 0 {
+            *cell = None;
+        }
+    }
+    while cells.len() > open && cells.last().is_some_and(Option::is_none) {
+        cells.pop();
+    }
+}
+
+/// Slice 18: `count` of `item` into the first `open` hidden cells, `size` a cell; what is left.
+pub fn store_hidden(
+    cells: &mut Vec<crate::machines::slots::Slot>,
+    open: usize,
+    item: &str,
+    count: u32,
+    size: u32,
+) -> u32 {
+    let mut intake = (count > 0).then(|| (item.to_owned(), count));
+    crate::machines::queue::intake(&mut intake, cells, open, size.max(1));
+    intake.map_or(0, |(_, n)| n)
+}
+
+/// Slice 18: whether a hidden cell has room for one more stack of anything.
+pub fn hidden_room(cells: &[crate::machines::slots::Slot], open: usize) -> bool {
+    (0..open).any(|i| cells.get(i).is_none_or(Option::is_none))
 }
 
 /// Slice 18 (guide `miner`, `mod_stack`): the item ids of the stack modules (stream «modules»
@@ -568,6 +639,37 @@ impl Shown {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn storage_doubles_past_the_window() {
+        let t = Tuning::default();
+        let with = |n: usize| -> Vec<Option<Module>> {
+            (0..4).map(|i| (i < n).then_some(Module::Storage)).collect()
+        };
+        let totals: Vec<usize> = (0..=4).map(|n| slots_of(&with(n), &t)).collect();
+        assert_eq!(totals, vec![9, 18, 36, 72, 144], "×2 a module (guide `mod_storage`)");
+        assert_eq!(split_slots(9), (9, 0));
+        assert_eq!(split_slots(36), (27, 9));
+        assert_eq!(split_slots(144), (27, 117));
+    }
+
+    #[test]
+    fn settle_moves_hidden_cells_into_free_slots() {
+        let iron = "minecraft:raw_iron";
+        let mut cells = Vec::new();
+        assert_eq!(store_hidden(&mut cells, 2, iron, 100, 64), 0);
+        assert_eq!(store_hidden(&mut cells, 2, iron, 100, 64), 72, "two cells of 64 are full");
+        assert!(!hidden_room(&cells, 2));
+        let mut visible: Vec<crate::machines::slots::Slot> = vec![Some((iron.into(), 60)), None];
+        settle(&mut visible, &mut cells, 2, |_| 64);
+        assert_eq!(visible, vec![Some((iron.into(), 64)), Some((iron.into(), 64))]);
+        assert_eq!(crate::machines::slots::count_in(&cells, iron), 128 - 68);
+        // The module taken out: the cells only give, nothing is lost.
+        let mut visible: Vec<crate::machines::slots::Slot> = vec![None, None];
+        settle(&mut visible, &mut cells, 0, |_| 64);
+        assert_eq!(crate::machines::slots::count_in(&visible, iron), 60);
+        assert!(cells.is_empty());
+    }
     use super::*;
 
     #[test]
@@ -630,7 +732,7 @@ mod tests {
         assert_eq!(side(&[Some(Module::Area); 3], &t), 33);
         assert_eq!(slots_of(&[], &t), 9);
         assert_eq!(slots_of(&[Some(Module::Storage)], &t), 18);
-        assert_eq!(slots_of(&[Some(Module::Storage); 2], &t), 27);
+        assert_eq!(slots_of(&[Some(Module::Storage); 2], &t), 36, "×2 a module, slice 18");
         assert_eq!(scout(&[Some(Module::Scout); 2]), 4.0);
     }
 

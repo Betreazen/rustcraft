@@ -29,6 +29,7 @@ use rustcraft_rules::{
         },
         style::Severity,
     },
+    machines::slots::Slot,
     mining::{self as rules, Cycle, Miner, Ore, Outlet, Shown, Step, Survey},
     reports::Report,
     tuning::Tuning,
@@ -141,6 +142,7 @@ enum What {
         off: u16,
         scout: f64,
         usable: usize,
+        hidden: usize,
         room: bool,
     },
     Placer {
@@ -175,8 +177,10 @@ pub(super) fn read(game: &Game<'_>, pos: Pos, machine: Machine, t: &Tuning) -> O
             let side = rules::side(&slots, t);
             let total = rules::cells(pos, side, min_y);
             let m = read_miner(&entity.nbt);
-            let usable = rules::slots_of(&slots, t);
-            let room = has_room(&entity.items, usable);
+            // Slice 18: past the window's 27 slots the miner keeps hidden cells.
+            let (usable, hidden) = rules::split_slots(rules::slots_of(&slots, t));
+            let room = has_room(&entity.items, usable)
+                || rules::hidden_room(&read_cells(&entity.nbt), hidden);
             Held {
                 request: m.request(total, room, energy, t),
                 work,
@@ -188,6 +192,7 @@ pub(super) fn read(game: &Game<'_>, pos: Pos, machine: Machine, t: &Tuning) -> O
                     off: read_int(&entity.nbt, OFF_KEY).map_or(0, |v| v as u16),
                     scout: rules::scout(&slots),
                     usable,
+                    hidden,
                     room,
                 },
             }
@@ -271,6 +276,7 @@ pub(super) fn run(
             off,
             scout,
             usable,
+            hidden,
             room,
         } => {
             let before = m.clone();
@@ -289,7 +295,7 @@ pub(super) fn run(
                 Step::Nothing
             };
             if let Step::Dig(p) = step {
-                dig(game, &dimension, pos, p, off, usable, t);
+                dig(game, &dimension, pos, p, off, (usable, hidden), t);
             }
             if m != before {
                 game.native_with_mod_block_entity(pos, |e| write_miner(&mut e.nbt, &m));
@@ -334,7 +340,7 @@ pub(super) fn run(
                         &dimension,
                         pos,
                         cell,
-                        content::BLOCK_SLOTS,
+                        (content::BLOCK_SLOTS, 0),
                         t.breaker_tool.as_str(),
                     );
                 }
@@ -355,7 +361,74 @@ pub(super) fn run(
     if push && machine != Machine::Placer {
         let outlet = push_out(game, &dimension, pos);
         state().outlets.insert((dimension, pos), outlet);
+        if machine == Machine::Miner {
+            settle_cells(game, pos, t);
+        }
     }
+}
+
+// ---- Slice 18: the miner's hidden cells (guide `mod_storage`: ×2 a module, past 27) ----
+
+/// The miner's cells past its window's slots, its saved compound's key: (item, count) each.
+pub(super) const CELLS_KEY: &str = "miner_cells";
+
+fn read_cells(nbt: &Compound) -> Vec<Slot> {
+    crate::game::rustcraft_utility::read_json(nbt, CELLS_KEY)
+}
+
+/// What the miner's hidden cells hold: stacks and items, for its window.
+pub(super) fn hidden_counts(nbt: &Compound) -> (usize, u64) {
+    read_cells(nbt)
+        .iter()
+        .flatten()
+        .fold((0, 0), |(k, n), (_, c)| (k + 1, n + u64::from(*c)))
+}
+
+/// The hidden cells give into the window's slots as far as they take (rustcraft_rules::mining::
+/// settle): what goes out (MN1) is taken from the slots, the cells refill them.
+fn settle_cells(game: &mut Game<'_>, pos: Pos, t: &Tuning) {
+    let Some(entity) = crate::game::rustcraft_machines::entity(game, pos) else {
+        return;
+    };
+    let before = read_cells(&entity.nbt);
+    if before.iter().all(Option::is_none) {
+        return;
+    }
+    let (usable, hidden) = rules::split_slots(rules::slots_of(&base::modules_at(game, pos), t));
+    let modules = base::module_items(game, pos);
+    let plain = |s: &ItemStack| s.damage == 0 && s.extra.is_none() && s.count > 0;
+    let visible_before: Vec<Slot> = (0..usable)
+        .map(|i| {
+            let st = entity.items.get(i).cloned().flatten();
+            match st {
+                Some(st) if plain(&st) => Some((st.item.to_string(), st.count)),
+                // A stack with components (or anything odd) is not the cells' to merge onto: its
+                // slot reads as taken by an item no cell holds.
+                Some(st) if st.count > 0 => Some((String::from("!components"), st.count)),
+                _ => None,
+            }
+        })
+        .collect();
+    let mut visible = visible_before.clone();
+    let mut cells = before.clone();
+    rules::settle(&mut visible, &mut cells, hidden, |i| rules::slot_max(&modules, machines::max_stack(game, i)));
+    if cells == before {
+        return;
+    }
+    game.native_with_mod_block_entity(pos, move |e| {
+        if e.items.len() < usable {
+            e.items.resize(usable, None);
+        }
+        for (i, (now, was)) in visible.iter().zip(&visible_before).enumerate() {
+            if now != was && let Some((item, n)) = now {
+                match e.items[i].as_mut() {
+                    Some(st) if st.count > 0 && &*st.item == item.as_str() => st.count = *n,
+                    _ => e.items[i] = Some(ItemStack::new(item, *n)),
+                }
+            }
+        }
+        crate::game::rustcraft_utility::write_json(&mut e.nbt, CELLS_KEY, &cells);
+    });
 }
 
 fn save_progress(game: &mut Game<'_>, pos: Pos, before: Cycle, after: Cycle) {
@@ -374,7 +447,7 @@ fn dig(
     miner: Pos,
     p: Pos,
     off: u16,
-    usable: usize,
+    usable: (usize, usize),
     t: &Tuning,
 ) {
     let ore = game.native_block(p);
@@ -417,16 +490,18 @@ fn dig(
     });
 }
 
-/// Breaks `cell` with `tool`, the drops into slots `0..usable` of the block at `at` (what does
-/// not fit drops on top of it); whether it broke.
+/// Breaks `cell` with `tool`, the drops into slots `0..usable.0` of the block at `at`, then (slice
+/// 18, the miner) into its first `usable.1` hidden cells (what does not fit drops on top of it);
+/// whether it broke.
 fn take(
     game: &mut Game<'_>,
     dimension: &str,
     at: Pos,
     cell: Pos,
-    usable: usize,
+    usable: (usize, usize),
     tool: &str,
 ) -> bool {
+    let (usable, hidden) = usable;
     let tool = ItemStack::new(tool, 1);
     let Some(drops) = game.native_machine_destroy_block(cell, Some(&tool), true) else {
         return false;
@@ -450,6 +525,28 @@ fn take(
                 .collect()
         })
         .unwrap_or_default();
+    // Slice 18: what the slots do not take goes into the hidden cells (plain stacks only).
+    let left = if hidden > 0 && !left.is_empty() {
+        let sizes: Vec<u32> = left.iter().map(|l| rules::slot_max(&modules, machines::max_stack(game, &l.item))).collect();
+        game.native_with_mod_block_entity(at, |e| {
+            let mut cells = read_cells(&e.nbt);
+            let rest: Vec<ItemStack> = left
+                .into_iter()
+                .zip(sizes)
+                .filter_map(|(mut l, size)| {
+                    if l.damage == 0 && l.extra.is_none() {
+                        l.count = rules::store_hidden(&mut cells, hidden, &l.item, l.count, size);
+                    }
+                    (l.count > 0).then_some(l)
+                })
+                .collect();
+            crate::game::rustcraft_utility::write_json(&mut e.nbt, CELLS_KEY, &cells);
+            rest
+        })
+        .unwrap_or_default()
+    } else {
+        left
+    };
     for l in left {
         drop_stack(game, dimension, [at[0], at[1] + 1, at[2]], &l);
     }
@@ -750,7 +847,21 @@ pub(super) fn sheet(
                 }
             })
             .collect();
-        s.usable = u8::try_from(rules::slots_of(&slots, t)).ok();
+        // Slice 18: the window's slots, and the hidden cells past them counted.
+        let (shown_slots, hidden) = rules::split_slots(rules::slots_of(&slots, t));
+        s.usable = u8::try_from(shown_slots).ok();
+        if hidden > 0 {
+            let (stacks, items) = hidden_counts(&entity.nbt);
+            s.rows.push(base::v(&line(
+                "rustcraft.miner.hidden",
+                "In reserve past the window: %s items in %s of %s cells",
+                &[
+                    Text::literal(items.to_string()),
+                    Text::literal(stacks.to_string()),
+                    Text::literal(hidden.to_string()),
+                ],
+            )));
+        }
     } else {
         let (title, energy, ticks) = if kind == SheetKind::Placer {
             (

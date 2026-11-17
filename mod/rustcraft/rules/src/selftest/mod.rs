@@ -37,6 +37,7 @@ pub mod slice15;
 pub mod slice18_machine;
 // Slice 18, cross-stream agent.
 pub mod s18_cross;
+pub mod s18_last;
 pub mod explore2;
 pub mod sources;
 pub mod storage;
@@ -614,6 +615,7 @@ pub fn catalog() -> Vec<Build> {
     all.extend(pipe18::ALL);
     // Slice 18, cross-stream agent.
     all.extend(s18_cross::ALL);
+    all.extend(s18_last::ALL);
     all
 }
 

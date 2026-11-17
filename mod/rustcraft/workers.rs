@@ -1708,6 +1708,8 @@ fn click(
         };
         let gave = give(game, uuid, &item, n);
         w.hold.take(&item, gave);
+        // Slice 18: a hold past the window's slots moves its hidden stacks up into them.
+        w.hold.settle(CELLS - HOLD_FIRST);
         return gave > 0;
     }
     let Some(n) = slot.checked_sub(CELLS) else {
@@ -1868,6 +1870,15 @@ fn cells(game: &Game<'_>, w: &Worker, t: &Tuning) -> Vec<Option<ItemStack>> {
                     Text::literal(w.hold.slots.len().to_string()),
                 ],
             ),
+            // Slice 18 (guide `mod_storage`): what the hold keeps past the window's slots.
+            {
+                let (stacks, items) = w.hold.beyond(CELLS - HOLD_FIRST);
+                line(
+                    "rustcraft.worker.hold_beyond",
+                    "Past the window: %s items in %s slots",
+                    &[Text::literal(items.to_string()), Text::literal(stacks.to_string())],
+                )
+            },
             hint(
                 "rustcraft.worker.charge_hint",
                 "Under 20% it goes to the charge dock",
