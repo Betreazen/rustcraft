@@ -135,7 +135,11 @@ fn mixer_on_a_channel(b: &mut dyn Bench, o: Pos, tier: u8) -> Result<(), String>
     )?;
     let water = at(o, [1, 0, 1]);
     b.place(water, TANK, &[])?;
-    b.set_tank(water, WATER, 8000)?;
+    b.set_tank(water, WATER, 16_000)?;
+    // Slice 18: the mixer's tanks hold 16 buckets (`ui.js` mixer), so the water tank holds more
+    // than that: the water keeps the tier-1 channel's one lane.
+    b.place(at(water, [0, 1, 0]), TANK, &[])?;
+    b.set_tank(at(water, [0, 1, 0]), WATER, 16_000)?;
     b.set_joint(
         at(o, [1, 0, 0]),
         Face::ZPos,

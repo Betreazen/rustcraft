@@ -1430,7 +1430,15 @@ pub(super) fn module_items(game: &Game<'_>, pos: Pos) -> Vec<Option<String>> {
     let mut items = crate::game::rustcraft_machines::entity(game, pos)
         .map(|e| read_modules(&e.nbt))
         .unwrap_or_default();
-    items.resize(MODULE_SLOTS, None);
+    // Slice 18, stream 3: the sockets its tier opens (3 / 3 / 4 / 4), and past them one that
+    // still holds a module (a block taken down a tier).
+    let block = game.native_block(pos);
+    let open = rustcraft_rules::machines::sockets::open(
+        &block,
+        Some(i32::from(crate::game::rustcraft_tiers::tier_of(game, pos, &block))),
+    );
+    let last = items.iter().rposition(Option::is_some).map_or(0, |i| i + 1);
+    items.resize(open.max(last), None);
     items
 }
 
