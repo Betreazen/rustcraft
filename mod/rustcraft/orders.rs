@@ -1186,14 +1186,22 @@ fn take_back(
     }
 }
 
-/// Whether a machine has none of the job's items left in its inputs.
+/// Whether a machine has none of the job's items left in its inputs (wave 2: the kitchen's hidden
+/// input cells too, which a stack or capacity module fills from its slots).
 fn inputs_spent(game: &Game<'_>, machine: Machine, job: &Job) -> bool {
     let (inputs, _) = slots_of(machine);
+    let hidden: Vec<Slot> = match machine {
+        Machine::Util(rustcraft_rules::utility::Util::Kitchen) => game
+            .native_mod_block_entity(job.machine)
+            .map(|e| crate::game::rustcraft_utility::read_json(&e.nbt, crate::game::rustcraft_utility::KITCHEN_CELLS_KEY))
+            .unwrap_or_default(),
+        _ => Vec::new(),
+    };
     read_slots(game, job.machine, inputs).is_none_or(|slots| {
         job.step
             .items()
             .iter()
-            .all(|(item, _)| slots::count_in(&slots, item) == 0)
+            .all(|(item, _)| slots::count_in(&slots, item) + slots::count_in(&hidden, item) == 0)
     })
 }
 
