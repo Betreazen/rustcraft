@@ -1216,7 +1216,9 @@ const JETPACK_MODEL: &str = "rustcraft:block/worn_jetpack";
 const FLAME_MODEL: &str = "rustcraft:block/worn_flame";
 const BACKPACK_MODEL: &str = "rustcraft:block/worn_backpack";
 const HANDLE_MODEL: &str = "rustcraft:block/worn_handle";
-pub(super) const WORN_MODELS: [&str; 4] = [JETPACK_MODEL, FLAME_MODEL, BACKPACK_MODEL, HANDLE_MODEL];
+/// Wave 2: one of the handle's two rollers, drawn turning (rules::looks::roller_angle).
+const ROLLER_MODEL: &str = "rustcraft:block/worn_handle_roller";
+pub(super) const WORN_MODELS: [&str; 5] = [JETPACK_MODEL, FLAME_MODEL, BACKPACK_MODEL, HANDLE_MODEL, ROLLER_MODEL];
 
 /// A player began a zipline ride (rustcraft_zipline): seen with the handle while it lasts.
 pub(super) fn note_zip_ride(player: u128) {
@@ -1320,6 +1322,15 @@ pub(super) fn draw_looks(
         draw.push();
         draw.translate([0.0, 1.0, 0.0]);
         game.native_draw_model(draw, HANDLE_MODEL, 0xFF_FFFF);
+        // Wave 2 (#40): the rollers roll along the rope.
+        let angle = rules::looks::roller_angle(mob.age);
+        for at in rules::looks::ROLLERS {
+            draw.push();
+            draw.translate([at[0] - rules::looks::ROLLERS[0][0], 0.0, 0.0]);
+            draw.rotate_about(rules::looks::ROLLER_AXIS, angle, rules::looks::ROLLERS[0]);
+            game.native_draw_model(draw, ROLLER_MODEL, 0xFF_FFFF);
+            draw.pop();
+        }
         draw.pop();
     }
     draw.pop();

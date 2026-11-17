@@ -86,6 +86,8 @@ struct State {
     ropes: Ropes,
     ticks: HashMap<String, u64>,
     pulls: Vec<Pull>,
+    /// Wave 2: the rope each rider is on, while they ride (its five minutes wait for them).
+    riders: HashMap<u128, u64>,
 }
 
 static STATE: LazyLock<Mutex<State>> = LazyLock::new(Mutex::default);
@@ -324,6 +326,7 @@ fn ride(
     // Slice 18: the rider is seen holding the handle with its rollers.
     if rides {
         crate::game::rustcraft_gear::note_zip_ride(player.uuid);
+        state().riders.insert(player.uuid, rope.id);
     }
     rides
 }
@@ -526,9 +529,12 @@ pub(super) fn tick(game: &mut Game<'_>, dimension: &str) {
     }
     // Slice 18: a rope comes down by itself five minutes after it was tied.
     let expired: Vec<u64> = {
+        // Wave 2: a rope somebody rides stays up until they get off.
+        state().riders.retain(|uuid, _| monorail::riding(*uuid));
         let s = loaded(game);
+        let ridden: std::collections::BTreeSet<u64> = s.riders.values().copied().collect();
         s.ropes
-            .expired(now_ms())
+            .expired_free(now_ms(), &ridden)
             .into_iter()
             .filter(|id| s.ropes.get(*id).is_some_and(|r| r.dimension == dimension))
             .collect()
