@@ -43,9 +43,62 @@ pub fn milk_buckets(need: &[(String, u32)]) -> u32 {
     need.iter().filter(|(i, _)| i == MILK_BUCKET).map(|(_, n)| *n).sum()
 }
 
+/// Slice 18 (cross, guide `mod_stack`): the input slots the kitchen has, each a hidden cell of
+/// its own with a stack module.
+pub const INPUTS: usize = 9;
+
+/// With a stack module (`stacked`) the kitchen's inputs hold `size(item)` each (256 for what
+/// stacks to 64): what the visible input slots hold moves into hidden cells, one a slot, so the
+/// slots take more; without one, the cells give back into the slots as far as they take
+/// (`queue::spill`). What a cell and a slot hold together is what the kitchen cooks from.
+pub fn stash(
+    visible: &mut [crate::machines::slots::Slot],
+    cells: &mut Vec<crate::machines::slots::Slot>,
+    stacked: bool,
+    size: impl Fn(&str) -> u32,
+    max: impl Fn(&str) -> u32,
+) {
+    use crate::machines::queue;
+    let open = if stacked { INPUTS } else { 0 };
+    if stacked {
+        for slot in visible.iter_mut() {
+            if let Some((item, _)) = slot.clone() {
+                queue::intake(slot, cells, open, size(&item));
+            }
+        }
+    } else {
+        for slot in visible.iter_mut() {
+            queue::spill(slot, cells, open, &max);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_stack_module_lets_each_input_hold_256() {
+        let wheat = "minecraft:wheat";
+        let mut visible: Vec<crate::machines::slots::Slot> = vec![None; INPUTS];
+        let mut cells = Vec::new();
+        visible[0] = Some((wheat.into(), 64));
+        stash(&mut visible, &mut cells, true, |_| 256, |_| 64);
+        assert_eq!(visible[0], None, "the slot takes more");
+        assert_eq!(crate::machines::slots::count_in(&cells, wheat), 64);
+        for _ in 0..4 {
+            visible[0] = Some((wheat.into(), 64));
+            stash(&mut visible, &mut cells, true, |_| 256, |_| 64);
+        }
+        // 5 × 64 = 320: the first cell holds 256, the rest goes on in the next cell.
+        assert_eq!(crate::machines::slots::count_in(&cells, wheat), 320);
+        assert_eq!(cells[0], Some((wheat.into(), 256)));
+        // The module taken out: the cells give back as far as the slots take.
+        stash(&mut visible, &mut cells, false, |_| 256, |_| 64);
+        let total = crate::machines::slots::count_in(&cells, wheat) + crate::machines::slots::count_in(&visible, wheat);
+        assert_eq!(total, 320, "nothing lost");
+        assert_eq!(crate::machines::slots::count_in(&visible, wheat), 320, "all back in five slots");
+    }
 
     #[test]
     fn a_page_a_capacity_module() {

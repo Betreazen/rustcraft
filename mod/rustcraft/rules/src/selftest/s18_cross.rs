@@ -9,6 +9,7 @@
 //! - The alloy smelter, the autocrafter and the pump take a catalyst from a tank they touch, and
 //!   the accelerator speeds the pump up (guide `fluids`).
 //! - A slice-12 machine that opens on tier 3 or 4 has four module sockets (A5).
+//! - A stack module lets each of the kitchen's inputs hold 256 (guide `mod_stack`).
 //! - A broken tiered block drops its own tier's item: the loot tables in 26.3's form
 //!   (`match_block`), which the old `block_state_property` list was not.
 
@@ -19,7 +20,7 @@ use crate::machines::panel::ENERGY_SCALE;
 use crate::machines::processor::WorkMode;
 use crate::tuning::Tuning;
 
-pub const ALL: [Build; 7] = [
+pub const ALL: [Build; 8] = [
     pump_boost_mode,
     placer_and_breaker_by_tier,
     tiered_blocks_drop_their_tier,
@@ -27,6 +28,7 @@ pub const ALL: [Build; 7] = [
     machines_report_smelt_and_craft,
     catalysts_in_more_machines,
     craft_machines_sockets_by_tier,
+    kitchen_stack_module,
 ];
 
 const STONE: &str = "minecraft:stone";
@@ -300,6 +302,32 @@ fn craft_machines_sockets_by_tier(o: Pos, _: &Tuning) -> Scenario {
                 same(block, b.sheet(p).map(|s| s.modules.len()), Some(n))?;
             }
             Ok(())
+        })
+}
+
+fn kitchen_stack_module(o: Pos, _: &Tuning) -> Scenario {
+    const WHEAT: &str = "minecraft:wheat";
+    let p = at(o, [3, 1, 0]);
+    // More than its nine slots of 64 hold without the module.
+    const MORE: u32 = 9 * 64 + 128;
+    Scenario::new("s18_kitchen_stack_module", plot_area(o))
+        .then("a kitchen with a stack module, no energy", move |b, _| {
+            b.place(at(p, [0, -1, 0]), STONE, &[])?;
+            b.place(p, "rustcraft:kitchen", &[])?;
+            b.set_modules(p, &[crate::modules::Module::Stack.item()])
+        })
+        .until("it took more wheat than nine slots of 64", 400, move |b, m| {
+            let got = b.insert(p, WHEAT, 64)?;
+            m.mark("taken", m.get("taken") + f64::from(got));
+            Ok(m.get("taken") >= f64::from(MORE))
+        })
+        .check("and keeps it: what its slots show is less than it took", move |b, m| {
+            let shown = super::count_of(&b.items(p), WHEAT);
+            if f64::from(shown) < m.get("taken") {
+                Ok(())
+            } else {
+                Err(format!("its slots show {shown} of {}", m.get("taken")))
+            }
         })
 }
 

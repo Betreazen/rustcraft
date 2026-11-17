@@ -1444,7 +1444,22 @@ pub(super) fn on_destroyed(game: &mut Game<'_>, dimension: &str, pos: Pos, creat
     let Some(entity) = entity(game, pos) else {
         return;
     };
-    if socket_holder(&entity.id).is_none() || creative {
+    if creative {
+        return;
+    }
+    // Slice 18 (cross): the kitchen's hidden input cells (a sheet: its modules are rustcraft_base's).
+    let kitchen: Vec<Slot> = crate::game::rustcraft_utility::read_json(&entity.nbt, crate::game::rustcraft_utility::KITCHEN_CELLS_KEY);
+    if !kitchen.is_empty() {
+        let lying = queue::spilled(&kitchen, |i| max_stack(game, i));
+        for (item, count) in lying {
+            drop_stack(game, dimension, pos, &item, count);
+        }
+        return;
+    }
+    let Some(entity) = self::entity(game, pos) else {
+        return;
+    };
+    if socket_holder(&entity.id).is_none() {
         return;
     }
     let modules = modules::read(&base::read_module_items(&entity.nbt));

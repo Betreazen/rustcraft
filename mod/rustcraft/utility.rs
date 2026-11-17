@@ -407,6 +407,11 @@ pub(super) fn tick(game: &mut Game<'_>, dimension: &str, level: &LevelNet, t: &T
         *n
     };
     for (pos, u) in mine {
+        // Slice 18 (cross): the kitchen's inputs go into its hidden cells between its steps too,
+        // so its slots keep taking while it waits.
+        if u == Util::Kitchen && now.is_multiple_of(KITCHEN_STASH_EVERY) {
+            kitchen_stash(game, pos);
+        }
         let (every, cost) = paced(game, pos, u);
         if !now.is_multiple_of(every) {
             continue;
@@ -904,8 +909,56 @@ fn capacity_of(entity: &ModBlockEntity) -> u32 {
     module_items(entity).iter().filter(|i| i.as_str() == CAPACITY).count() as u32
 }
 
+/// Slice 18 (cross): the kitchen's hidden input cells (guide `mod_stack`: each input holds 256
+/// with a stack module), its saved compound's key.
+pub(super) const KITCHEN_CELLS_KEY: &str = "kitchen_cells";
+/// How often, in ticks, the kitchen's inputs go into its cells between its steps.
+const KITCHEN_STASH_EVERY: u64 = 4;
+
+/// Slice 18 (cross): the kitchen's inputs moved into or out of its hidden cells as its stack
+/// module says (rustcraft_rules::utility::kitchen::stash), written back; the cells after it.
+/// Only plain stacks (no damage, no components) go into a cell.
+fn kitchen_stash(game: &mut Game<'_>, pos: Pos) -> Vec<rustcraft_rules::machines::slots::Slot> {
+    use rustcraft_rules::machines::slots::Slot;
+    use rustcraft_rules::utility::kitchen;
+    let Some(entity) = game.native_mod_block_entity(pos) else {
+        return Vec::new();
+    };
+    let modules = base::modules_at(game, pos);
+    let stacked = rustcraft_rules::modules::stack_tier(&modules) > 0;
+    let cells_before: Vec<Slot> = read_json(&entity.nbt, KITCHEN_CELLS_KEY);
+    if !stacked && cells_before.iter().all(Option::is_none) {
+        return cells_before;
+    }
+    let plain = |s: &ItemStack| s.damage == 0 && s.extra.is_none();
+    let visible_before: Vec<Slot> = (0..kitchen::INPUTS)
+        .map(|k| {
+            entity.items.get(k).cloned().flatten().filter(|s| plain(s) && s.count > 0).map(|s| (s.item.to_string(), s.count))
+        })
+        .collect();
+    let mut visible = visible_before.clone();
+    let mut cells = cells_before.clone();
+    let max = |i: &str| machines::max_stack(game, i);
+    kitchen::stash(&mut visible, &mut cells, stacked, |i| rustcraft_rules::modules::machine_stack(&modules, max(i)), max);
+    if visible == visible_before && cells == cells_before {
+        return cells;
+    }
+    let written = cells.clone();
+    game.native_with_mod_block_entity(pos, move |e| {
+        for (k, (now, was)) in visible.iter().zip(&visible_before).enumerate() {
+            if now != was && let Some(slot) = e.items.get_mut(k) {
+                *slot = now.as_ref().map(|(i, n)| ItemStack::new(i, *n));
+            }
+        }
+        write_json(&mut e.nbt, KITCHEN_CELLS_KEY, &written);
+    });
+    cells
+}
+
 fn cook(game: &mut Game<'_>, dimension: &str, level: &LevelNet, pos: Pos, cost: f64, t: &Tuning) -> Shown {
     use rustcraft_rules::utility::kitchen::{self, BUCKET_MB, MILK, MILK_BUCKET};
+    // Slice 18 (cross): with a stack module each input holds 256, the rest in hidden cells.
+    let mut cells = kitchen_stash(game, pos);
     let Some(entity) = game.native_mod_block_entity(pos) else {
         return Shown::Idle("kitchen_none");
     };
@@ -937,7 +990,8 @@ fn cook(game: &mut Game<'_>, dimension: &str, level: &LevelNet, pos: Pos, cost: 
             .filter(|(i, _)| !(from_tank && i == MILK_BUCKET))
             .cloned()
             .collect();
-        if !items_need.iter().all(|(item, n)| count_of(&slots, 0..9, item) >= *n) {
+        let have = |item: &str| count_of(&slots, 0..9, item) + rustcraft_rules::machines::slots::count_in(&cells, item);
+        if !items_need.iter().all(|(item, n)| have(item) >= *n) {
             no_milk |= milk > 0 && !from_tank;
             continue;
         }
@@ -956,9 +1010,19 @@ fn cook(game: &mut Game<'_>, dimension: &str, level: &LevelNet, pos: Pos, cost: 
         if from_tank {
             crate::game::rustcraft_fluids::take_touching(game, level, pos, MILK, u64::from(milk) * BUCKET_MB, t);
         }
+        // The hidden cells first, then the slots.
+        let cells_was = cells.clone();
+        let from_cells: Vec<u32> = items_need
+            .iter()
+            .map(|(item, n)| rustcraft_rules::machines::slots::take_from(&mut cells, item, *n))
+            .collect();
+        let cells_now = cells.clone();
         game.native_with_mod_block_entity(pos, |e| {
-            for (item, n) in &items_need {
-                take(&mut e.items, 0..9, item, *n);
+            for ((item, n), got) in items_need.iter().zip(&from_cells) {
+                take(&mut e.items, 0..9, item, n - got);
+            }
+            if cells_now != cells_was {
+                write_json(&mut e.nbt, KITCHEN_CELLS_KEY, &cells_now);
             }
             if let Some(p) = page {
                 write_i64(&mut e.nbt, NEXT_PAGE_KEY, (p as i64 + 1) % usable.max(1) as i64);
