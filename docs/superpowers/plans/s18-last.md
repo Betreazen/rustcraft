@@ -39,7 +39,7 @@
 
 **Files:** `rules/src/backpack.rs` (раскладка экрана: сетка 9×N до 81, гнездо, инвентарь; `deposit`/`take` по стаку `modules::backpack_stack`; кодирование нажатий и содержимого), `mod/rustcraft/backpack.rs` (окно — свой экран `rustcraft:backpack` вместо окна сундука; сервер хранит ячейки с числом > 99 (число отдельно от предмета в NBT), шлёт содержимое клиенту, принимает нажатия; гнездо модуля), хуки экрана (как у планшета: `hook_screen_render_post.rs`, `hook_screen_mouse.rs`, `hook_net_from_server.rs`, `hook_net_from_client.rs`, `hook_tick.rs` — по строке), lang, `mod/README.md` (раздел «Что проверить в игре: срез 18»), самотест, если путь без игрока есть (иначе — проверка ботом).
 
-- [ ] RED/GREEN правил, бандл, коммит.
+- [x] RED/GREEN правил, бандл, коммит.
 
 ### Task 3: модуль стака варочного куба
 
