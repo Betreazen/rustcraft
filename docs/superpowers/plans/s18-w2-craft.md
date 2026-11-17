@@ -148,7 +148,7 @@ slots). Not an engine limit: a layout one; the lines stay («Молоко в б�
 
 ### Task 16: bench try, plan ticks, report
 
-- [ ] try on a snapshot; all RC / PCT / SC green; plan «Try status»; report.
+- [x] try on a snapshot; all RC / PCT / SC green; plan «Try status»; report.
 
 ## Try status
 
@@ -161,3 +161,7 @@ slots). Not an engine limit: a layout one; the lines stay («Молоко в б�
   map, and the projector's rows asked that map again (`server::with_level` twice on one thread).
   Fixed in 63f6781: the projector's rows take the level (they never found the storage in game
   either, the window's tick has the level out of the map).
+- try-w2-craft-6 (63f6781, before the last merge): no stall; RC 244/245 (the tier-4 scenario read
+  the kitchen's window, whose rows are its dish and milk), PCT 42/42, SC 105/105.
+- try-w2-craft-7 (e9c5608, feat/handbook-parity 42151ac merged in): **green** — RC 249/249,
+  PCT 42/42, SC 105/105 (-Path, not published).
