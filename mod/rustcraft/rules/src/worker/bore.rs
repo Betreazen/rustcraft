@@ -134,3 +134,25 @@ mod tests {
     }
 
 }
+
+/// Wave 2 (guide `mod_height`, rules::modules::height_step): with the height module and a height
+/// set, the next rail climbs or drops a step towards it from `level_ahead` (the cell ahead on the
+/// rail's level); none when the way stays on its level.
+pub fn toward_height(level_ahead: Pos, height_module: bool, target: Option<i32>) -> Option<Pos> {
+    let step = crate::modules::height_step(height_module, target, level_ahead[1]);
+    (step != 0).then_some([level_ahead[0], level_ahead[1] + step, level_ahead[2]])
+}
+
+#[cfg(test)]
+mod wave2_height_tests {
+    use super::toward_height;
+
+    #[test]
+    fn the_bore_climbs_and_drops_a_step_towards_the_height_set() {
+        assert_eq!(toward_height([5, 40, 0], true, Some(45)), Some([5, 41, 0]));
+        assert_eq!(toward_height([5, 40, 0], true, Some(30)), Some([5, 39, 0]));
+        assert_eq!(toward_height([5, 40, 0], true, Some(40)), None, "at the height it stays level");
+        assert_eq!(toward_height([5, 40, 0], false, Some(45)), None, "the module is needed");
+        assert_eq!(toward_height([5, 40, 0], true, None), None, "no height set: level");
+    }
+}

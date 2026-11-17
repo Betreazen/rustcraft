@@ -10,4 +10,6 @@ fn rustcraft_screen_mouse(
     crate::game::rustcraft_handbook::on_mouse(game, screen, button, canceled);
     crate::game::rustcraft_node_window::on_mouse(game, screen, button, canceled);
     crate::game::rustcraft_joint_screen::on_mouse(game, screen, button, canceled);
+    // Slice 18, wave 2: the chassis window, the mod's own screen.
+    crate::game::rustcraft_station::chassis_mouse(game, screen, button, canceled);
 }

@@ -46,9 +46,15 @@ MODELS = {
         {"metal": "minecraft:block/iron_block", "roller": "minecraft:block/black_concrete"},
         [
             box([2.0, 16.0, 7.5], [14.0, 17.0, 8.5], "metal"),
-            box([3.0, 17.0, 6.5], [6.0, 20.0, 9.5], "roller"),
-            box([10.0, 17.0, 6.5], [13.0, 20.0, 9.5], "roller"),
             box([11.5, 9.0, 7.5], [12.5, 16.0, 8.5], "metal"),
+        ],
+    ),
+    # Wave 2: one roller, drawn twice over the bar and turned as it rolls along the rope
+    # (rustcraft_gear::draw_looks turns it about its middle, x 4.5, y 18.5, z 8).
+    "worn_handle_roller": (
+        {"roller": "minecraft:block/black_concrete"},
+        [
+            box([3.0, 17.0, 6.5], [6.0, 20.0, 9.5], "roller"),
         ],
     ),
 }

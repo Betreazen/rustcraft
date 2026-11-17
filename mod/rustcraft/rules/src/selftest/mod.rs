@@ -56,6 +56,8 @@ pub mod gear18;
 // Slice 18, last leftovers: the backpack.
 pub mod s18_last_pack;
 pub mod s18_last_orders;
+// Slice 18, wave 2: rail, workers, base and gear.
+pub mod s18_w2_rail_gear;
 // Slice 18, wave 2: the magistral and the energy.
 pub mod w2_pipe_energy;
 
@@ -440,6 +442,24 @@ pub trait Bench {
     fn pair_docks(&mut self, _a: Pos, _b: Pos) -> Result<(), String> {
         Err("no portal docks on this bench".into())
     }
+
+    // ---- Slice 18, wave 2: rail, workers, base and gear ----
+    /// A right click with rail item `item` on the rail at `pos`: the old tier's item it gives
+    /// back, or why nothing changed (rustcraft_monorail::swap_rail_in_place).
+    fn swap_rail(&mut self, pos: Pos, item: &str) -> Result<String, String> {
+        let _ = (pos, item);
+        Err("no rails on this bench".into())
+    }
+    /// A press in worker `id`'s chassis window (rustcraft_workers::press_for_selftest).
+    fn chassis_press(&mut self, id: u64, press: crate::worker::screen::Press) -> Result<(), String> {
+        let _ = (id, press);
+        Err("no chassis windows on this bench".into())
+    }
+    /// Worker `id`'s sockets hold `modules`.
+    fn set_worker_modules(&mut self, id: u64, modules: &[&str]) -> Result<(), String> {
+        let _ = (id, modules);
+        Err("no workers on this bench".into())
+    }
 }
 
 /// A mob as the self-test reads it.
@@ -642,6 +662,8 @@ pub fn catalog() -> Vec<Build> {
     // Slice 18, last leftovers: the backpack.
     all.extend(s18_last_pack::ALL);
     all.extend(s18_last_orders::ALL);
+    // Slice 18, wave 2: rail, workers, base and gear.
+    all.extend(s18_w2_rail_gear::ALL);
     all.extend(w2_pipe_energy::ALL);
     // Slice 18, wave 2: machines and modules.
     all.extend(w2_machine::ALL);

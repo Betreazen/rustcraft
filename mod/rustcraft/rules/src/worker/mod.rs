@@ -19,6 +19,7 @@ pub mod hold;
 pub mod plants;
 pub mod pivots;
 pub mod pose;
+pub mod screen;
 pub mod trees;
 pub mod wire;
 
@@ -206,6 +207,10 @@ pub struct Worker {
     /// Slice 18: the block its tool works on now, for the client's pose (not saved).
     #[serde(skip)]
     pub aim: Option<Pos>,
+    /// Wave 2 (guide `mod_height`): the height the bore's height module takes its way to, set in
+    /// the chassis window; none keeps the way on its level.
+    #[serde(default)]
+    pub height: Option<i32>,
 }
 
 fn first_tier() -> u8 {
@@ -324,6 +329,7 @@ impl Worker {
             tier: 1,
             carry: 0.0,
             aim: None,
+            height: None,
         }
     }
 
@@ -640,6 +646,12 @@ impl Worker {
         serde_json::to_string(self).unwrap_or_default()
     }
 
+    /// Wave 2 (W3): whether a packed worker reads back; one that does not stays a stack in the
+    /// player's hands, so nothing it carries is lost.
+    pub fn reads_back(packed: &str) -> bool {
+        serde_json::from_str::<Worker>(packed).is_ok()
+    }
+
     /// A packed worker set on rail `cell` for `owner` under `id`: what it carried kept, its way
     /// and errand started afresh. None when `packed` does not read.
     pub fn unpack(packed: &str, id: u64, owner: u128, cell: Pos, t: &Tuning) -> Option<Worker> {
@@ -649,6 +661,7 @@ impl Worker {
         w.hold = old.hold;
         w.charge = old.charge;
         w.filter = old.filter;
+        w.height = old.height;
         w.set_tier(old.tier, t);
         w.upgrades = old.upgrades;
         w.note = if w.tool.is_some() { Note::Working } else { Note::NoTool };
@@ -1201,5 +1214,43 @@ pub(crate) mod tests {
         w.upgrades[0] = Some(Module::Radius);
         assert_eq!(w.guard_range(&t), 2.0 * t.guard_range);
         assert!(!Tool::Shooter.keeps("minecraft:arrow"));
+    }
+}
+
+/// Wave 2 (ui.js `dock_charge` «Энергия · получает 16 из 16 Е/с»): what a charge dock took in a
+/// second, from its buffer then (`before`) and now (`after`), the charge it gave out meanwhile and
+/// the seconds between; never above what it may draw.
+pub fn dock_intake(before: f64, after: f64, gave: f64, seconds: f64, draw: f64) -> f64 {
+    if seconds <= 0.0 {
+        return 0.0;
+    }
+    ((after - before + gave) / seconds).clamp(0.0, draw)
+}
+
+#[cfg(test)]
+mod wave2_dock_tests {
+    use super::dock_intake;
+
+    #[test]
+    fn the_charge_dock_says_what_it_takes_in_a_second() {
+        assert_eq!(dock_intake(100.0, 116.0, 0.0, 1.0, 16.0), 16.0);
+        assert_eq!(dock_intake(100.0, 52.0, 64.0, 1.0, 16.0), 16.0, "it gave 64 to a worker and took 16");
+        assert_eq!(dock_intake(1000.0, 1000.0, 0.0, 1.0, 16.0), 0.0, "a full dock takes nothing");
+        assert_eq!(dock_intake(0.0, 8.0, 0.0, 2.0, 16.0), 4.0);
+        assert_eq!(dock_intake(0.0, 8.0, 0.0, 0.0, 16.0), 0.0);
+    }
+}
+
+#[cfg(test)]
+mod wave2_pack_tests {
+    use super::*;
+
+    #[test]
+    fn a_packed_worker_that_does_not_read_back_is_refused() {
+        let t = Tuning::default();
+        let w = Worker::new(1, 7, [0, 0, 0], &t);
+        assert!(Worker::reads_back(&w.packed()));
+        assert!(!Worker::reads_back("{\"tool\": 12}"));
+        assert!(!Worker::reads_back("not json"));
     }
 }

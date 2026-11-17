@@ -99,9 +99,38 @@ fn structures_near(game: &Game<'_>, cell: Pos, side: i32) -> Vec<(String, Pos)> 
     };
     let mut out: Vec<(String, Pos)> = Vec::new();
     for p in rules::structure_samples(cell, side, turn, rules::SAMPLE_BUDGET) {
-        for (id, _) in game.structures_reaching(p) {
+        for id in structures_over_column(game, p[0], p[2]) {
             if !out.iter().any(|(o, _)| *o == id) {
                 out.push((id, p));
+            }
+        }
+    }
+    out
+}
+
+/// Wave 2 (rail-worker «глубокие постройки»): the structures whose box spans the column (x, z) at
+/// any height — an ancient city or a stronghold far under the rail too — from the chunk's
+/// structure references and their starts, as `structures_reaching` reads them
+/// (SRC game/structures.rs:14-44) without its height test. A `/place structure` leaves no start
+/// in the chunk, here as in vanilla's PlaceCommand (SRC game/commands/place.rs:203-216), so such
+/// a structure is no structure to the game, the cartographer or `/locate`.
+fn structures_over_column(game: &Game<'_>, x: i32, z: i32) -> Vec<String> {
+    let Some(chunk) = game.world.chunks.get(&(x >> 4, z >> 4)) else {
+        return Vec::new();
+    };
+    if chunk.structure_refs.is_empty() {
+        return Vec::new();
+    }
+    let Some(locator) = game.end.locator() else {
+        return Vec::new();
+    };
+    let mut out: Vec<String> = Vec::new();
+    for (id, (sx, sz)) in &chunk.structure_refs {
+        for start in locator.starts_at(*sx, *sz) {
+            let b = &start.bounding_box;
+            let spans = b.min[0] <= x && x <= b.max[0] && b.min[2] <= z && z <= b.max[2];
+            if *start.name == **id && spans && !out.iter().any(|o| *o == *start.name) {
+                out.push(start.name.to_string());
             }
         }
     }
@@ -186,7 +215,7 @@ pub(super) fn player(
             s.dirty = true;
         }
         for id in &inside {
-            if s.atlas.enter(p.uuid, id) {
+            if s.atlas.enter_at(p.uuid, &p.dimension, id, cell) {
                 s.dirty = true;
             }
         }

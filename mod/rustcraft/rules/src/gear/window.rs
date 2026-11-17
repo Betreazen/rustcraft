@@ -121,3 +121,33 @@ mod tests {
         assert_eq!(grouped(-5.0), "0");
     }
 }
+
+/// Wave 2 (#15, ui.js `armor` «Ёмкость костюма: батарея костюма +50%»): a module's short name in
+/// its window line and what it gives, by their keys and Russian fallbacks (the guide's words).
+pub fn named(m: Module) -> ((&'static str, &'static str), (&'static str, &'static str)) {
+    match m {
+        Module::Dash => (("rustcraft.gear.window.name.dash", "Рывок"), ("rustcraft.gear.window.does.dash", "бросок на 4 блока по двойному нажатию")),
+        Module::Run => (("rustcraft.gear.window.name.run", "Бег"), ("rustcraft.gear.window.does.run", "бег +50% на 5 с")),
+        Module::Jump => (("rustcraft.gear.window.name.jump", "Прыжок"), ("rustcraft.gear.window.does.jump", "прыжок до 2,5 блока")),
+        Module::Absorber => (("rustcraft.gear.window.name.absorber", "Амортизатор"), ("rustcraft.gear.window.does.absorber", "гасит урон от падения")),
+        Module::Capacity => (("rustcraft.gear.window.name.capacity", "Ёмкость костюма"), ("rustcraft.gear.window.does.capacity", "батарея костюма +50%")),
+        Module::Night => (("rustcraft.gear.window.name.night", "Ночное зрение"), ("rustcraft.gear.window.does.night", "видно в темноте")),
+        Module::Magnet => (("rustcraft.gear.window.name.magnet", "Магнит"), ("rustcraft.gear.window.does.magnet", "притягивает предметы")),
+        Module::Damper => (("rustcraft.gear.window.name.damper", "Демпфер"), ("rustcraft.gear.window.does.damper", "после удара 5 с урон −20%")),
+        Module::Jetpack => (("rustcraft.gear.window.name.jetpack", "Джетпак"), ("rustcraft.gear.window.does.jetpack", "полёт за заряд")),
+    }
+}
+
+#[cfg(test)]
+mod wave2_tests {
+    use super::*;
+
+    #[test]
+    fn every_module_line_says_what_it_gives() {
+        assert_eq!(named(Module::Capacity), (("rustcraft.gear.window.name.capacity", "Ёмкость костюма"), ("rustcraft.gear.window.does.capacity", "батарея костюма +50%")));
+        let mut keys: Vec<&str> = Module::ALL.iter().flat_map(|m| { let (a, b) = named(*m); [a.0, b.0] }).collect();
+        keys.sort_unstable();
+        keys.dedup();
+        assert_eq!(keys.len(), 2 * Module::ALL.len(), "a key each");
+    }
+}

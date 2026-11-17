@@ -99,6 +99,8 @@ struct TurretState {
     target: Option<String>,
     /// The target's entity id: whether the engine lets poison onto it.
     target_id: Option<u32>,
+    /// Wave 2: E a second a support turret draws now (its window's «получает N из M Е/с»).
+    drawing: f64,
 }
 
 /// Who struck a mob last: a turret, slice 11's guard (P2) or butcher (round 26).
@@ -122,6 +124,8 @@ struct Hit {
 /// The turret's own bleeding on a mob, without SoulsCraft.
 struct Bleed {
     dimension: String,
+    /// Wave 2: whose turret bled it, to strike the killing bleed as the owner.
+    owner: Option<u128>,
     damage: f64,
     until: u64,
 }
@@ -160,6 +164,10 @@ struct Base {
     index: Option<anchor::Index>,
     /// Slice 18: the share of its draw each anchor got last second, for its window's bar.
     anchor_shares: HashMap<(String, Pos), f64>,
+    /// Wave 2: each charge dock's meter (when, its buffer then, what it gave since, E/s taken).
+    dock_meters: HashMap<(String, Pos), (std::time::Instant, f64, f64, f64)>,
+    /// Wave 2: the charge each dock gave its workers since its meter last read.
+    dock_given: HashMap<Pos, f64>,
     /// Blocks placed by a player, owners due.
     owners_due: Vec<(u128, String, Pos)>,
     broken: Vec<(String, Pos)>,
@@ -540,6 +548,8 @@ pub(super) fn tick(game: &mut Game<'_>, dimension: &str, level: &LevelNet, t: &T
     crate::game::rustcraft_utility::tick(game, dimension, level, t);
     crate::game::rustcraft_gear::tick(game, dimension);
     bleed(game, dimension, now, t);
+    // Wave 2: SoulsCraft's shared bleeding kills outside this mod's hits.
+    mark_hits(game, dimension);
     unslow(game, dimension, now);
     deaths(game, t);
     if now.is_multiple_of(ANCHOR_EVERY) {
@@ -773,6 +783,7 @@ fn attack(
                         id,
                         Bleed {
                             dimension: dimension.to_owned(),
+                            owner,
                             damage: g.damage,
                             until,
                         },
@@ -785,6 +796,7 @@ fn attack(
         aim_and_beam(game, pos, to, Some(SHOT_BEAM));
     }
     if !owner_shot(game, dimension, id, owner, t.turret_damage as f32) {
+        mark_hits(game, dimension);
         game.native_hurt_entity(dimension, id, t.turret_damage as f32, SHOT_TYPE, None);
     }
     turret::shown(l, true, Shown::Shooting(kind))
@@ -929,24 +941,51 @@ fn bleed(game: &mut Game<'_>, dimension: &str, now: u64, t: &Tuning) {
     if !now.is_multiple_of(period) {
         return;
     }
-    let due: Vec<(u32, f64)> = {
+    let due: Vec<(u32, f64, Option<u128>)> = {
         let mut s = state();
         s.bleeds.retain(|_, b| b.until > now);
         s.bleeds
             .iter()
             .filter(|(_, b)| b.dimension == dimension)
-            .map(|(id, b)| (*id, b.damage))
+            .map(|(id, b)| (*id, b.damage, b.owner))
             .collect()
     };
-    for (id, damage) in due {
+    for (id, damage, owner) in due {
+        // Wave 2 (#3): the bleed that kills is the owner's when he is in this level, as a shot.
+        if owner_shot(game, dimension, id, owner, damage as f32) {
+            continue;
+        }
+        mark_hits(game, dimension);
         if !game.native_hurt_entity(dimension, id, damage as f32, BLEED_TYPE, None) {
             state().bleeds.remove(&id);
         }
     }
 }
 
+/// Wave 2 (#3, guide `tool_gun`): where the mobs a guard or turret hit lately stand, for the loot
+/// hooks (horizon_world::loot::rustcraft_loot_marks): such a mob's death drops the loot only a
+/// player's kill gets, as vanilla's 100 ticks of a player's hit. Not a kill the owner struck
+/// (the game counts that one) nor a butcher's animal.
+fn mark_hits(game: &Game<'_>, dimension: &str) {
+    use horizon_world::loot::rustcraft_loot_marks as marks;
+    let (now, hit): (u64, Vec<u32>) = {
+        let s = state();
+        let hit = s
+            .hits
+            .iter()
+            .filter(|(_, h)| h.by != Striker::Butcher && !h.by_owner && s.ticks.saturating_sub(h.tick) <= KILL_MEMORY)
+            .map(|(id, _)| *id)
+            .collect();
+        (s.ticks, hit)
+    };
+    for m in game.mobs.iter().filter(|m| !m.removed && hit.contains(&m.id)) {
+        marks::mark(dimension, m.id, [m.position.x, m.position.y, m.position.z], now);
+    }
+    marks::forget_before(now.saturating_sub(KILL_MEMORY));
+}
+
 /// D5, X8: a turret's kill gives its owner the kill's experience and Path-of-craft-tree a `kill`.
-fn deaths(game: &mut Game<'_>, t: &Tuning) {
+fn deaths(game: &mut Game<'_>, _t: &Tuning) {
     let (deaths, now) = {
         let mut s = state();
         (std::mem::take(&mut s.deaths), s.ticks)
@@ -972,7 +1011,11 @@ fn deaths(game: &mut Game<'_>, t: &Tuning) {
         if hit.by_owner {
             continue;
         }
-        game.native_give_experience(hit.owner, t.turret_kill_experience);
+        // Wave 2 (#3): the mob's own experience, as the owner's kill would give.
+        let experience = turret_owner::kill_experience(&kind).unwrap_or(0);
+        if experience > 0 {
+            game.native_give_experience(hit.owner, experience);
+        }
         // SoulsCraft's hunter book (spec 27.1), apart from Path-of-craft-tree's report.
         state().souls_kills.push(SoulsKill {
             source: if hit.by == Striker::Guard {
@@ -1025,6 +1068,7 @@ pub(super) fn guard_shot(
     // blaze rod) «как если бы владелец убил его сам».
     remember_hit(id, owner, Striker::Guard);
     if !owner_shot(game, dimension, id, Some(owner), damage as f32) {
+        mark_hits(game, dimension);
         game.native_hurt_entity(dimension, id, damage as f32, SHOT_TYPE, None);
     }
     Some(kind)
@@ -1083,14 +1127,16 @@ fn support(
     let players: Vec<_> = game
         .native_server_players()
         .into_iter()
-        .filter(|p| p.health > 0.0 && p.game_mode != 3 && distance(at, p.position) <= range)
+        .filter(|p| p.dimension == dimension && p.health > 0.0 && p.game_mode != 3 && distance(at, p.position) <= range)
         .collect();
     if players.is_empty() {
+        ts.drawing = 0.0;
         return turret::shown(l, true, Shown::NoPlayers);
     }
-    // Slice 18, wave 2 (guide `mod_heal`): the heal modules draw only while someone is hurt.
+    // Wave 2: the heal module draws only while someone in range is hurt (#6).
     let someone_hurt = players.iter().any(|p| p.health > 0.0 && p.health < 20.0);
-    let cost = l.support_draw_for(t, someone_hurt) / t.ticks_per_second;
+    ts.drawing = l.support_draw_now(t, true, someone_hurt);
+    let cost = ts.drawing / t.ticks_per_second;
     if energy < cost {
         return turret::shown(l, false, Shown::NoEnergy);
     }
@@ -1850,16 +1896,34 @@ fn turret_sheet(game: &Game<'_>, dimension: &str, pos: Pos, t: &Tuning, s: &mut 
         }
         role_rows(&slots, s);
     } else {
-        s.rows.push(v(&line(
-            "rustcraft.turret.shot",
-            "Shot: %s E",
-            &[Text::literal(format!("{:.0}", l.shot_energy(t)))],
-        )));
+        // Wave 2 (#12): «Выстрел: 40 Е + 3 × 10 Е = 70 Е», «Эффекты: … · −20% скорости».
+        let p = l.shot_parts(t);
+        let n = |x: f64| Text::literal(format!("{x:.0}"));
+        s.rows.push(v(&if p.effects == 0 {
+            line("rustcraft.turret.shot", "Shot: %s E", &[n(p.total)])
+        } else {
+            line(
+                "rustcraft.turret.shot_parts",
+                "Shot: %s E + %s × %s E = %s E",
+                &[n(p.base), Text::literal(p.effects.to_string()), n(p.each), n(p.total)],
+            )
+        }));
         let e = turret::effects(&l, t, &Resist::default(), false);
         if !e.is_empty() {
-            s.rows.push(v(&joined(
-                e.iter().map(|g| effect_name(g.effect)).collect(),
-            )));
+            let names = e
+                .iter()
+                .map(|g| match g.effect {
+                    Effect::Slow => line(
+                        "rustcraft.turret.effect.slow_share",
+                        "−%s speed",
+                        &[Text::literal(format!("{:.0}%", 100.0 * turret::slow_fraction(l.slow, t)))],
+                    ),
+                    other => effect_name(other),
+                })
+                .collect();
+            let mut row = line("rustcraft.turret.effects", "Effects: ", &[]);
+            row.push(joined(names));
+            s.rows.push(v(&row));
         }
     }
     let aimed = state()
@@ -1887,13 +1951,38 @@ fn turret_sheet(game: &Game<'_>, dimension: &str, pos: Pos, t: &Tuning, s: &mut 
         s.rows.push(v(&l2));
     }
     let e = machines::buffer_energy(game, pos);
-    s.bars.push(SheetBar {
-        label: v(&line("rustcraft.window.energy", "Energy", &[])),
-        value: v(&Text::literal(format!("{e:.0} / {:.0} E", t.turret_buffer))),
-        share: e / t.turret_buffer.max(1.0),
-        energy: true,
-        colour: None,
-    });
+    // Wave 2 (#12): a support turret's bar is what it draws (ui.js `energy(24, 24)`).
+    if support {
+        let need = l.support_draw(t);
+        let now = state()
+            .turrets
+            .get(&(dimension.to_owned(), pos))
+            .map_or(0.0, |x| x.drawing);
+        s.bars.push(SheetBar {
+            label: v(&line("rustcraft.window.energy", "Energy", &[])),
+            value: v(&line(
+                "rustcraft.anchor.gets",
+                "gets %s of %s E/s",
+                &[Text::literal(format!("{now:.0}")), Text::literal(format!("{need:.0}"))],
+            )),
+            share: if need > 0.0 { (now / need).clamp(0.0, 1.0) } else { 0.0 },
+            energy: true,
+            colour: None,
+        });
+    } else {
+        // ui.js «Запас энергии · 480 из 800 Е».
+        s.bars.push(SheetBar {
+            label: v(&line("rustcraft.turret.reserve", "Energy reserve", &[])),
+            value: v(&line(
+                "rustcraft.turret.reserve_value",
+                "%s of %s E",
+                &[Text::literal(format!("{e:.0}")), Text::literal(format!("{:.0}", t.turret_buffer))],
+            )),
+            share: e / t.turret_buffer.max(1.0),
+            energy: true,
+            colour: None,
+        });
+    }
     let shown = turret_shown(dimension, pos);
     let severity = match shown {
         Some(Shown::NoEnergy) => Severity::Bad,
@@ -1948,7 +2037,7 @@ fn support_rows(game: &Game<'_>, dimension: &str, pos: Pos, _slots: &[Option<Mod
         && let Some(p) = players.iter().find(|p| p.name == name)
     {
         s.rows.push(v(&line(
-            "rustcraft.turret.healing",
+            "rustcraft.turret.healing_row",
             "Heals: %s · %s of 20 health",
             &[Text::literal(name.clone()), Text::literal(format!("{:.0}", p.health))],
         )));
@@ -2066,18 +2155,19 @@ fn dock_sheet(
     }
     if machine == Machine::DockCharge {
         let e = machines::buffer_energy(game, pos);
+        // Wave 2 (ui.js `dock_charge`): «Энергия · получает N из 16 Е/с».
+        let taken = dock_intake(dimension, pos, e, t);
         s.bars.push(SheetBar {
             label: v(&line("rustcraft.window.energy", "Energy", &[])),
-            value: v(&Text::literal(format!("{e:.0} / {:.0} E", t.dock_buffer))),
-            share: e / t.dock_buffer.max(1.0),
+            value: v(&line(
+                "rustcraft.anchor.gets",
+                "gets %s of %s E/s",
+                &[Text::literal(format!("{taken:.0}")), Text::literal(format!("{:.0}", t.dock_draw))],
+            )),
+            share: taken / t.dock_draw.max(1.0),
             energy: true,
             colour: None,
         });
-        s.rows.push(v(&line(
-            "rustcraft.dock.draw",
-            "Draws up to %s E/s",
-            &[Text::literal(format!("{:.0}", t.dock_draw))],
-        )));
         let severity = if e > 0.0 { Severity::Ok } else { Severity::Bad };
         s.status = status(severity, &text);
     } else {
@@ -2397,4 +2487,32 @@ pub(super) fn forget_area(game: &mut Game<'_>, dimension: &str, min: Pos, max: P
     s.turrets.retain(|(d, p), _| d != dimension || !inside(*p));
     s.anchor_states
         .retain(|(d, p), _| d != dimension || !inside(*p));
+}
+
+// ---- Wave 2: what a charge dock takes ----
+
+/// The charge dock at `pos` gave a worker `amount` (rustcraft_workers::charge_from).
+pub(super) fn dock_gave(pos: Pos, amount: f64) {
+    *state().dock_given.entry(pos).or_default() += amount;
+}
+
+/// E a second the charge dock at `pos`, holding `buffer` now, took in its last second
+/// (rustcraft_rules::worker::dock_intake); read again once a second has passed.
+fn dock_intake(dimension: &str, pos: Pos, buffer: f64, t: &Tuning) -> f64 {
+    let now = std::time::Instant::now();
+    let mut s = state();
+    let key = (dimension.to_owned(), pos);
+    let Some(&(since, before, _, rate)) = s.dock_meters.get(&key) else {
+        s.dock_given.remove(&pos);
+        s.dock_meters.insert(key, (now, buffer, 0.0, 0.0));
+        return 0.0;
+    };
+    let seconds = now.duration_since(since).as_secs_f64();
+    if seconds < 1.0 {
+        return rate;
+    }
+    let gave = s.dock_given.remove(&pos).unwrap_or(0.0);
+    let rate = rustcraft_rules::worker::dock_intake(before, buffer, gave, seconds, t.dock_draw);
+    s.dock_meters.insert(key, (now, buffer, 0.0, rate));
+    rate
 }

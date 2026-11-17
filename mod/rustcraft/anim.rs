@@ -19,8 +19,8 @@ use horizon_world::{
 };
 use rustcraft_rules::anim::{self, Off, Shown, Step, parts::PARTS};
 
-const ON_KEY: &str = "anim_on";
-const LEVEL_KEY: &str = "anim_lv";
+pub(super) const ON_KEY: &str = "anim_on";
+pub(super) const LEVEL_KEY: &str = "anim_lv";
 const COLOUR_KEY: &str = "anim_c";
 /// Keys of other modules a client also draws from (the facade's look, rustcraft_facade).
 pub(super) const EXTRA_KEYS: [&str; 4] = ["facade", "facade_state", "plan", "ghost"];

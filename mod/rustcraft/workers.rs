@@ -28,7 +28,6 @@ use crate::game::{
     rustcraft_machines as machines, rustcraft_monorail as monorail,
     rustcraft_server::{self as server, LevelNet, line, tell},
     rustcraft_transport as transport, rustcraft_utility as util,
-    rustcraft_window::named,
 };
 use horizon_client::{
     items::ItemStack,
@@ -45,6 +44,7 @@ use rustcraft_rules::{
     utility::grown,
     worker::{
         BlockView, Errand, Fleet, Note, Step, Tool, Track, Worker, chassis, digging, plants, trees,
+        screen::{self, Press},
     },
 };
 use std::{
@@ -64,8 +64,9 @@ const SWEEP_EVERY: u64 = 100;
 /// The unload dock hands its load to a container beside it this often, this many at a time.
 const DOCK_PUSH_EVERY: u64 = 8;
 const DOCK_PUSH: u32 = 8;
-const ROWS: u8 = 6;
-const CELLS: usize = 54;
+/// Wave 2: the session of a chassis window on the mod's own screen (no menu, no menu id).
+const SCREEN_WINDOW: i32 = -1;
+const CELLS: usize = screen::INVENTORY_FROM;
 const MAIN_SLOTS: usize = 27;
 const INVENTORY_SLOTS: usize = 36;
 /// The window's first row: tool, the sockets (up to 7, U4), then its state with charge and hold.
@@ -111,6 +112,8 @@ struct Workers {
     sessions: HashMap<u128, Session>,
     opening: Vec<(u128, String, u64)>,
     clicks: Vec<Click>,
+    /// Wave 2: presses in the chassis windows (screen::Press), for the level's tick.
+    presses: Vec<(u128, Press)>,
     /// Chassis placed, to become workers once the level ticks: owner, dimension, rail, and the
     /// worker a picked-up chassis carries (W3).
     placing: Vec<(u128, String, Pos, Option<String>, u8)>,
@@ -276,6 +279,16 @@ pub(super) fn on_use_item_on(
         return;
     }
     let packed = packed_of(stack);
+    // Wave 2 (W3): a packed worker that does not read back stays in the hand with all it carries.
+    if packed.as_deref().is_some_and(|k| !Worker::reads_back(k)) {
+        log::warn!("rustcraft: a packed worker that does not read: left with the player");
+        tell(
+            game,
+            player.uuid,
+            line("rustcraft.worker.unreadable", "This worker does not read: it stays with you", &[]),
+        );
+        return;
+    }
     if player.game_mode != 1 {
         if packed.is_some() {
             take_exact(game, player.uuid, stack);
@@ -830,7 +843,7 @@ fn take_grown(game: &mut Game<'_>, dimension: &str, w: &mut Worker, zone: &[Pos]
             continue;
         }
         let max = machines::max_stack(game, &block);
-        let name = grown::hold_name(&block, true);
+        let name = util::grown_hold_name(game, p, &block);
         if w.hold.add(&name, 1, max) > 0 {
             break;
         }
@@ -909,6 +922,9 @@ fn bore(game: &mut Game<'_>, dimension: &str, net: &Network, w: &mut Worker, cel
         matches!(b.as_str(), "minecraft:air" | "minecraft:cave_air" | "minecraft:water") || b.contains("lava")
     };
     let (ahead, _) = bore::next_cell(level_ahead, open, has(M::Height) > 0);
+    // Wave 2 (guide `mod_height`): with a height set in the chassis window, a step up or down
+    // towards it.
+    let ahead = bore::toward_height(level_ahead, has(M::Height) > 0, w.height).unwrap_or(ahead);
     let heading = [ahead[0] - cell[0], ahead[2] - cell[2]];
     let (side, height) = bore::size(has(M::Tunnel));
     let (lava_module, build_module) = (has(M::Lava) > 0, has(M::Build) > 0);
@@ -1295,6 +1311,7 @@ fn charge_from(game: &mut Game<'_>, w: &mut Worker, dock: Pos, t: &Tuning) {
         .min((cap - w.charge).max(0.0));
     if give > 0.0 {
         machines::set_buffer_energy(game, dock, buffer - give);
+        crate::game::rustcraft_base::dock_gave(dock, give);
         w.charge += give;
         let share = w.charge / cap.max(1.0);
         dock_log()
@@ -1582,22 +1599,46 @@ fn windows(game: &mut Game<'_>, dimension: &str, level: &mut LevelFleet, t: &Tun
         s.clicks = rest;
         (here, clicks)
     };
+    // Wave 2: the window is the mod's own screen on the player's client (screen::View).
     for (uuid, _, id) in opening {
         let Some(w) = level.fleet.workers.iter().find(|w| w.id == id) else {
             continue;
         };
-        let items = cells(game, w, t);
-        let title = window_title(w.tier);
-        if let Some(window) = game.native_open_menu(uuid, ROWS, title, items) {
-            send_panel(game, uuid, w, t);
-            state().sessions.insert(
-                uuid,
-                Session {
-                    dimension: dimension.to_owned(),
-                    worker: id,
-                    window,
-                },
-            );
+        send_view(game, uuid, w, t, true);
+        state().sessions.insert(
+            uuid,
+            Session {
+                dimension: dimension.to_owned(),
+                worker: id,
+                window: SCREEN_WINDOW,
+            },
+        );
+    }
+    let presses: Vec<(u128, Press)> = {
+        let mut s = state();
+        let mine: Vec<u128> = s.sessions.iter().filter(|(_, x)| x.dimension == dimension).map(|(u, _)| *u).collect();
+        let (here, rest): (Vec<_>, Vec<_>) = std::mem::take(&mut s.presses).into_iter().partition(|(u, _)| mine.contains(u));
+        s.presses = rest;
+        here
+    };
+    let mut clicks = clicks;
+    for (uuid, press) in presses {
+        let id = match state().sessions.get(&uuid) {
+            Some(x) => x.worker,
+            None => continue,
+        };
+        match press {
+            Press::Closed => {
+                state().sessions.remove(&uuid);
+            }
+            Press::Cell { cell, right } => clicks.push(Click { uuid, window: SCREEN_WINDOW, slot: cell, shift: right }),
+            Press::Height { by } => {
+                if let Some(w) = level.fleet.workers.iter_mut().find(|w| w.id == id) {
+                    w.height = screen::adjust_height(w.height, w.cell[1], by);
+                    level.dirty = true;
+                    send_view(game, uuid, w, t, false);
+                }
+            }
         }
     }
     for c in clicks {
@@ -1609,15 +1650,13 @@ fn windows(game: &mut Game<'_>, dimension: &str, level: &mut LevelFleet, t: &Tun
             }
         };
         let Some(w) = level.fleet.workers.iter_mut().find(|w| w.id == id) else {
-            game.native_close_menu(c.uuid);
+            close_view(game, c.uuid);
             continue;
         };
         if click(game, c.uuid, c.slot, c.shift, w, t) {
             level.dirty = true;
         }
-        let items = cells(game, w, t);
-        game.native_set_menu_items(c.uuid, items);
-        send_panel(game, c.uuid, w, t);
+        send_view(game, c.uuid, w, t, false);
     }
     // Open windows follow their worker each second.
     if level.ticks.is_multiple_of(BOARD_EVERY) {
@@ -1629,26 +1668,54 @@ fn windows(game: &mut Game<'_>, dimension: &str, level: &mut LevelFleet, t: &Tun
             .collect();
         for (uuid, id) in open {
             if let Some(w) = level.fleet.workers.iter().find(|w| w.id == id) {
-                let items = cells(game, w, t);
-                game.native_set_menu_items(uuid, items);
-                send_panel(game, uuid, w, t);
+                send_view(game, uuid, w, t, false);
             } else {
-                game.native_close_menu(uuid);
+                close_view(game, uuid);
             }
         }
     }
 }
 
-/// The window's title by the chassis's tier (guide `chassis`: «Шасси работника · из искростали»).
-pub(super) fn window_title(tier: u8) -> Text {
-    let (key, fallback) = rustcraft_rules::worker::wire::window_key(tier);
-    line(key, fallback, &[])
+/// Wave 2: what the chassis window shows, to the player who has it open (rustcraft_station draws
+/// it); `open` opens the screen.
+fn send_view(game: &mut Game<'_>, uuid: u128, w: &Worker, t: &Tuning, open: bool) {
+    let mut v = screen::View::of(w, t);
+    v.open = open;
+    if game.remote.is_none() && uuid == game.native_acting_id() {
+        crate::game::rustcraft_station::chassis_view(v);
+        return;
+    }
+    if let Err(e) = game.native_net_send_to_player(uuid, screen::VIEW_CHANNEL, &v.encode()) {
+        log::debug!("rustcraft: a chassis window not sent: {e}");
+    }
 }
 
-/// The chassis window's panel to the player who has it open (rustcraft_station::draw_chassis).
-fn send_panel(game: &mut Game<'_>, uuid: u128, w: &Worker, t: &Tuning) {
-    use rustcraft_rules::worker::wire::{PANEL, Panel};
-    let _ = game.native_net_send_to_player(uuid, PANEL, &Panel::of(w, t).encode());
+/// The chassis window closes: its worker is gone.
+fn close_view(game: &mut Game<'_>, uuid: u128) {
+    state().sessions.remove(&uuid);
+    let v = screen::View { close: true, ..screen::View::default() };
+    if game.remote.is_none() && uuid == game.native_acting_id() {
+        crate::game::rustcraft_station::chassis_view(v);
+        return;
+    }
+    let _ = game.native_net_send_to_player(uuid, screen::VIEW_CHANNEL, &v.encode());
+}
+
+/// `native_net_from_client` (through rustcraft_monorail): a press in a player's chassis window.
+pub(super) fn on_client_message(player: u128, channel: &str, data: &[u8]) {
+    if channel != screen::PRESS_CHANNEL {
+        return;
+    }
+    match screen::decode_press(data) {
+        Some(p) => press(player, p),
+        None => log::warn!("rustcraft: a chassis window press that does not read"),
+    }
+}
+
+/// A press in `player`'s chassis window, for their level's next tick (the single player's
+/// window gives it straight from rustcraft_station).
+pub(super) fn press(player: u128, p: Press) {
+    state().presses.push((player, p));
 }
 
 /// Gives `count` of `item` (a hold's name) to the player; how many they took.
@@ -1777,172 +1844,6 @@ fn click(
         w.note = Note::Working;
     }
     true
-}
-
-/// The window's cells (guide `chassis`): tool, three upgrade slots, charge, hold, state, then
-/// the hold's slots; slots past the hold's size are grey.
-fn cells(game: &Game<'_>, w: &Worker, t: &Tuning) -> Vec<Option<ItemStack>> {
-    let _ = game;
-    let mut out: Vec<Option<ItemStack>> = vec![None; CELLS];
-    out[TOOL_CELL] = Some(match w.tool {
-        Some(tool) => named(
-            tool.item(),
-            1,
-            tool_name(Some(tool)),
-            &[hint(
-                "rustcraft.worker.tool_hint",
-                "Click: take the tool back",
-            )],
-            false,
-        ),
-        None => named(
-            "minecraft:light_gray_stained_glass_pane",
-            1,
-            line("rustcraft.worker.tool_slot", "Tool", &[]),
-            &[hint(
-                "rustcraft.worker.tool_put",
-                "Click a saw or a reaper in your inventory",
-            )],
-            false,
-        ),
-    });
-    for (k, cell) in UPGRADE_CELLS.enumerate() {
-        out[cell] = Some(match w.upgrades.get(k) {
-            Some(Some(m)) => named(
-                m.item(),
-                1,
-                Text::translate(&format!("item.{}", m.item().replace(':', ".")), &[]),
-                &[hint("rustcraft.worker.upgrade_hint", "Click: take it back")],
-                false,
-            ),
-            Some(None) => named(
-                "minecraft:gray_stained_glass_pane",
-                1,
-                line("rustcraft.worker.upgrade_slot", "Upgrade slot", &[]),
-                &[hint(
-                    "rustcraft.worker.upgrade_put",
-                    "Battery, speed, storage or radius",
-                )],
-                false,
-            ),
-            // U4: a socket this chassis's tier does not have.
-            None => named(
-                "minecraft:black_stained_glass_pane",
-                1,
-                line(
-                    "rustcraft.worker.socket_locked",
-                    "A socket of a crystallite or starsteel chassis",
-                    &[],
-                ),
-                &[],
-                false,
-            ),
-        });
-    }
-    let cap = w.capacity(t);
-    let percent = (100.0 * w.charge / cap.max(1.0)).round();
-    let bad = !matches!(
-        w.note,
-        Note::Working | Note::Unloading | Note::Charging | Note::ToUnload | Note::ToCharge
-    );
-    out[NOTE_CELL] = Some(named(
-        if bad {
-            "minecraft:red_dye"
-        } else {
-            "minecraft:lime_dye"
-        },
-        1,
-        note_text(w.note),
-        &[
-            line(
-                "rustcraft.worker.charge",
-                "Charge: %s",
-                &[Text::literal(format!(
-                    "{percent}% · {:.0} / {:.0} E",
-                    w.charge, cap
-                ))],
-            ),
-            line(
-                "rustcraft.worker.hold",
-                "Hold: %s of %s slots",
-                &[
-                    Text::literal(w.hold.used().to_string()),
-                    Text::literal(w.hold.slots.len().to_string()),
-                ],
-            ),
-            // Slice 18 (guide `mod_storage`): what the hold keeps past the window's slots.
-            {
-                let (stacks, items) = w.hold.beyond(CELLS - HOLD_FIRST);
-                line(
-                    "rustcraft.worker.hold_beyond",
-                    "Past the window: %s items in %s slots",
-                    &[Text::literal(items.to_string()), Text::literal(stacks.to_string())],
-                )
-            },
-            hint(
-                "rustcraft.worker.charge_hint",
-                "Under 20% it goes to the charge dock",
-            ),
-            hint(
-                "rustcraft.worker.hold_hint",
-                "A full hold goes to the unload dock",
-            ),
-            filter_line(game, &w.filter),
-
-            hint(
-                "rustcraft.worker.filter_hint",
-                "Shift-click a plant or block in your inventory: into the filter; click here: clear it",
-            ),
-        ],
-        false,
-    ));
-    for i in 0..(CELLS - HOLD_FIRST) {
-        out[HOLD_FIRST + i] = match w.hold.slots.get(i) {
-            Some(Some((item, n))) => Some(util::hold_stack(item, *n)),
-            Some(None) => None,
-            None => Some(named(
-                "minecraft:black_stained_glass_pane",
-                1,
-                line(
-                    "rustcraft.worker.no_slot",
-                    "More slots with a storage module",
-                    &[],
-                ),
-                &[],
-                false,
-            )),
-        };
-    }
-    out
-}
-
-/// H6: what the filter names, or that it takes everything.
-pub(super) fn filter_line(game: &Game<'_>, filter: &[String]) -> Text {
-    if filter.is_empty() {
-        return line("rustcraft.worker.filter_all", "Filter: takes everything", &[]);
-    }
-    let mut names = Text::literal(String::new());
-    for (i, f) in filter.iter().enumerate() {
-        if i > 0 {
-            names.push(Text::literal(", "));
-        }
-        names.push(Text::translate(&item_key(game, f), &[]));
-    }
-    line("rustcraft.worker.filter", "Filter: %s", &[names])
-}
-
-/// The translation key of `id`: a block's `block.ns.path`, else the item's `item.ns.path`.
-fn item_key(game: &Game<'_>, id: &str) -> String {
-    let path = id.replace(':', ".");
-    if game.native_default_state(id).is_some() {
-        format!("block.{path}")
-    } else {
-        format!("item.{path}")
-    }
-}
-
-fn hint(key: &str, fallback: &str) -> Text {
-    line(key, fallback, &[])
 }
 
 // ---- For the self-test ----
@@ -2163,4 +2064,33 @@ pub(super) fn clear_area(game: &mut Game<'_>, dimension: &str, min: Pos, max: Po
     for id in ids {
         remove_for_selftest(game, dimension, id);
     }
+}
+
+// ---- Wave 2: the chassis window for the self-test ----
+
+/// The self-test's player of chassis windows: no one's, so its views go nowhere.
+const SELFTEST_VIEWER: u128 = 0x5e1f_7e57_0000_0000_0000_0000_0000_c4a5;
+
+/// A press in worker `id`'s window, as a player who has it open would make it.
+pub(super) fn press_for_selftest(dimension: &str, id: u64, p: Press) -> Result<(), String> {
+    let mut s = state();
+    let level = s.levels.get(dimension).ok_or("no workers in this level")?;
+    if !level.fleet.workers.iter().any(|w| w.id == id) {
+        return Err("no such worker".into());
+    }
+    s.sessions.insert(SELFTEST_VIEWER, Session { dimension: dimension.to_owned(), worker: id, window: SCREEN_WINDOW });
+    s.presses.push((SELFTEST_VIEWER, p));
+    Ok(())
+}
+
+/// Worker `id`'s sockets hold `modules` (item ids), the rest empty.
+pub(super) fn modules_for_selftest(dimension: &str, id: u64, modules: &[&str]) -> Result<(), String> {
+    let mut s = state();
+    let level = s.levels.get_mut(dimension).ok_or("no workers in this level")?;
+    let w = level.fleet.workers.iter_mut().find(|w| w.id == id).ok_or("no such worker")?;
+    for (i, slot) in w.upgrades.iter_mut().enumerate() {
+        *slot = modules.get(i).and_then(|m| Module::of(m));
+    }
+    level.dirty = true;
+    Ok(())
 }

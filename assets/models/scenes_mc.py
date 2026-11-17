@@ -58,7 +58,7 @@ RC.TIER_COLOR = ['', '#c57f52', '#e2bd55', '#69d2d8', '#a184f2'];
 RC.CH_COLOR = { i: '#ffa53c', f: '#4c9bf5', e: '#ffe14a', '-': '#15171c' };
 for (const f of ['data.js', 'info.js', 'scenes.js']) run(f);
 const stepTime = (st) => Math.max(st.dur || 5, 3 + st.text.length / 14);
-const KEEP = ['tier', 'tool', 'color', 'on'];
+const KEEP = ['tier', 'tool', 'color', 'on', 'face'];
 const out = [];
 for (const [id, def] of Object.entries(RC.SCENES)) {
   const s = new RC.Scene();
@@ -260,6 +260,8 @@ class Table:
 
 
 MODE = {'once': 'Once', 'loop': 'Loop', 'ping': 'Ping'}
+# Wave 2: scenes.js `face` as rustcraft_rules::handbook::scene's FACE_* codes.
+FACE = {'x+': 1, 'x-': 2, 'y+': 3, 'y-': 4}
 TONE = {'bad': 'Bad', 'warn': 'Warn', 'ok': 'Ok', 'info': 'Info'}
 
 
@@ -281,8 +283,14 @@ def step_rust(t, st, have, dropped):
                 i, t.path(m['pts']), num(m['speed']), MODE[m['mode']], num(m['since'])))
         elif o['id'] not in covered:
             at = o['at'] if look[0] != 'drop' else [o['at'][0], o['at'][1], o['at'][2] - DROP_DOWN]
-            if 'gone' in o:
+            # Wave 2: a block that faces a way in the guide faces it in the game's scene too.
+            face = FACE.get(o.get('face')) if look[0] in ('item', 'model') else None
+            if 'gone' in o and face:
+                blocks.append('bgf(%d,%s,%s,%d)' % (i, point(at), num(o['gone']), face))
+            elif 'gone' in o:
                 blocks.append('bg(%d,%s,%s)' % (i, point(at), num(o['gone'])))
+            elif face:
+                blocks.append('bf(%d,%s,%d)' % (i, point(at), face))
             else:
                 blocks.append('b(%d,%s)' % (i, point(at)))
     flows = []
@@ -363,7 +371,7 @@ def build(page_ids, have):
     paths = ['const P%d: &[[f32; 3]] = %s;' % (i, p) for i, p in enumerate(t.paths)]
     text = ('//! The handbook\'s scenes, written by assets/models/scenes_mc.py (through handbook_mc.py)\n'
             '//! from the guide\'s docs/showcase/js/scenes.js: do not edit by hand, run the script.\n\n'
-            'use super::scene::{Beam, Block, End, Flow, Kind, Label, Look, Mode, Mover, Scene, Step, Tone, b, bg};\n\n'
+            'use super::scene::{Beam, Block, End, Flow, Kind, Label, Look, Mode, Mover, Scene, Step, Tone, b, bf, bg, bgf};\n\n'
             '/// What the scenes\' blocks look like, by `Block::look` and `Mover::look`.\n'
             '#[rustfmt::skip]\npub const LOOKS: &[Look] = &[\n    %s,\n];\n\n'
             '#[rustfmt::skip]\npub const SCENES: &[Scene] = &[\n%s\n];\n\n'

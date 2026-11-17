@@ -278,6 +278,12 @@ impl Ropes {
             .collect()
     }
 
+
+    /// Wave 2: the ropes whose time is up at `now_ms` and nobody rides now (`ridden`): a rope
+    /// waits for its rider to get off.
+    pub fn expired_free(&self, now_ms: u64, ridden: &std::collections::BTreeSet<u64>) -> Vec<u64> {
+        self.expired(now_ms).into_iter().filter(|id| !ridden.contains(id)).collect()
+    }
     pub fn count_of(&self, owner: u128) -> usize {
         let key = owner_key(owner);
         self.ropes.iter().filter(|r| r.owner == key).count()
@@ -507,6 +513,9 @@ mod tests {
         ropes.stamp(1_000);
         assert!(ropes.expired(1_000 + ROPE_LIFE_MS - 1).is_empty());
         assert_eq!(ropes.expired(1_000 + ROPE_LIFE_MS), vec![id]);
+        let ridden = std::collections::BTreeSet::from([id]);
+        assert!(ropes.expired_free(1_000 + ROPE_LIFE_MS, &ridden).is_empty(), "a ridden rope waits for its rider");
+        assert_eq!(ropes.expired_free(1_000 + ROPE_LIFE_MS, &Default::default()), vec![id]);
         ropes.stamp(9_999_999);
         assert_eq!(ropes.get(id).map(|r| r.tied_ms), Some(1_000), "a stamped rope keeps its time");
         let old: Ropes = serde_json::from_str(r#"{"next":1,"ropes":[{"id":1,"owner":"x","dimension":"o","a":[0,0,0],"b":[1,0,0]}]}"#).expect("an older store reads");

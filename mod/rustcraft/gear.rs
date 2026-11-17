@@ -526,9 +526,10 @@ pub(super) fn on_use_item(game: &mut Game<'_>, stack: &ItemStack, claimed: &mut 
         }
         return;
     }
+    // Wave 2: the rifle fires from its client (a tap of use, or attack while aiming, see
+    // `client_tick`), so a held use that aims does not also fire.
     if g.kind == Kind::Rifle {
         *claimed = true;
-        shoot(game, &player, stack);
     }
     if g.kind == Kind::Zipline {
         *claimed = true;
@@ -843,14 +844,22 @@ pub(super) fn draw_window(game: &Game<'_>, batch: &mut horizon_client::hud::HudB
     );
     kit::text(game, batch, &amount, o, [8.0, 25.0], kit::VALUE);
     for (i, (item, st)) in v.modules.iter().enumerate() {
-        let name = kit::tr(&format!("item.{}", item.replace(':', ".")), item);
+        // Wave 2 (#15): the guide's short name, and for a module without a key what it gives.
+        let named = Module::of(item).map(rules::window::named);
+        let name = match named {
+            Some(((k, f), _)) => kit::tr(k, f),
+            None => kit::tr(&format!("item.{}", item.replace(':', ".")), item),
+        };
         let key = Module::of(item)
             .and_then(rules::window::key_of)
             .map(|k| rules::window::key_label(&game.native_mod_key("rustcraft", k.name(), k.default_key())));
         let state = match (st, key) {
             (rules::window::State::On, Some(k)) => kit::tr_with("rustcraft.gear.window.on", "on · key %s", &[k]),
             (rules::window::State::Off, Some(k)) => kit::tr_with("rustcraft.gear.window.off", "off · key %s", &[k]),
-            _ => kit::tr("rustcraft.gear.window.auto", "works by itself"),
+            _ => match named {
+                Some((_, (k, f))) => kit::tr(k, f),
+                None => kit::tr("rustcraft.gear.window.auto", "works by itself"),
+            },
         };
         let line = format!("{name}: {state}");
         let colour = if *st == rules::window::State::Off { kit::TEXT } else { kit::TEXT_ON };
@@ -860,6 +869,42 @@ pub(super) fn draw_window(game: &Game<'_>, batch: &mut horizon_client::hud::HudB
 
 /// Slice 18: whether this window's player aims the rifle (in the main hand, its use key held).
 static AIMING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// Wave 2: ticks the use key was held with the rifle, and the attack key last tick.
+static RIFLE_HELD: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+static ATTACK_WAS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// Wave 2: the players whose rifle fired, for the server's next gear tick.
+static RIFLE_SHOTS: Mutex<Vec<u128>> = Mutex::new(Vec::new());
+
+/// `native_net_from_client`: a player's rifle fired (rules::RIFLE_SHOT_CHANNEL).
+pub(super) fn on_client_message(player: u128, channel: &str, _data: &[u8]) {
+    if channel == rules::RIFLE_SHOT_CHANNEL {
+        RIFLE_SHOTS.lock().unwrap_or_else(PoisonError::into_inner).push(player);
+    }
+}
+
+/// The rifle shots since the last tick of the players in `dimension` (the level whose mobs the
+/// shot meets): each from the rifle in that player's main hand.
+fn rifle_shots(game: &mut Game<'_>, dimension: &str) {
+    let players = game.native_server_players();
+    let due: Vec<u128> = {
+        let mut shots = RIFLE_SHOTS.lock().unwrap_or_else(PoisonError::into_inner);
+        let (here, later): (Vec<u128>, Vec<u128>) = std::mem::take(&mut *shots)
+            .into_iter()
+            .filter(|u| players.iter().any(|p| p.uuid == *u))
+            .partition(|u| players.iter().any(|p| p.uuid == *u && p.dimension == dimension));
+        *shots = later;
+        here
+    };
+    for uuid in due {
+        let Some(player) = players.iter().find(|p| p.uuid == uuid && p.health > 0.0).cloned() else {
+            continue;
+        };
+        let Some(stack) = game.native_player_equipment(uuid, EquipmentSlot::MainHand) else { continue };
+        if Gear::of(&stack.item).is_some_and(|g| g.kind == Kind::Rifle) {
+            shoot(game, &player, &stack);
+        }
+    }
+}
 
 /// `native_compute_fov_modifier` on a client: aiming the rifle zooms twice.
 pub(super) fn fov(modifier: &mut f32) {
@@ -870,9 +915,26 @@ pub(super) fn fov(modifier: &mut f32) {
 
 /// The window's tick: a dash waiting is pushed; whether the rifle is aimed.
 pub(super) fn client_tick(game: &mut Game<'_>) {
+    use std::sync::atomic::Ordering::Relaxed;
     let rifle = game.native_held().is_some_and(|(item, _, _)| item == "rustcraft:rifle");
-    let aiming = rifle && game.native_playing() && game.native_mapping("key.use").is_some_and(|(down, _)| down);
-    AIMING.store(aiming, std::sync::atomic::Ordering::Relaxed);
+    let playing = rifle && game.native_playing();
+    let use_down = playing && game.native_mapping("key.use").is_some_and(|(down, _)| down);
+    let attack_down = playing && game.native_mapping("key.attack").is_some_and(|(down, _)| down);
+    let attack_pressed = attack_down && !ATTACK_WAS.swap(attack_down, Relaxed);
+    ATTACK_WAS.store(attack_down, Relaxed);
+    let held = if playing { RIFLE_HELD.load(Relaxed) } else { 0 };
+    let (held, aiming, fire) = rules::rifle_input(held, use_down, attack_pressed);
+    RIFLE_HELD.store(held, Relaxed);
+    AIMING.store(aiming, Relaxed);
+    if fire && playing {
+        if game.remote.is_some() {
+            if let Err(e) = game.native_net_send_to_server(rules::RIFLE_SHOT_CHANNEL, &[]) {
+                log::warn!("rustcraft: a rifle shot was not sent: {e}");
+            }
+        } else if let Some(p) = game.native_acting_player() {
+            RIFLE_SHOTS.lock().unwrap_or_else(PoisonError::into_inner).push(p.uuid);
+        }
+    }
     let push = PUSH.lock().unwrap_or_else(PoisonError::into_inner).take();
     if let Some(p) = push {
         game.native_push_player(p);
@@ -1062,6 +1124,7 @@ pub(super) fn tick(game: &mut Game<'_>, dimension: &str) {
     };
     open_windows(game);
     keys(game);
+    rifle_shots(game, dimension);
     if now.is_multiple_of(rules::moves::MAGNET_EVERY) {
         pull(game, dimension);
     }
@@ -1153,7 +1216,9 @@ const JETPACK_MODEL: &str = "rustcraft:block/worn_jetpack";
 const FLAME_MODEL: &str = "rustcraft:block/worn_flame";
 const BACKPACK_MODEL: &str = "rustcraft:block/worn_backpack";
 const HANDLE_MODEL: &str = "rustcraft:block/worn_handle";
-pub(super) const WORN_MODELS: [&str; 4] = [JETPACK_MODEL, FLAME_MODEL, BACKPACK_MODEL, HANDLE_MODEL];
+/// Wave 2: one of the handle's two rollers, drawn turning (rules::looks::roller_angle).
+const ROLLER_MODEL: &str = "rustcraft:block/worn_handle_roller";
+pub(super) const WORN_MODELS: [&str; 5] = [JETPACK_MODEL, FLAME_MODEL, BACKPACK_MODEL, HANDLE_MODEL, ROLLER_MODEL];
 
 /// A player began a zipline ride (rustcraft_zipline): seen with the handle while it lasts.
 pub(super) fn note_zip_ride(player: u128) {
@@ -1257,6 +1322,15 @@ pub(super) fn draw_looks(
         draw.push();
         draw.translate([0.0, 1.0, 0.0]);
         game.native_draw_model(draw, HANDLE_MODEL, 0xFF_FFFF);
+        // Wave 2 (#40): the rollers roll along the rope.
+        let angle = rules::looks::roller_angle(mob.age);
+        for at in rules::looks::ROLLERS {
+            draw.push();
+            draw.translate([at[0] - rules::looks::ROLLERS[0][0], 0.0, 0.0]);
+            draw.rotate_about(rules::looks::ROLLER_AXIS, angle, rules::looks::ROLLERS[0]);
+            game.native_draw_model(draw, ROLLER_MODEL, 0xFF_FFFF);
+            draw.pop();
+        }
         draw.pop();
     }
     draw.pop();

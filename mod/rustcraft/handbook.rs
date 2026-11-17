@@ -547,9 +547,12 @@ fn scene_part(game: &Game<'_>, batch: &mut HudBatch, o: [f32; 2], page: usize, s
     kit::fills(game, batch, o, &style::well(panel));
     let at = [o[0] + panel[0], o[1] + panel[1]];
     let fit = scene::fit(s, [panel[2], panel[3]]);
+    // Wave 2: the standing blocks as a scene of blocks; the rest (moving objects, heads, eggs,
+    // tools, tinted cubes) as icons over it.
+    draw_scene_blocks(game, batch, at, [panel[2], panel[3]], st, t, &fit);
     let start = batch.vertices.len();
     let drawn = scene::drawn(st, t, &fit);
-    for d in &drawn {
+    for d in &scene::drawn_except(st, t, &fit, |b| scene_state(game, b).is_some()) {
         look(game, batch, at, d, &fit);
     }
     if st.tint != 0 {
@@ -1228,4 +1231,98 @@ pub(super) fn on_key(game: &Game<'_>, key: &str, canceled: &mut bool) {
 fn turn(game: &Game<'_>, forward: bool) {
     let v = *view();
     *view() = rules::turn(v, forward, sheets_of(game, v));
+}
+
+// ---- Wave 2: the scene's blocks as blocks, facing their way, their parts moving ----
+
+/// Blocks whose model the game draws by a renderer of its own (an entity's): in a scene of
+/// blocks they would show nothing, so they stay icons.
+fn entity_drawn(id: &str) -> bool {
+    id.ends_with("_head")
+        || id.ends_with("_skull")
+        || id.ends_with("chest")
+        || id.ends_with("_bed")
+        || id.ends_with("shulker_box")
+        || id.contains("banner")
+        || id.ends_with("_sign")
+        || id.contains("spawn_egg")
+}
+
+/// `state` with property `key` set to `value` (`BlockState.setValue`), as the game's
+/// `native_state_with_property` builds it; none when the block has no such property.
+fn with_property(game: &Game<'_>, state: horizon_world::registry::BlockStateId, key: &str, value: &str) -> Option<horizon_world::registry::BlockStateId> {
+    let registry = &game.pack.assets.registry;
+    let mut s = registry.state(state)?.clone();
+    s.properties.get(key)?;
+    s.properties.insert(key.into(), value.into());
+    registry.resolve(&s).ok()
+}
+
+/// The block state a scene's block is drawn as (`native_draw_scene`), facing its scene's way;
+/// none for a look that is no block (a head, an egg, a tool, a tinted cube).
+fn scene_state(game: &Game<'_>, bl: &scene::Block) -> Option<(horizon_world::registry::BlockStateId, &'static str, bool)> {
+    let (id, on, model) = match scene::look(bl.look) {
+        Look::Item(id) => (id, false, false),
+        Look::Model(id, still) => (id, still.ends_with("_on"), true),
+        _ => return None,
+    };
+    if entity_drawn(id) {
+        return None;
+    }
+    let mut state = game.native_default_state(id)?;
+    if game.pack.assets.registry.state(state).is_none_or(|s| &*s.name == "minecraft:air") {
+        return None;
+    }
+    if let Some(f) = scene::facing_of(bl.face) {
+        state = with_property(game, state, "facing", f).unwrap_or(state);
+    }
+    Some((state, id, model && on))
+}
+
+/// The scene's standing blocks drawn as a scene of blocks (API: native_draw_scene, Create's
+/// Ponder): each block's own model turned by its `facing`, a machine's moving parts drawn by its
+/// block entity (rustcraft_anim, `anim_on` from the scene's state) and turning with the game's
+/// time, a turret's head aimed at the step's first moving object. In the guide's view
+/// (scene::scene_view), so the icons, dots and labels drawn over it lie where they did.
+fn draw_scene_blocks(game: &Game<'_>, batch: &mut HudBatch, at: [f32; 2], size: [f32; 2], st: &scene::Step, t: f32, fit: &scene::Fit) {
+    use horizon_client::containers::{ModBlockEntity, ModBlockEntityFields};
+    let target = st.movers.first().map(|m| scene::world_of(scene::centre(m.at(t))));
+    let mut entities: Vec<(usize, ModBlockEntity)> = Vec::new();
+    let mut placed: Vec<([i32; 3], horizon_world::registry::BlockStateId)> = Vec::new();
+    for bl in st.blocks.iter().filter(|b| t < b.gone) {
+        let Some((state, id, on)) = scene_state(game, bl) else { continue };
+        let w = scene::world_of(bl.at);
+        let pos = [w[0].floor() as i32, w[1].floor() as i32, w[2].floor() as i32];
+        use horizon_world::nbt::{Compound, JavaString, Tag};
+        let mut nbt = Compound::new();
+        nbt.insert(JavaString::from(crate::game::rustcraft_anim::ON_KEY), Tag::Byte(i8::from(on)));
+        nbt.insert(JavaString::from(crate::game::rustcraft_anim::LEVEL_KEY), Tag::Byte(75));
+        if id == "rustcraft:turret"
+            && let Some(to) = target
+        {
+            let from = [f64::from(pos[0]) + 0.5, f64::from(pos[1]) + 0.6, f64::from(pos[2]) + 0.5];
+            let (yaw, pitch) = rustcraft_rules::aim::aim(from, to.map(f64::from));
+            let keys = crate::game::rustcraft_base::AIM_KEYS;
+            nbt.insert(JavaString::from(keys[0]), Tag::Short(yaw.round() as i16));
+            nbt.insert(JavaString::from(keys[1]), Tag::Short(pitch.round() as i16));
+        }
+        let fields = ModBlockEntityFields { id: id.to_owned(), nbt, items: Vec::new(), data: Vec::new() };
+        entities.push((placed.len(), ModBlockEntity::new(fields)));
+        placed.push((pos, state));
+    }
+    if placed.is_empty() {
+        return;
+    }
+    let blocks: Vec<horizon_client::mod_api::NativeSceneBlock<'_>> = placed
+        .iter()
+        .enumerate()
+        .map(|(i, (pos, state))| horizon_client::mod_api::NativeSceneBlock {
+            pos: *pos,
+            state: *state,
+            entity: entities.iter().find(|(k, _)| *k == i).map(|(_, e)| e),
+        })
+        .collect();
+    let (center, yaw, pitch, scale) = scene::scene_view(fit, size);
+    let view = horizon_client::mod_api::NativeSceneView { center, yaw, pitch, scale };
+    game.native_draw_scene(batch, [at[0], at[1], at[0] + size[0], at[1] + size[1]], &blocks, view);
 }

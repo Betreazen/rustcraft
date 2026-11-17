@@ -1256,3 +1256,39 @@ bindings = [
   { name = "game", ty = "&crate::game::Game<'_>", value = "&*self" },
   { name = "primitives", ty = "&mut horizon_client::world_primitives::WorldPrimitives", value = "&mut *primitives" },
 ]
+
+# ---- Slice 18, wave 2: a guard's or turret's kill drops the owner's loot ----
+
+# The loot hooks run in horizon-world, below the game crate, so the marks of the devices' lethal
+# hits live there (rustcraft_base sets them; SRC/crates/horizon-world/src/native_load_hooks.rs).
+[[module]]
+id = "loot_marks"
+file = "crates/horizon-world/src/loot.rs"
+name = "rustcraft_loot_marks"
+source = "loot_marks.rs"
+visibility = "pub"
+
+# Every mob table's `killed_by_player` also holds for `rustcraft:killed_for_owner` (API 75).
+[[injection]]
+id = "loot_table_load"
+hook = "loot_table_load"
+hook_version = 1
+kind = "HEAD"
+helper = "hook_loot_table_load.rs"
+bindings = [
+  { name = "id", ty = "&str", value = "id" },
+  { name = "table", ty = "&mut serde_json::Value", value = "&mut *table" },
+]
+
+# `rustcraft:killed_for_owner` holds where a device's lethal hit was marked (API 133, 156).
+[[injection]]
+id = "loot_condition"
+hook = "loot_condition"
+hook_version = 1
+kind = "HEAD"
+helper = "hook_loot_condition.rs"
+bindings = [
+  { name = "kind", ty = "&str", value = "kind" },
+  { name = "ctx", ty = "&crate::loot::NativeLootContext<'_>", value = "ctx" },
+  { name = "holds", ty = "&mut bool", value = "&mut *holds" },
+]

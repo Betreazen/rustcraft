@@ -55,3 +55,28 @@ mod tests {
         assert!(decode(&[1, 2, 3]).is_empty());
     }
 }
+
+/// Wave 2 (#40, guide `zipline` «ролики катятся по тросу»): the handle's rollers' turn at a rider's
+/// `age` in ticks, degrees: 36° a tick, a turn and a half a second, forward along the rope.
+pub const ROLLER_DEGREES_PER_TICK: f32 = 36.0;
+/// The rollers' middles in the handle's model, in blocks, and the axis they turn about (the bar,
+/// across the rope).
+pub const ROLLERS: [[f32; 3]; 2] = [[4.5 / 16.0, 18.5 / 16.0, 0.5], [11.5 / 16.0, 18.5 / 16.0, 0.5]];
+pub const ROLLER_AXIS: [f32; 3] = [1.0, 0.0, 0.0];
+
+pub fn roller_angle(age: f32) -> f32 {
+    (-age * ROLLER_DEGREES_PER_TICK).rem_euclid(360.0)
+}
+
+#[cfg(test)]
+mod wave2_roller_tests {
+    use super::*;
+
+    #[test]
+    fn the_rollers_turn_as_the_rider_goes() {
+        assert_eq!(roller_angle(0.0), 0.0);
+        assert_eq!(roller_angle(1.0), 324.0);
+        assert_eq!(roller_angle(10.0), 0.0, "a whole turn in 10 ticks");
+        assert!(ROLLERS[1][0] - ROLLERS[0][0] == 7.0 / 16.0, "the second roller is 7 px along the bar");
+    }
+}

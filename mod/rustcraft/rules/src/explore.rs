@@ -47,6 +47,10 @@ pub struct Atlas {
     /// The structure ids each player has been in.
     #[serde(default)]
     pub been: BTreeMap<u128, BTreeSet<String>>,
+    /// Wave 2 (guide `scout_compass`: «посещённым считается каждое место отдельно»): the found
+    /// sites each player has been in, as (dimension, id, the site's block).
+    #[serde(default)]
+    pub been_at: BTreeMap<u128, BTreeSet<(String, String, [i32; 3])>>,
 }
 
 /// What the compass points to.
@@ -123,6 +127,33 @@ impl Atlas {
     /// `player` is in structure `id`: true when that is new.
     pub fn enter(&mut self, player: u128, id: &str) -> bool {
         self.been.entry(player).or_default().insert(id.to_owned())
+    }
+
+    /// Wave 2: `player` is in structure `id` at `at` in `dimension`: the found sites of that id
+    /// within SITE_APART are visited, that place only. True when something is new.
+    pub fn enter_at(&mut self, player: u128, dimension: &str, id: &str, at: [i32; 3]) -> bool {
+        let mut new = self.enter(player, id);
+        let near = |p: &[i32; 3]| (p[0] - at[0]).abs() < SITE_APART && (p[2] - at[2]).abs() < SITE_APART;
+        let sites: Vec<[i32; 3]> = self
+            .sites
+            .get(dimension)
+            .into_iter()
+            .flatten()
+            .filter(|(s, p)| s == id && near(p))
+            .map(|(_, p)| *p)
+            .collect();
+        let been = self.been_at.entry(player).or_default();
+        for p in sites {
+            new |= been.insert((dimension.to_owned(), id.to_owned(), p));
+        }
+        new
+    }
+
+    /// Whether `player` has been in the found site of `id` at `site` in `dimension`.
+    pub fn been_in_site(&self, player: u128, dimension: &str, id: &str, site: [i32; 3]) -> bool {
+        self.been_at
+            .get(&player)
+            .is_some_and(|b| b.contains(&(dimension.to_owned(), id.to_owned(), site)))
     }
 
     /// The scout compass's target for `player` at `at`: the nearest found biome or structure of

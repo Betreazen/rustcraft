@@ -468,6 +468,8 @@ pub(super) fn on_button(game: &Game<'_>, pos: Pos, entity: &ModBlockEntity, id: 
 
 /// `native_net_from_client`: a station's new name, for the next tick of its level.
 pub(super) fn on_client_message(player: u128, channel: &str, data: &[u8]) {
+    // Wave 2: a press in a chassis window (rustcraft_workers).
+    crate::game::rustcraft_workers::on_client_message(player, channel, data);
     if channel != RENAME {
         return;
     }
@@ -1431,4 +1433,68 @@ pub(super) fn diagnosis(
             Text::literal(format!("{}", tuning.station_buffer)),
         ],
     ))
+}
+
+// ---- Wave 2: a rail changes its tier in place ----
+
+/// `native_right_click_block`: a rail clicked with a rail item of another tier takes that tier,
+/// its mount and shape kept (rustcraft_rules::monorail::tier_swap); the old tier's rail goes to
+/// the player (or drops when the inventory is full), as the machines' tier swap (rustcraft_tiers).
+pub(super) fn on_right_click_block(game: &mut Game<'_>, pos: Pos, canceled: &mut bool) {
+    if *canceled {
+        return;
+    }
+    let Some(player) = game.native_acting_player() else {
+        return;
+    };
+    if player.sneaking {
+        return;
+    }
+    let Some((item, _, _)) = game.native_held() else {
+        return;
+    };
+    if read_rail(game, pos).is_none() || content::monorail_tier(&item).is_none() {
+        return;
+    }
+    *canceled = true;
+    let Ok((old, from, tier)) = swap_rail_in_place(game, &player.dimension, pos, &item) else {
+        return;
+    };
+    if player.game_mode != 1 {
+        game.native_take_items(&item, 1);
+        if game.native_give_items(old, 1) == 0 {
+            let stack = Tag::compound([
+                ("id", Tag::String(JavaString::from(old))),
+                ("count", Tag::Int(1)),
+            ]);
+            let nbt = Compound::from([(JavaString::from("Item"), stack)]);
+            let at = pos.map(|c| f64::from(c) + 0.5);
+            if game.native_summon(&player.dimension, "minecraft:item", at, nbt).is_none() {
+                log::warn!("rustcraft: the rail {old} from the swap at {pos:?} was lost");
+            }
+        }
+    }
+    let text = line(
+        "rustcraft.monorail.tier_swapped",
+        "Monorail: tier %s took the place of tier %s",
+        &[Text::literal(tier.to_string()), Text::literal(from.to_string())],
+    );
+    tell(game, player.uuid, text);
+}
+
+/// The rail at `pos` takes the tier of rail item `item` in place: the old tier's item, the tiers
+/// before and after, or why it did not.
+pub(super) fn swap_rail_in_place(
+    game: &mut Game<'_>,
+    dimension: &str,
+    pos: Pos,
+    item: &str,
+) -> Result<(&'static str, u8, u8), &'static str> {
+    let rail = read_rail(game, pos).ok_or("no rail there")?;
+    let (tier, old) = monorail::tier_swap(rail.tier, content::monorail_tier(item)).ok_or("not another tier's rail")?;
+    if !game.native_set_block_property(pos, content::TIER, &tier.to_string()) {
+        return Err("the rail did not take the tier");
+    }
+    touched(dimension, pos);
+    Ok((old, rail.tier, tier))
 }
