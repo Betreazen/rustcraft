@@ -420,7 +420,7 @@ pub(super) fn on_menu_clicked(_: &mut Game<'_>, _: u128, _: i32, _: i32) {}
 /// `native_menu_input_closed`: the backpack opens no chest window since slice 18.
 pub(super) fn on_menu_input_closed(_: u128, _: i32, _: &mut [Option<ItemStack>]) {}
 
-/// Slice 18: the backpack key (B, rustcraft_gear_keys): the backpack on the back, else the first
+/// Slice 18: the backpack key (], rustcraft_gear_keys): the backpack on the back, else the first
 /// backpack in the player's inventory, opens at the next tick.
 pub(super) fn open_by_key(game: &mut Game<'_>, uuid: u128) {
     // The lock is let go before the branches: held in an `if let` scrutinee it lived through

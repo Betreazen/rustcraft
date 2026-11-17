@@ -1,5 +1,6 @@
-//! Slice 18: the gear's keys (owner's decision 2026-11-16: Z magnet, B backpack, ; night vision;
-//! M is the world map's and betterf3's). Each is a mod key players rebind in Options › Mods
+//! Slice 18: the gear's keys (owner's decision 2026-11-16: Z magnet, ; night vision;
+//! M is the world map's and betterf3's; 2026-11-17: ] the backpack, since B is Horizon's emote
+//! wheel, `key.emote`, SRC crates/horizon-client-input/src/keybinds.rs:82). Each is a mod key players rebind in Options › Mods
 //! (`native_mods`, `native_mod_key`); a press while playing goes to the server as one byte.
 
 use super::{Held, Module};
@@ -30,7 +31,7 @@ impl GearKey {
     pub fn default_key(self) -> &'static str {
         match self {
             GearKey::Magnet => "key.keyboard.z",
-            GearKey::Backpack => "key.keyboard.b",
+            GearKey::Backpack => "key.keyboard.right.bracket",
             GearKey::Night => "key.keyboard.semicolon",
         }
     }
@@ -117,7 +118,7 @@ mod tests {
     #[test]
     fn keys_have_their_defaults_and_bytes() {
         assert_eq!(GearKey::Magnet.default_key(), "key.keyboard.z");
-        assert_eq!(GearKey::Backpack.default_key(), "key.keyboard.b");
+        assert_eq!(GearKey::Backpack.default_key(), "key.keyboard.right.bracket");
         assert_eq!(GearKey::Night.default_key(), "key.keyboard.semicolon");
         for k in GearKey::ALL {
             assert_eq!(GearKey::from_byte(k.byte()), Some(k));

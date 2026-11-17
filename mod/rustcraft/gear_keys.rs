@@ -1,4 +1,4 @@
-// Slice 18: the gear's keys (rustcraft_rules::gear::keys): Z the magnet, B the backpack, ; night
+// Slice 18: the gear's keys (rustcraft_rules::gear::keys): Z the magnet, ] the backpack, ; night
 // vision, each a mod key players rebind in Options › Mods.
 //
 // - `native_mods` lists RustCraft with its keys (name, label, default); Options › Mods shows them
