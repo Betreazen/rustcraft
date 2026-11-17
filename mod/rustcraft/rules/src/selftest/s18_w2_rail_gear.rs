@@ -50,7 +50,7 @@ fn turret_window_spells_the_shot(o: Pos, _: &Tuning) -> Scenario {
                     return Err(format!("no {want} row in {keys:?}"));
                 }
             }
-            for n in ["\"40\"", "\"3\"", "\"10\"", "\"70\"", "\"20%\""] {
+            for n in ["[40,3,10,70]", "20%"] {
                 if !text.contains(n) {
                     return Err(format!("no {n} in {text}"));
                 }
