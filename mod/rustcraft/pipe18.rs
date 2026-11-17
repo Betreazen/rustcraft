@@ -546,6 +546,29 @@ pub(super) fn mark_weak(game: &mut Game<'_>, level: &server::LevelNet) {
 
 static HANDLED: LazyLock<Mutex<BTreeSet<(String, Pos)>>> = LazyLock::new(Mutex::default);
 
+/// Wave 2: each housing's facade and block of its look as items, as last seen (at a rescan or a
+/// facade click), so that a housing gone without a player drops them too: by then its block
+/// entity is gone.
+static FACADES: LazyLock<Mutex<HashMap<(String, Pos), Vec<String>>>> = LazyLock::new(Mutex::default);
+
+fn facades() -> MutexGuard<'static, HashMap<(String, Pos), Vec<String>>> {
+    FACADES.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+/// A facade was set, changed or taken off the housing at `pos`: what it would give back now.
+pub(super) fn remember_facade(game: &Game<'_>, dimension: &str, pos: Pos) {
+    if game.native_block(pos) != content::HOUSING {
+        return;
+    }
+    let items = facade_items(game, pos);
+    let key = (dimension.to_owned(), pos);
+    if items.is_empty() {
+        facades().remove(&key);
+    } else {
+        facades().insert(key, items);
+    }
+}
+
 fn handled() -> MutexGuard<'static, BTreeSet<(String, Pos)>> {
     HANDLED.lock().unwrap_or_else(PoisonError::into_inner)
 }
@@ -597,5 +620,22 @@ pub(super) fn drop_lost(
         for c in housing.slots.into_iter().flatten() {
             server::drop_one(game, dimension, pos, content::channel_item(c.kind, c.tier));
         }
+        // Wave 2: and its facade and the block of its look (guide `facade`).
+        let covered = facades().remove(&(dimension.to_owned(), pos)).unwrap_or_default();
+        for item in covered {
+            server::drop_one(game, dimension, pos, &item);
+        }
+    }
+    // What the level's housings would give back now, for the next rescan.
+    let now_covered: Vec<(Pos, Vec<String>)> = now
+        .housings
+        .keys()
+        .map(|&p| (p, facade_items(game, p)))
+        .filter(|(_, items)| !items.is_empty())
+        .collect();
+    let mut f = facades();
+    f.retain(|(d, _), _| d != dimension);
+    for (p, items) in now_covered {
+        f.insert((dimension.to_owned(), p), items);
     }
 }

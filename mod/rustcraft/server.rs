@@ -335,6 +335,8 @@ pub(super) fn on_use_item_on(
         }
         if crate::game::rustcraft_builder::on_use_item_on(game, player.uuid, player.sneaking, stack, pos) {
             *claimed = true;
+            // Wave 2: what an exploded housing would drop of its facade.
+            crate::game::rustcraft_pipe18::remember_facade(game, &player.dimension, pos);
             return;
         }
     }
