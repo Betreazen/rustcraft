@@ -1088,7 +1088,9 @@ fn support(
     if players.is_empty() {
         return turret::shown(l, true, Shown::NoPlayers);
     }
-    let cost = l.support_draw(t) / t.ticks_per_second;
+    // Slice 18, wave 2 (guide `mod_heal`): the heal modules draw only while someone is hurt.
+    let someone_hurt = players.iter().any(|p| p.health > 0.0 && p.health < 20.0);
+    let cost = l.support_draw_for(t, someone_hurt) / t.ticks_per_second;
     if energy < cost {
         return turret::shown(l, false, Shown::NoEnergy);
     }

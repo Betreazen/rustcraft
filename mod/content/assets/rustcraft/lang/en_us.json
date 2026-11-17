@@ -1372,5 +1372,6 @@
   "rustcraft.util.disintegrator.preview": "Taking apart: what the item gives",
   "rustcraft.util.charger.armour": "Armour",
   "rustcraft.mixer.pace": "A bucket in %s s",
-  "rustcraft.window.module_slot.locked": "Closed: opens on tier %s"
+  "rustcraft.window.module_slot.locked": "Closed: opens on tier %s",
+  "rustcraft.util.fishery.reserve": "%s more past the window"
 }

@@ -6747,5 +6747,6 @@
   "rustcraft.util.disintegrator.preview": "Разборка: что выйдет из предмета",
   "rustcraft.util.charger.armour": "Броня",
   "rustcraft.mixer.pace": "Ведро за %s с",
-  "rustcraft.window.module_slot.locked": "Закрыто: откроется на ступени %s"
+  "rustcraft.window.module_slot.locked": "Закрыто: откроется на ступени %s",
+  "rustcraft.util.fishery.reserve": "ещё %s сверх окна"
 }

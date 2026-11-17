@@ -1467,6 +1467,8 @@ pub(super) fn on_destroyed(game: &mut Game<'_>, dimension: &str, pos: Pos, creat
     for (item, count) in hidden {
         drop_stack(game, dimension, pos, &item, count);
     }
+    // Slice 18, wave 2: the fishing station's catch past its window.
+    crate::game::rustcraft_farm::drop_reserve(game, dimension, pos);
     let Some(entity) = self::entity(game, pos) else {
         return;
     };
