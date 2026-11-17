@@ -373,7 +373,8 @@ pub(super) fn on_wrench(game: &mut Game<'_>, player: u128, dimension: &str, snea
     true
 }
 
-/// The sneaking wrench on a projector: it comes out as an item keeping its plan.
+/// The sneaking wrench on a projector: it comes out as an item keeping its plan (wave 2: the
+/// wrench keeps the projector, rustcraft_rules::net::wrench::KEPT, so this lift is its own).
 fn lift(game: &mut Game<'_>, player: u128, dimension: &str, pos: Pos) {
     let Some(e) = game.native_mod_block_entity(pos) else { return };
     let mut mark = Compound::new();
