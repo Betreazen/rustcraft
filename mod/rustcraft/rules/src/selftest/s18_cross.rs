@@ -6,6 +6,8 @@
 //! - A line-boost module in a node raises a fluid net's flow by half (guide `mod_line`).
 //! - The electric furnace and the autocrafter report their work to Path-of-craft-tree (`smelt`,
 //!   `craft`).
+//! - The alloy smelter, the autocrafter and the pump take a catalyst from a tank they touch, and
+//!   the accelerator speeds the pump up (guide `fluids`).
 //! - A broken tiered block drops its own tier's item: the loot tables in 26.3's form
 //!   (`match_block`), which the old `block_state_property` list was not.
 
@@ -16,12 +18,13 @@ use crate::machines::panel::ENERGY_SCALE;
 use crate::machines::processor::WorkMode;
 use crate::tuning::Tuning;
 
-pub const ALL: [Build; 5] = [
+pub const ALL: [Build; 6] = [
     pump_boost_mode,
     placer_and_breaker_by_tier,
     tiered_blocks_drop_their_tier,
     line_boost_on_a_fluid_net,
     machines_report_smelt_and_craft,
+    catalysts_in_more_machines,
 ];
 
 const STONE: &str = "minecraft:stone";
@@ -231,6 +234,38 @@ fn machines_report_smelt_and_craft(o: Pos, _: &Tuning) -> Scenario {
                 .iter()
                 .any(|r| r.contains(&format!("craft {owner} ")) && r.contains("minecraft:oak_planks 4 1"));
             Ok(smelt && craft)
+        })
+}
+
+fn catalysts_in_more_machines(o: Pos, t: &Tuning) -> Scenario {
+    use crate::machines::catalyst::{ACCELERATOR, Catalyst};
+    let machines = [
+        ("rustcraft:alloy", at(o, [1, 1, 0])),
+        ("rustcraft:crafter", at(o, [4, 1, 0])),
+        ("rustcraft:pump", at(o, [7, 1, 0])),
+    ];
+    let pump = machines[2].1;
+    let fast = (t.pump_ticks / t.accelerator_speed).round() as i32;
+    Scenario::new("s18_catalysts_in_more_machines", plot_area(o))
+        .then("a smelter, an autocrafter and a pump, each beside a tank of accelerator", move |b, _| {
+            for (block, p) in machines {
+                b.place(at(p, [0, -1, 0]), STONE, &[])?;
+                b.place(at(p, [0, -1, 1]), STONE, &[])?;
+                b.place(p, block, &[])?;
+                let tank = at(p, [0, 0, 1]);
+                b.place(tank, "rustcraft:tank", &[])?;
+                b.set_tank(tank, ACCELERATOR, 3000)?;
+            }
+            Ok(())
+        })
+        .until("each holds the accelerator", 100, move |b, _| {
+            Ok(machines
+                .iter()
+                .all(|(_, p)| b.catalyst(*p).is_some_and(|c| c.active() == Some(Catalyst::Accelerator))))
+        })
+        .wait(10)
+        .check("the pump's bucket takes the accelerator's time", move |b, _| {
+            same("ticks a bucket", b.menu_data(pump).get(pw::TICKS_AT).copied(), Some(fast))
         })
 }
 

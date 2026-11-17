@@ -4,7 +4,12 @@
 //! chance of an extra product. A machine holds one catalyst at a time (K2): its tank takes only
 //! the fluid it holds until that runs out. A machine spends its catalyst only while it works.
 //!
-//! In this slice the electric furnace and the crusher take catalysts.
+//! In slice 11 the electric furnace and the crusher took catalysts; slice 18 (guide `fluids`:
+//! «Катализатор подходит любой машине, для которой его эффект имеет смысл») adds the alloy
+//! smelter, the autocrafter and the pump ([`TAKERS`]); the enricher means nothing to the pump,
+//! which makes no item, nor to the autocrafter, whose recipes run both ways (a block of iron and
+//! its nine ingots: an extra product would make items from nothing) ([`Catalyst::acts_in`]). The mixer makes the catalysts and keeps its own
+//! water and product tanks, so it takes none.
 
 use serde::{Deserialize, Serialize};
 
@@ -14,6 +19,18 @@ use crate::tuning::Tuning;
 pub const ACCELERATOR: &str = "rustcraft:accelerator";
 pub const ECONOMIZER: &str = "rustcraft:economizer";
 pub const ENRICHER: &str = "rustcraft:enricher";
+
+const PUMP: &str = "rustcraft:pump";
+const CRAFTER: &str = "rustcraft:crafter";
+
+/// The machine blocks that take a catalyst (K1, slice 18).
+pub const TAKERS: [&str; 5] = [
+    "rustcraft:furnace",
+    "rustcraft:crusher",
+    "rustcraft:alloy",
+    "rustcraft:crafter",
+    PUMP,
+];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Catalyst {
@@ -42,6 +59,12 @@ impl Catalyst {
 
     pub fn of(fluid: &str) -> Option<Catalyst> {
         Catalyst::ALL.into_iter().find(|c| c.fluid() == fluid)
+    }
+
+    /// Whether it does anything in a machine `block`: the enricher's extra product only in the
+    /// furnace, the crusher and the alloy smelter (not the pump, not the autocrafter).
+    pub fn acts_in(self, block: &str) -> bool {
+        TAKERS.contains(&block) && !(self == Catalyst::Enricher && (block == PUMP || block == CRAFTER))
     }
 
     /// (speed, energy) multipliers it gives a machine.
@@ -124,6 +147,21 @@ impl Tank {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn every_machine_with_an_effect_takes_a_catalyst_but_the_enricher_skips_the_pump() {
+        for block in ["rustcraft:furnace", "rustcraft:crusher", "rustcraft:alloy"] {
+            for c in Catalyst::ALL {
+                assert!(c.acts_in(block), "{c:?} in {block}");
+            }
+        }
+        for block in [PUMP, CRAFTER] {
+            assert!(Catalyst::Accelerator.acts_in(block));
+            assert!(Catalyst::Economizer.acts_in(block));
+            assert!(!Catalyst::Enricher.acts_in(block));
+        }
+        assert!(!Catalyst::Accelerator.acts_in("rustcraft:mixer"));
+    }
 
     #[test]
     fn a_tank_takes_one_catalyst_at_a_time() {

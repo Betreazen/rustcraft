@@ -18,6 +18,7 @@ use crate::game::{
     rustcraft_utility::{read_json, write_json},
 };
 use horizon_client::{containers::ModBlockEntity, items::ItemStack};
+use rustcraft_rules::machines::catalyst::Tank as CatalystTank;
 use rustcraft_rules::{
     geom::Pos,
     machines::{
@@ -64,9 +65,12 @@ pub(super) fn parse_recipe(game: &Game<'_>, json: &serde_json::Value) -> Option<
 
 /// The smelter's numbers on its tier and modules (A8, A7): a higher tier and speed modules work
 /// faster, economy modules cost less; a stack module makes its cells 256.
-fn spec(tuning: &Tuning, fitted: &Fitted) -> AlloySpec {
+fn spec(tuning: &Tuning, fitted: &Fitted, catalyst: &CatalystTank) -> AlloySpec {
     let tier = fitted.speed(Machine::Alloy, tuning);
     let (work, energy) = modules::factors(&fitted.modules, tuning);
+    // Slice 18 (cross, guide `fluids`): its catalyst's speed and energy too.
+    let (cat_work, cat_energy) = machines::catalyst_factors(content::ALLOY, catalyst, tuning);
+    let (work, energy) = (work * cat_work, energy * cat_energy);
     AlloySpec {
         ticks_on_fuel: (tuning.alloy_ticks_on_fuel / (tier * work)).max(1.0),
         ticks_on_energy: (tuning.alloy_ticks_on_energy / (tier * work)).max(1.0),
@@ -88,6 +92,8 @@ pub(super) struct Held {
     /// E a second it asks for this tick.
     pub request: f64,
     data: Vec<i32>,
+    /// Slice 18 (cross): its catalyst tank.
+    catalyst: CatalystTank,
 }
 
 fn smelter_of(entity: &ModBlockEntity) -> AlloySmelter {
@@ -157,7 +163,8 @@ pub(super) fn read(
     for (k, out) in smelter.outputs.iter_mut().enumerate() {
         *out = queue::join(out, &reserve_before[k]);
     }
-    let request = smelter.request(&recipes.alloying, &spec(tuning, &fitted));
+    let catalyst = machines::read_catalyst(&entity.nbt);
+    let request = smelter.request(&recipes.alloying, &spec(tuning, &fitted, &catalyst));
     Some(Held {
         smelter,
         raw,
@@ -168,6 +175,7 @@ pub(super) fn read(
         burn_total: read_f64(&entity.nbt, BURN_TOTAL_KEY).max(0.0),
         request,
         data: entity.data.clone(),
+        catalyst,
     })
 }
 
@@ -190,10 +198,14 @@ pub(super) fn run(
         mut burn_total,
         request,
         data: shown_data,
+        mut catalyst,
     } = held;
-    let spec = spec(tuning, &fitted);
+    let spec = spec(tuning, &fitted, &catalyst);
     let before = smelter.clone();
-    smelter.lucky = modules::yield_lucky(&fitted.modules, roll());
+    let catalyst_before = catalyst.clone();
+    // Slice 18 (cross): the enricher's chance of one more product joins the yield module's.
+    smelter.lucky = modules::yield_lucky(&fitted.modules, roll())
+        || machines::catalyst_lucky(content::ALLOY, &catalyst, roll(), tuning);
     let state = {
         let game = &*game;
         smelter.tick(&recipes.alloying, &spec, share, &|item| {
@@ -201,6 +213,11 @@ pub(super) fn run(
         })
     };
     smelter.lucky = false;
+    if state == State::Working {
+        // On fuel it works at full pace without energy.
+        let pace = if share > 0.0 { share } else { 1.0 };
+        catalyst.spend(1.0 / tuning.ticks_per_second, pace, tuning);
+    }
     // Slice 18 (cross): what it gave goes to Path-of-craft-tree (`smelt`); PCT gives nothing for
     // alloys today but takes the report (docs/design/path-of-craft-tree-contract.md).
     let outs = |o: &[Option<(String, u32)>]| o.iter().flatten().map(|(i, n)| (i.as_str(), *n)).collect::<Vec<_>>();
@@ -271,6 +288,7 @@ pub(super) fn run(
         && data == shown_data
         && remainder.is_none()
         && fitted.tier_saved()
+        && catalyst == catalyst_before
     {
         return Some(shown);
     }
@@ -295,6 +313,9 @@ pub(super) fn run(
             write_json(&mut entity.nbt, RESERVE_KEY, &reserve);
         }
         fitted.save_tier(&mut entity.nbt);
+        if catalyst != catalyst_before {
+            machines::write_catalyst(&mut entity.nbt, &catalyst);
+        }
         if smelter.progress != before.progress {
             write_f64(&mut entity.nbt, PROGRESS_KEY, smelter.progress);
         }

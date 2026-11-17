@@ -119,7 +119,8 @@ pub(super) fn default_mode(block: &str) -> Option<Mode> {
     } else if block == content::PUMP {
         Some(PUMP_DEFAULT)
     } else if machines::takes_catalyst(block) {
-        // Slice 11: a furnace or a crusher takes its catalyst (K1).
+        // Slice 11: a furnace or a crusher takes its catalyst (K1); slice 18 the smelter and the
+        // autocrafter too (the pump, above, gives).
         Some(TANK_DEFAULT)
     } else if block == content::MIXER {
         Some(Mode::Both)
@@ -342,7 +343,11 @@ impl FluidInventories for Inventories<'_> {
             *self.destroyed.entry(block).or_default() += n;
             return n;
         }
-        if let Some(c) = self.catalysts.get_mut(&block) {
+        // Slice 18 (cross): only a catalyst goes into a machine's catalyst tank, so a pump (which
+        // has one now) still takes its own refused bucket back below.
+        if let Some(c) = self.catalysts.get_mut(&block)
+            && Catalyst::of(fluid).is_some()
+        {
             return c.put(fluid, amount, self.tuning);
         }
         if let Some(s) = self.sinks.get_mut(&block) {
@@ -486,7 +491,8 @@ pub(super) fn tick(game: &mut Game<'_>, level: &mut LevelNet, tuning: &Tuning) {
     let catalysts_at: Vec<Pos> = level
         .machines
         .iter()
-        .filter(|(_, m)| matches!(**m, Machine::Furnace | Machine::Crusher))
+        // Slice 18 (cross): every machine that takes one (rustcraft_machines::takes_catalyst).
+        .filter(|(_, m)| machines::takes_catalyst(m.block()))
         .map(|(p, _)| *p)
         .collect();
     let f = &mut level.fluids;
@@ -717,13 +723,17 @@ pub struct PumpHeld {
     ticks: f64,
     energy: f64,
     mode: WorkMode,
+    catalyst: CatalystTank,
 }
 
 /// A8, A7: a higher tier and speed modules pump faster; economy modules cost less. Owner
 /// 2026-11-17: its work mode too (A1, `pump::numbers`).
-fn pump_numbers(fitted: &machines::Fitted, mode: WorkMode, tuning: &Tuning) -> (f64, f64) {
+fn pump_numbers(fitted: &machines::Fitted, mode: WorkMode, catalyst: &CatalystTank, tuning: &Tuning) -> (f64, f64) {
     let tier = fitted.speed(Machine::Pump, tuning);
-    let modules = rustcraft_rules::modules::factors(&fitted.modules, tuning);
+    let (work, draw) = rustcraft_rules::modules::factors(&fitted.modules, tuning);
+    // Slice 18 (cross, guide `fluids`): the accelerator and the economizer act on it too.
+    let (cat_work, cat_draw) = machines::catalyst_factors(content::PUMP, catalyst, tuning);
+    let modules = (work * cat_work, draw * cat_draw);
     pump::numbers(tuning.pump_ticks, tuning.pump_energy, tier, modules, mode)
 }
 
@@ -768,7 +778,8 @@ pub(super) fn read_pump(game: &Game<'_>, pos: Pos, tuning: &Tuning) -> Option<Pu
     let under = under(game, pos);
     let fitted = machines::fitted(game, pos, entity);
     let mode = machines::read_work(&entity.nbt);
-    let (ticks, energy) = pump_numbers(&fitted, mode, tuning);
+    let catalyst = machines::read_catalyst(&entity.nbt);
+    let (ticks, energy) = pump_numbers(&fitted, mode, &catalyst, tuning);
     Some(PumpHeld {
         request: pump.request(&under, energy),
         pump,
@@ -778,6 +789,7 @@ pub(super) fn read_pump(game: &Game<'_>, pos: Pos, tuning: &Tuning) -> Option<Pu
         ticks,
         energy,
         mode,
+        catalyst,
     })
 }
 
@@ -800,9 +812,14 @@ pub(super) fn run_pump(
         ticks,
         energy,
         mode,
+        mut catalyst,
     } = held;
     let before = pump.clone();
     let tick = pump.tick(&under, share, ticks);
+    let catalyst_before = catalyst.clone();
+    if tick.state == rustcraft_rules::machines::processor::State::Working {
+        catalyst.spend(1.0 / tuning.ticks_per_second, share, tuning);
+    }
     let shown = Pump::shown(tick, share);
     if let Some(source) = tick.pumped
         && !under.endless()
@@ -822,11 +839,14 @@ pub(super) fn run_pump(
     data.extend(fitted.extras(game, &[], 0, &None));
     data.push(ticks.round() as i32);
     data.push(pump_window::mode_slot(mode));
-    if pump == before && shown_data == data && fitted.tier_saved() {
+    if pump == before && shown_data == data && fitted.tier_saved() && catalyst == catalyst_before {
         return Some(shown);
     }
     game.native_with_mod_block_entity(pos, move |e| {
         fitted.save_tier(&mut e.nbt);
+        if catalyst != catalyst_before {
+            machines::write_catalyst(&mut e.nbt, &catalyst);
+        }
         if pump.progress != before.progress {
             write_f64(&mut e.nbt, PROGRESS_KEY, pump.progress);
         }

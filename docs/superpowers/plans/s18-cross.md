@@ -83,9 +83,8 @@
 
 ### Task 7: катализаторы в других машинах
 
-**Files:** Modify `mod/rustcraft/machines.rs` (`takes_catalyst`: + плавильня, смеситель, насос, автокрафтер), `alloy.rs`, `crafter.rs`, `mixer.rs`, `fluids.rs` (их множители берут катализатор: `catalyst::Tank::factors`), самотест `alloy_takes_accelerator`.
-
-- [ ] Правило: `catalyst.rs` — эффект «имеет смысл»: ускоритель и экономайзер — всем, обогатитель — тем, у кого есть продукт (не насосу). Тест `the_enricher_is_not_for_the_pump`. Коммит `feat: the alloy smelter, mixer, pump and autocrafter take catalysts`.
+- [x] Правило `catalyst::TAKERS` (печь, дробилка, плавильня, автокрафтер, насос) и `Catalyst::acts_in(block)`: обогатитель — только печи, дробилке и плавильне (насос не делает предмета; у автокрафтера рецепты обратимы — блок железа и девять слитков, лишний продукт делал бы предметы из ничего). Смеситель катализаторов не берёт: он их делает и держит свои баки воды и продукта. Тест `every_machine_with_an_effect_takes_a_catalyst_but_the_enricher_skips_the_pump`.
+- [x] Бандл: `machines::{takes_catalyst, catalyst_factors, catalyst_lucky}`; плавильня (`alloy::spec` и шанс, тратит и на топливе), автокрафтер (`crafter::spec`), насос (`pump_numbers`); каждый тратит катализатор, пока работает, и пишет бак в NBT. `fluids.rs`: катализаторы ищутся у всех `takes_catalyst`, а в бак катализатора идёт только катализатор (свой отказанный ковш насоса возвращается в насос). Самотест `s18_catalysts_in_more_machines`.
 
 ### Task 8: ключ поднимает работника целиком
 

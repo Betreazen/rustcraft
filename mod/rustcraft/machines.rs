@@ -693,9 +693,25 @@ pub(super) fn write_catalyst(nbt: &mut Compound, tank: &CatalystTank) {
     write_f64(nbt, CATALYST_KEY, tank.amount);
 }
 
-/// Slice 11: the machines that take a catalyst (K1): the electric furnace and the crusher.
+/// The machines that take a catalyst (K1): slice 11's electric furnace and crusher, slice 18's
+/// alloy smelter, autocrafter and pump (rustcraft_rules::machines::catalyst::TAKERS).
 pub(super) fn takes_catalyst(block: &str) -> bool {
-    block == content::FURNACE || block == content::CRUSHER
+    rustcraft_rules::machines::catalyst::TAKERS.contains(&block)
+}
+
+/// Slice 18 (cross): the (speed, energy) multipliers the catalyst in `tank` gives a machine
+/// `block`; none (1, 1) when it holds none or it does nothing there.
+pub(super) fn catalyst_factors(block: &str, tank: &CatalystTank, tuning: &Tuning) -> (f64, f64) {
+    tank.active()
+        .filter(|c| c.acts_in(block))
+        .map_or((1.0, 1.0), |c| c.factors(tuning))
+}
+
+/// Slice 18 (cross): whether the enricher in `tank` gives a machine `block` one more product
+/// this time, on the roll `roll` (0 to 1).
+pub(super) fn catalyst_lucky(block: &str, tank: &CatalystTank, roll: f64, tuning: &Tuning) -> bool {
+    tank.active()
+        .is_some_and(|c| c.acts_in(block) && roll < c.extra_chance(tuning))
 }
 
 /// Slice 11: the catalyst tank of the machine at `pos`, if it takes one.

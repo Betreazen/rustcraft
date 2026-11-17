@@ -29,6 +29,7 @@ use crate::game::{
     rustcraft_utility::{read_json, write_json},
 };
 use horizon_client::{containers::ModBlockEntity, items::ItemStack};
+use rustcraft_rules::machines::catalyst::Tank as CatalystTank;
 use horizon_world::nbt::{Compound, JavaString, Tag};
 use rustcraft_rules::{
     geom::Pos,
@@ -204,12 +205,17 @@ pub(super) struct Held {
     pub request: f64,
     nominal: f64,
     data: Vec<i32>,
+    /// Slice 18 (cross): its catalyst tank.
+    catalyst: CatalystTank,
 }
 
 /// Its numbers on its tier and modules (A8, A7).
-fn spec(tuning: &Tuning, fitted: &Fitted) -> CrafterSpec {
+fn spec(tuning: &Tuning, fitted: &Fitted, catalyst: &CatalystTank) -> CrafterSpec {
     let tier = fitted.speed(content::Machine::Crafter, tuning);
     let (work, energy) = modules::factors(&fitted.modules, tuning);
+    // Slice 18 (cross, guide `fluids`): the accelerator and the economizer act here too.
+    let (cat_work, cat_energy) = machines::catalyst_factors(content::CRAFTER, catalyst, tuning);
+    let (work, energy) = (work * cat_work, energy * cat_energy);
     CrafterSpec {
         ticks: (tuning.crafter_ticks / (tier * work)).max(1.0),
         energy: tuning.crafter_energy * tier * energy,
@@ -299,7 +305,8 @@ pub(super) fn read(
         progress: read_f64(nbt, PROGRESS_KEY).clamp(0.0, 1.0),
         mode: read_work(nbt),
     };
-    let spec = spec(tuning, &fitted);
+    let catalyst = machines::read_catalyst(&entity.nbt);
+    let spec = spec(tuning, &fitted, &catalyst);
     Some(Held {
         request: crafter.request(&spec),
         nominal: spec.energy * crafter.mode.factors().1,
@@ -315,6 +322,7 @@ pub(super) fn read(
         fitted,
         legacy,
         data: entity.data.clone(),
+        catalyst,
     })
 }
 
@@ -372,10 +380,15 @@ pub(super) fn run(
         request,
         nominal,
         data: shown_data,
+        mut catalyst,
     } = held;
+    let catalyst_before = catalyst.clone();
     let before = crafter.clone();
     let temp_pattern = temp.as_ref().map(|t| t.pattern.clone());
-    let state = crafter.tick(&spec(tuning, &fitted), share);
+    let state = crafter.tick(&spec(tuning, &fitted, &catalyst), share);
+    if state == rustcraft_rules::machines::processor::State::Working {
+        catalyst.spend(1.0 / tuning.ticks_per_second, share, tuning);
+    }
     // Slice 18 (cross): a craft done goes to Path-of-craft-tree (`craft`, one craft a report).
     if state == rustcraft_rules::machines::processor::State::Working && crafter.current.is_none() {
         let page = before.pick();
@@ -413,6 +426,7 @@ pub(super) fn run(
         && !hidden_moved
         && legacy.is_empty()
         && fitted.tier_saved()
+        && catalyst == catalyst_before
     {
         return Some(shown);
     }
@@ -437,6 +451,9 @@ pub(super) fn run(
             write_json(&mut entity.nbt, QUEUE_KEY, &cells);
         }
         fitted.save_tier(&mut entity.nbt);
+        if catalyst != catalyst_before {
+            machines::write_catalyst(&mut entity.nbt, &catalyst);
+        }
         // Slice 18: a module in an old module slot moves into a free socket.
         if !legacy.is_empty() {
             let mut items = crate::game::rustcraft_base::read_module_items(&entity.nbt);
