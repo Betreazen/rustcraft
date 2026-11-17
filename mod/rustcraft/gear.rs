@@ -843,14 +843,22 @@ pub(super) fn draw_window(game: &Game<'_>, batch: &mut horizon_client::hud::HudB
     );
     kit::text(game, batch, &amount, o, [8.0, 25.0], kit::VALUE);
     for (i, (item, st)) in v.modules.iter().enumerate() {
-        let name = kit::tr(&format!("item.{}", item.replace(':', ".")), item);
+        // Wave 2 (#15): the guide's short name, and for a module without a key what it gives.
+        let named = Module::of(item).map(rules::window::named);
+        let name = match named {
+            Some(((k, f), _)) => kit::tr(k, f),
+            None => kit::tr(&format!("item.{}", item.replace(':', ".")), item),
+        };
         let key = Module::of(item)
             .and_then(rules::window::key_of)
             .map(|k| rules::window::key_label(&game.native_mod_key("rustcraft", k.name(), k.default_key())));
         let state = match (st, key) {
             (rules::window::State::On, Some(k)) => kit::tr_with("rustcraft.gear.window.on", "on · key %s", &[k]),
             (rules::window::State::Off, Some(k)) => kit::tr_with("rustcraft.gear.window.off", "off · key %s", &[k]),
-            _ => kit::tr("rustcraft.gear.window.auto", "works by itself"),
+            _ => match named {
+                Some((_, (k, f))) => kit::tr(k, f),
+                None => kit::tr("rustcraft.gear.window.auto", "works by itself"),
+            },
         };
         let line = format!("{name}: {state}");
         let colour = if *st == rules::window::State::Off { kit::TEXT } else { kit::TEXT_ON };
