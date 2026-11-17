@@ -11,6 +11,8 @@ fn rustcraft_screen_render_post(
     crate::game::rustcraft_gear::draw_window(game, batch, screen);
 
     crate::game::rustcraft_tablet::draw(game, batch, screen);
+    // Slice 18: the backpack's own screen.
+    crate::game::rustcraft_backpack::draw(game, batch, screen);
     crate::game::rustcraft_node_window::draw(game, batch, screen);
     crate::game::rustcraft_joint_screen::draw(game, batch, screen);
 }
