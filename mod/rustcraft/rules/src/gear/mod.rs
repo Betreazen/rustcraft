@@ -543,3 +543,47 @@ mod tests {
         assert_eq!(Module::Jetpack.piece(), Piece::Chestplate);
     }
 }
+
+/// Wave 2: the rifle's shot travels from the client (a tap of the use key, or the attack key
+/// while aiming) on this channel: holding use to aim must not also fire (vanilla repeats a held
+/// use every 4 ticks).
+pub const RIFLE_SHOT_CHANNEL: &str = "rustcraft:rifle_shot";
+/// Ticks of holding use before the rifle aims (zooms) instead of firing on release.
+pub const AIM_TICKS: u32 = 5;
+
+/// What the client's rifle does this tick, from the ticks use was held so far, whether it is down
+/// now and whether attack was just pressed: the ticks held now, whether it aims, whether it fires.
+/// A tap fires on release; a hold aims and fires nothing until attack is pressed.
+pub fn rifle_input(held: u32, use_down: bool, attack_pressed: bool) -> (u32, bool, bool) {
+    if use_down {
+        let now = held.saturating_add(1);
+        let aiming = now >= AIM_TICKS;
+        (now, aiming, aiming && attack_pressed)
+    } else {
+        (0, false, held > 0 && held < AIM_TICKS)
+    }
+}
+
+#[cfg(test)]
+mod wave2_rifle_tests {
+    use super::*;
+
+    #[test]
+    fn aiming_the_rifle_does_not_fire_it() {
+        let mut held = 0;
+        let mut shots = 0;
+        for _ in 0..40 {
+            let (h, aiming, fire) = rifle_input(held, true, false);
+            held = h;
+            shots += u32::from(fire);
+            assert!(aiming || held < AIM_TICKS);
+        }
+        let (_, aiming, fire) = rifle_input(held, false, false);
+        assert_eq!((shots, aiming, fire), (0, false, false), "a long hold and its release fire nothing");
+        let (_, _, fire) = rifle_input(held, true, true);
+        assert!(fire, "attack while aiming fires");
+        let (h, _, _) = rifle_input(0, true, false);
+        let (_, _, fire) = rifle_input(h, false, false);
+        assert!(fire, "a tap fires on release");
+    }
+}
