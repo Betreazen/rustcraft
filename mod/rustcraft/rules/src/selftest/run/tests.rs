@@ -288,6 +288,9 @@ impl Bench for Fake {
     fn recipe_grid(&self, _: &str) -> Option<[Option<String>; 9]> {
         None
     }
+    fn handbook_recipes(&self, _: usize) -> Vec<crate::handbook::recipes::Shown> {
+        Vec::new()
+    }
     fn set_brush_loot(&mut self, _: Pos, _: &str) -> Result<(), String> {
         Ok(())
     }

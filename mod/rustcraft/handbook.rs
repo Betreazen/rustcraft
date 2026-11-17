@@ -19,8 +19,16 @@
 // - `native_screen_render_post` (API 78, native_hooks.rs:3779-3803) draws it over the world in
 //   the «Кузня душ» style (docs/design/04-window-style.md): the contents, a section's pages, a
 //   page with its item's icon (`native_gui_draw_item_with`, native_client_services.rs:529-539),
-//   its texts from the content mod's lang files, and the item's crafting recipe as a 3 × 3 grid
-//   read from the game's own recipes (`Game::recipes`, world_entry.rs:175-180).
+//   its texts from the content mod's lang files, and its recipes read from the game's own
+//   (rustcraft_rules::handbook::recipes picks and lays them out): the crafting table's, shaped,
+//   shapeless and transmuting (`Game::recipes`, world_entry.rs:175-180; `Special::Transmute`,
+//   horizon-client crafting.rs:426-433), smelting (`Recipes::cooking`) and the machines' own types
+//   (`native_recipes_of_type`, API 36, native_hooks.rs:11351-11356: a client sees the content
+//   mod's recipes, which is where the mod's are), two to a row, a machine's over its arrow.
+//   A table of the guide's (the turret's) is drawn in columns, and «см. также» is a row of page
+//   icons and names: a click opens that page. A block's window is drawn as a picture before its
+//   numbered legend (rustcraft_rules::handbook::window): each part's number, label and widget
+//   (slots, bars, the mode switch, sockets, the status line, rows, chips) in the windows' style.
 // - A left click (`native_screen_mouse_button_pressed_pre`, API 80, native_hooks.rs:3804-3838),
 //   the wheel (`native_screen_mouse_scrolled_pre`, API 93, native_hooks.rs:3893-3933) and the
 //   arrow keys (`native_screen_key_pressed_pre`, API 104) turn its sheets; Escape closes it.
@@ -30,7 +38,11 @@
 //   `HudBatch::scale_since`, horizon-client-render hud.rs:1889-1894), water, lava and the ghost as
 //   tinted cubes (`native_quad`, API 111, native_hooks.rs:11020-11023), flows and beams as dots
 //   (`native_fill`, native_hooks.rs:10842-10846), everything cut to the panel
-//   (`HudBatch::clip_since`, hud.rs:1895). The scene moves by the window's own clock and goes on
+//   (`HudBatch::clip_since`, hud.rs:1895). The guide's badges and name tags are small plates of
+//   text above their points (the text scaled down with `HudBatch::scale_since`), a dropped item a
+//   little cube of its colour. A block with moving parts is drawn with a still of its model and
+//   parts in the step's state (`native_item_model`, API 111, native_hooks.rs:10992-11016; the
+//   stills are item models of the content mod's, assets/models/poses_mc.py). The scene moves by the window's own clock and goes on
 //   to its next step by itself; the step buttons in the bottom row step it by hand. A block
 //   under the mouse names its item (`native_gui_tooltip`, native_client_services.rs:472-474).
 use crate::game::{
@@ -41,7 +53,7 @@ use crate::game::{
     rustcraft_server::line,
 };
 use horizon_client::{
-    crafting::{Ingredient, Recipe},
+    crafting::{Ingredient, Recipe, Special, Template},
     hud::HudBatch,
     items::ItemStack,
     mod_api::NativeScreenView,
@@ -50,7 +62,9 @@ use horizon_client::{
 use rustcraft_rules::{
     handbook::{
         self as rules, Given, PAGES, Part, Piece, Role, Row, View,
+        recipes::{self, Made, Out, Shown},
         scene::{self, Look, Playback, Scene},
+        window::{self, Cell, Widget},
     },
     machines::style::{self, colour},
 };
@@ -252,15 +266,88 @@ pub(super) fn recipe_of(game: &Game<'_>, item: &str) -> Option<(Grid, u32)> {
     None
 }
 
+/// Every recipe of the game as a page shows it: the crafting table's (shaped, shapeless,
+/// transmuting), smelting and the machines' own types.
+fn all_recipes(game: &Game<'_>) -> Vec<Shown> {
+    let mut out = Vec::new();
+    let book = game.recipes();
+    let grid = |width: usize, cells: Vec<Option<String>>, result: &Template| {
+        rules::recipe_grid(width, &cells)
+            .zip(result.item.as_deref().map(str::to_owned))
+            .map(|(g, it)| Shown {
+                made: Made::Grid(g),
+                out: Out::Item(it, result.count.max(1)),
+            })
+    };
+    for (_, recipe) in &book.crafting {
+        let made = match recipe {
+            Recipe::Shaped {
+                width,
+                cells,
+                result,
+                ..
+            } => grid(
+                *width,
+                cells.iter().map(|c| c.as_ref().and_then(shown)).collect(),
+                result,
+            ),
+            Recipe::Shapeless {
+                ingredients,
+                result,
+            } => grid(3, ingredients.iter().map(shown).collect(), result),
+            Recipe::Special(Special::Transmute {
+                input,
+                material,
+                min,
+                result,
+                ..
+            }) => shown(input)
+                .zip(shown(material))
+                .zip(result.item.as_deref().map(str::to_owned))
+                .map(|((i, m), it)| recipes::transmute(i, m, *min, it, result.count)),
+            Recipe::Special(_) => None,
+        };
+        out.extend(made);
+    }
+    for c in &book.cooking {
+        if c.kind == recipes::SMELTING
+            && let Some(i) = shown(&c.ingredient)
+        {
+            out.push(recipes::smelting(
+                i,
+                c.result.item.to_string(),
+                c.result.count,
+            ));
+        }
+    }
+    let resolve = |id: &str| {
+        game.native_recipe_ingredient(&serde_json::Value::String(id.to_owned()))
+            .and_then(|i| shown(&i))
+    };
+    for kind in recipes::MACHINE_TYPES {
+        for r in game.native_recipes_of_type(kind) {
+            out.extend(recipes::custom(kind, &r.json, &resolve));
+        }
+    }
+    out
+}
+
+/// The recipes page `page` shows (rustcraft_rules::handbook::recipes::for_page).
+pub(super) fn page_recipes(game: &Game<'_>, page: usize) -> Vec<Shown> {
+    match PAGES.get(page) {
+        Some(p) if !p.makes.is_empty() => recipes::for_page(p, all_recipes(game)),
+        _ => Vec::new(),
+    }
+}
+
 // ---- The client: the window ----
 
 /// The window asked for by the server, opened at the window's next tick.
 static ASKED: AtomicBool = AtomicBool::new(false);
 /// Where the window is: kept while it is closed, so it opens again where it was.
 static VIEW: LazyLock<Mutex<View>> = LazyLock::new(Mutex::default);
-/// The recipes the window has looked up since it opened, by item.
-static RECIPES: LazyLock<Mutex<HashMap<&'static str, Option<(Grid, u32)>>>> =
-    LazyLock::new(Mutex::default);
+/// The recipes the window has looked up since it opened, by page.
+static RECIPES: LazyLock<Mutex<HashMap<&'static str, Vec<Shown>>>> = LazyLock::new(Mutex::default);
 
 /// The scene on screen: its page, step and since when (`clock`); None off a scene's sheet.
 static PLAYING: LazyLock<Mutex<Option<Playback>>> = LazyLock::new(Mutex::default);
@@ -279,7 +366,7 @@ fn view() -> MutexGuard<'static, View> {
     VIEW.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
-fn recipes() -> MutexGuard<'static, HashMap<&'static str, Option<(Grid, u32)>>> {
+fn recipes() -> MutexGuard<'static, HashMap<&'static str, Vec<Shown>>> {
     RECIPES.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
@@ -314,37 +401,36 @@ fn lookup(key: &str) -> Option<String> {
     horizon_client::lang::has(key).then(|| horizon_client::lang::get_or(key, ""))
 }
 
-/// A page's recipe, looked up once while the window is open.
-fn recipe_for(game: &Game<'_>, item: &'static str) -> Option<(Grid, u32)> {
-    if let Some(r) = recipes().get(item) {
+/// A page's recipes, looked up once while the window is open.
+fn recipes_for(game: &Game<'_>, page: usize) -> Vec<Shown> {
+    let id = PAGES[page].id;
+    if let Some(r) = recipes().get(id) {
         return r.clone();
     }
-    let r = recipe_of(game, item);
-    recipes().insert(item, r.clone());
+    let r = page_recipes(game, page);
+    recipes().insert(id, r.clone());
     r
 }
 
-/// A page laid out in the reader's language: its rows, its sheets and its recipe.
+/// A page laid out in the reader's language: its rows, its sheets and its recipes.
 struct Laid {
     rows: Vec<Row>,
     sheets: Vec<Range<usize>>,
-    /// The page's item and its recipe.
-    item: Option<&'static str>,
-    recipe: Option<(Grid, u32)>,
+    recipes: Vec<Shown>,
 }
 
 fn laid(game: &Game<'_>, page: usize) -> Laid {
     let p = &PAGES[page];
-    let recipe = p.item.and_then(|item| recipe_for(game, item));
-    let pieces: Vec<Piece> = rules::pieces(p, recipe.is_some(), &lookup);
+    let recipes = recipes_for(game, page);
+    let heights: Vec<f32> = recipes.iter().map(Shown::height).collect();
+    let pieces: Vec<Piece> = rules::pieces(p, &heights, &lookup);
     let measure = |s: &str| game.native_text_width(s);
     let rows = rules::lay_out(&pieces, rules::BODY_WIDTH, &measure);
     let sheets = rules::sheets(&rows);
     Laid {
         rows,
         sheets,
-        item: p.item,
-        recipe,
+        recipes,
     }
 }
 
@@ -480,6 +566,7 @@ fn scene_part(game: &Game<'_>, batch: &mut HudBatch, o: [f32; 2], page: usize, s
         let r = [c[0] - side / 2.0, c[1] - side / 2.0, side, side];
         game.native_fill(batch, r, 0xFF00_0000 | dot.rgb);
     }
+    labels(game, batch, at, s, step, t, &fit);
     batch.clip_since(start, at[0], at[1], at[0] + panel[2], at[1] + panel[3]);
     let measure = |x: &str| game.native_text_width(x);
     if let Some(caption) = lookup(&s.caption_key(step)) {
@@ -500,7 +587,9 @@ fn scene_part(game: &Game<'_>, batch: &mut HudBatch, o: [f32; 2], page: usize, s
     if kit::hovered(game, o, panel) {
         let cursor = game.native_cursor();
         let over = [cursor[0] - at[0], cursor[1] - at[1]];
-        if let Some(Look::Item(id)) = scene::pick(&drawn, &fit, over).map(|i| drawn[i].look) {
+        if let Some(Look::Item(id) | Look::Model(id, _)) =
+            scene::pick(&drawn, &fit, over).map(|i| drawn[i].look)
+        {
             game.native_gui_tooltip(batch, &[item_name(game, id)], cursor);
         }
     }
@@ -520,6 +609,57 @@ fn look(game: &Game<'_>, batch: &mut HudBatch, at: [f32; 2], d: &scene::Drawn, f
                 game.native_quad(batch, corners, scene::shaded(argb, light));
             }
         }
+        Look::Model(id, model) => {
+            let side = fit.icon();
+            let corner = d.corner(side);
+            game.native_item_model(
+                batch,
+                id,
+                model,
+                [at[0] + corner[0], at[1] + corner[1]],
+                side,
+            );
+        }
+        Look::Drop(argb) => {
+            for (corners, light) in scene::cube_faces(c, fit.scale * scene::DROP) {
+                game.native_quad(batch, corners, scene::shaded(argb, light));
+            }
+        }
+    }
+}
+
+/// The step's badges and name tags: each a plate with its text, scaled down, above its point.
+fn labels(
+    game: &Game<'_>,
+    batch: &mut HudBatch,
+    at: [f32; 2],
+    s: &Scene,
+    step: usize,
+    t: f32,
+    fit: &scene::Fit,
+) {
+    let st = &s.steps[step];
+    let size = [scene::PANEL[2], scene::PANEL[3]];
+    for (k, p) in scene::labels_at(st, t) {
+        let Some(words) = lookup(&s.label_key(step, k)) else {
+            continue;
+        };
+        let (rgb, back) = scene::tone_colours(st.labels[k].tone);
+        let b = scene::label_box(fit.place(p), game.native_text_width(&words), size);
+        game.native_fill(batch, [at[0] + b[0], at[1] + b[1], b[2], b[3]], back);
+        let corner = [
+            at[0] + b[0] + scene::LABEL_PAD,
+            at[1] + b[1] + scene::LABEL_PAD,
+        ];
+        let start = batch.vertices.len();
+        game.native_text(batch, &words, corner, rgb, false);
+        batch.scale_since(
+            start,
+            corner[0],
+            corner[1],
+            scene::LABEL_SCALE,
+            scene::LABEL_SCALE,
+        );
     }
 }
 
@@ -630,11 +770,60 @@ fn body(game: &Game<'_>, batch: &mut HudBatch, o: [f32; 2], laid: &Laid, sheet: 
                     role_colour(*role),
                 );
             }
-            Row::Recipe => recipe(game, batch, o, y, laid),
+            Row::Recipes { first, n, .. } => {
+                for k in 0..*n {
+                    if let Some(r) = laid.recipes.get(first + k) {
+                        let at = [x + recipes::column_x(k), y];
+                        recipe(game, batch, o, at, r);
+                    }
+                }
+            }
+            Row::Cells { cells, role } => {
+                for (dx, t) in cells {
+                    text(game, batch, t, o, [x + dx, y + 1.0], role_colour(*role));
+                }
+            }
+            Row::Links(pages) => {
+                for (col, page) in pages.iter().enumerate() {
+                    if let Some(&p) = page.as_ref() {
+                        link(game, batch, o, y, col, p);
+                    }
+                }
+            }
+            Row::WindowTitle(title) => window_title(game, batch, o, y, title),
+            Row::Widget {
+                n,
+                label,
+                widget: w,
+                words,
+                height,
+            } => widget_part(game, batch, o, y, (*n, label, w, words, *height)),
             Row::Gap => {}
         }
         y += row.height();
     }
+}
+
+/// A «см. также» link: the page's icon in a slot and its name, lit under the mouse.
+fn link(game: &Game<'_>, batch: &mut HudBatch, o: [f32; 2], y: f32, col: usize, page: usize) {
+    let p = &PAGES[page];
+    let r = rules::link_rect(y, col);
+    let icon = [r[0] + 1.0, r[1] + 1.0];
+    slot(game, batch, o, icon);
+    item(game, batch, o, icon, p.icon(), 1);
+    let measure = |s: &str| game.native_text_width(s);
+    let name = rules::clip(&tr(&p.key("name"), p.id), r[2] - 22.0, &measure);
+    let hot = kit::hovered(game, o, r);
+    let ty = r[1] + ((r[3] - FONT_HEIGHT) / 2.0).round();
+    text(
+        game,
+        batch,
+        &name,
+        o,
+        [r[0] + 21.0, ty],
+        if hot { VALUE } else { TEXT },
+    );
+    kit::hover(game, batch, o, r);
 }
 
 fn role_colour(role: Role) -> u32 {
@@ -646,40 +835,78 @@ fn role_colour(role: Role) -> u32 {
     }
 }
 
-/// The recipe's block at `y`: the grid, the arrow and what it makes; a cell under the mouse
-/// names its item.
-fn recipe(game: &Game<'_>, batch: &mut HudBatch, o: [f32; 2], y: f32, laid: &Laid) {
-    let (Some((grid, count)), Some(made)) = (laid.recipe.as_ref(), laid.item) else {
-        return;
-    };
-    let mut named: Option<&str> = None;
-    for (i, cell) in grid.iter().enumerate() {
-        let p = rules::recipe_cell(y, i);
+/// A recipe's block with its corner at `at` (window pixels): a grid or a machine's inputs, the
+/// arrow (the machine over it) and what it makes; a slot under the mouse names its item.
+fn recipe(game: &Game<'_>, batch: &mut HudBatch, o: [f32; 2], at: [f32; 2], r: &Shown) {
+    let mut named: Option<Text> = None;
+    let cell = |batch: &mut HudBatch, p: [f32; 2], it: &str, count: u32| {
+        let p = [at[0] + p[0], at[1] + p[1]];
         slot(game, batch, o, p);
-        if let Some(it) = cell {
-            item(game, batch, o, p, it, 1);
-            if kit::hovered(game, o, style::slot_rect(p)) {
-                named = Some(it.as_str());
+        item(game, batch, o, p, it, count);
+        kit::hovered(game, o, style::slot_rect(p)).then(|| item_name(game, it))
+    };
+    let (arrow, result) = match &r.made {
+        Made::Grid(grid) => {
+            for (i, c) in grid.iter().enumerate() {
+                let p = recipes::grid_cell(i);
+                match c {
+                    Some(it) => named = cell(batch, p, it, 1).or(named),
+                    None => slot(game, batch, o, [at[0] + p[0], at[1] + p[1]]),
+                }
             }
+            (recipes::GRID_ARROW, recipes::GRID_RESULT)
         }
-    }
-    let a = rules::RECIPE_ARROW;
+        Made::Machine { machine, inputs } => {
+            for (k, (it, n)) in inputs.iter().take(recipes::INPUTS).enumerate() {
+                named = cell(batch, recipes::input_at(k), it, *n).or(named);
+            }
+            let m = [
+                at[0] + recipes::MACHINE_ICON[0],
+                at[1] + recipes::MACHINE_ICON[1],
+            ];
+            item(game, batch, o, m, machine, 1);
+            if kit::hovered(game, o, [m[0], m[1], 16.0, 16.0]) {
+                named = Some(item_name(game, machine));
+            }
+            (recipes::MACHINE_ARROW, recipes::MACHINE_RESULT)
+        }
+    };
     kit::arrow(
         game,
         batch,
         o,
-        [rules::BODY_X + a[0], y + a[1], a[2], a[3]],
+        [at[0] + arrow[0], at[1] + arrow[1], arrow[2], arrow[3]],
         1.0,
     );
-    let res = [
-        rules::BODY_X + rules::RECIPE_RESULT[0],
-        y + rules::RECIPE_RESULT[1],
-    ];
-    slot(game, batch, o, res);
-    item(game, batch, o, res, made, *count);
-    if let Some(it) = named {
-        game.native_gui_tooltip(batch, &[item_name(game, it)], game.native_cursor());
+    match &r.out {
+        Out::Item(it, n) => named = cell(batch, result, it, *n).or(named),
+        Out::Fluid(fluid, mb) => {
+            let p = [at[0] + result[0], at[1] + result[1]];
+            slot(game, batch, o, p);
+            let c = [o[0] + p[0] + 1.0, o[1] + p[1] + 1.0, 16.0, 16.0];
+            game.native_fill(batch, c, recipes::fluid_colour(fluid));
+            if *mb != recipes::BUCKET_MB {
+                let n = mb.div_ceil(recipes::BUCKET_MB).to_string();
+                kit::text_right(game, batch, &n, o, p[0] + 17.0, p[1] + 9.0, VALUE);
+            }
+            if kit::hovered(game, o, style::slot_rect(p)) {
+                named = Some(fluid_name(fluid));
+            }
+        }
     }
+    if let Some(name) = named {
+        game.native_gui_tooltip(batch, &[name], game.native_cursor());
+    }
+}
+
+/// A fluid's name, as the mod's windows name it (`rustcraft.fluid.<name>.name`).
+fn fluid_name(id: &str) -> Text {
+    let (space, name) = id.split_once(':').unwrap_or(("minecraft", id));
+    if space == "minecraft" {
+        let key = format!("block.minecraft.{name}");
+        return Text::translate_with_fallback(&key, name, &[]);
+    }
+    Text::translate_with_fallback(&format!("{space}.fluid.{name}.name"), name, &[])
 }
 
 fn item(game: &Game<'_>, batch: &mut HudBatch, o: [f32; 2], p: [f32; 2], id: &str, count: u32) {
@@ -712,6 +939,222 @@ fn bottom(
     kit::centred(game, batch, o, place, &n, LABEL);
 }
 
+// ---- The window's picture (rustcraft_rules::handbook::window) ----
+
+/// The picture's title strip: the window's name on a raised strip.
+fn window_title(game: &Game<'_>, batch: &mut HudBatch, o: [f32; 2], y: f32, title: &str) {
+    let r = [rules::BODY_X, y, rules::BODY_WIDTH, window::TITLE_HEIGHT];
+    kit::fills(game, batch, o, &style::raised(r));
+    let measure = |s: &str| game.native_text_width(s);
+    let t = rules::clip(title, r[2] - 8.0, &measure);
+    text(game, batch, &t, o, [r[0] + 4.0, y + 3.0], TEXT_ON);
+}
+
+/// One part of the picture: the dark panel behind it, its number and label, its widget.
+fn widget_part(
+    game: &Game<'_>,
+    batch: &mut HudBatch,
+    o: [f32; 2],
+    y: f32,
+    part: (usize, &str, &Widget, &[String], f32),
+) {
+    let (n, label, w, words, height) = part;
+    let x = rules::BODY_X;
+    game.native_fill(
+        batch,
+        [o[0] + x, o[1] + y, rules::BODY_WIDTH, height],
+        colour::WELL,
+    );
+    let square = [x + 2.0, y + 1.0, rules::NUMBER[0], rules::NUMBER[1]];
+    kit::fills(game, batch, o, &style::raised(square));
+    kit::centred(game, batch, o, square, &n.to_string(), TEXT_ON);
+    if !label.is_empty() {
+        text(
+            game,
+            batch,
+            &label.to_uppercase(),
+            o,
+            [x + rules::INDENT + 2.0, y + 1.0],
+            LABEL,
+        );
+    }
+    let at = window::widget_at(!label.is_empty());
+    let at = [x + at[0] + 2.0, y + at[1]];
+    let width = rules::BODY_WIDTH - rules::INDENT - 4.0;
+    widget(game, batch, o, at, width, w, words);
+}
+
+/// A mock-up slot: its frame, its item's colour, its count.
+fn mock_slot(game: &Game<'_>, batch: &mut HudBatch, o: [f32; 2], p: [f32; 2], c: &Cell) {
+    slot(game, batch, o, p);
+    if c.rgb != 0 {
+        let alpha = if c.ghost { 0x6000_0000 } else { 0xFF00_0000 };
+        let r = [o[0] + p[0] + 3.0, o[1] + p[1] + 3.0, 12.0, 12.0];
+        game.native_fill(batch, r, alpha | c.rgb);
+    }
+    if !c.count.is_empty() {
+        kit::text_right(game, batch, c.count, o, p[0] + 17.0, p[1] + 9.0, VALUE);
+    }
+}
+
+fn word(words: &[String], k: usize) -> &str {
+    words.get(k).map_or("", String::as_str)
+}
+
+/// A widget with its corner at `at` (window pixels), `width` wide.
+fn widget(
+    game: &Game<'_>,
+    batch: &mut HudBatch,
+    o: [f32; 2],
+    at: [f32; 2],
+    width: f32,
+    w: &Widget,
+    words: &[String],
+) {
+    let measure = |s: &str| game.native_text_width(s);
+    let bar = |batch: &mut HudBatch, pct: u8, rgb: u32| {
+        let r = [at[0], at[1] + 1.0, window::BAR[0], window::BAR[1]];
+        kit::fills(game, batch, o, &style::well(r));
+        let fill = (r[2] - 2.0) * f32::from(pct.min(100)) / 100.0;
+        let f = [o[0] + r[0] + 1.0, o[1] + r[1] + 1.0, fill, r[3] - 2.0];
+        game.native_fill(batch, f, 0xFF00_0000 | rgb);
+        let line = rules::clip(word(words, 0), width - r[2] - 6.0, &measure);
+        text(game, batch, &line, o, [at[0] + r[2] + 6.0, at[1]], LABEL);
+    };
+    match *w {
+        Widget::Slots { cols, cells } => {
+            let per = window::slot_cols(cols, width);
+            for (i, c) in cells.iter().enumerate() {
+                let p = [
+                    at[0] + window::SLOT * (i % per) as f32,
+                    at[1] + window::SLOT * (i / per) as f32,
+                ];
+                mock_slot(game, batch, o, p, c);
+            }
+        }
+        Widget::Work { pct } => {
+            let r = [at[0], at[1] + 1.0, 22.0, 6.0];
+            kit::arrow(game, batch, o, r, f64::from(pct) / 100.0);
+        }
+        Widget::Bar { pct, rgb } | Widget::Tank { pct, rgb } => bar(batch, pct, rgb),
+        Widget::Mode { active } => {
+            let each = (width / 3.0).min(70.0);
+            for k in 0..3 {
+                let r = [
+                    at[0] + each * k as f32,
+                    at[1],
+                    each - 2.0,
+                    window::MODE_HEIGHT,
+                ];
+                let t = rules::clip(word(words, k), r[2] - 4.0, &measure);
+                button(game, batch, o, r, &t, k == usize::from(active));
+            }
+        }
+        Widget::Sockets { filled } => {
+            for (k, &rgb) in filled.iter().enumerate() {
+                let c = Cell {
+                    rgb,
+                    count: "",
+                    ghost: false,
+                };
+                mock_slot(game, batch, o, [at[0] + window::SLOT * k as f32, at[1]], &c);
+            }
+        }
+        Widget::Status { tone } => {
+            let (rgb, back) = match tone {
+                0 => (colour::OK & 0xFF_FFFF, colour::OK_BACK),
+                1 => (colour::WARN & 0xFF_FFFF, colour::WARN_BACK),
+                _ => (colour::BAD_TEXT, colour::BAD_BACK),
+            };
+            let r = [o[0] + at[0], o[1] + at[1], width, window::STATUS_HEIGHT];
+            game.native_fill(batch, r, back);
+            let t = rules::clip(word(words, 0), width - 6.0, &measure);
+            text(game, batch, &t, o, [at[0] + 3.0, at[1] + 2.0], rgb);
+        }
+        Widget::Rows { n } => {
+            for k in 0..usize::from(n) {
+                let y = at[1] + rules::LINE * k as f32;
+                let value = word(words, 2 * k + 1);
+                let room = width - measure(value) - rules::PAIR_GAP;
+                let key = rules::clip(word(words, 2 * k), room.max(0.0), &measure);
+                text(game, batch, &key, o, [at[0], y], LABEL);
+                kit::text_right(game, batch, value, o, at[0] + width, y, VALUE);
+            }
+        }
+        Widget::Chips { on, note } => {
+            let rects = window::chip_rects(words, on.len(), width, &measure);
+            for (k, r) in rects.iter().enumerate() {
+                let r = [at[0] + r[0], at[1] + r[1], r[2], r[3]];
+                let lit = on.get(k).copied().unwrap_or(false);
+                let face = if lit {
+                    style::raised(r)
+                } else {
+                    style::well(r)
+                };
+                kit::fills(game, batch, o, &face);
+                let t = rules::clip(word(words, k), r[2] - 2.0, &measure);
+                kit::centred(game, batch, o, r, &t, if lit { TEXT_ON } else { TEXT });
+            }
+            if note {
+                let top = rects.last().map_or(0.0, |r| r[1] + r[3]) + 2.0;
+                for (i, l) in rules::wrap(word(words, on.len()), width, &measure)
+                    .iter()
+                    .enumerate()
+                {
+                    let y = at[1] + top + rules::LINE * i as f32;
+                    text(game, batch, l, o, [at[0], y], LABEL);
+                }
+            }
+        }
+        Widget::Craft { from, to } => {
+            for (k, c) in from.iter().enumerate() {
+                mock_slot(game, batch, o, [at[0] + window::SLOT * k as f32, at[1]], c);
+            }
+            let ax = at[0] + window::SLOT * from.len() as f32 + 4.0;
+            kit::arrow(
+                game,
+                batch,
+                o,
+                [ax, at[1] + 6.0, window::CRAFT_ARROW, 6.0],
+                1.0,
+            );
+            let ox = at[0] + window::craft_out_x(from.len());
+            for (k, c) in to.iter().enumerate() {
+                mock_slot(game, batch, o, [ox + window::SLOT * k as f32, at[1]], c);
+            }
+        }
+        Widget::Map { n } => {
+            let rows = usize::from(n).div_ceil(3).max(1);
+            let r = [at[0], at[1], width, rules::LINE * rows as f32 + 2.0];
+            kit::fills(game, batch, o, &style::well(r));
+            let col = width / 3.0;
+            for k in 0..usize::from(n) {
+                let t = rules::clip(word(words, k), col - 6.0, &measure);
+                let p = [
+                    at[0] + 3.0 + col * (k % 3) as f32,
+                    at[1] + 2.0 + rules::LINE * (k / 3) as f32,
+                ];
+                text(game, batch, &t, o, p, VALUE);
+            }
+        }
+        Widget::Text => {
+            for (i, l) in rules::wrap(word(words, 0), width, &measure)
+                .iter()
+                .enumerate()
+            {
+                text(
+                    game,
+                    batch,
+                    l,
+                    o,
+                    [at[0], at[1] + rules::LINE * i as f32],
+                    TEXT,
+                );
+            }
+        }
+    }
+}
+
 /// `native_screen_mouse_button_pressed_pre`: a left click on the window's parts.
 pub(super) fn on_mouse(
     game: &Game<'_>,
@@ -736,6 +1179,17 @@ pub(super) fn on_mouse(
             p.go(s, part == Part::StepOn, clock());
         }
         return;
+    }
+    if let View::Page { page, sheet } = v.clamped(sheets_of(game, v))
+        && page < PAGES.len()
+    {
+        let laid = laid(game, page);
+        if let Some(range) = laid.sheets.get(sheet)
+            && let Some(to) = rules::link_at(&laid.rows, range.clone(), sheet, at)
+        {
+            *view() = View::Page { page: to, sheet: 0 };
+            return;
+        }
     }
     let Some(part) = rules::part_at(v, at) else {
         return;

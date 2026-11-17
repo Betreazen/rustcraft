@@ -11,6 +11,9 @@
 //!   scene's every step into the panel at one scale, `drawn` lists a moment's icons back to front.
 //! - Flows and beams are dots moving along their paths (`dots`), by the time since the step
 //!   began; water, lava and the projector's ghost are tinted cubes (`cube_faces`).
+//! - Labels (`Label`): the guide's badges (numbers and diagnoses over the scene) and name tags
+//!   (one per kind of block), drawn as small plates above their points (`labels_at`,
+//!   `label_box`); a tag on a moving object follows it.
 //! - `Playback` steps through a scene: on after its time (`Step::dur`, player.js `stepTime`), back
 //!   to the first after the last, or by the step buttons.
 
@@ -24,9 +27,18 @@ pub use super::scenes::{LOOKS, SCENES};
 pub enum Look {
     /// An item's icon (`minecraft:stone`, `rustcraft:crusher`).
     Item(&'static str),
+    /// A block with its moving parts, as a still (assets/models/poses_mc.py): the item, drawn
+    /// with the item model (`rustcraft:hb/<block>_on` working, `_still` standing).
+    Model(&'static str, &'static str),
     /// A cube of one colour (ARGB): water, lava, the projector's ghost.
     Tint(u32),
+    /// A dropped item, as the guide draws one: a little cube of one colour (ARGB), `DROP` of a
+    /// block's edge.
+    Drop(u32),
 }
+
+/// A dropped item's cube, of a block's edge.
+pub const DROP: f32 = 0.24;
 
 /// A block standing in a cell; `gone` is when in the step it vanishes (infinity: never).
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -114,6 +126,32 @@ pub struct Step {
     pub beams: &'static [Beam],
     /// The night's veil over the panel (ARGB), 0 for none.
     pub tint: u32,
+    /// Its badges and name tags; label `k`'s text is `Scene::label_key(step, k)`.
+    pub labels: &'static [Label],
+}
+
+/// What a label says, and so its colours (player.js badge classes).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Tone {
+    /// A diagnosis: the block stands.
+    Bad,
+    /// It works worse.
+    Warn,
+    /// It works, or a gain.
+    Ok,
+    /// A plain fact or number.
+    Info,
+    /// A block's name.
+    Tag,
+}
+
+/// A badge or a name tag: where it stands (a scene point, or a moving object's corner raised by
+/// `lift` through its middle) and its tone.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Label {
+    pub at: End,
+    pub lift: f32,
+    pub tone: Tone,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -127,6 +165,11 @@ impl Scene {
     /// The caption of step `step`.
     pub fn caption_key(&self, step: usize) -> String {
         format!("{PREFIX}scene.{}.{step}", self.id)
+    }
+
+    /// The text of the step's label `k`.
+    pub fn label_key(&self, step: usize, k: usize) -> String {
+        format!("{PREFIX}scene.{}.{step}.label.{k}", self.id)
     }
 }
 
@@ -200,8 +243,61 @@ pub fn cells(scene: &Scene) -> Vec<[f32; 3]> {
         for f in st.flows {
             out.extend_from_slice(f.path);
         }
+        // A badge's point, as the guide's camera keeps room for its labels.
+        for l in st.labels {
+            if let End::Point(p) = l.at {
+                out.push([p[0] - 0.5, p[1] - 0.5, p[2] - 0.5]);
+            }
+        }
     }
     out
+}
+
+/// Where the step's labels stand `t` seconds into it: each label's index and scene point.
+pub fn labels_at(step: &Step, t: f32) -> Vec<(usize, [f32; 3])> {
+    step.labels
+        .iter()
+        .enumerate()
+        .filter_map(|(k, l)| {
+            let p = match l.at {
+                End::Point(p) => p,
+                End::Mover(i) => {
+                    let c = step.movers.get(usize::from(i))?.at(t);
+                    [c[0] + 0.5, c[1] + 0.5, c[2] + l.lift]
+                }
+            };
+            Some((k, p))
+        })
+        .collect()
+}
+
+/// A label's text is drawn at this share of the window's font.
+pub const LABEL_SCALE: f32 = 0.75;
+/// The font's line, and what a plate keeps round its text.
+pub const LABEL_LINE: f32 = 8.0;
+pub const LABEL_PAD: f32 = 2.0;
+
+/// The plate (panel pixels) of a label whose text is `width` wide at scale 1, standing on the
+/// point `at`: centred over it, kept inside a panel of `size`.
+pub fn label_box(at: [f32; 2], width: f32, size: [f32; 2]) -> Rect {
+    let w = width * LABEL_SCALE + 2.0 * LABEL_PAD;
+    let h = LABEL_LINE * LABEL_SCALE + 2.0 * LABEL_PAD;
+    let x = (at[0] - w / 2.0).clamp(0.0, (size[0] - w).max(0.0));
+    let y = (at[1] - h).clamp(0.0, (size[1] - h).max(0.0));
+    [x.round(), y.round(), w, h]
+}
+
+/// A label's colours: its text (RGB, as the window's text takes it) and its plate (ARGB).
+pub fn tone_colours(tone: Tone) -> (u32, u32) {
+    use crate::machines::style::colour;
+    const RGB: u32 = 0x00FF_FFFF;
+    match tone {
+        Tone::Bad => (colour::BAD_TEXT, colour::BAD_BACK),
+        Tone::Warn => (colour::WARN & RGB, colour::WARN_BACK),
+        Tone::Ok => (colour::OK & RGB, colour::OK_BACK),
+        Tone::Info => (colour::VALUE, colour::FACE),
+        Tone::Tag => (colour::LABEL, 0xC011_0D0B),
+    }
 }
 
 /// The box (x0, y0, x1, y1, GUI pixels at scale 1) of every icon of the scene, over all its
