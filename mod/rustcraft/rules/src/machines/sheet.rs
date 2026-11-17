@@ -235,12 +235,16 @@ impl Kind {
             },
             // Energy, water and product bars, a line of progress (slice 18: and one of its queue
             // cells), its three input slots.
+            // Slice 18, wave 2 (`ui.js` mixer): its three ingredient slots and the work arrow
+            // after them; one line, its pace (and its queue cells).
             Kind::Mixer => Shape {
                 sockets,
                 mode: true,
-                rows: 2,
+                rows: 1,
                 bars: 3,
                 slots: 3,
+                lead: 3,
+                work: true,
                 ..Shape::default()
             },
             Kind::DockLoad => Shape {
@@ -902,6 +906,8 @@ mod tests {
         let dis = layout(Kind::Util(Util::Disintegrator).shape());
         assert_eq!((dis.preview.len(), dis.slots.len()), (4, 10));
         assert!(dis.work.is_some());
+        let mixer = layout(Kind::Mixer.shape());
+        assert!(mixer.work.is_some_and(|w| w[0] > mixer.slots[2][0] + 16.0));
         let charger = Kind::Util(Util::Charger).shape();
         assert!(!charger.mode && charger.label);
         let l = layout(charger);

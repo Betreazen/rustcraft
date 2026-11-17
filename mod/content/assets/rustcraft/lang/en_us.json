@@ -1370,5 +1370,7 @@
   "rustcraft.util.disintegrator.share_hint": "A yield module raises the share to 60%, two to 70%, never above 75%",
   "rustcraft.util.disintegrator.kept_hint": "Fractions wait inside until they make a whole item",
   "rustcraft.util.disintegrator.preview": "Taking apart: what the item gives",
-  "rustcraft.util.charger.armour": "Armour"
+  "rustcraft.util.charger.armour": "Armour",
+  "rustcraft.mixer.pace": "A bucket in %s s",
+  "rustcraft.window.module_slot.locked": "Closed: opens on tier %s"
 }

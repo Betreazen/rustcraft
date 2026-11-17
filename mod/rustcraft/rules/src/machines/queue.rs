@@ -20,6 +20,13 @@ pub fn open_cells(capacity_slots: usize, stacked: bool) -> usize {
     capacity_slots + usize::from(stacked)
 }
 
+/// Slice 18, wave 2 (guide `mod_stack`: «256 на каждый ввод»): the cells of a machine with
+/// `inputs` input slots (the autocrafter's nine, the mixer's three): two a capacity module, and
+/// with a stack module one more for every input, so each input holds 256 more.
+pub fn open_cells_per_input(capacity_slots: usize, stacked: bool, inputs: usize) -> usize {
+    capacity_slots + if stacked { inputs } else { 0 }
+}
+
 /// Moves what `intake` holds into the first `open` cells: onto cells of its item with room first,
 /// then into empty ones, each up to `size`. What does not fit stays in the intake.
 pub fn intake(intake: &mut Slot, cells: &mut Vec<Slot>, open: usize, size: u32) {
@@ -154,6 +161,28 @@ pub fn spilled(cells: &[Slot], max: impl Fn(&str) -> u32) -> Vec<(String, u32)> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_stack_module_gives_every_input_its_cell() {
+        assert_eq!(open_cells_per_input(0, false, 9), 0);
+        assert_eq!(open_cells_per_input(2, false, 9), 2);
+        assert_eq!(open_cells_per_input(0, true, 9), 9);
+        assert_eq!(open_cells_per_input(4, true, 3), 7);
+        // Nine inputs of iron, a stack module: each holds its 64 and 256 more.
+        let mut visible: Vec<Slot> = vec![Some(("minecraft:iron_ingot".into(), 64)); 9];
+        let mut cells = Vec::new();
+        let open = open_cells_per_input(0, true, 9);
+        for _ in 0..5 {
+            for v in visible.iter_mut() {
+                if v.is_none() {
+                    *v = Some(("minecraft:iron_ingot".into(), 64));
+                }
+                intake(v, &mut cells, open, 256);
+            }
+        }
+        let held: u32 = visible.iter().chain(&cells).flatten().map(|(_, n)| n).sum();
+        assert_eq!(held, 9 * 64 + 9 * 256);
+    }
 
     fn s(item: &str, n: u32) -> Slot {
         Some((item.to_owned(), n))

@@ -59,9 +59,20 @@ pub fn decode(data: &[i32]) -> (usize, [Option<Module>; tiers::MAX_SOCKETS]) {
     (open, slots)
 }
 
+/// Slice 18, wave 2: the tier on which socket `k` opens (A5: three on tiers 1–2, the fourth on
+/// 3), for the tooltip of a socket still closed.
+pub fn opens_on_tier(k: usize) -> u8 {
+    (1..=4).find(|t| tiers::sockets(*t) > k).unwrap_or(4)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_fourth_socket_opens_on_the_third_tier() {
+        assert_eq!([0, 1, 2, 3].map(super::opens_on_tier), [1, 1, 1, 3]);
+    }
 
     #[test]
     fn open_sockets_by_tier() {

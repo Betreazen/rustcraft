@@ -6745,5 +6745,7 @@
   "rustcraft.util.disintegrator.share_hint": "Модуль выхода поднимает долю до 60%, два — до 70%, не выше 75%",
   "rustcraft.util.disintegrator.kept_hint": "Дробные остатки ждут внутри, пока не наберётся целый предмет",
   "rustcraft.util.disintegrator.preview": "Разборка: что выйдет из предмета",
-  "rustcraft.util.charger.armour": "Броня"
+  "rustcraft.util.charger.armour": "Броня",
+  "rustcraft.mixer.pace": "Ведро за %s с",
+  "rustcraft.window.module_slot.locked": "Закрыто: откроется на ступени %s"
 }

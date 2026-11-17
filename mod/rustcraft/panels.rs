@@ -266,7 +266,7 @@ fn draw_crafter(game: &Game<'_>, data: &[i32], batch: &mut HudBatch, o: [f32; 2]
     let p = cw::decode(data);
     kit::background(game, batch, o, [WIDTH, cw::HEIGHT]);
     kit::title(game, batch, o, Machine::Crafter);
-    let tabs: Vec<Rect> = (0..p.pages).map(cw::tab).collect();
+    let tabs: Vec<Rect> = (0..p.pages).map(|i| cw::tab_of(i, p.pages)).collect();
     let line_y = cw::TABS_Y + cw::TAB_H;
     let tab_right = cw::MODULE_SLOTS[0][0] - 4.0;
     kit::fills(
@@ -340,14 +340,23 @@ fn draw_crafter(game: &Game<'_>, data: &[i32], batch: &mut HudBatch, o: [f32; 2]
 fn tab(game: &Game<'_>, batch: &mut HudBatch, o: [f32; 2], i: usize, p: &cw::CrafterPanel) {
     let open = i == p.page;
     if !open {
-        kit::hover(game, batch, o, cw::tab(i));
+        kit::hover(game, batch, o, cw::tab_of(i, p.pages));
     }
-    let r = at(o, cw::tab(i));
+    let r = at(o, cw::tab_of(i, p.pages));
     let number = (i + 1).to_string();
     let colour = if open { VALUE } else { LABEL };
-    game.native_text(batch, &number, [r[0] + 3.0, r[1] + 5.0], colour, false);
-    if let Some(id) = p.tabs[i].and_then(|n| item_of_number(game, n)) {
-        game.native_item(batch, id, [r[0] + 12.0, r[1] + 2.0], 14.0);
+    let id = p.tabs[i].and_then(|n| item_of_number(game, n));
+    // Slice 18, wave 2 (`ui.js` crafter): «1 · Бумага» when the tab has room for it.
+    match id {
+        Some(id) if cw::tab_named(p.pages) => {
+            let named = kit::fit(game, &format!("{number} · {}", item_name(id)), r[2] - 6.0);
+            game.native_text(batch, &named, [r[0] + 3.0, r[1] + 5.0], colour, false);
+        }
+        Some(id) => {
+            game.native_text(batch, &number, [r[0] + 3.0, r[1] + 5.0], colour, false);
+            game.native_item(batch, id, [r[0] + 12.0, r[1] + 2.0], 14.0);
+        }
+        None => game.native_text(batch, &number, [r[0] + 3.0, r[1] + 5.0], colour, false),
     }
     if p.crafting == Some(i) {
         game.native_fill(
@@ -458,8 +467,8 @@ fn alloy_tooltip(data: &[i32], at: [f32; 2], lines: &mut Vec<String>) {
             "Fuel left: %s",
             &[format!("{}%", (p.flame * 100.0).round())],
         ));
-    } else if aw::module_slot_at(at).is_some() {
-        kit::module_slot_tooltip(lines);
+    } else if let Some(k) = aw::module_slot_at(at) {
+        kit::module_slot_tooltip(k, lines);
     } else if aw::button_at(at).is_some() {
         lines.push(tr("rustcraft.window.take_own", "Take own alloy"));
         hint(
@@ -484,7 +493,7 @@ fn alloy_tooltip(data: &[i32], at: [f32; 2], lines: &mut Vec<String>) {
 fn crafter_tooltip(game: &Game<'_>, data: &[i32], at: [f32; 2], lines: &mut Vec<String>) {
     let p = cw::decode(data);
     let name = |n: Option<u32>| n.and_then(|n| item_of_number(game, n)).map(item_name);
-    if let Some(i) = (0..p.pages).find(|&i| over(cw::tab(i), at)) {
+    if let Some(i) = (0..p.pages).find(|&i| over(cw::tab_of(i, p.pages), at)) {
         let made =
             name(p.tabs[i]).unwrap_or_else(|| tr("rustcraft.window.page.empty", "nothing yet"));
         lines.push(tr_with(
