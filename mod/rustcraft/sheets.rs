@@ -186,10 +186,12 @@ fn layout_of(kind: Kind) -> Layout {
 pub(super) fn layout(block: &str) -> Option<NativeScreen> {
     let kind = Kind::of(block)?;
     let l = layout_of(kind);
-    let slots = if l.slots.is_empty() {
+    // Slice 18, wave 2: a hidden menu slot (the trash's old filter cells, the charger's output)
+    // has no place.
+    let slots = if l.menu_slots.is_empty() {
         vec![None]
     } else {
-        l.slots.iter().copied().map(Some).collect()
+        l.menu_slots.clone()
     };
     Some(NativeScreen {
         width: WIDTH,
@@ -255,10 +257,34 @@ pub(super) fn draw(game: &Game<'_>, block: &str, batch: &mut HudBatch, o: [f32; 
             game.native_fill(batch, kit::at(o, slot_frame(*p)), UNUSED);
         }
     }
+    lead_row(game, batch, o, &l, &s);
     if let Some(st) = &s.status {
         kit::status_line(game, batch, o, l.status, st.severity(), &read(&st.text));
     }
     kit::inventory(game, batch, o, l.inventory, l.inventory_label_y);
+}
+
+/// Slice 18, wave 2: the lead row's label, its work arrow and the ghost cells of what comes out
+/// (`ui.js` `work`, the disintegrator's «Разборка»).
+fn lead_row(game: &Game<'_>, batch: &mut HudBatch, o: [f32; 2], l: &Layout, s: &Sheet) {
+    if let (Some(y), Some(t)) = (l.label_y, &s.label) {
+        label(game, batch, &read(t), o, [8.0, y]);
+    }
+    if let Some(r) = l.work {
+        let shaft = [r[0], r[1] + 2.0, r[2] - style::ARROW_HEAD[0], 8.0];
+        kit::arrow(game, batch, o, shaft, s.work.unwrap_or(0.0).clamp(0.0, 1.0));
+    }
+    for (p, (item, count)) in l.preview.iter().zip(&s.preview) {
+        slot(game, batch, o, *p);
+        let at = [o[0] + p[0], o[1] + p[1]];
+        if game.native_item(batch, item, at, 16.0) {
+            game.native_fill(batch, [at[0], at[1], 16.0, 16.0], colour::GHOST);
+        }
+        if !count.is_empty() {
+            let w = game.native_text_width(count);
+            game.native_text(batch, count, [at[0] + 17.0 - w, at[1] + 9.0], 0xFFFFFF, true);
+        }
+    }
 }
 
 fn sockets(game: &Game<'_>, batch: &mut HudBatch, o: [f32; 2], l: &Layout, s: &Sheet) {
@@ -435,5 +461,23 @@ pub(super) fn tooltip(game: &Game<'_>, block: &str, at: [f32; 2], lines: &mut Ve
         && let Some(st) = &s.status
     {
         lines.push(read(&st.text));
+        return;
+    }
+    // Slice 18, wave 2: what comes out, by its ghost cell; the lead row's name over its cells.
+    if let Some((_, (item, count))) = l.preview.iter().zip(&s.preview).find(|(p, _)| inside(slot_frame(**p), at)) {
+        lines.push(format!("{} {count}", item_name(item)));
+        return;
+    }
+    if let Some(r) = l.work
+        && inside(r, at)
+    {
+        lines.push(format!("{:.0}%", s.work.unwrap_or(0.0).clamp(0.0, 1.0) * 100.0));
+        return;
+    }
+    if l.label_y.is_none()
+        && let Some(t) = &s.label
+        && l.slots.iter().any(|p| inside(slot_frame(*p), at))
+    {
+        lines.push(read(t));
     }
 }

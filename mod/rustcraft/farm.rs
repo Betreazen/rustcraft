@@ -120,11 +120,102 @@ fn sky_closed(game: &Game<'_>, pos: Pos) -> bool {
     !rules::open_sky(&filled)
 }
 
-/// The catch slots it uses: 9, 18 with a storage module.
+/// Its storage modules, counted once (slice 18, wave 2: the sockets' list is the one record).
+fn storage_modules(game: &Game<'_>, pos: Pos) -> u32 {
+    modules::count(&base::modules_at(game, pos), Module::Storage)
+}
+
+/// The catch slots of its window it uses: 9, 18 with a storage module.
 fn catch_slots(game: &Game<'_>, pos: Pos) -> std::ops::Range<usize> {
-    let storage = util::module_count(game, pos, rustcraft_rules::storage::modules::STORAGE)
-        + modules::count(&base::modules_at(game, pos), Module::Storage);
-    1..1 + rules::fish_buffer(storage)
+    1..1 + rules::fish_buffer(storage_modules(game, pos)).min(rules::FISH_SHOWN)
+}
+
+/// Slice 18, wave 2: the block entity key of its catch past the window (two storage modules and
+/// more: 36, 72 cells).
+const RESERVE_KEY: &str = "fish_reserve";
+
+fn read_reserve(game: &Game<'_>, pos: Pos) -> Vec<Option<ItemStack>> {
+    use horizon_world::nbt::{JavaString, Tag};
+    let Some(e) = crate::game::rustcraft_machines::entity(game, pos) else {
+        return Vec::new();
+    };
+    match e.nbt.get(&JavaString::from(RESERVE_KEY)) {
+        Some(Tag::List(list)) => list
+            .iter()
+            .map(|t| match t {
+                Tag::Compound(_) => horizon_client::save::item_from_nbt(t),
+                _ => None,
+            })
+            .collect(),
+        _ => Vec::new(),
+    }
+}
+
+fn write_reserve(game: &mut Game<'_>, pos: Pos, reserve: &[Option<ItemStack>]) {
+    use horizon_world::nbt::{Compound, JavaString, Tag};
+    let list: Vec<Tag> = reserve
+        .iter()
+        .map(|s| s.as_ref().map_or_else(|| Tag::Compound(Compound::default()), horizon_client::save::item_to_nbt))
+        .collect();
+    game.native_with_mod_block_entity(pos, |e| {
+        if list.iter().all(|t| matches!(t, Tag::Compound(c) if c.is_empty())) {
+            e.nbt.remove(&JavaString::from(RESERVE_KEY));
+        } else {
+            e.nbt.insert(JavaString::from(RESERVE_KEY), Tag::List(list));
+        }
+    });
+}
+
+/// The catch past the window's slots: `stack` into the hidden cells as far as they reach; what
+/// does not fit comes back.
+fn reserve_put(game: &mut Game<'_>, pos: Pos, stack: ItemStack) -> Option<ItemStack> {
+    let cells = rules::fish_reserve(storage_modules(game, pos));
+    if cells == 0 {
+        return Some(stack);
+    }
+    let mut reserve = read_reserve(game, pos);
+    reserve.resize(cells.max(reserve.len()), None);
+    let max = crate::game::rustcraft_machines::max_stack(game, &stack.item);
+    let rest = crate::game::rustcraft_mining::store(&mut reserve[..cells], stack, max);
+    write_reserve(game, pos, &reserve);
+    rest
+}
+
+/// What the hidden cells hold moves into the window's free catch slots (the net takes from
+/// those), and with fewer modules than before it all comes back as room allows.
+fn reserve_refill(game: &mut Game<'_>, pos: Pos) {
+    let reserve = read_reserve(game, pos);
+    if reserve.iter().all(Option::is_none) {
+        return;
+    }
+    let slots = catch_slots(game, pos);
+    let mut left = Vec::with_capacity(reserve.len());
+    for s in reserve {
+        left.push(s.and_then(|s| put(game, pos, slots.clone(), s)));
+    }
+    write_reserve(game, pos, &left);
+}
+
+/// The hidden cells fall out as items when the station is broken, their components and all.
+pub(super) fn drop_reserve(game: &mut Game<'_>, dimension: &str, pos: Pos) {
+    let reserve = read_reserve(game, pos);
+    if reserve.iter().all(Option::is_none) {
+        return;
+    }
+    let at = pos.map(|c| f64::from(c) + 0.5);
+    for s in reserve.into_iter().flatten() {
+        use horizon_world::nbt::{Compound, JavaString};
+        let nbt = Compound::from([(JavaString::from("Item"), horizon_client::save::item_to_nbt(&s))]);
+        if game.native_summon(dimension, "minecraft:item", at, nbt).is_none() {
+            log::warn!("rustcraft: the fishing station's {} at {pos:?} was lost", s.item);
+        }
+    }
+    write_reserve(game, pos, &[]);
+}
+
+/// Items waiting in the hidden cells, for the window.
+pub(super) fn reserve_count(game: &Game<'_>, pos: Pos) -> u32 {
+    read_reserve(game, pos).iter().flatten().map(|s| s.count).sum()
 }
 
 fn fish(game: &mut Game<'_>, dimension: &str, pos: Pos, cost: f64, now: u64) -> Shown {
@@ -145,8 +236,11 @@ fn fish(game: &mut Game<'_>, dimension: &str, pos: Pos, cost: f64, now: u64) -> 
         // Wave 2 (guide: «Расход 4 Е/с»): it pays each step it fishes, the wait as the catch.
         return if spend(game, pos, cost) { Shown::Working } else { Shown::NoEnergy };
     }
+    reserve_refill(game, pos);
     let slots = catch_slots(game, pos);
-    if !fits(game, pos, slots.clone(), &[ItemStack::new("minecraft:cod", 1)]) {
+    let room_hidden = read_reserve(game, pos).iter().filter(|s| s.is_some()).count()
+        < rules::fish_reserve(storage_modules(game, pos));
+    if !fits(game, pos, slots.clone(), &[ItemStack::new("minecraft:cod", 1)]) && !room_hidden {
         return Shown::Blocked("output_full");
     }
     if !spend(game, pos, cost) {
@@ -164,7 +258,10 @@ fn fish(game: &mut Game<'_>, dimension: &str, pos: Pos, cost: f64, now: u64) -> 
         if let Some(o) = who {
             base::report(Report::Fish { owner: o, item: c.item.to_string(), count: c.count });
         }
-        put(game, pos, slots.clone(), c);
+        // Slice 18, wave 2: past the window's slots, into the hidden cells.
+        if let Some(rest) = put(game, pos, slots.clone(), c) {
+            reserve_put(game, pos, rest);
+        }
     }
     Shown::Working
 }
@@ -208,6 +305,13 @@ pub(super) fn fishery_rows(game: &Game<'_>, dimension: &str, pos: Pos, now: u64)
         _ => line("rustcraft.util.fishery.ready", "The line is out", &[]),
     };
     let rod_and_wait = line("rustcraft.util.fishery.rod_wait", "%s · %s", &[rod, wait]);
+    // Slice 18, wave 2: the catch in the hidden cells past the window.
+    let mut water = water;
+    let reserve = reserve_count(game, pos);
+    if reserve > 0 {
+        water.push(Text::literal(" · "));
+        water.push(line("rustcraft.util.fishery.reserve", "%s more past the window", &[Text::literal(reserve.to_string())]));
+    }
     vec![water, rod_and_wait]
 }
 

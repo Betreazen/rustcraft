@@ -18,6 +18,10 @@ fn rustcraft_block_entity_submit(
         crate::game::rustcraft_zipline::draw_anchor(game, pos, entity, draw);
         return;
     }
+    // Slice 18, wave 2: the charger's and the plate's pulsing glow.
+    if crate::game::rustcraft_utility::draw_glow(game, block, state, draw) {
+        return;
+    }
     if block == "rustcraft:terminal" {
         crate::game::rustcraft_storage::draw_holes(game, pos, entity, draw);
     }

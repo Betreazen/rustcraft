@@ -373,6 +373,8 @@ pub(super) fn tick(game: &mut Game<'_>, dimension: &str, level: &mut LevelNet, t
             &mut stocks,
         );
         apply(game, dimension, &net.joints, &stores, &result.transfers);
+        // Wave 2: the moves drawn in the housings (rustcraft_pipe18::show_flow, M5).
+        crate::game::rustcraft_pipe18::moved(dimension, net.key, &result.transfers);
         for (j, note) in result.notes {
             if note == JointNote::ReceiverFull {
                 full_until.insert(net.joints[j].block, now + NOTE_HOLD);

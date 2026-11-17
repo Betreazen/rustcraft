@@ -164,11 +164,12 @@ fn spec_of(game: &Game<'_>, pos: Pos, nbt: &Compound, t: &Tuning) -> Spec {
 /// (rustcraft_rules::machines::queue): the real slots move into them, the mixer counts both.
 fn queued(game: &Game<'_>, pos: Pos, raw: &[Slot], saved: &[Slot]) -> Vec<Slot> {
     let slots = base::modules_at(game, pos);
-    let open = rustcraft_rules::machines::queue::open_cells(
+    // Slice 18, wave 2 (guide `mod_stack`): a stack module gives each input a cell of 256.
+    let open = rustcraft_rules::machines::queue::open_cells_per_input(
         rustcraft_rules::modules::capacity_slots(&slots),
         rustcraft_rules::modules::stack_tier(&slots) > 0,
-    )
-    .min(rustcraft_rules::machines::extras::MAX_CELLS);
+        raw.len(),
+    );
     let mut visible = raw.to_vec();
     let mut cells = saved.to_vec();
     for slot in visible.iter_mut() {
@@ -422,23 +423,25 @@ pub(super) fn sheet(game: &Game<'_>, dimension: &str, pos: Pos, t: &Tuning, s: &
     // Slice 18: the queue cells' items, when it has any.
     let cells: Vec<Slot> = crate::game::rustcraft_utility::read_json(&entity.nbt, machines::QUEUE_KEY);
     let queued: u32 = cells.iter().flatten().map(|(_, n)| n).sum();
+    // Slice 18, wave 2 (`ui.js` mixer): the progress is the arrow after its slots; one line says
+    // its pace, and its queue cells when it has any.
+    let progress = read_f64(&entity.nbt, PROGRESS_KEY).clamp(0.0, 1.0);
+    s.work = Some(progress);
+    let secs = t.mixer_ticks / spec.work.max(1e-9) / t.ticks_per_second;
+    let mut row = line(
+        "rustcraft.mixer.pace",
+        "A bucket in %s s",
+        &[Text::literal(format!("{secs:.1}").replace(".0", "").replace('.', ","))],
+    );
     if !cells.is_empty() {
-        s.rows.push(base::v(&line(
+        row.push(Text::literal(" · "));
+        row.push(line(
             "rustcraft.mixer.queue",
             "Queue: %s items in %s cells",
             &[Text::literal(queued.to_string()), Text::literal(cells.len().to_string())],
-        )));
+        ));
     }
-    let progress = read_f64(&entity.nbt, PROGRESS_KEY).clamp(0.0, 1.0);
-    let secs = t.mixer_ticks / spec.work.max(1e-9) / t.ticks_per_second;
-    s.rows.push(base::v(&line(
-        "rustcraft.mixer.progress",
-        "Progress %s · a bucket in %s s",
-        &[
-            Text::literal(format!("{:.0}%", progress * 100.0)),
-            Text::literal(format!("{secs:.1}").replace(".0", "").replace('.', ",")),
-        ],
-    )));
+    s.rows.push(base::v(&row));
     s.hints = vec![vec![base::v(&line(
         "rustcraft.mixer.hint",
         "Water with bone meal and redstone: nutrient solution; sugar and glowstone: accelerator; honey and copper dust: economizer; nether wart and gold dust: enricher",

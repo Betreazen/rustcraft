@@ -132,12 +132,21 @@ pub fn fish_wait(random: f64, lure: u32) -> u64 {
 
 /// Ticks a level of Lure takes off the wait.
 pub const LURE_TICKS: u64 = 100;
-/// The catch buffer: 9 slots, 18 with a storage module.
+/// The catch buffer: 9 slots, twice as many a storage module (A9: modules stack in full).
 pub const FISH_BUFFER: usize = 9;
+/// The catch slots its window has: 18 (two rows).
+pub const FISH_SHOWN: usize = 2 * FISH_BUFFER;
 
-/// The catch slots a station with `storage` storage modules uses.
+/// The catch cells a station with `storage` storage modules has: 9, 18, 36, 72 (slice 18, wave 2:
+/// ×2 each, guide `mod_storage`).
 pub fn fish_buffer(storage: u32) -> usize {
-    if storage > 0 { 2 * FISH_BUFFER } else { FISH_BUFFER }
+    FISH_BUFFER << storage.min(3)
+}
+
+/// Of them, the cells past the window's 18, kept in the block entity (a menu slot holds at most
+/// 99, SRC/docs/native-mods.md:4617-4627, and the window has room for two rows).
+pub fn fish_reserve(storage: u32) -> usize {
+    fish_buffer(storage).saturating_sub(FISH_SHOWN)
 }
 
 /// Slice 18: the rod's last point is not spent: a rod one catch from breaking stops the station
@@ -239,6 +248,9 @@ mod tests {
         assert!(!rod_worn(5, 0));
         assert_eq!(fish_buffer(0), 9);
         assert_eq!(fish_buffer(1), 18);
+        // Slice 18, wave 2: ×2 for each module; past 18 the cells are hidden.
+        assert_eq!([2, 3, 4].map(fish_buffer), [36, 72, 72]);
+        assert_eq!([0, 1, 2, 3].map(fish_reserve), [0, 0, 18, 54]);
         assert!(open_sky(&[false; 24]));
         assert!(!open_sky(&[false, true]));
     }

@@ -262,7 +262,12 @@ pub(super) fn read(
     let fitted = machines::fitted(game, pos, entity);
     let legacy = legacy_modules(entity);
     let queue_before: Vec<Slot> = read_json(&entity.nbt, QUEUE_KEY);
-    let open_cells = fitted.open_cells();
+    // Slice 18, wave 2 (guide `mod_stack`): a stack module gives each of the nine inputs a cell of 256.
+    let open_cells = queue::open_cells_per_input(
+        modules::capacity_slots(&fitted.modules),
+        modules::stack_tier(&fitted.modules) > 0,
+        content::CRAFTER_BUFFER.len(),
+    );
     let mut visible = raw_buffer.clone();
     let mut cells = queue_before.clone();
     for slot in visible.iter_mut() {

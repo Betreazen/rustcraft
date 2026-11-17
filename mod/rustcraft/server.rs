@@ -254,6 +254,8 @@ pub(super) fn on_level_tick(game: &mut Game<'_>, dimension: &str) {
     // Slice 15: the orders' jobs and a round of every storage's queue, once a second.
     if second {
         orders::tick(game, dimension, &mut level);
+        // Wave 2: the plain item flow drawn in the housings (M5).
+        crate::game::rustcraft_pipe18::show_flow(game, dimension, &level);
     }
     storage::tick(game, dimension);
     monorail::tick(game, dimension, &TUNING);
@@ -335,6 +337,8 @@ pub(super) fn on_use_item_on(
         }
         if crate::game::rustcraft_builder::on_use_item_on(game, player.uuid, player.sneaking, stack, pos) {
             *claimed = true;
+            // Wave 2: what an exploded housing would drop of its facade.
+            crate::game::rustcraft_pipe18::remember_facade(game, &player.dimension, pos);
             return;
         }
     }
@@ -508,6 +512,14 @@ pub(super) fn on_destroy_block(game: &mut Game<'_>, pos: [i32; 3]) {
     if block == content::HOUSING {
         // s18/pipe: its channels are dealt with here, not as a loss at the next rescan.
         crate::game::rustcraft_pipe18::housing_handled(&player.dimension, pos);
+    }
+    // Wave 2: a node broken in survival gives back its facade, its look and its line-boost modules.
+    if block == content::NODE && player.game_mode != CREATIVE {
+        for item in crate::game::rustcraft_node_window::node_returns(game, pos) {
+            if game.native_give_items(&item, 1) == 0 {
+                drop_item(game, &player.dimension, pos, &item);
+            }
+        }
     }
     if block != content::HOUSING || player.game_mode == CREATIVE {
         return;

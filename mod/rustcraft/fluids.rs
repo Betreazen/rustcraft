@@ -136,19 +136,23 @@ pub(super) fn default_mode(block: &str) -> Option<Mode> {
 /// Slice 18: the trash block, a fluid sink of the fluid nets.
 const TRASH: &str = "rustcraft:trash";
 
-/// Slice 18: how much fluid (mB) each trash of the level may destroy this pass: its tier's rate
-/// a second, in buckets, over the pass, as far as its buffer pays 1 E a bucket (guide `trash`).
-fn trash_room(game: &Game<'_>, level: &LevelNet) -> BTreeMap<Pos, u64> {
+/// Slice 18: how much fluid (mB) each trash of the level may destroy this pass and what a bucket
+/// costs it: its tier's rate a second with its speed modules and work mode, in buckets, over the
+/// pass, as far as its buffer pays 1 E a bucket (0.6 with an economy module; guide `trash`,
+/// rustcraft_rules::machines::tiered::trash_rate).
+fn trash_room(game: &Game<'_>, level: &LevelNet, t: &Tuning) -> BTreeMap<Pos, (u64, f64)> {
     level
         .machines
         .iter()
         .filter(|(_, m)| **m == Machine::Util(rustcraft_rules::utility::Util::Trash))
         .map(|(&p, _)| {
             let tier = crate::game::rustcraft_tiers::tier_at(game, p);
-            let rate = u64::from(rustcraft_rules::machines::tiered::trash_batch(tier));
-            let pass = rate * BUCKET * EVERY / 20;
-            let paid = (machines::buffer_energy(game, p).max(0.0) * BUCKET as f64) as u64;
-            (p, pass.min(paid))
+            let mode = machines::entity(game, p).map_or(Default::default(), |e| machines::read_work(&e.nbt));
+            let slots = crate::game::rustcraft_base::modules_at(game, p);
+            let (rate, per) = rustcraft_rules::machines::tiered::trash_rate(tier, &slots, mode, t);
+            let pass = (rate * (BUCKET * EVERY) as f64 / 20.0) as u64;
+            let paid = (machines::buffer_energy(game, p).max(0.0) / per.max(1e-6) * BUCKET as f64) as u64;
+            (p, (pass.min(paid), per))
         })
         .collect()
 }
@@ -269,7 +273,7 @@ struct Inventories<'a> {
     tuning: &'a Tuning,
     /// Slice 18: what each trash may still destroy this pass, mB, and what it destroyed.
     trash: BTreeMap<Pos, u64>,
-    destroyed: BTreeMap<Pos, u64>,
+    destroyed: BTreeMap<Pos, (u64, String)>,
 }
 
 impl FluidInventories for Inventories<'_> {
@@ -341,7 +345,9 @@ impl FluidInventories for Inventories<'_> {
         if let Some(room) = self.trash.get_mut(&block) {
             let n = (*room).min(amount);
             *room -= n;
-            *self.destroyed.entry(block).or_default() += n;
+            let d = self.destroyed.entry(block).or_insert_with(|| (0, fluid.to_owned()));
+            d.0 += n;
+            d.1 = fluid.to_owned();
             return n;
         }
         // Slice 18 (cross): only a catalyst goes into a machine's catalyst tank, so a pump (which
@@ -475,7 +481,8 @@ fn catalysts_from_tanks(
 pub(super) fn tick(game: &mut Game<'_>, level: &mut LevelNet, tuning: &Tuning) {
     let now = level.ticks;
     // Slice 18: the trashes' room this pass, read before the nets borrow the level.
-    let trash = trash_room(game, level);
+    let trash_rooms = trash_room(game, level, tuning);
+    let trash: BTreeMap<Pos, u64> = trash_rooms.iter().map(|(p, (room, _))| (*p, *room)).collect();
     let pumps_at: Vec<Pos> = level
         .machines
         .iter()
@@ -622,11 +629,12 @@ pub(super) fn tick(game: &mut Game<'_>, level: &mut LevelNet, tuning: &Tuning) {
     }
     // Slice 18: each trash pays 1 E a bucket it destroyed.
     let destroyed = std::mem::take(&mut inv.destroyed);
-    for (pos, mb) in destroyed {
+    for (pos, (mb, fluid)) in destroyed {
         let dimension = game.native_dimension().to_owned();
-        crate::game::rustcraft_utility::note_burnt(&dimension, pos, (mb / BUCKET) as u32);
+        crate::game::rustcraft_utility::note_fluid_burnt(&dimension, pos, &fluid, mb);
+        let per = trash_rooms.get(&pos).map_or(1.0, |(_, per)| *per);
         let e = machines::buffer_energy(game, pos);
-        machines::set_buffer_energy(game, pos, e - mb as f64 / BUCKET as f64);
+        machines::set_buffer_energy(game, pos, e - mb as f64 / BUCKET as f64 * per);
     }
     write_back(game, &before, &groups, per_block);
     power::write_sinks(game, &sinks_before, &sinks);
