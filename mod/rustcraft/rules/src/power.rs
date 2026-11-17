@@ -219,19 +219,18 @@ pub fn windmill_output(y: i32, clear: bool, t: &Tuning) -> f64 {
     t.windmill_low + (t.windmill_high - t.windmill_low) * k
 }
 
-/// The cells a windmill at `pos` needs free: the two above it (its mast) and the ring round the
-/// first of them, where the blades turn.
-pub fn windmill_room(pos: Pos) -> Vec<Pos> {
-    let up = |n: i32| [pos[0], pos[1] + n, pos[2]];
-    let mut cells = vec![up(1), up(2)];
-    for dx in -1..=1 {
-        for dz in -1..=1 {
-            if dx != 0 || dz != 0 {
-                cells.push([pos[0] + dx, pos[1] + 1, pos[2] + dz]);
-            }
-        }
-    }
-    cells
+/// The cells a windmill at `pos` facing `facing` needs free: the two above it (its mast and top)
+/// and those its blades sweep. The rotor turns about the facing's axis with its hub two blocks
+/// up (rustcraft:block/windmill__rotor lifted a block, anim::parts), its blades from about 1.2 to
+/// 2.9 blocks up and a block to either side across the facing: x for north and south, z for east
+/// and west. Behind and before it they reach no further than its own column.
+pub fn windmill_room(pos: Pos, facing: &str) -> Vec<Pos> {
+    let side = match facing {
+        "east" | "west" => [0, 0, 1],
+        _ => [1, 0, 0],
+    };
+    let at = |s: i32, n: i32| [pos[0] + s * side[0], pos[1] + n, pos[2] + s * side[2]];
+    vec![at(0, 1), at(0, 2), at(-1, 1), at(1, 1), at(-1, 2), at(1, 2)]
 }
 
 // ---- Lava ----
@@ -473,7 +472,21 @@ mod tests {
         let mid = windmill_output(111, true, &t);
         assert!(mid > 6.9 && mid < 7.0, "{mid}");
         assert!(close(windmill_output(200, false, &t), 0.0));
-        assert_eq!(windmill_room([0, 10, 0]).len(), 10);
+    }
+
+    #[test]
+    fn the_windmills_blades_need_room_where_the_lifted_rotor_turns() {
+        // Wave 2: the hub two blocks up, the blades a block to either side across the facing, on
+        // the first and the second block above it.
+        let north = windmill_room([0, 10, 0], "north");
+        for c in [[0, 11, 0], [0, 12, 0], [-1, 12, 0], [1, 12, 0], [-1, 11, 0], [1, 11, 0]] {
+            assert!(north.contains(&c), "{c:?}");
+        }
+        assert!(!north.contains(&[0, 11, 1]), "behind it the blades do not reach");
+        assert_eq!(north.len(), 6);
+        let east = windmill_room([0, 10, 0], "east");
+        assert!(east.contains(&[0, 12, 1]) && east.contains(&[0, 12, -1]));
+        assert!(!east.contains(&[1, 12, 0]));
     }
 
     #[test]

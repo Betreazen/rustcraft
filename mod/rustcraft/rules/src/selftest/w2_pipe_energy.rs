@@ -7,7 +7,11 @@ use crate::net::topology::ChannelKind;
 use crate::geom::Pos;
 use crate::tuning::Tuning;
 
-pub const ALL: [Build; 2] = [wrench_lifts_a_tier_3_machine, energy_channel_caps_all_its_passes];
+pub const ALL: [Build; 3] = [
+    wrench_lifts_a_tier_3_machine,
+    energy_channel_caps_all_its_passes,
+    windmill_blades_where_the_rotor_turns,
+];
 
 /// Guide `wrench`: a machine of a higher tier lifted by the wrench comes off as its tier's item
 /// and is placed back on that tier, with what it held.
@@ -64,5 +68,26 @@ fn energy_channel_caps_all_its_passes(o: Pos, t: &Tuning) -> Scenario {
         })
         .until("every furnace works on its share of the channel's 32", 200, move |b, _| {
             Ok(furnaces.iter().all(|&f| b.shown(f) == Some(want)))
+        })
+}
+
+/// Guide `windmill` («место вокруг лопастей должно быть свободно»): the blades turn a block to
+/// either side, one and two blocks up. A block beside it two up stops one windmill; a block
+/// behind it one up, where the blades never reach, does not stop another.
+fn windmill_blades_where_the_rotor_turns(o: Pos, _t: &Tuning) -> Scenario {
+    use crate::power::Shown;
+    let side = at(o, [2, 0, 0]);
+    let behind = at(o, [8, 0, 0]);
+    let shown = |b: &dyn super::Bench, p: Pos| b.power(p).map(|v| v.shown);
+    Scenario::new("w2_windmill_blades_checked_where_the_rotor_turns", plot_area(o))
+        .then("two windmills facing north, stone beside one two up, behind the other one up", move |b, _| {
+            b.place(side, "rustcraft:windmill", &[("facing", "north")])?;
+            b.place(at(side, [1, 2, 0]), "minecraft:stone", &[])?;
+            b.place(behind, "rustcraft:windmill", &[("facing", "north")])?;
+            b.place(at(behind, [0, 1, 1]), "minecraft:stone", &[])
+        })
+        .until("the first is blocked, the second turns", 200, move |b, _| {
+            Ok(shown(b, side) == Some(Shown::Blocked)
+                && matches!(shown(b, behind), Some(Shown::Gives(_))))
         })
 }

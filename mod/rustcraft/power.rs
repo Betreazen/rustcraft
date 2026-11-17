@@ -216,7 +216,8 @@ fn refresh(game: &Game<'_>, s: &mut Sources, t: &Tuning) {
         }
     }
     for &w in &s.windmills {
-        let clear = rules::windmill_room(w)
+        let facing = game.native_block_property(w, content::FACING).unwrap_or_default();
+        let clear = rules::windmill_room(w, &facing)
             .into_iter()
             .all(|c| AIR.contains(&game.native_block(c).as_str()));
         let out = rules::windmill_output(w[1], clear, t);
