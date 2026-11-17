@@ -1142,6 +1142,7 @@ pub(super) fn tick(game: &mut Game<'_>, dimension: &str, level: &mut LevelNet) {
             game, dimension, level, &mut state, &jobs, &mut ships, *id, *anchor, terminals,
         );
         jobs.extend(started);
+        feed_crafters(game, dimension, level, &jobs, *id, *anchor);
     }
     // Storages that are gone take their orders with them.
     let live: BTreeSet<u32> = anchors.keys().copied().collect();
@@ -1294,6 +1295,41 @@ fn stock_with_fluids(
 /// One storage's round: its line, its «держать» orders and the jobs to start, started. The jobs
 /// that went to machines. An order whose items ride the item channel counts as running.
 #[allow(clippy::too_many_arguments)]
+/// Slice 18 (handed over from stream 1): «автокрафтер просит у склада недостающий ингредиент».
+/// An autocrafter on the storage's line with no order job, whose first page short of something
+/// the storage holds all of, gets one craft's worth into its buffer straight from the storage.
+fn feed_crafters(game: &mut Game<'_>, dimension: &str, level: &LevelNet, jobs: &[Running], id: u32, anchor: Pos) {
+    let (_, machines_on_line) = line_state(level, anchor);
+    let tuning = server::tuning();
+    for (pos, machine) in machines_on_line {
+        if machine != Machine::Crafter || jobs.iter().any(|r| r.job.machine == pos) {
+            continue;
+        }
+        let Some(entity) = crate::game::rustcraft_machines::entity(game, pos) else { continue };
+        let (patterns, buffer) = crafter::pages_and_buffer(&entity, tuning);
+        drop(entity);
+        // The first page with anything in it that lacks something the storage has.
+        let short = patterns
+            .iter()
+            .filter(|p| p.iter().any(Option::is_some))
+            .map(|p| rustcraft_rules::orders::page_shortfall(p, &buffer))
+            .find(|s| !s.is_empty() && s.iter().all(|(i, n)| storage::stored_count(dimension, id, i) >= u64::from(*n)));
+        let Some(short) = short else { continue };
+        let mut taken: Vec<(ItemKey, u64)> = Vec::new();
+        for (item, n) in &short {
+            let got = storage::take_from(dimension, id, item, u64::from(*n));
+            taken.push((item.clone(), got));
+        }
+        if taken.iter().zip(&short).any(|((_, got), (_, n))| *got < u64::from(*n))
+            || !place_inputs(game, machine, pos, &taken)
+        {
+            for (item, got) in taken {
+                storage::restore_into(dimension, id, &item, got);
+            }
+        }
+    }
+}
+
 fn storage_round(
     game: &mut Game<'_>,
     dimension: &str,
