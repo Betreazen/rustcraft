@@ -961,6 +961,19 @@ bindings = [
   { name = "entity", ty = "Option<i32>", value = "entity" },
 ]
 
+# Slice 18 (cross): an energy shield whose charge ran out while held up goes down (API 131).
+[[injection]]
+id = "living_entity_use_item_tick"
+hook = "living_entity_use_item_tick"
+hook_version = 1
+kind = "HEAD"
+helper = "hook_use_item_tick.rs"
+bindings = [
+  { name = "stack", ty = "&horizon_client::items::ItemStack", value = "stack" },
+  { name = "entity", ty = "Option<i32>", value = "entity" },
+  { name = "canceled", ty = "&mut bool", value = "&mut *canceled" },
+]
+
 # Slice 13: a player's input flags (API 343), for the dash module.
 [[injection]]
 id = "player_input"

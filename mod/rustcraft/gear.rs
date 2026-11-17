@@ -891,12 +891,31 @@ pub(super) fn on_use_start(stack: &ItemStack, entity: Option<i32>, canceled: &mu
     let Some(id) = id_of(stack) else { return };
     let mut s = state();
     let charge = s.store.held.get(&id).map_or(0.0, |h| h.charge);
-    if charge < rules::SHIELD_PER_DAMAGE {
+    if !rules::shield::holds_up(charge) {
         *canceled = true;
         return;
     }
     if let Some(e) = entity {
         s.blocking.insert(e, (id, g.tier));
+    }
+}
+
+/// `native_living_entity_use_item_tick` (API 131): an energy shield held up whose charge ran out
+/// goes down (guide `eshield`): the cancel finishes the use, so vanilla's blocking ends. Only
+/// where its charge is known (the server's store); a client that does not know leaves it.
+pub(super) fn on_use_tick(stack: &ItemStack, entity: Option<i32>, canceled: &mut bool) {
+    let Some(g) = Gear::of(&stack.item) else { return };
+    if g.kind != Kind::Shield {
+        return;
+    }
+    let Some(id) = id_of(stack) else { return };
+    let mut s = state();
+    let Some(charge) = s.store.held.get(&id).map(|h| h.charge) else { return };
+    if !rules::shield::holds_up(charge) {
+        *canceled = true;
+        if let Some(e) = entity {
+            s.blocking.remove(&e);
+        }
     }
 }
 

@@ -2,6 +2,13 @@
 //! 1.5 s by tier (vanilla's shield: 5 s), and the fourth tier sends arrows and other projectiles
 //! back at whoever shot them.
 
+/// Slice 18 (cross, guide `eshield`: «Когда заряд кончается, поле гаснет и щит не блокирует,
+/// пока его не зарядят»): whether a shield with `charge` E can stay up: enough for one block's
+/// least cost. Asked when it goes up and every tick it is held up.
+pub fn holds_up(charge: f64) -> bool {
+    charge + 1e-9 >= super::SHIELD_PER_DAMAGE
+}
+
 /// Vanilla's shield is off this long after an axe's hit, seconds.
 pub const AXE_SECONDS: f32 = 5.0;
 
@@ -59,6 +66,14 @@ pub fn back_motion(at: [f64; 3], target: [f64; 3], speed: f64) -> [f64; 3] {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_drained_shield_goes_down() {
+        assert!(holds_up(super::super::SHIELD_PER_DAMAGE));
+        assert!(holds_up(6000.0));
+        assert!(!holds_up(9.0));
+        assert!(!holds_up(0.0));
+    }
 
     #[test]
     fn an_axe_switches_the_shield_off_for_its_tiers_time() {
