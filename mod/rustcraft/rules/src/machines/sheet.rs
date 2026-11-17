@@ -52,12 +52,23 @@ pub enum Kind {
     Structure,
 }
 
-/// Slice 18: the rows a slice-12 window adds to its spec's: the trash's filter and burnt count,
-/// the disintegrator's item, share and kept fractions.
-fn extra_rows(u: crate::utility::Util) -> usize {
+/// Slice 18, wave 2: the windows the guide draws part by part (`ui.js` trash, disintegrator,
+/// charger), on top of a slice-12 window's shape.
+fn guide_shape(u: crate::utility::Util, s: Shape) -> Shape {
+    use crate::utility::Util;
     match u {
-        crate::utility::Util::Trash | crate::utility::Util::Disintegrator => 2,
-        _ => 0,
+        // Its joint's filter, «самый низкий» priority, the minute's count and the throughput; the
+        // fluid and energy bars; «Сгорает сейчас»: the nine cells it burns from and the arrow of
+        // its batch (its old filter cells 0..9 hidden). The throughput is a line, not a gauge,
+        // and the cells' name is their tooltip: the window keeps to 240 pixels.
+        Util::Trash => Shape { rows: 4, bars: 2, shown: Some((9, 18)), lead: 9, work: true, ..s },
+        // The share (and «чары теряются»), the kept fractions; durability and energy bars; its
+        // input, the arrow and «Разборка», what comes out; the nine output cells.
+        Util::Disintegrator => Shape { rows: 2, bars: 2, lead: 1, work: true, preview: 4, ..s },
+        // «Броня»: four cells (the output, which the net takes, hidden); the charge and energy
+        // bars; no work mode in the guide's window.
+        Util::Charger => Shape { rows: 0, bars: 2, mode: false, shown: Some((0, 4)), lead: 4, label: true, ..s },
+        _ => s,
     }
 }
 
@@ -75,6 +86,27 @@ pub struct Shape {
     pub toggles: usize,
     /// The block's own slots, in rows of nine.
     pub slots: usize,
+    /// Slice 18, wave 2: the menu's slots the window shows (the rest are hidden: the trash's old
+    /// filter cells, the charger's output); all when none.
+    pub shown: Option<(usize, usize)>,
+    /// Slice 18, wave 2: the first shown slots on a row of their own from the left (the mixer's
+    /// ingredients, the disintegrator's input, the trash's cells, the charger's «Броня»), the
+    /// work arrow after them (`ui.js` `work`) and ghost cells of what comes out after it.
+    pub lead: usize,
+    pub work: bool,
+    pub preview: usize,
+    /// A label line over the lead row.
+    pub label: bool,
+}
+
+impl Shape {
+    /// The menu slots shown, in order.
+    pub fn shown_range(&self) -> std::ops::Range<usize> {
+        match self.shown {
+            Some((a, b)) => a.min(self.slots)..b.min(self.slots),
+            None => 0..self.slots,
+        }
+    }
 }
 
 impl Kind {
@@ -243,7 +275,7 @@ impl Kind {
                 let count = u.slots().count;
                 // Slice 18: the living vein has the work modes and a progress bar (ui.js `vein`).
                 let vein = u == crate::utility::Util::Vein;
-                Shape {
+                guide_shape(u, Shape {
                     sockets,
                     // Slice 18 (UT7): every machine that works in steps has the three modes;
                     // the ones whose pace is the animals' or the water's do not. The living vein
@@ -253,7 +285,7 @@ impl Kind {
                         || crate::modules::Holder::Util(u).takes(crate::modules::Module::Speed),
                     // Slice 18: the guide's windows' rows and bars (`ui.js` trash, disintegrator,
                     // charger, vein, and each craft machine's own bars).
-                    rows: spec.rows + extra_rows(u),
+                    rows: spec.rows,
                     bars: if vein {
                         2
                     } else {
@@ -262,7 +294,7 @@ impl Kind {
                     toggles: spec.toggles,
                     slots: if count > 1 { count } else { 0 },
                     ..Shape::default()
-                }
+                })
             }
         }
     }
@@ -335,6 +367,14 @@ pub struct Sheet {
     pub toggles: Vec<Toggle>,
     /// How many of the block's slots it uses now (the miner's grow with storage modules).
     pub usable: Option<u8>,
+    /// Slice 18, wave 2: the work arrow's share done, the ghost cells (item, count text) and the
+    /// lead row's label.
+    #[serde(default)]
+    pub work: Option<f64>,
+    #[serde(default)]
+    pub preview: Vec<(String, String)>,
+    #[serde(default)]
+    pub label: Option<Value>,
     pub status: Option<Status>,
 }
 
@@ -369,6 +409,8 @@ const BAR_STEP: f32 = 18.0;
 const TOGGLE: f32 = 20.0;
 const TOGGLE_GAP: f32 = 2.0;
 const STATUS_H: f32 = 12.0;
+/// Slice 18, wave 2: the work arrow's width.
+const WORK_W: f32 = 22.0;
 /// The player's inventory: three rows, a gap and the hotbar.
 const INVENTORY_H: f32 = 76.0;
 const INVENTORY_X: f32 = 26.0;
@@ -386,8 +428,13 @@ pub struct Layout {
     /// Each bar's label line and its well.
     pub bars: Vec<(f32, Rect)>,
     pub toggles: Vec<Rect>,
-    /// Where each of the block's slots has its item.
+    /// Where each of the block's shown slots has its item.
     pub slots: Vec<[f32; 2]>,
+    /// Slice 18, wave 2: every menu slot's place, none for a hidden one.
+    pub menu_slots: Vec<Option<[f32; 2]>>,
+    pub work: Option<Rect>,
+    pub preview: Vec<[f32; 2]>,
+    pub label_y: Option<f32>,
     pub status: Rect,
     pub inventory: [f32; 2],
     pub inventory_label_y: f32,
@@ -404,6 +451,10 @@ pub fn layout(shape: Shape) -> Layout {
         bars: Vec::new(),
         toggles: Vec::new(),
         slots: Vec::new(),
+        menu_slots: Vec::new(),
+        work: None,
+        preview: Vec::new(),
+        label_y: None,
         status: [0.0; 4],
         inventory: [0.0; 2],
         inventory_label_y: 0.0,
@@ -440,17 +491,35 @@ pub fn layout(shape: Shape) -> Layout {
             .collect();
         y += TOGGLE + TOGGLE_GAP;
     }
-    if shape.slots > 0 {
-        out.slots = (0..shape.slots)
-            .map(|i| {
-                [
-                    INVENTORY_X + 18.0 * (i % 9) as f32,
-                    y + 1.0 + 18.0 * (i / 9) as f32,
-                ]
-            })
-            .collect();
-        y += 18.0 * shape.slots.div_ceil(9) as f32 + 2.0;
+    let shown = shape.shown_range();
+    let lead = shape.lead.min(shown.len());
+    if shape.label {
+        out.label_y = Some(y);
+        y += ROW;
     }
+    if lead > 0 || shape.work {
+        out.slots = (0..lead).map(|k| [LEFT + 1.0 + 18.0 * k as f32, y + 1.0]).collect();
+        let mut x = LEFT + 18.0 * lead as f32 + 4.0;
+        if shape.work {
+            out.work = Some([x, y + 3.0, WORK_W, 12.0]);
+            x += WORK_W + 4.0;
+        }
+        out.preview = (0..shape.preview).map(|k| [x + 1.0 + 18.0 * k as f32, y + 1.0]).collect();
+        y += 18.0 + 2.0;
+    }
+    let rest = shown.len() - lead;
+    if rest > 0 {
+        out.slots.extend((0..rest).map(|i| {
+            [
+                INVENTORY_X + 18.0 * (i % 9) as f32,
+                y + 1.0 + 18.0 * (i / 9) as f32,
+            ]
+        }));
+        y += 18.0 * rest.div_ceil(9) as f32 + 2.0;
+    }
+    out.menu_slots = (0..shape.slots)
+        .map(|i| shown.contains(&i).then(|| out.slots[i - shown.start]))
+        .collect();
     out.status = [LEFT, y, RIGHT - LEFT, STATUS_H];
     y += STATUS_H + 2.0;
     out.inventory_label_y = y;
@@ -623,6 +692,9 @@ mod tests {
         }
         out.extend(l.toggles.iter().copied());
         out.extend(l.slots.iter().map(|p| slot_frame(*p)));
+        out.extend(l.work);
+        out.extend(l.preview.iter().map(|p| slot_frame(*p)));
+        out.extend(l.label_y.map(|y| [LEFT, y, RIGHT - LEFT, ROW - 1.0]));
         out.push(l.status);
         out
     }
@@ -633,7 +705,8 @@ mod tests {
 
     #[test]
     fn every_window_fits_the_screen_and_its_parts_do_not_overlap() {
-        for kind in Kind::ALL {
+        let utils = crate::utility::Util::ALL.into_iter().map(Kind::Util);
+        for kind in Kind::ALL.into_iter().chain(utils) {
             let l = layout(kind.shape());
             assert!(l.height <= MAX_HEIGHT, "{kind:?} is {} high", l.height);
             let parts = rects(&l);
@@ -651,7 +724,8 @@ mod tests {
             }
             // The inventory, nine slots wide, inside the window.
             assert!(l.inventory[0] + 9.0 * 18.0 <= WIDTH);
-            assert_eq!(l.slots.len(), kind.shape().slots);
+            assert_eq!(l.slots.len(), kind.shape().shown_range().len());
+            assert_eq!(l.menu_slots.len(), kind.shape().slots);
         }
     }
 
@@ -797,6 +871,42 @@ mod tests {
         assert!(!put_free(&mut slots, Holder::Miner, Module::Poison.item()));
         assert!(put_free(&mut slots, Holder::Miner, Module::Storage.item()));
         assert!(!put_free(&mut slots, Holder::Miner, Module::Speed.item()));
+    }
+
+    #[test]
+    fn a_lead_row_has_its_slots_the_arrow_and_the_preview_in_turn() {
+        let shape = Shape { slots: 10, lead: 1, work: true, preview: 4, label: true, ..Shape::default() };
+        let l = layout(shape);
+        let w = l.work.expect("an arrow");
+        assert!(w[0] > l.slots[0][0] + 16.0);
+        assert!(l.preview[0][0] > w[0] + w[2]);
+        assert_eq!(l.preview.len(), 4);
+        assert_eq!(l.slots.len(), 10);
+        // The rest of the slots go under the lead row.
+        assert!(l.slots[1][1] > l.slots[0][1] + 16.0);
+        assert!(l.label_y.unwrap() < l.slots[0][1]);
+        let hidden = layout(Shape { slots: 8, shown: Some((0, 4)), lead: 4, ..Shape::default() });
+        assert_eq!(hidden.slots.len(), 4);
+        assert!(hidden.menu_slots[..4].iter().all(Option::is_some));
+        assert!(hidden.menu_slots[4..].iter().all(Option::is_none));
+    }
+
+    #[test]
+    fn the_guides_trash_disintegrator_and_charger_windows() {
+        use crate::utility::Util;
+        let trash = layout(Kind::Util(Util::Trash).shape());
+        assert_eq!(trash.slots.len(), 9);
+        assert!(trash.menu_slots[..9].iter().all(Option::is_none));
+        assert!(trash.work.is_some() && trash.rows.len() == 4 && trash.bars.len() == 2);
+        assert!(!trash.mode.is_empty());
+        let dis = layout(Kind::Util(Util::Disintegrator).shape());
+        assert_eq!((dis.preview.len(), dis.slots.len()), (4, 10));
+        assert!(dis.work.is_some());
+        let charger = Kind::Util(Util::Charger).shape();
+        assert!(!charger.mode && charger.label);
+        let l = layout(charger);
+        assert_eq!(l.slots.len(), 4);
+        assert!(l.menu_slots[4..].iter().all(Option::is_none));
     }
 
     #[test]

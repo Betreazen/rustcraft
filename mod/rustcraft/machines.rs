@@ -1122,10 +1122,12 @@ pub(super) fn slot_takes(
                     .map(|s| s.item.to_string())
                     .collect()
             };
-            // Slice 18 (guide `trash`): with no filter cells of its own, the trash's joints'
-            // filters decide what reaches it.
-            if u == rustcraft_rules::utility::Util::Trash && filter.is_empty() {
-                return u.slots().inputs.contains(&slot);
+            // Slice 18, wave 2 (guide `trash`): only what its joints' filters let through, by its
+            // copy of them (a hopper above it puts nothing else).
+            if u == rustcraft_rules::utility::Util::Trash {
+                let filters = crate::game::rustcraft_utility::trash_filters(entity);
+                return u.slots().inputs.contains(&slot)
+                    && rustcraft_rules::machines::tiered::trash_passes(&filters, item);
             }
             u.takes(slot, item, &filter)
         }

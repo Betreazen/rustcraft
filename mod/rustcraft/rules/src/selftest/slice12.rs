@@ -82,23 +82,27 @@ fn reported(b: &dyn Bench, kind: &str) -> bool {
     b.reports().iter().any(|r| r.starts_with(&format!("pct-machine {kind} ")))
 }
 
+/// Slice 18, wave 2: the trash's filter is its joint's (the wrench): what that lets through
+/// burns, and what a player put in that it does not stays.
 fn trash_burns_what_its_filter_names(o: Pos, _: &Tuning) -> Scenario {
+    use crate::geom::Face;
+    let h = at(o, [2, 1, 0]);
     let p = at(o, [3, 1, 0]);
     Scenario::new("util_trash_burns_its_filter", plot_area(o))
-        .then("a trash with dirt in its filter and dirt to burn", move |b, _| {
+        .then("a trash beside a housing whose joint lets dirt through, dirt and stone in it", move |b, _| {
             floor(b, o)?;
+            b.place(h, "rustcraft:housing", &[])?;
             machine(b, p, "rustcraft:trash")?;
-            b.put(p, 0, "minecraft:dirt", 1)?;
+            let mut j = crate::machines::tiered::trash_joint();
+            j.filter.items.insert("minecraft:dirt".into());
+            b.set_joint(h, Face::XPos, 0, j)?;
             b.put(p, 9, "minecraft:dirt", 6)?;
             b.put(p, 10, STONE, 3)
         })
         .until("the dirt is burnt", 120, move |b, _| {
-            Ok(b.items(p).get(9).is_none_or(|s| s.as_ref().is_none_or(|s| s.1 == 0)))
+            Ok(count_of(&b.items(p), "minecraft:dirt") == 0)
         })
-        .check("the filter and the stone stay", move |b, _| {
-            same("filter", count_of(&b.items(p).into_iter().take(9).collect::<Vec<_>>(), "minecraft:dirt"), 1)?;
-            same("stone", count_of(&b.items(p), STONE), 3)
-        })
+        .check("the stone stays", move |b, _| same("stone", count_of(&b.items(p), STONE), 3))
 }
 
 fn trash_without_a_filter_stands(o: Pos, _: &Tuning) -> Scenario {
