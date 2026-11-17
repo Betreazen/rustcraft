@@ -3,6 +3,7 @@
 //! - The pump has the work modes (owner 2026-11-17): boost pumps a bucket in half the time for
 //!   three times the energy, and its window shows the mode.
 //! - The placer and the breaker work faster on a higher tier (A8): their windows' pace.
+//! - A line-boost module in a node raises a fluid net's flow by half (guide `mod_line`).
 //! - A broken tiered block drops its own tier's item: the loot tables in 26.3's form
 //!   (`match_block`), which the old `block_state_property` list was not.
 
@@ -13,7 +14,12 @@ use crate::machines::panel::ENERGY_SCALE;
 use crate::machines::processor::WorkMode;
 use crate::tuning::Tuning;
 
-pub const ALL: [Build; 3] = [pump_boost_mode, placer_and_breaker_by_tier, tiered_blocks_drop_their_tier];
+pub const ALL: [Build; 4] = [
+    pump_boost_mode,
+    placer_and_breaker_by_tier,
+    tiered_blocks_drop_their_tier,
+    line_boost_on_a_fluid_net,
+];
 
 const STONE: &str = "minecraft:stone";
 const LAVA: &str = "minecraft:lava";
@@ -119,6 +125,69 @@ fn tiered_blocks_drop_their_tier(o: Pos, _: &Tuning) -> Scenario {
                 }
             }
             Ok(())
+        })
+}
+
+/// Ticks each flow is counted over.
+const FLOW_WINDOW: u64 = 100;
+
+fn line_boost_on_a_fluid_net(o: Pos, t: &Tuning) -> Scenario {
+    use super::magistral::{channel, line};
+    use crate::geom::Face;
+    use crate::net::fluids::BUCKET;
+    use crate::net::items::Mode;
+    use crate::net::settings::JointSetting;
+    use crate::net::topology::ChannelKind;
+    const TANK: &str = "rustcraft:tank";
+    const WATER: &str = "minecraft:water";
+    // Two stacked tanks each end: 32 buckets, more than both windows move.
+    let (from, to) = (at(o, [1, 0, -1]), at(o, [4, 0, -1]));
+    let full = 2 * t.tank_buckets * BUCKET;
+    let amount = move |b: &dyn super::Bench, p: Pos| b.tank(p).map_or(0, |g| g.amount) as f64;
+    let boost = crate::net::node_window::boost(1);
+    Scenario::new("s18_line_boost_on_a_fluid_net", plot_area(o))
+        .then("a tier-1 fluid line from a full tank to an empty one", move |b, _| {
+            line(b, o, 1, 4, [channel(ChannelKind::Fluid, 1), None, None, None])?;
+            for p in [from, to] {
+                b.place(p, TANK, &[])?;
+                b.place(at(p, [0, 1, 0]), TANK, &[])?;
+            }
+            b.set_tank(from, WATER, full)?;
+            b.set_joint(at(o, [1, 0, 0]), Face::ZNeg, 0, JointSetting::of_mode(Mode::From))
+        })
+        .wait(20)
+        .then("count the plain flow", move |b, m| {
+            m.mark("plain0", amount(b, to));
+            Ok(())
+        })
+        .wait(FLOW_WINDOW)
+        .then("a line-boost module into the node", move |b, m| {
+            m.mark("plain", amount(b, to) - m.get("plain0"));
+            let n = b.pipe("socket:0", o)?;
+            if n != "1" {
+                return Err(format!("{n} modules after the press"));
+            }
+            b.refresh();
+            Ok(())
+        })
+        .wait(20)
+        .then("count the boosted flow", move |b, m| {
+            m.mark("boost0", amount(b, to));
+            Ok(())
+        })
+        .wait(FLOW_WINDOW)
+        .check("the boosted net carries half as much again", move |b, m| {
+            let plain = m.get("plain");
+            let boosted = amount(b, to) - m.get("boost0");
+            if plain <= 0.0 {
+                return Err("nothing flowed before the module".into());
+            }
+            let ratio = boosted / plain;
+            if (ratio - boost).abs() <= 0.25 {
+                Ok(())
+            } else {
+                Err(format!("plain {plain} mB, boosted {boosted} mB in {FLOW_WINDOW} ticks: ×{ratio:.2}, not ×{boost}"))
+            }
         })
 }
 

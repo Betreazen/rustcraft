@@ -174,6 +174,9 @@ pub(super) fn rebuild(
             }
         }
     }
+    // Slice 18 (cross, guide `mod_line`): a line-boost module in a node raises the fluid
+    // channels it serves too, the net held to its weakest section, as the item nets.
+    let boosts = crate::game::rustcraft_node_window::node_modules(game, level.layout.nodes.keys().copied());
     let nets: Vec<FluidNet> = fluid_nets
         .filter_map(|net| {
             let joints = joints::item_joints(net, &level.layout, &blocks, &level.joints);
@@ -181,7 +184,8 @@ pub(super) fn rebuild(
             (!joints.is_empty()).then(|| FluidNet {
                 key: (net.slot, first),
                 joints,
-                buckets_per_second: tuning.fluids_of(net.min_tier),
+                buckets_per_second: tuning.fluids_of(net.min_tier)
+                    * rustcraft_rules::net::node_window::net_boost(&net.housings, &level.topology.reach, &boosts),
                 kinds: tuning.kinds_of(net.min_tier),
             })
         })

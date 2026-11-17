@@ -71,9 +71,9 @@
 
 - [x] RED/GREEN (`placer_and_breaker_speed_up_from_tier_two`), бандл (`mining::tier_speed`: работа и расход ×скорость ступени; строка темпа окна считает ступень, режим и модули), самотест `s18_placer_and_breaker_by_tier` (темп в окне на ступенях 2/4 и 2/3), коммит.
 
-### Task 5: ускорение линии на жидкостных и энергосетях — [~] после слияния `s18/pipe`
+### Task 5: ускорение линии на жидкостных и энергосетях
 
-- [~] В `fluids.rs` (поток ведра по каналу) и `power.rs` (пропуск энергии канала) множитель `node_window::net_boost(housings, &topo.reach, &modules)`, модули узлов — как их читает `transport.rs:253`.
+- [x] `fluids.rs::rebuild`: `buckets_per_second ×= node_window::net_boost(housings, &topology.reach, &boosts)`, модули узлов — `rustcraft_node_window::node_modules`, как `transport.rs`; `machines::circuits` берёт `boosts` (новый параметр, вызов в `server.rs` — своя строка), `cap ×= net_boost`. Нажатие гнезда узла уже помечает уровень устаревшим (`mark_level_stale`), сети перестраиваются. Самотест `s18_line_boost_on_a_fluid_net` (поток бак→бак за 100 тиков до и после модуля, ×1,5 ± 0,25). Энергия — тем же множителем, отдельного самотеста нет (правило `net_boost` проверено потоком 1).
 
 ### Task 6: опыт PCT от электропечи, плавильни и автокрафтера
 

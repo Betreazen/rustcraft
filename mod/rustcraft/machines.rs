@@ -183,6 +183,7 @@ pub(super) fn circuits(
     layout: &Layout,
     ports: &BTreeMap<Pos, Port>,
     settings: &BTreeMap<Pos, HousingJoints>,
+    boosts: &BTreeMap<Pos, u8>,
     tuning: &Tuning,
 ) -> Vec<Circuit> {
     topology
@@ -191,7 +192,10 @@ pub(super) fn circuits(
         .filter(|net| net.kind == ChannelKind::Energy)
         .map(|net| Circuit {
             members: joints::energy_members(net, layout, ports, settings),
-            cap: tuning.energy_of(net.min_tier),
+            // Slice 18 (cross, guide `mod_line`): the nodes' line-boost modules (`boosts`, their
+            // counts) raise what the circuit's channels let through, as the item nets'.
+            cap: tuning.energy_of(net.min_tier)
+                * rustcraft_rules::net::node_window::net_boost(&net.housings, &topology.reach, boosts),
         })
         .filter(|c| !c.members.is_empty())
         .collect()

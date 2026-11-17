@@ -591,11 +591,14 @@ fn rescan(game: &mut Game<'_>, dimension: &str, level: &mut LevelNet) {
         .collect();
     // The machines may have changed: every idle one looks at its slots again.
     level.power.idle.clear();
+    // Slice 18 (cross): the nodes' line-boost modules for the energy circuits.
+    let boosts = crate::game::rustcraft_node_window::node_modules(game, level.layout.nodes.keys().copied());
     level.power.circuits = machines::circuits(
         &level.topology,
         &level.layout,
         &ports,
         &level.joints,
+        &boosts,
         &TUNING,
     );
     power::rescan(level);
