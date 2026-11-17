@@ -977,7 +977,7 @@ impl Bench for GameBench<'_, '_> {
     fn menu_data(&self, pos: Pos) -> Vec<i32> {
         self.game
             .native_mod_block_entity(pos)
-            .map(|e| e.data)
+            .map(|e| e.data.clone())
             .unwrap_or_default()
     }
 
