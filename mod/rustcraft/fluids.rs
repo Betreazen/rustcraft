@@ -903,6 +903,42 @@ pub(super) fn put_touching(game: &mut Game<'_>, level: &LevelNet, pos: Pos, flui
     went
 }
 
+/// Slice 18 (stream 5, O12 handed over from stream 1): «заказ приносит свою воду»: an order's
+/// mixer step takes its water from the tanks `reachable` counts for it (touching it, or behind a
+/// joint that gives on a fluid net it is a joint of) into the mixer's own tank, as far as it has
+/// room. How much came.
+pub(super) fn bring_water(game: &mut Game<'_>, level: &LevelNet, mixer_at: Pos, amount: u64, tuning: &Tuning) -> u64 {
+    let Some(mut tanks) = mixer::read_tanks(game, mixer_at) else {
+        return 0;
+    };
+    let room = mixer::tank_size(tuning).saturating_sub(tanks.water).min(amount);
+    if room == 0 {
+        return 0;
+    }
+    let mut near: BTreeSet<Pos> = Face::ALL.into_iter().map(|f| step(mixer_at, f)).collect();
+    for net in &level.fluids.nets {
+        if net.joints.iter().any(|j| j.block == mixer_at && j.mode != Mode::From) {
+            near.extend(net.joints.iter().filter(|j| j.mode != Mode::Into).map(|j| j.block));
+        }
+    }
+    let per_block = tuning.tank_buckets * BUCKET;
+    let before = read_groups(game, &level.fluids.tanks, per_block);
+    let mut after = before.clone();
+    let mut got = 0;
+    for g in after.iter_mut() {
+        if got >= room {
+            break;
+        }
+        if g.fluid.as_deref() == Some(WATER) && g.blocks.iter().any(|b| near.contains(b)) {
+            got += g.take(WATER, room - got);
+        }
+    }
+    write_back(game, &before, &after, per_block);
+    tanks.water += got;
+    mixer::write_tanks(game, mixer_at, &tanks);
+    got
+}
+
 /// A tank's diagnosis: «Бак: вода, 20 из 32 вёдер», its joints and its note.
 pub(super) fn tank_text(game: &Game<'_>, level: &LevelNet, pos: Pos, tuning: &Tuning) -> Text {
     let Some(g) = group_at(game, level, pos, tuning) else {

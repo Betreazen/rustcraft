@@ -1452,6 +1452,19 @@ fn storage_round(
             continue;
         }
         queue.started(&job);
+        // Slice 18 (O12): a mixer step's water comes with the order.
+        if machine == Machine::Mixer {
+            let water: u64 = job
+                .step
+                .inputs
+                .iter()
+                .filter(|(k, _)| fluid_of(k) == Some(WATER))
+                .map(|(_, n)| u64::from(*n) * u64::from(job.runs) * BUCKET)
+                .sum();
+            if water > 0 {
+                crate::game::rustcraft_fluids::bring_water(game, level, job.machine, water, server::tuning());
+            }
+        }
         // Along the channel the page comes when the items arrive.
         if machine == Machine::Crafter && sent == Sent::Placed {
             level.temp_pages.insert(
