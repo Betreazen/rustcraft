@@ -952,9 +952,9 @@ fn kitchen_stash(game: &mut Game<'_>, pos: Pos) -> Vec<rustcraft_rules::machines
     let modules = base::modules_at(game, pos);
     let stacked = rustcraft_rules::modules::stack_tier(&modules) > 0;
     // Wave 2: and two hidden cells a capacity module.
-    let capacity = capacity_of(&entity);
+    let queue = rustcraft_rules::utility::queue_cells(Util::Kitchen, &modules);
     let cells_before: Vec<Slot> = read_json(&entity.nbt, KITCHEN_CELLS_KEY);
-    if !stacked && capacity == 0 && cells_before.iter().all(Option::is_none) {
+    if !stacked && queue == 0 && cells_before.iter().all(Option::is_none) {
         return cells_before;
     }
     let plain = |s: &ItemStack| s.damage == 0 && s.extra.is_none();
@@ -966,7 +966,7 @@ fn kitchen_stash(game: &mut Game<'_>, pos: Pos) -> Vec<rustcraft_rules::machines
     let mut visible = visible_before.clone();
     let mut cells = cells_before.clone();
     let max = |i: &str| machines::max_stack(game, i);
-    kitchen::stash(&mut visible, &mut cells, stacked, capacity, |i| rustcraft_rules::modules::machine_stack(&modules, max(i)), &max);
+    kitchen::stash(&mut visible, &mut cells, stacked, queue, |i| rustcraft_rules::modules::machine_stack(&modules, max(i)), &max);
     if visible == visible_before && cells == cells_before {
         return cells;
     }
@@ -1122,9 +1122,9 @@ fn brew_stash(game: &mut Game<'_>, pos: Pos) -> [Vec<rustcraft_rules::machines::
     let modules = base::modules_at(game, pos);
     let stacked = rustcraft_rules::modules::stack_tier(&modules) > 0;
     // Wave 2: and two hidden reagent cells a capacity module.
-    let capacity = capacity_of(&entity);
+    let queue = rustcraft_rules::utility::queue_cells(Util::Brewer, &modules);
     let before: [Vec<Slot>; 2] = keys.map(|k| read_json(&entity.nbt, k));
-    if !stacked && capacity == 0 && before.iter().all(|c| c.iter().all(Option::is_none)) {
+    if !stacked && queue == 0 && before.iter().all(|c| c.iter().all(Option::is_none)) {
         return before;
     }
     let plain = |s: &ItemStack| s.damage == 0 && s.extra.is_none();
@@ -1140,7 +1140,7 @@ fn brew_stash(game: &mut Game<'_>, pos: Pos) -> [Vec<rustcraft_rules::machines::
     let mut cells = before.clone();
     let max = |i: &str| machines::max_stack(game, i);
     for (g, (v, c)) in visible.iter_mut().zip(cells.iter_mut()).enumerate() {
-        let open = rustcraft_rules::utility::brew::group_open(g, stacked, capacity);
+        let open = rustcraft_rules::utility::brew::group_open(g, stacked, queue);
         rustcraft_rules::utility::kitchen::stash_open(v, c, open, |i| rustcraft_rules::modules::machine_stack(&modules, max(i)), &max);
     }
     if visible == visible_before && cells == before {

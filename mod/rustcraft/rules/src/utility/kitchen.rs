@@ -48,13 +48,11 @@ pub fn milk_buckets(need: &[(String, u32)]) -> u32 {
 pub const INPUTS: usize = 9;
 
 /// Wave 2 (guide `mod_cap`: «+2 ячейки очереди за модуль»; `kitchen`: «больше ячеек под
-/// ингредиенты»): hidden input cells a capacity module adds to the kitchen and the brewing vat.
-pub const CELLS_PER_CAPACITY: usize = 2;
-
-/// The hidden cells a group of `slots` input slots has open: one a slot with a stack module
-/// (`stacked`), and [`CELLS_PER_CAPACITY`] a capacity module.
-pub fn open_cells(slots: usize, stacked: bool, capacity: u32) -> usize {
-    (if stacked { slots } else { 0 }) + CELLS_PER_CAPACITY * capacity as usize
+/// ингредиенты»): the hidden cells a group of `slots` input slots has open: one a slot with a
+/// stack module (`stacked`), and the `queue` cells its capacity modules give
+/// (`utility::queue_cells`, two a module).
+pub fn open_cells(slots: usize, stacked: bool, queue: usize) -> usize {
+    (if stacked { slots } else { 0 }) + queue
 }
 
 /// What the visible slots hold moves into the first `open` hidden cells, `size(item)` a cell (256
@@ -80,7 +78,7 @@ pub fn stash_open(
 }
 
 /// With a stack module (`stacked`) the kitchen's inputs hold `size(item)` each (256 for what
-/// stacks to 64), and each capacity module (`capacity`) adds two hidden cells: what the visible
+/// stacks to 64), and its capacity modules add `queue` hidden cells: what the visible
 /// input slots hold moves into the hidden cells, so the slots take more; without them, the cells
 /// give back into the slots as far as they take. What a cell and a slot hold together is what the
 /// kitchen cooks from.
@@ -88,12 +86,12 @@ pub fn stash(
     visible: &mut [crate::machines::slots::Slot],
     cells: &mut Vec<crate::machines::slots::Slot>,
     stacked: bool,
-    capacity: u32,
+    queue: usize,
     size: impl Fn(&str) -> u32,
     max: impl Fn(&str) -> u32,
 ) {
     let n = visible.len().min(INPUTS);
-    stash_open(&mut visible[..n], cells, open_cells(n, stacked, capacity), size, max);
+    stash_open(&mut visible[..n], cells, open_cells(n, stacked, queue), size, max);
 }
 
 /// w2: what a dish takes, each of `need` from the hidden `cells` first; what the visible slots
@@ -146,13 +144,13 @@ mod tests {
     fn a_capacity_module_gives_two_hidden_cells() {
         // Wave 2: no stack module, one capacity module: two cells of a stack each.
         let wheat = "minecraft:wheat";
-        assert_eq!(open_cells(INPUTS, false, 1), 2);
-        assert_eq!(open_cells(INPUTS, true, 2), INPUTS + 4);
+        assert_eq!(open_cells(INPUTS, false, 2), 2);
+        assert_eq!(open_cells(INPUTS, true, 4), INPUTS + 4);
         let mut visible: Vec<crate::machines::slots::Slot> = vec![None; INPUTS];
         let mut cells = Vec::new();
         for _ in 0..3 {
             visible[0] = Some((wheat.into(), 64));
-            stash(&mut visible, &mut cells, false, 1, |_| 64, |_| 64);
+            stash(&mut visible, &mut cells, false, 2, |_| 64, |_| 64);
         }
         assert_eq!(crate::machines::slots::count_in(&cells, wheat), 128, "two cells of 64");
         assert_eq!(visible[0], Some((wheat.into(), 64)), "the third stack stays in its slot");

@@ -75,11 +75,12 @@ pub const PAGES_MAX: usize = 4;
 pub const STASH_GROUPS: [std::ops::Range<usize>; 2] = [super::BREW_INGREDIENTS, super::BREW_FUEL..super::BREW_FUEL + 1];
 
 /// Wave 2 (guide `mod_cap`): the hidden cells each of [`STASH_GROUPS`] has open: one a slot
-/// with a stack module, and two a capacity module for the reagents (not for the powder).
-pub fn group_open(group: usize, stacked: bool, capacity: u32) -> usize {
+/// with a stack module, and the `queue` cells of its capacity modules (`utility::queue_cells`)
+/// for the reagents (not for the powder).
+pub fn group_open(group: usize, stacked: bool, queue: usize) -> usize {
     let slots = STASH_GROUPS.get(group).map_or(0, |g| g.len());
-    let capacity = if group == 0 { capacity } else { 0 };
-    super::kitchen::open_cells(slots, stacked, capacity)
+    let queue = if group == 0 { queue } else { 0 };
+    super::kitchen::open_cells(slots, stacked, queue)
 }
 
 pub fn pages(capacity: u32) -> usize {
@@ -169,8 +170,8 @@ mod tests {
 
     #[test]
     fn a_capacity_module_gives_the_reagents_two_cells() {
-        assert_eq!(group_open(0, false, 1), 2);
-        assert_eq!(group_open(0, true, 1), STASH_GROUPS[0].len() + 2);
+        assert_eq!(group_open(0, false, 2), 2);
+        assert_eq!(group_open(0, true, 2), STASH_GROUPS[0].len() + 2);
         assert_eq!(group_open(1, false, 3), 0, "the powder's slot only grows with the stack");
         assert_eq!(group_open(1, true, 3), 1);
     }

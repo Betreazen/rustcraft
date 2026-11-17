@@ -140,17 +140,17 @@ fn fish(game: &mut Game<'_>, dimension: &str, pos: Pos, cost: f64, now: u64) -> 
     }
     let lure = rod.enchantment_level("minecraft:lure");
     let key = (dimension.to_owned(), pos);
+    let due = *state().fish_due.entry(key.clone()).or_insert_with(|| now + rules::fish_wait(util::random(), lure));
+    if now < due {
+        // Wave 2 (guide: «Расход 4 Е/с»): it pays each step it fishes, the wait as the catch.
+        return if spend(game, pos, cost) { Shown::Working } else { Shown::NoEnergy };
+    }
     let slots = catch_slots(game, pos);
     if !fits(game, pos, slots.clone(), &[ItemStack::new("minecraft:cod", 1)]) {
         return Shown::Blocked("output_full");
     }
-    // Wave 2 (guide: «Расход 4 Е/с»): it pays each step it fishes, the wait as the catch.
     if !spend(game, pos, cost) {
         return Shown::NoEnergy;
-    }
-    let due = *state().fish_due.entry(key.clone()).or_insert_with(|| now + rules::fish_wait(util::random(), lure));
-    if now < due {
-        return Shown::Working;
     }
     state().fish_due.insert(key, now + rules::fish_wait(util::random(), lure));
     let catch = game.sequence_loot("minecraft:gameplay/fishing", "minecraft:gameplay/fishing", Some(&rod));

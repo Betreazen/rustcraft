@@ -165,8 +165,8 @@ fn strike_every(game: &Game<'_>, pos: Pos, t: &Tuning) -> u64 {
     let tier = crate::game::rustcraft_tiers::tier_at(game, pos);
     let speed = rustcraft_rules::tiers::family_of_block(rules::BLOCK)
         .map_or(1.0, |f| rustcraft_rules::tiers::speed(f, tier, t.tier_speed_step));
-    let work = modules::factors(&base::modules_at(game, pos), t).0;
-    rules::strike_ticks(t.butcher_ticks, work, speed)
+    let economy = modules::count(&base::modules_at(game, pos), Module::Economy);
+    rules::tier_strike_ticks(rules::strike_ticks(t.butcher_ticks, economy, t.economy_work), speed)
 }
 
 /// Wave 2: the block entity's copy of its tier (rustcraft_rules::machines::sockets::TIER_KEY),

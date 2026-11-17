@@ -58,10 +58,11 @@ pub fn strike_energy(ticks: u64, economy: u32) -> f64 {
     ENERGY_PER_SECOND * ticks as f64 / 20.0 * 0.6f64.powi(economy as i32)
 }
 
-/// Wave 2: ticks between its strikes: `base` (`Tuning::butcher_ticks`, 10 s) shortened by its
-/// tier (`tiers::speed`) and lengthened by its modules' work factor (economy ×0.85 each, A7).
-pub fn strike_ticks(base: u64, work: f64, tier_speed: f64) -> u64 {
-    ((base as f64 / (work * tier_speed).max(1e-6)).round() as u64).max(1)
+/// Slice 18, wave 2 (A9, guide `mod_eco`: работа ×0,85): ticks between a butcher's strikes
+/// with `economy` economy modules: `base` over `economy_work` (0.85) for each. A strike still
+/// costs [`strike_energy`] of `base`, so its energy is ×0.6 a strike.
+pub fn strike_ticks(base: u64, economy: u32, economy_work: f64) -> u64 {
+    ((base as f64 / economy_work.powi(economy as i32)).round() as u64).max(1)
 }
 
 /// Slice 18: what Looting adds to a farm animal's drops, as the game's loot tables add it (0 to
@@ -212,15 +213,23 @@ pub fn worn(damage: u32, max_damage: u32) -> Option<u32> {
     (next < max_damage).then_some(next)
 }
 
+/// Wave 2 (w2-craft, guide `machine`: «машина следующей ступени работает быстрее»): a strike
+/// every `ticks` on its first tier comes `tier_speed` (`tiers::speed`) times as often.
+pub fn tier_strike_ticks(ticks: u64, tier_speed: f64) -> u64 {
+    ((ticks as f64 / tier_speed.max(1e-6)).round() as u64).max(1)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn economy_slows_the_strike_and_a_tier_speeds_it() {
-        assert_eq!(strike_ticks(200, 1.0, 1.0), 200);
-        assert_eq!(strike_ticks(200, 0.85, 1.0), 235, "economy: ×0.85 work");
-        assert_eq!(strike_ticks(200, 1.0, 2.0), 100, "tier 4: twice as fast");
+    fn economy_slows_the_strike() {
+        let t = crate::tuning::Tuning::default();
+        assert_eq!(super::strike_ticks(t.butcher_ticks, 0, t.economy_work), t.butcher_ticks);
+        let one = super::strike_ticks(200, 1, t.economy_work);
+        assert_eq!(one, 235);
+        assert!(super::strike_ticks(200, 2, t.economy_work) > one);
     }
 
     #[test]
@@ -335,5 +344,11 @@ mod tests {
         assert!(is_sword("minecraft:iron_sword"));
         assert!(!is_sword("minecraft:iron_axe"));
         assert_eq!(icon("minecraft:cow"), "minecraft:cow_spawn_egg");
+    }
+
+    #[test]
+    fn a_higher_tier_strikes_more_often() {
+        assert_eq!(tier_strike_ticks(200, 1.0), 200);
+        assert_eq!(tier_strike_ticks(200, 2.0), 100, "tier 4 of a tier-2 machine");
     }
 }

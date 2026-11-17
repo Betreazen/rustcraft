@@ -285,6 +285,16 @@ pub fn capacity_in(items: &[String]) -> u32 {
     items.iter().filter(|i| i.as_str() == crate::storage::modules::CAPACITY).count() as u32
 }
 
+/// Slice 18, wave 2 (guide `mod_cap`: «+2 ячейки очереди»): the hidden queue cells a capacity
+/// module gives the kitchen and the brewer behind their ingredient slots, two each, as the
+/// furnace's (`machines::queue::intake` moves into them). The other slice-12 machines have none.
+pub fn queue_cells(u: Util, slots: &[Option<crate::modules::Module>]) -> usize {
+    match u {
+        Util::Kitchen | Util::Brewer => crate::modules::capacity_slots(slots),
+        _ => 0,
+    }
+}
+
 /// A machine whose slot rule reads its capacity modules.
 pub fn has_capacity(u: Util) -> bool {
     matches!(u, Util::Repair | Util::Kitchen | Util::Brewer)
@@ -426,6 +436,15 @@ impl Shown {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_capacity_module_gives_the_kitchen_and_brewer_two_queue_cells() {
+        use crate::modules::Module;
+        let two = [Some(Module::Capacity), Some(Module::Capacity), None];
+        assert_eq!(queue_cells(Util::Kitchen, &two), 4);
+        assert_eq!(queue_cells(Util::Brewer, &two[..1]), 2);
+        assert_eq!(queue_cells(Util::Trash, &two), 0);
+    }
 
     #[test]
     fn every_machine_has_a_block_of_its_own_and_sane_slots() {
