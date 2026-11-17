@@ -94,6 +94,11 @@ pub struct Joint {
     pub mode: Mode,
     pub filter: Filter,
     pub priority: i32,
+    /// Slice 18 (guide `quickstart` 5, `housing`): a vanilla container with no setting of its
+    /// own. It works both ways but only with the rest of the net: it gives a machine or a storage
+    /// what they take, takes a machine's products after every other receiver, and never trades
+    /// with another such container.
+    pub auto: bool,
 }
 
 /// The inventories behind the joints, as the game sees them this tick.
@@ -143,6 +148,9 @@ pub struct TickResult {
     pub notes: Vec<(usize, JointNote)>,
 }
 
+/// The turn key of the auto containers' group (`NetState::turn`).
+const AUTO_TURN: i32 = i32::MIN;
+
 /// One tick of an item net that carries `per_second` items, with `joints` on it.
 pub fn tick(
     joints: &[Joint],
@@ -162,10 +170,13 @@ pub fn tick(
         return result;
     }
     // Receivers by priority, highest first; the order inside a priority is the joints' order.
-    let mut by_priority: BTreeMap<std::cmp::Reverse<i32>, Vec<usize>> = BTreeMap::new();
+    // Auto containers come after every other receiver (slice 18), with a turn of their own.
+    let mut by_priority: BTreeMap<(bool, std::cmp::Reverse<i32>), Vec<usize>> = BTreeMap::new();
     for &r in &receivers {
+        let j = &joints[r];
+        let priority = if j.auto { AUTO_TURN } else { j.priority };
         by_priority
-            .entry(std::cmp::Reverse(joints[r].priority))
+            .entry((j.auto, std::cmp::Reverse(priority)))
             .or_default()
             .push(r);
     }
@@ -179,7 +190,7 @@ pub fn tick(
                 continue;
             }
             let mut left = count;
-            for (std::cmp::Reverse(priority), group) in &by_priority {
+            for ((_, std::cmp::Reverse(priority)), group) in &by_priority {
                 if left == 0 || available == 0 {
                     break;
                 }
@@ -187,7 +198,11 @@ pub fn tick(
                 let candidates: Vec<usize> = group
                     .iter()
                     .copied()
-                    .filter(|&r| joints[r].block != src.block && joints[r].filter.passes(&item))
+                    .filter(|&r| {
+                        joints[r].block != src.block
+                            && joints[r].filter.passes(&item)
+                            && !(src.auto && joints[r].auto)
+                    })
                     .collect();
                 if candidates.is_empty() {
                     continue;
@@ -381,7 +396,71 @@ mod tests {
             mode,
             filter: Filter::default(),
             priority,
+            auto: false,
         }
+    }
+
+    fn auto_chest(block: Pos) -> Joint {
+        Joint {
+            auto: true,
+            ..joint(block, Mode::Both, 0)
+        }
+    }
+
+    const FURNACE: Pos = [5, 0, 0];
+
+    #[test]
+    fn an_auto_chest_feeds_a_machine_and_takes_its_products() {
+        // Guide `quickstart` 5: ore in the left chest reaches the furnace, ingots the right chest.
+        let mut world = World::default();
+        world.gives(CHEST, "minecraft:raw_iron", 4);
+        world.takes(FURNACE, "minecraft:raw_iron", 64);
+        world.gives(FURNACE, "minecraft:iron_ingot", 2);
+        world.takes(CHEST2, "minecraft:iron_ingot", 64);
+        world.takes(CHEST2, "minecraft:raw_iron", 64);
+        let joints = [auto_chest(CHEST), joint(FURNACE, Mode::Both, 0), auto_chest(CHEST2)];
+        run(&joints, &mut world, 1);
+        assert_eq!(world.got(FURNACE, "minecraft:raw_iron"), 4);
+        assert_eq!(world.got(CHEST2, "minecraft:iron_ingot"), 2);
+        assert_eq!(world.got(CHEST2, "minecraft:raw_iron"), 0, "chest to chest");
+    }
+
+    #[test]
+    fn auto_chests_never_trade_between_themselves() {
+        let mut world = World::default();
+        world.gives(CHEST, "minecraft:cobblestone", 10);
+        world.takes(CHEST2, "minecraft:cobblestone", 64);
+        let joints = [auto_chest(CHEST), auto_chest(CHEST2)];
+        let r = run(&joints, &mut world, 2);
+        assert!(r.iter().all(|t| t.transfers.is_empty()));
+        assert!(r.iter().all(|t| t.notes.is_empty()), "no «Приёмник полон» either");
+    }
+
+    #[test]
+    fn an_auto_chest_is_the_last_receiver() {
+        // A machine product goes to a storage or a set receiver first, to the chest only after.
+        let mut world = World::default();
+        world.gives(FURNACE, "minecraft:iron_ingot", 3);
+        world.takes(CHEST, "minecraft:iron_ingot", 64);
+        world.takes(CHEST2, "minecraft:iron_ingot", 2);
+        let joints = [
+            joint(FURNACE, Mode::Both, 0),
+            auto_chest(CHEST),
+            joint(CHEST2, Mode::Into, -5),
+        ];
+        run(&joints, &mut world, 1);
+        assert_eq!(world.got(CHEST2, "minecraft:iron_ingot"), 2);
+        assert_eq!(world.got(CHEST, "minecraft:iron_ingot"), 1);
+    }
+
+    #[test]
+    fn a_set_chest_still_feeds_an_auto_chest() {
+        let mut world = World::default();
+        world.gives(CHEST, "minecraft:cobblestone", 5);
+        world.takes(CHEST2, "minecraft:cobblestone", 64);
+        let joints = [joint(CHEST, Mode::From, 0), auto_chest(CHEST2)];
+        run(&joints, &mut world, 1);
+        assert_eq!(world.got(CHEST2, "minecraft:cobblestone"), 5);
     }
 
     const CRUSHER: Pos = [0, 0, 0];

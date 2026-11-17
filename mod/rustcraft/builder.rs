@@ -259,11 +259,11 @@ pub(super) fn wrench_dock(game: &mut Game<'_>, player: u128, pos: Pos) {
 
 // ---- The facade ----
 
-fn has_facade(nbt: &Compound) -> bool {
+pub(super) fn has_facade(nbt: &Compound) -> bool {
     read_i64(nbt, FACADE_KEY) != 0
 }
 
-fn look(nbt: &Compound) -> Option<String> {
+pub(super) fn look(nbt: &Compound) -> Option<String> {
     match nbt.get(&JavaString::from(LOOK_KEY)) {
         Some(Tag::String(s)) => Some(s.to_string_lossy()).filter(|s| !s.is_empty()),
         _ => None,
@@ -291,6 +291,8 @@ pub(super) fn on_use_item_on(game: &mut Game<'_>, player: u128, sneaking: bool, 
     if item == FACADE && !covered {
         game.native_with_mod_block_entity(pos, |e| write_i64(&mut e.nbt, FACADE_KEY, 1));
         game.native_take_items(FACADE, 1);
+        // s18/pipe, F4: the hidden housing is a whole block (the node is one already).
+        game.native_set_block_property(pos, rustcraft_rules::housing::COVERED, "true");
     } else if item == content::WRENCH && sneaking && covered {
         let old = look(&entity.nbt);
         game.native_with_mod_block_entity(pos, |e| {
@@ -301,7 +303,13 @@ pub(super) fn on_use_item_on(game: &mut Game<'_>, player: u128, sneaking: bool, 
         if let Some(o) = old {
             give(game, player, &o);
         }
-    } else if covered && game.items().get(item).is_some_and(|i| i.block.is_some()) && !crate::game::rustcraft_server::is_ours(item) {
+        game.native_set_block_property(pos, rustcraft_rules::housing::COVERED, "false");
+    } else if covered
+        && game.items().get(item).is_some_and(|i| i.block.is_some())
+        && !crate::game::rustcraft_server::is_ours(item)
+        // s18/pipe, F2: only a whole block gives the look.
+        && rustcraft_rules::housing::whole_block(item)
+    {
         let old = look(&entity.nbt);
         game.native_with_mod_block_entity(pos, |e| {
             e.nbt.insert(JavaString::from(LOOK_KEY), Tag::String(JavaString::from(item)));
@@ -323,13 +331,14 @@ fn give(game: &mut Game<'_>, _player: u128, item: &str) {
 
 /// On a client: the housing's look over it.
 pub(super) fn draw_facade(game: &Game<'_>, entity: &ModBlockEntity, draw: &mut BlockEntityDraw) -> bool {
-    if !has_facade(&entity.nbt) {
+    // s18/pipe, F5: with the wrench in hand every facade is see-through; drawn each frame (not
+    // kept) so that taking the wrench shows it at once.
+    if !has_facade(&entity.nbt) || crate::game::rustcraft_pipe18::wrench_in_hand(game) {
         return false;
     }
     let look = look(&entity.nbt).unwrap_or_else(|| FACADE_PLAIN.to_owned());
     if !game.native_draw_block(draw, &look, &[]) {
         game.native_draw_block(draw, FACADE_PLAIN, &[]);
     }
-    draw.keep();
     true
 }

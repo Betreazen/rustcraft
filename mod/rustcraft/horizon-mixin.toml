@@ -337,6 +337,27 @@ file = "crates/horizon-client/src/game.rs"
 name = "rustcraft_selftest"
 source = "selftest.rs"
 
+# s18/pipe: slice 18's magistral as the handbook says (node tiers, wrench, node window).
+[[module]]
+id = "pipe18"
+file = "crates/horizon-client/src/game.rs"
+name = "rustcraft_pipe18"
+source = "pipe18.rs"
+
+# s18/pipe: the node's window (a screen of the mod's own) and the line-boost module.
+[[module]]
+id = "node_window"
+file = "crates/horizon-client/src/game.rs"
+name = "rustcraft_node_window"
+source = "node_window.rs"
+
+# s18/pipe: the joint window drawn as the guide's table (the client half; rustcraft_window serves it).
+[[module]]
+id = "joint_screen"
+file = "crates/horizon-client/src/game.rs"
+name = "rustcraft_joint_screen"
+source = "joint_screen.rs"
+
 # The fall handling lives in the client library, below the game crate, so the list of riders
 # whose falls do no damage must live there too.
 [[module]]

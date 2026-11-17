@@ -64,8 +64,10 @@ const NOTE_HOLD: u64 = 40;
 const LEGACY_JOINT_KEY: &str = "joint";
 /// M17: a machine takes its input and gives its products through one joint.
 const MACHINE_DEFAULT: Mode = Mode::Both;
-/// A chest beside the magistral is filled until its joint says otherwise.
-const CONTAINER_DEFAULT: Mode = Mode::Into;
+/// Slice 18 (guide `quickstart` 5): a chest beside the magistral works both ways until its
+/// joint says otherwise, as an auto joint (rustcraft_rules::net::items::Joint::auto): it gives a
+/// machine or a storage what they take and takes the machines' products last.
+const CONTAINER_DEFAULT: Mode = Mode::Both;
 /// A storage takes what the net brings (M16: «ненужное уходит туда»).
 const STORAGE_DEFAULT: Mode = Mode::Into;
 
@@ -197,8 +199,12 @@ fn block_side(joint: &Joint) -> Direction {
 /// housings' settings.
 pub(super) fn rebuild(game: &mut Game<'_>, dimension: &str, level: &mut LevelNet, tuning: &Tuning) {
     let saved = load_modes(game);
+    // s18/pipe: the nodes' line-boost modules raise their sections' throughput.
+    let boosts = crate::game::rustcraft_node_window::node_modules(game, level.layout.nodes.keys().copied());
     let mut inventories: BTreeMap<Pos, Mode> = BTreeMap::new();
     let mut checked: BTreeSet<Pos> = BTreeSet::new();
+    // Slice 18: the vanilla containers on their default, auto joints unless a housing sets them.
+    let mut auto: BTreeSet<Pos> = BTreeSet::new();
     let item_nets = || {
         level
             .topology
@@ -218,14 +224,17 @@ pub(super) fn rebuild(game: &mut Game<'_>, dimension: &str, level: &mut LevelNet
                 let side = direction(face.opposite());
                 if let Some(mode) = default_mode(game, dimension, block, side, &saved) {
                     inventories.insert(block, mode);
+                    if is_auto_container(game, block, &saved) {
+                        auto.insert(block);
+                    }
                 }
             }
         }
     }
     let nets: Vec<ItemNet> = item_nets()
         .filter_map(|net| {
-            let joints: Vec<Joint> =
-                joints::item_joints(net, &level.layout, &inventories, &level.joints)
+            let found = joints::item_joints(net, &level.layout, &inventories, &level.joints);
+            let joints: Vec<Joint> = joints::mark_auto(found, net, &level.joints, &auto)
                     .into_iter()
                     .filter_map(|mut j| {
                         // A storage's cells and terminals are one joint, at its first cell; a
@@ -240,7 +249,12 @@ pub(super) fn rebuild(game: &mut Game<'_>, dimension: &str, level: &mut LevelNet
             (!joints.is_empty()).then(|| ItemNet {
                 key: (net.slot, first),
                 joints,
-                per_second: tuning.items_of(net.min_tier),
+                per_second: tuning.items_of(net.min_tier)
+                    * rustcraft_rules::net::node_window::net_boost(
+                        &net.housings,
+                        &level.topology.reach,
+                        &boosts,
+                    ),
                 housings: net.housings.clone(),
                 tier: net.min_tier,
             })
@@ -287,6 +301,13 @@ pub(super) fn default_mode(
     // Slots through that side: a chest, a barrel, a hopper, a vanilla furnace (native_items.rs:110-136).
     game.native_container_slots(dimension, pos, side)?;
     Some(saved.get(&pos).copied().unwrap_or(CONTAINER_DEFAULT))
+}
+
+/// Slice 18: whether the block at `pos` (with slots a joint reaches) is a vanilla container on
+/// the default: no slice-2 mode of its own.
+fn is_auto_container(game: &Game<'_>, pos: Pos, saved: &BTreeMap<Pos, Mode>) -> bool {
+    let block = game.native_block(pos);
+    !block.starts_with("rustcraft:") && !saved.contains_key(&pos)
 }
 
 /// The slice-2 modes of the level's vanilla containers.
@@ -492,6 +513,17 @@ pub(super) fn on_right_click_block(
         return;
     };
     if player.sneaking {
+        return;
+    }
+    // s18/pipe (guide `wrench`): a click on a machine turns it; the joint window opens on a housing.
+    if let Some(facing) = crate::game::rustcraft_pipe18::rotate_machine(game, pos) {
+        *canceled = true;
+        let text = server::line(
+            "rustcraft.wrench.turned",
+            "Turned: faces %s",
+            &[server::line(&format!("rustcraft.facing.{facing}"), facing, &[])],
+        );
+        server::tell(game, player.uuid, text);
         return;
     }
     let target = if game.native_block(pos) == content::HOUSING {
