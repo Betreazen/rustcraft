@@ -126,6 +126,11 @@ pub trait Inventories {
     fn needs(&self, _block: Pos, _item: &str) -> bool {
         false
     }
+    /// Slice 18: the block is a machine (it takes only its ingredients): its products go to the
+    /// nearest auto container (guide `quickstart` 5, «слитками в правом»).
+    fn is_machine(&self, _block: Pos) -> bool {
+        false
+    }
     /// Takes up to `count` of `item` out of the block; returns how many it took.
     fn take(&mut self, block: Pos, item: &str, count: u32) -> u32;
     /// Puts up to `count` of `item` into the block; returns how many fitted.
@@ -237,8 +242,10 @@ pub fn tick(
                 }
                 let turn = state.turn.entry(*priority).or_insert(0);
                 let mut gave = 0;
-                // Auto containers nearest the source along the line first, equally near in turn.
-                for near in nearest_first(joints, &candidates, src.housing, *auto) {
+                // A machine's products: auto containers nearest it along the line first, equally
+                // near in turn; from a chest, auto containers take turns (M8).
+                let nearest = *auto && inv.is_machine(src.block);
+                for near in nearest_first(joints, &candidates, src.housing, nearest) {
                     gave += share_in_turn(
                         joints,
                         &near,
@@ -268,10 +275,10 @@ pub fn tick(
     result
 }
 
-/// Slice 18 (guide `quickstart` 5, «слитками в правом»): auto containers grouped by how far
-/// their housings are from `from` (the source's), nearest first; any other receivers as one group.
-fn nearest_first(joints: &[Joint], candidates: &[usize], from: Pos, auto: bool) -> Vec<Vec<usize>> {
-    if !auto {
+/// Slice 18 (guide `quickstart` 5, «слитками в правом»): with `nearest`, the candidates grouped
+/// by how far their housings are from `from` (the source's), nearest first; else one group.
+fn nearest_first(joints: &[Joint], candidates: &[usize], from: Pos, nearest: bool) -> Vec<Vec<usize>> {
+    if !nearest {
         return vec![candidates.to_vec()];
     }
     let far = |r: usize| -> i32 {
@@ -416,6 +423,9 @@ mod tests {
         }
         fn needs(&self, block: Pos, item: &str) -> bool {
             self.need.get(&block).is_some_and(|n| n.contains(item))
+        }
+        fn is_machine(&self, block: Pos) -> bool {
+            self.need.contains_key(&block)
         }
         fn take(&mut self, block: Pos, item: &str, count: u32) -> u32 {
             let mut left = count;
@@ -575,10 +585,28 @@ mod tests {
     }
 
     #[test]
+    fn a_chests_items_take_turns_between_auto_chests() {
+        // M8 holds for what a chest gives: equally prioritised receivers share, near or far.
+        let mut world = World::default();
+        world.gives(LEFT, INGOT, 6);
+        world.takes(LINE_FURNACE, INGOT, 64);
+        world.takes(RIGHT, INGOT, 64);
+        let line = [
+            joint(LEFT, Mode::From, 0),
+            auto_chest(LINE_FURNACE),
+            auto_chest(RIGHT),
+        ];
+        run(&line, &mut world, 1);
+        assert_eq!(world.got(LINE_FURNACE, INGOT), 3);
+        assert_eq!(world.got(RIGHT, INGOT), 3);
+    }
+
+    #[test]
     fn ingots_go_to_the_nearest_chest_then_the_next() {
         // «Она сама станет слитками в правом»: the furnace's product goes to the chest nearest along
         // the line; only when that one is full, on to the next.
         let mut world = World::default();
+        world.machine_takes(LINE_FURNACE, DUST, 64);
         world.gives(LINE_FURNACE, INGOT, 5);
         world.takes(LEFT, INGOT, 64);
         world.takes(RIGHT, INGOT, 64);
@@ -586,6 +614,7 @@ mod tests {
         assert_eq!(world.got(RIGHT, INGOT), 5);
         assert_eq!(world.got(LEFT, INGOT), 0);
         let mut world = World::default();
+        world.machine_takes(LINE_FURNACE, DUST, 64);
         world.gives(LINE_FURNACE, INGOT, 5);
         world.takes(LEFT, INGOT, 64);
         world.takes(RIGHT, INGOT, 3);

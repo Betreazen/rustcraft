@@ -209,11 +209,15 @@ fn miner_fills_a_load_dock(o: crate::geom::Pos, _t: &Tuning) -> Scenario {
             move |b, _| {
                 let s = b.sheet(m).ok_or("no sheet for the miner")?;
                 let rows: Vec<String> = s.rows.iter().map(|r| r.to_string()).collect();
+                // In-game check w3: the row names the place in use («Куда складывает» · блок
+                // погрузки); all three are in its tooltip, the one in use in brackets.
+                let hint: String = s.hints.get(1).map(|h| h.iter().map(|v| v.to_string()).collect()).unwrap_or_default();
                 Ok(rows.len() == 2
                     && rows[0].contains("rustcraft.miner.found_left")
                     && !rows[0].contains("rustcraft.miner.counting")
-                    && rows[1].contains("\"[\"")
-                    && rows[1].contains("rustcraft.miner.outlet.dock"))
+                    && rows[1].contains("rustcraft.miner.outlet_row")
+                    && rows[1].contains("rustcraft.miner.outlet.dock")
+                    && hint.contains("\"[\""))
             },
         )
         .then("a chest beside it too, another ore, the miner set anew", move |b, m2| {

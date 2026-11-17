@@ -152,6 +152,13 @@ impl Inventories for Stocks {
         }
     }
 
+    /// A machine limits what it takes (`accepts` or its input slots' `only`).
+    fn is_machine(&self, block: Pos) -> bool {
+        self.blocks.get(&block).is_some_and(|s| {
+            s.accepts.is_some() || s.slots.iter().any(|slot| slot.can_put && slot.only.is_some())
+        })
+    }
+
     fn take(&mut self, block: Pos, item: &str, count: u32) -> u32 {
         if let Some(s) = self.stores.get_mut(&block) {
             return if s.works {
