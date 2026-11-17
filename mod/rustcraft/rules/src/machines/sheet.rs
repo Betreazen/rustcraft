@@ -141,7 +141,7 @@ impl Kind {
 
     /// Its window's parts: what its server menu showed, part by part.
     pub fn shape(self) -> Shape {
-        let sockets = self.holder().is_some();
+        let sockets = self.holder().is_some_and(|h| h.has_sockets());
         match self {
             // Slice 18 (base and gear): the targets as chips; the support window's players in
             // range, the one healed and the role's working modules.
@@ -797,6 +797,17 @@ mod tests {
         assert!(!put_free(&mut slots, Holder::Miner, Module::Poison.item()));
         assert!(put_free(&mut slots, Holder::Miner, Module::Storage.item()));
         assert!(!put_free(&mut slots, Holder::Miner, Module::Speed.item()));
+    }
+
+    #[test]
+    fn blocks_without_modules_draw_no_sockets() {
+        use crate::utility::Util;
+        for u in [Util::ChargePlate, Util::XpTank, Util::Projector, Util::PortalDock] {
+            assert!(!Kind::Util(u).shape().sockets, "{u:?}");
+            assert!(layout(Kind::Util(u).shape()).sockets.is_empty(), "{u:?}");
+        }
+        assert!(Kind::Util(Util::Trash).shape().sockets);
+        assert!(Kind::Miner.shape().sockets);
     }
 
     #[test]
