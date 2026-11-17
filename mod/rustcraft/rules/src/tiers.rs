@@ -99,6 +99,10 @@ pub const FAMILIES: &[Family] = &[
 /// are `rustcraft:chassis`, `rustcraft:chassis_2`, `rustcraft:chassis_3`.
 pub const CHASSIS: Family = Family::up_to("rustcraft:chassis", 1, 3);
 
+/// The magistral's node (guide `node`, stream 1): tiers 1–4. Not in [`FAMILIES`]: it places and
+/// replaces itself (`rustcraft_pipe18`) and its higher tiers are made from the node below.
+pub const NODE: Family = Family::new("rustcraft:node", 1);
+
 /// The family of a placed `block`.
 pub fn family_of_block(block: &str) -> Option<Family> {
     FAMILIES.iter().copied().find(|f| f.block == block)

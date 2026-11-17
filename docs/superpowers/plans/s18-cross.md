@@ -21,14 +21,14 @@
 
 ## Пределы и зависимости
 
-- **Поток 1 не влит.** `rules/src/net/node_tier.rs`, `rules/src/net/node_window.rs` (`net_boost`, `LINE_MODULE`), рецепты узлов `recipe/node*.json` и окно узла есть только на ветке `s18/pipe`. Поэтому узловая часть задачи 3 и задача 5 (ускорение линии на жидкостных и энергосетях — нужно число модулей линии в узлах, его хранит окно узла потока 1) делаются после слияния `s18/pipe`. Что сделать тогда — в задачах 3b и 5.
+- **Поток 1 был не влит** (до d7913ac; теперь влит). `rules/src/net/node_tier.rs`, `rules/src/net/node_window.rs` (`net_boost`, `LINE_MODULE`), рецепты узлов `recipe/node*.json` и окно узла есть только на ветке `s18/pipe`. Поэтому узловая часть задачи 3 и задача 5 (ускорение линии на жидкостных и энергосетях — нужно число модулей линии в узлах, его хранит окно узла потока 1) делаются после слияния `s18/pipe`. Что сделать тогда — в задачах 3b и 5.
 - **Стак больше 99 в ячейке меню.** `native_menu_slot_rules` держит `max_stack` в 1–99 (`SRC/docs/native-mods.md:4617-4627`, запись потока 3). Хранилище добытчика больше 27, трюм больше 45 и стаки рюкзака до 1024 требуют своих экранов с запасом в NBT (как очередь машин потока 3, `rules/src/machines/queue.rs`).
 
 ---
 
 ## Задачи
 
-Статусы: `[ ]` — не начато, `[x]` — сделано и закоммичено, `[~]` — ждёт слияния потока 1.
+Статусы: `[ ]` — не начато, `[x]` — сделано и закоммичено.
 
 ### Task 1a: заметка рецепта узла (решение владельца)
 
@@ -61,9 +61,9 @@
 
 - [x] Тесты шасси остаются зелёными; новые тесты `chassis_items_come_from_the_tier_family`, `the_chassis_family_stops_at_its_third_tier`. У `Family` поле `last` и `Family::up_to(block, first, last)` (`new` — до `MAX_TIER`, `tools/tiers.py` читает только `Family::new`). Коммит `refactor: the chassis tiers on rustcraft_rules::tiers`.
 
-### Task 3b: узлы на `rustcraft_rules::tiers` — [~] после слияния `s18/pipe`
+### Task 3b: узлы на `rustcraft_rules::tiers`
 
-- [~] В `tiers::FAMILIES` строка `Family::new("rustcraft:node", 1)`; `node_tier.rs` — обёртки над `tiers`; `py tools/tiers.py` (не объявлять предметы узла второй раз в `content.rs`; рецепт узла выше первой ступени — узел предыдущей ступени в центре, `tools/tiers.py` должен это знать).
+- [x] Поток 1 влит (d7913ac). `tiers::NODE = Family::new("rustcraft:node", 1)` — константа, как `CHASSIS`, **не** строка `FAMILIES`: у узла своё размещение и замена (`pipe18.rs`), а рецепт ступеней 2–4 — узел предыдущей ступени в центре (решение владельца), не замена сплава `tools/tiers.py`; в `FAMILIES` его взяли бы `rustcraft_tiers` и `tiers.py` второй раз. `node_tier::{tier_of_item, item_of_tier, swap}` — через `NODE` и `tiers::upgrade`; тест `node_items_come_from_the_tier_family`. Коммит `refactor: the node tiers on rustcraft_rules::tiers`.
 
 ### Task 4: установщик и разрушитель быстрее по ступени
 

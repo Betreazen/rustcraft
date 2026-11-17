@@ -2,11 +2,14 @@
 //! its `tier`, a broken node gives back its own tier's item, and a click with a node of a higher
 //! tier on a placed one takes its place (U2), the old one coming back to the hand.
 //!
-//! Stream 3 of slice 18 builds the general tier mechanism (`rustcraft_rules::tiers`); until it is
-//! merged the node keeps its own functions here, with the same shape, so the bundle switches by
-//! changing one import.
+//! The tier items and the U2 rule come from `rustcraft_rules::tiers` (`tiers::NODE`,
+//! `tiers::upgrade`). The node is not in `tiers::FAMILIES`: its placement and replacement are its
+//! own (`rustcraft_pipe18`), and a node of tiers 2–4 is made from the node below in the centre of
+//! the grid, not by `tools/tiers.py`'s alloy swap (owner 2026-11-17).
 
-/// The node's items, tier 1 first.
+use crate::tiers::{self, NODE};
+
+/// The node's items, tier 1 first (`tiers::NODE`'s items).
 pub const ITEMS: [&str; 4] = [
     "rustcraft:node",
     "rustcraft:node_2",
@@ -16,23 +19,35 @@ pub const ITEMS: [&str; 4] = [
 
 /// The node tier `item` places, if it is a node item.
 pub fn tier_of_item(item: &str) -> Option<u8> {
-    ITEMS.iter().position(|i| *i == item).map(|i| i as u8 + 1)
+    NODE.tier_of(item)
 }
 
 /// The item of a node of `tier` (clamped to 1–4).
 pub fn item_of_tier(tier: u8) -> &'static str {
-    ITEMS[usize::from(tier.clamp(1, 4)) - 1]
+    let tier = tier.clamp(NODE.first, NODE.last);
+    ITEMS
+        .into_iter()
+        .find(|i| NODE.tier_of(i) == Some(tier))
+        .unwrap_or(ITEMS[0])
 }
 
 /// U2: a node of tier `held` clicked on a placed node of tier `placed` takes its place only when
 /// it is of a higher tier; the answer is the tier that comes back to the hand.
 pub fn swap(placed: u8, held: u8) -> Option<u8> {
-    (held > placed).then_some(placed)
+    tiers::upgrade(placed, held).then_some(placed)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn node_items_come_from_the_tier_family() {
+        for (i, item) in ITEMS.iter().enumerate() {
+            assert_eq!(NODE.item(i as u8 + 1).as_deref(), Some(*item));
+        }
+        assert!(tiers::family_of_block(NODE.block).is_none());
+    }
 
     #[test]
     fn each_node_item_places_its_own_tier() {
