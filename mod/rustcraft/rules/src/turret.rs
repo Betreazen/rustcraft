@@ -117,6 +117,14 @@ impl Loadout {
     pub fn support_draw(&self, t: &Tuning) -> f64 {
         t.support_energy * f64::from(self.support_modules()) * self.energy(t)
     }
+
+    /// Slice 18, wave 2 (guide `mod_heal`): what it draws while `someone_hurt` says whether
+    /// anyone in range needs healing: the heal modules draw only then; guard, power and haste
+    /// draw while anyone is near.
+    pub fn support_draw_for(&self, t: &Tuning, someone_hurt: bool) -> f64 {
+        let heal = if someone_hurt { 0 } else { self.heal };
+        t.support_energy * f64::from(self.support_modules() - heal) * self.energy(t)
+    }
 }
 
 /// The effects a turret's shots can give.
@@ -351,6 +359,17 @@ pub const UNDEAD: [&str; 14] = [
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn heal_draws_only_while_someone_is_hurt() {
+        let t = Tuning::default();
+        let heal = load(&[Module::Heal, Module::Heal]);
+        assert_eq!(heal.support_draw_for(&t, false), 0.0);
+        assert_eq!(heal.support_draw_for(&t, true), heal.support_draw(&t));
+        let both = load(&[Module::Heal, Module::Haste]);
+        assert!(both.support_draw_for(&t, false) > 0.0);
+        assert!(both.support_draw_for(&t, false) < both.support_draw(&t));
+    }
 
     fn load(m: &[Module]) -> Loadout {
         let slots: Vec<Option<Module>> = m.iter().copied().map(Some).collect();

@@ -324,6 +324,24 @@ pub mod crafter {
         [8.0 + i as f32 * (TAB_W + 2.0), TABS_Y, TAB_W, TAB_H]
     }
 
+    /// Slice 18, wave 2 (`ui.js` crafter: «1 · Бумага»): where the row ends, before the sockets.
+    pub const TABS_RIGHT: f32 = MODULE_SLOTS[0][0] - 4.0;
+    /// A tab at least this wide writes its page's name after its number; a narrower one shows the
+    /// number and the result's icon.
+    pub const NAMED_TAB_W: f32 = 40.0;
+
+    /// Tab `i` of a crafter with `pages` pages: the row is shared out among them.
+    pub fn tab_of(i: usize, pages: usize) -> Rect {
+        let n = pages.clamp(1, MAX_PAGES) as f32;
+        let w = ((TABS_RIGHT - 8.0 - 2.0 * (n - 1.0)) / n).floor();
+        [8.0 + i as f32 * (w + 2.0), TABS_Y, w, TAB_H]
+    }
+
+    /// Whether tab `i` of `pages` has room for «N · name».
+    pub fn tab_named(pages: usize) -> bool {
+        tab_of(0, pages)[2] >= NAMED_TAB_W
+    }
+
     /// Where pattern cell `i` (row by row) has its item.
     pub fn cell(i: usize) -> [f32; 2] {
         [10.0 + (i % 3) as f32 * 18.0, ROWS[i / 3]]
@@ -350,7 +368,7 @@ pub mod crafter {
         if let Some(i) = MODE_BUTTONS.iter().position(|&r| inside(r, at)) {
             return Some(i32::from(WorkMode::ALL[i].code()));
         }
-        if let Some(i) = (0..pages.min(MAX_PAGES)).find(|&i| inside(tab(i), at)) {
+        if let Some(i) = (0..pages.min(MAX_PAGES)).find(|&i| inside(tab_of(i, pages), at)) {
             return Some(TAB_BUTTON + i as i32);
         }
         cell_at(at).map(|i| CELL_BUTTON + i as i32)
@@ -455,8 +473,9 @@ mod tests {
             button_at([cell(8)[0] + 8.0, cell(8)[1] + 8.0], 1),
             Some(CELL_BUTTON + 8)
         );
-        let second_tab = [tab(1)[0] + 2.0, tab(1)[1] + 2.0];
-        assert_eq!(button_at(second_tab, 1), None);
+        // Slice 18, wave 2: one page's tab takes the whole row.
+        let second_tab = [tab_of(1, 2)[0] + 2.0, tab_of(1, 2)[1] + 2.0];
+        assert_eq!(button_at(second_tab, 1), Some(TAB_BUTTON));
         assert_eq!(button_at(second_tab, 2), Some(TAB_BUTTON + 1));
         assert_eq!(button_at(buffer(0), 4), None);
         assert_eq!(
@@ -478,6 +497,23 @@ mod tests {
             segment_rects(alloy::TAKE_OWN_WELL, 2),
             alloy::TAKE_OWN.to_vec()
         );
+    }
+
+    #[test]
+    fn tabs_share_the_row_and_leave_the_sockets_free() {
+        use crafter as c;
+        for pages in 1..=c::MAX_PAGES {
+            let last = c::tab_of(pages - 1, pages);
+            assert!(last[0] + last[2] <= c::TABS_RIGHT + 0.5, "{pages}: {last:?}");
+            for i in 1..pages {
+                let (a, b) = (c::tab_of(i - 1, pages), c::tab_of(i, pages));
+                assert!(a[0] + a[2] < b[0], "{pages}");
+            }
+            assert_eq!(c::button_at([last[0] + 2.0, last[1] + 2.0], pages), Some(super::crafter::TAB_BUTTON + pages as i32 - 1));
+        }
+        // «1 · Бумага» on one or two pages; three and four show the number and the icon.
+        assert!(c::tab_named(1) && c::tab_named(2));
+        assert!(!c::tab_named(4));
     }
 
     #[test]

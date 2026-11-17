@@ -166,13 +166,33 @@ pub(super) fn is_grown(stack: &ItemStack) -> bool {
         .is_some_and(|d| d.get(&JavaString::from(grown::MARK)).is_some())
 }
 
-/// A stack of the item a worker's hold names `name`: a grown block's with its mark.
+/// Slice 18, wave 2: the find table a grown block's item carries (custom data
+/// `rustcraft:grown_table`).
+fn grown_table_of(stack: &ItemStack) -> Option<String> {
+    match stack.custom_data()?.get(&JavaString::from(grown::TABLE_KEY))? {
+        Tag::String(s) => Some(s.to_string_lossy()),
+        _ => None,
+    }
+}
+
+/// Slice 18, wave 2: the hold name a worker's grab keeps the grown block at `pos` under, with
+/// the find table its vein chose (`grown::hold_name_with`).
+pub(super) fn grown_hold_name(game: &Game<'_>, pos: Pos, block: &str) -> String {
+    let table = brushable_at(game, pos).and_then(|(t, _, _)| t);
+    grown::hold_name_with(block, table.as_deref())
+}
+
+/// A stack of the item a worker's hold names `name`: a grown block's with its mark (and its
+/// find table).
 pub(super) fn hold_stack(name: &str, count: u32) -> ItemStack {
-    let (item, marked) = grown::from_hold(name);
+    let (item, marked, table) = grown::from_hold_table(name);
     let mut stack = ItemStack::new(item, count);
     if marked {
         let mut data = stack.custom_data().cloned().unwrap_or_default();
         data.insert(JavaString::from(grown::MARK), Tag::Byte(1));
+        if let Some(t) = table {
+            data.insert(JavaString::from(grown::TABLE_KEY), Tag::String(JavaString::from(t)));
+        }
         stack
             .data_mut()
             .set_other(CUSTOM_DATA, Some(Tag::Compound(data)));
@@ -182,7 +202,10 @@ pub(super) fn hold_stack(name: &str, count: u32) -> ItemStack {
 
 /// The name a worker's hold keeps `stack` under: its item, marked when it was grown.
 pub(super) fn hold_name(stack: &ItemStack) -> String {
-    grown::hold_name(&stack.item, is_grown(stack))
+    if is_grown(stack) {
+        return grown::hold_name_with(&stack.item, grown_table_of(stack).as_deref());
+    }
+    grown::hold_name(&stack.item, false)
 }
 
 /// A random number 0..1 (xorshift; the machines' chances need no better).
@@ -304,8 +327,7 @@ pub(super) fn paced(game: &Game<'_>, pos: Pos, u: Util) -> (u64, f64) {
 pub(super) fn show(game: &mut Game<'_>, dimension: &str, pos: Pos, shown: Shown) {
     anim::show_on(game, pos, shown.working());
     // Slice 18 (guide `charger`, `charge_plate`): they glow while they charge: their furnace
-    // template's `lit` gives the block light (no emissive pulse on a block model: a recorded
-    // limit, rustcraft_rules::anim has only moving parts).
+    // template's `lit` gives the block light, and clients draw the coils' pulse (`draw_glow`).
     if matches!(Util::of(&game.native_block(pos)), Some(Util::Charger | Util::ChargePlate)) {
         let lit = if shown.working() { "true" } else { "false" };
         if game.native_block_property(pos, "lit").as_deref() != Some(lit) {
@@ -475,24 +497,36 @@ fn owner(game: &Game<'_>, pos: Pos) -> Option<u128> {
 const TRASH_BATCH: u32 = 8;
 
 fn trash(game: &mut Game<'_>, pos: Pos, _t: &Tuning) -> Shown {
-    let slots = items(game, pos);
-    // Slice 18 (guide `trash`): the filter is its joints' (the wrench); its own filter cells, if
-    // any are set, narrow it further.
-    let own_filter = slots.iter().take(9).any(|s| s.as_ref().is_some_and(|s| s.count > 0));
-    if !own_filter && !joint_filter_set(game, pos) {
+    // Slice 18, wave 2 (guide `trash`): its joints' filters decide what it takes and burns; it
+    // keeps a copy for its slot rule (`trash_filters`, asked without the world).
+    let filters = joint_filters(game, pos);
+    let json = tiered::filters_to_json(&filters);
+    let kept = machines::entity(game, pos).and_then(|e| match e.nbt.get(&JavaString::from(TRASH_FILTERS_KEY)) {
+        Some(Tag::String(s)) => Some(s.to_string_lossy()),
+        _ => None,
+    });
+    if kept.as_deref() != Some(json.as_str()) {
+        game.native_with_mod_block_entity(pos, |e| {
+            e.nbt.insert(JavaString::from(TRASH_FILTERS_KEY), Tag::String(JavaString::from(json.as_str())));
+        });
+    }
+    retire_filter_cells(game, pos);
+    if !filters.iter().any(|f| !f.allow_only || !f.items.is_empty()) {
         return Shown::Blocked("trash_no_filter");
     }
+    let slots = items(game, pos);
     // Slice 18: 8 / 16 / 32 / 64 a second by tier; a speed module shortens the step (paced), so it
     // doubles the rate once, not twice.
     let mut batch = tiered::trash_batch(crate::game::rustcraft_tiers::tier_at(game, pos));
     let per = paced(game, pos, Util::Trash).1;
-    let filter: Vec<&str> = slots.iter().take(9).flatten().map(|s| &*s.item).collect();
     let mut burned = 0;
-    for slot in 9..18 {
+    let mut waiting = false;
+    for slot in TRASH_BURN {
         let Some(Some(s)) = slots.get(slot) else { continue };
-        if own_filter && !filter.contains(&&*s.item) {
+        if !tiered::trash_passes(&filters, &s.item) {
             continue;
         }
+        waiting = true;
         let n = s.count.min(batch);
         if n == 0 || !spend(game, pos, per * f64::from(n)) {
             break;
@@ -514,31 +548,64 @@ fn trash(game: &mut Game<'_>, pos: Pos, _t: &Tuning) -> Shown {
     }
     if burned > 0 {
         Shown::Working
-    } else if slots.iter().skip(9).any(|s| s.is_some()) {
+    } else if waiting {
         Shown::NoEnergy
     } else {
         Shown::Idle("trash_empty")
     }
 }
 
-/// Slice 18: whether any joint of a housing beside the trash at `pos` names what to destroy.
-fn joint_filter_set(game: &Game<'_>, pos: Pos) -> bool {
-    Face::ALL.iter().any(|&face| {
+/// Slice 18, wave 2: the block entity key of the trash's copy of its joints' filters.
+const TRASH_FILTERS_KEY: &str = "trash_jf";
+/// Slice 18, wave 2: the cells it burns from (0..9 were its own filter cells, now hidden).
+const TRASH_BURN: std::ops::Range<usize> = 9..18;
+
+/// What the trash `entity` takes, by its copy of its joints' filters.
+pub(super) fn trash_filters(entity: &ModBlockEntity) -> Vec<rustcraft_rules::net::items::Filter> {
+    match entity.nbt.get(&JavaString::from(TRASH_FILTERS_KEY)) {
+        Some(Tag::String(s)) => tiered::filters_from_json(&s.to_string_lossy()),
+        _ => Vec::new(),
+    }
+}
+
+/// Slice 18, wave 2: its old filter cells are hidden now; what a world saved in them moves to the
+/// cells it burns from as room allows.
+fn retire_filter_cells(game: &mut Game<'_>, pos: Pos) {
+    if !items(game, pos).iter().take(TRASH_BURN.start).any(Option::is_some) {
+        return;
+    }
+    with_items(game, pos, |items| {
+        for from in 0..TRASH_BURN.start {
+            if items.get(from).is_none_or(Option::is_none) {
+                continue;
+            }
+            if let Some(to) = TRASH_BURN.clone().find(|&i| items.get(i).is_some_and(Option::is_none)) {
+                items[to] = items[from].take();
+            }
+        }
+    });
+}
+
+/// Slice 18: the filters of the joints of the housings beside the trash at `pos` that face it.
+fn joint_filters(game: &Game<'_>, pos: Pos) -> Vec<rustcraft_rules::net::items::Filter> {
+    let mut out = Vec::new();
+    for face in Face::ALL {
         let o = face.offset();
         let housing = [pos[0] + o[0], pos[1] + o[1], pos[2] + o[2]];
         if game.native_block(housing) != crate::game::rustcraft_content::HOUSING {
-            return false;
+            continue;
         }
         let Some(e) = machines::entity(game, housing) else {
-            return false;
+            continue;
         };
         let joints = crate::game::rustcraft_window::read_joints(&e.nbt);
-        (0..4).any(|slot| {
-            joints
-                .get(face.opposite(), slot)
-                .is_some_and(tiered::trash_filter_set)
-        })
-    })
+        for slot in 0..4 {
+            if let Some(s) = joints.get(face.opposite(), slot) {
+                out.push(s.filter.clone());
+            }
+        }
+    }
+    out
 }
 
 /// Slice 18 (guide `trash`): a trash placed beside a housing, or a housing beside a trash, gets
@@ -689,15 +756,30 @@ fn charge_slots(game: &mut Game<'_>, dimension: &str, pos: Pos, every: u64) -> S
                 crate::game::rustcraft_gear::charge(&s, b.charge);
             }
         }
-        // Full ones go to the output slots, for the net.
+        // Full ones go to the hidden output slots for the net, when a housing beside it takes
+        // them (slice 18, wave 2: `ui.js` shows the four «Броня» cells only).
+        let net = beside_housing(game, pos);
         for ((slot, _), b) in held.iter().zip(&after) {
-            if b.full()
+            if charging::to_output(b.full(), net)
                 && let Some(s) = items(game, pos).get(*slot).cloned().flatten()
-                && put(game, pos, 4..8, s).is_none()
+                && put(game, pos, CHARGER_ARMOUR..2 * CHARGER_ARMOUR, s).is_none()
             {
                 with_items(game, pos, |items| items[*slot] = None);
             }
         }
+    }
+    if !beside_housing(game, pos) {
+        // No net to take them: what waits in the hidden output comes back where it is seen.
+        with_items(game, pos, |items| {
+            for from in CHARGER_ARMOUR..2 * CHARGER_ARMOUR {
+                if items.get(from).is_none_or(Option::is_none) {
+                    continue;
+                }
+                if let Some(to) = (0..CHARGER_ARMOUR).find(|&i| items.get(i).is_some_and(Option::is_none)) {
+                    items[to] = items[from].take();
+                }
+            }
+        });
     }
     // «…или встань на него в снаряжении»: the gear of a player standing on it.
     let standing = standing_on(game, dimension, pos);
@@ -716,6 +798,14 @@ fn charge_slots(game: &mut Game<'_>, dimension: &str, pos: Pos, every: u64) -> S
         }
         _ => Shown::Idle("charge_empty"),
     }
+}
+
+/// Slice 18, wave 2: whether a housing of the net touches the block at `pos`.
+fn beside_housing(game: &Game<'_>, pos: Pos) -> bool {
+    Face::ALL.iter().any(|f| {
+        let o = f.offset();
+        game.native_block([pos[0] + o[0], pos[1] + o[1], pos[2] + o[2]]) == crate::game::rustcraft_content::HOUSING
+    })
 }
 
 /// The players standing on the block at `pos` (their feet in the cell above it, or on a thin
@@ -1452,6 +1542,8 @@ fn brush(game: &mut Game<'_>, pos: Pos, cost: f64) -> Shown {
     let remembered = found_of(&block);
     let rolled = remembered.as_ref().and_then(|(_, item)| item.clone());
     let table = found::brush_table(remembered.as_ref().map(|(f, _)| f), table).to_owned();
+    // Slice 18, wave 2: a grown block brushes by the find table its vein chose.
+    let table = grown_table_of(&block).unwrap_or(table);
     let finds = match rolled {
         Some(item) => vec![item],
         None => game.sequence_loot(&table, &table, Some(&brush)),
@@ -1514,12 +1606,16 @@ pub(super) fn set_brush_loot(game: &mut Game<'_>, pos: Pos, table: &str) -> bool
 }
 
 /// The item a lift gives of the suspicious `block`: marked grown, or with where it was found.
-fn lifted_stack(block: &str, lift: &Lift, rolled: Option<&ItemStack>) -> ItemStack {
+fn lifted_stack(block: &str, lift: &Lift, rolled: Option<&ItemStack>, table: Option<&str>) -> ItemStack {
     let mut stack = ItemStack::new(block, 1);
     let mut data = Compound::default();
     match lift {
         Lift::Grown => {
             data.insert(JavaString::from(grown::MARK), Tag::Byte(1));
+            // Slice 18, wave 2 (guide `mod_stratum`): the find table the vein's window chose.
+            if let Some(t) = table.filter(|t| !t.is_empty()) {
+                data.insert(JavaString::from(grown::TABLE_KEY), Tag::String(JavaString::from(t)));
+            }
         }
         Lift::Found(f) => {
             let text = |s: &str| Tag::String(JavaString::from(s));
@@ -1595,13 +1691,14 @@ pub(super) fn lift(game: &mut Game<'_>, dimension: &str, pos: Pos) -> Option<(It
     }
     let (table, seed, rolled) = brushable_at(game, pos).unwrap_or_default();
     let was_grown = grown_at(game, dimension, pos);
+    let grown_table = table.clone();
     let lift = found::lift(dimension, pos, was_grown, table, seed, rolled.is_some());
     let air = game.native_default_state("minecraft:air")?;
     if !game.native_set_block(dimension, pos, air, 3) {
         return None;
     }
     forget_grown(game, dimension, pos);
-    Some((lifted_stack(&block, &lift, rolled.as_ref()), lift))
+    Some((lifted_stack(&block, &lift, rolled.as_ref(), grown_table.as_deref()), lift))
 }
 
 /// `native_use_item_on` of the wrench with sneaking on suspicious sand or gravel: the block is
@@ -1666,8 +1763,11 @@ fn grow(game: &mut Game<'_>, dimension: &str, pos: Pos, cost: f64) -> Shown {
     let slots = items(game, pos);
     let mods = base::modules_at(game, pos);
     let stratum = modules::count(&mods, Module::Stratum) > 0;
-    // Slice 18: the stratum takes the rock its window chose (sand or gravel).
-    let chosen_rock = vein::stratum_rock(choice(game, pos, vein::STRATUM_ROCKS.len()));
+    // Slice 18: the stratum takes the rock its window chose (sand or gravel); wave 2: and the find
+    // table its block gets.
+    let picked = toggles_at(game, pos, Util::Vein.spec().toggles);
+    let chosen_rock = vein::stratum_rock(vein::stratum_choice(&picked).0);
+    let chosen_table = vein::stratum_table(&picked);
     let wanted = |item: &str| if stratum { item == chosen_rock } else { vein::is_stone(item) };
     let Some(slot) = slots.iter().position(|s| s.as_ref().is_some_and(|s| s.count > 0 && wanted(&s.item))) else {
         return Shown::Idle("vein_no_rock");
@@ -1706,6 +1806,7 @@ fn grow(game: &mut Game<'_>, dimension: &str, pos: Pos, cost: f64) -> Shown {
     game.native_set_block(dimension, cell, state_id, 3);
     with_items(game, pos, |items| take_one(items, slot));
     if grown::is_suspicious(ore) {
+        set_brush_loot(game, cell, chosen_table);
         let mut g = grown_cells(game);
         g.cells.grew(dimension, cell);
         g.dirty = true;
@@ -1827,7 +1928,12 @@ pub(super) fn sheet(game: &Game<'_>, dimension: &str, pos: Pos, u: Util, s: &mut
     let names = if u == Util::Vein {
         let mods = base::modules_at(game, pos);
         if modules::count(&mods, Module::Stratum) > 0 {
-            rustcraft_rules::utility::vein::STRATUM_ROCKS.iter().map(|r| ((*r).to_owned(), (*r).to_owned())).collect()
+            use rustcraft_rules::utility::vein::{STRATUM_ROCKS, STRATUM_TABLES};
+            STRATUM_ROCKS
+                .iter()
+                .map(|r| ((*r).to_owned(), (*r).to_owned()))
+                .chain(STRATUM_TABLES.iter().map(|t| ((*t).to_owned(), "minecraft:brush".to_owned())))
+                .collect()
         } else if modules::count(&mods, Module::Pick) > 0 {
             toggle_names(u)
         } else {
@@ -1837,6 +1943,11 @@ pub(super) fn sheet(game: &Game<'_>, dimension: &str, pos: Pos, u: Util, s: &mut
         toggle_names(u)
     };
     let shown_n = names.len();
+    // Slice 18, wave 2: the stratum's two choices, a rock and a find table, one of each on.
+    let stratum_on = (u == Util::Vein && modules::count(&base::modules_at(game, pos), Module::Stratum) > 0).then(|| {
+        let (rock, table) = rustcraft_rules::utility::vein::stratum_choice(&on);
+        (rock, rustcraft_rules::utility::vein::STRATUM_ROCKS.len() + table)
+    });
     s.toggles = names
         .into_iter()
         .into_iter()
@@ -1844,8 +1955,10 @@ pub(super) fn sheet(game: &Game<'_>, dimension: &str, pos: Pos, u: Util, s: &mut
         .map(|(i, (key, icon))| Toggle {
             icon,
             name: base::v(&line(&format!("rustcraft.util.{short}.toggle.{}", key.replace([':', '/'], "_")), &key, &[])),
-            on: on.get(i).copied().unwrap_or(false)
+            on: stratum_on.map_or(false, |(r, t)| i == r || i == t)
+                || (stratum_on.is_none() && on.get(i).copied().unwrap_or(false))
                 || (matches!(u, Util::Archeo | Util::Enchanter | Util::Vein | Util::Apiary)
+                    && stratum_on.is_none()
                     && i == 0
                     && !on.iter().take(shown_n).any(|t| *t)),
             hint: base::v(&line(&format!("rustcraft.util.{short}.hint"), "Click to turn on or off", &[])),
@@ -2134,6 +2247,10 @@ pub(super) fn on_button(game: &mut Game<'_>, pos: Pos, entity: &mut ModBlockEnti
             let by = xp::LEVEL_STEPS[i];
             write_i64(&mut entity.nbt, ENCHANT_LEVEL_KEY, i64::from(xp::step_level(now, by)));
         }
+        Util::Vein if modules::count(&modules::read(&base::read_module_items(&entity.nbt)), Module::Stratum) > 0 => {
+            let t = rustcraft_rules::utility::vein::stratum_press(&toggles(&entity.nbt), i);
+            write_toggles(&mut entity.nbt, &t);
+        }
         Util::Archeo | Util::Vein | Util::Apiary => {
             let mut t = vec![false; n];
             t[i] = true;
@@ -2186,6 +2303,52 @@ pub(super) fn note_burnt(dimension: &str, pos: Pos, n: u32) {
     }
 }
 
+/// Slice 18, wave 2: what fluid the trash at a place destroyed lately, mB, for its window's fluid
+/// bar and «… вёдер» of the minute.
+static FLUID_BURNT: LazyLock<Mutex<HashMap<(String, Pos), std::collections::VecDeque<(std::time::Instant, u64, String)>>>> =
+    LazyLock::new(Mutex::default);
+
+/// The trash at `pos` destroyed `mb` of `fluid` (rustcraft_fluids).
+pub(super) fn note_fluid_burnt(dimension: &str, pos: Pos, fluid: &str, mb: u64) {
+    if mb == 0 {
+        return;
+    }
+    let now = std::time::Instant::now();
+    let mut b = FLUID_BURNT.lock().unwrap_or_else(PoisonError::into_inner);
+    let q = b.entry((dimension.to_owned(), pos)).or_default();
+    q.push_back((now, mb, fluid.to_owned()));
+    while q.front().is_some_and(|(t, _, _)| now.duration_since(*t) > MINUTE) {
+        q.pop_front();
+    }
+}
+
+/// (mB in the last minute, mB a second over the last two seconds, the fluid last destroyed).
+fn fluid_burnt(dimension: &str, pos: Pos) -> (u64, f64, Option<String>) {
+    let now = std::time::Instant::now();
+    let b = FLUID_BURNT.lock().unwrap_or_else(PoisonError::into_inner);
+    let Some(q) = b.get(&(dimension.to_owned(), pos)) else {
+        return (0, 0.0, None);
+    };
+    let minute = q.iter().filter(|(t, _, _)| now.duration_since(*t) <= MINUTE).map(|(_, n, _)| n).sum();
+    let recent: u64 = q
+        .iter()
+        .filter(|(t, _, _)| now.duration_since(*t).as_secs_f64() <= 2.0)
+        .map(|(_, n, _)| n)
+        .sum();
+    let last = q.back().filter(|(t, _, _)| now.duration_since(*t).as_secs_f64() <= 2.0).map(|(_, _, f)| f.clone());
+    (minute, recent as f64 / 2.0, last)
+}
+
+/// Items the trash at a place burnt in the last second.
+fn burnt_last_second(dimension: &str, pos: Pos) -> u32 {
+    let now = std::time::Instant::now();
+    BURNT
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .get(&(dimension.to_owned(), pos))
+        .map_or(0, |q| q.iter().filter(|(t, _)| now.duration_since(*t).as_secs_f64() <= 1.0).map(|(_, n)| n).sum())
+}
+
 fn burnt_last_minute(dimension: &str, pos: Pos) -> u32 {
     let now = std::time::Instant::now();
     BURNT
@@ -2195,9 +2358,10 @@ fn burnt_last_minute(dimension: &str, pos: Pos) -> u32 {
         .map_or(0, |q| q.iter().filter(|(t, _)| now.duration_since(*t) <= MINUTE).map(|(_, n)| n).sum())
 }
 
-/// The filter its joints name and their priority, as the guide's window lists them.
-fn trash_joints(game: &Game<'_>, pos: Pos) -> (Vec<String>, Option<i32>) {
-    let mut items = Vec::new();
+//// The filters its joints name (allow list or not, the items) and their lowest priority, as the
+/// guide's window lists them.
+fn trash_joints(game: &Game<'_>, pos: Pos) -> (Vec<(bool, Vec<String>)>, Option<i32>) {
+    let mut filters: Vec<(bool, Vec<String>)> = Vec::new();
     let mut priority = None;
     for face in Face::ALL {
         let o = face.offset();
@@ -2209,109 +2373,278 @@ fn trash_joints(game: &Game<'_>, pos: Pos) -> (Vec<String>, Option<i32>) {
         for slot in 0..4 {
             if let Some(s) = joints.get(face.opposite(), slot) {
                 priority = Some(priority.map_or(s.priority, |p: i32| p.min(s.priority)));
-                for i in &s.filter.items {
-                    if !items.contains(i) {
-                        items.push(i.clone());
+                if tiered::trash_filter_set(s) {
+                    let items: Vec<String> = s.filter.items.iter().cloned().collect();
+                    if !filters.iter().any(|(a, i)| *a == s.filter.allow_only && *i == items) {
+                        filters.push((s.filter.allow_only, items));
                     }
                 }
             }
         }
     }
-    (items, priority)
+    (filters, priority)
+}
+
+/// Slice 18, wave 2: an item's or block's name in the reader's language.
+fn name_of(game: &Game<'_>, id: &str) -> Text {
+    let kind = if game.items().get(id).is_some_and(|i| i.block.is_some()) { "block" } else { "item" };
+    let fallback = id.rsplit(':').next().unwrap_or(id).replace('_', " ");
+    Text::translate_with_fallback(&format!("{kind}.{}", id.replace(':', ".")), &fallback, &[])
+}
+
+/// Names joined with «, ».
+fn names_of(game: &Game<'_>, ids: &[String]) -> Text {
+    let mut out = Text::literal("");
+    for (i, id) in ids.iter().enumerate() {
+        if i > 0 {
+            out.push(Text::literal(", "));
+        }
+        out.push(name_of(game, id));
+    }
+    out
+}
+
+/// A fluid's bar colour: water blue, lava orange, a solution green.
+fn fluid_colour(fluid: &str) -> u32 {
+    match fluid {
+        "minecraft:water" => 0xFF3F_76E4,
+        "minecraft:lava" => 0xFFE0_661A,
+        _ => 0xFF59_D38C,
+    }
+}
+
+/// The share of its step a machine stepping every `every` ticks has done, while it works.
+fn step_share(dimension: &str, pos: Pos, every: u64) -> f64 {
+    if !shown_at(dimension, pos).is_some_and(|s| s.working()) {
+        return 0.0;
+    }
+    let now = state().ticks.get(dimension).copied().unwrap_or(0);
+    (now % every.max(1)) as f64 / every.max(1) as f64
 }
 
 /// The rows the guide's windows add (`ui.js` trash, disintegrator) and the charger's charge bar.
 fn sheet_extras(game: &Game<'_>, dimension: &str, pos: Pos, u: Util, s: &mut Sheet) {
-    let lit = |s: String| Text::literal(s);
     match u {
-        Util::Trash => {
-            let tier = crate::game::rustcraft_tiers::tier_at(game, pos);
-            let (every, _) = paced(game, pos, u);
-            let rate = f64::from(tiered::trash_batch(tier)) * 20.0 / every.max(1) as f64;
-            // The throughput takes the step's row: «пропускная способность».
-            if let Some(row) = s.rows.get_mut(1) {
-                *row = base::v(&line(
-                    "rustcraft.util.trash.rate",
-                    "Destroys up to %s items or buckets a second",
-                    &[lit(format!("{rate:.0}"))],
-                ));
-            }
-            let (items, priority) = trash_joints(game, pos);
-            let filter = if items.is_empty() {
-                line("rustcraft.util.trash.filter_none", "Filter: none (set it on the joint with the wrench)", &[])
-            } else {
-                let names: Vec<String> = items.iter().map(|i| i.trim_start_matches("minecraft:").replace('_', " ")).collect();
-                line("rustcraft.util.trash.filter", "Filter: %s", &[lit(names.join(", "))])
-            };
-            s.rows.push(base::v(&filter));
-            s.rows.push(base::v(&line(
-                "rustcraft.util.trash.burnt",
-                "Burnt in a minute: %s · joint priority %s",
-                &[
-                    lit(burnt_last_minute(dimension, pos).to_string()),
-                    lit(priority.map_or("—".to_owned(), |p| p.to_string())),
-                ],
-            )));
-        }
-        Util::Disintegrator => {
-            let entity = machines::entity(game, pos);
-            let item = entity.and_then(|e| e.items.first().cloned().flatten()).filter(|s| s.count > 0);
-            let row = match &item {
-                Some(st) => {
-                    let durability = durability_left(game, st);
-                    line(
-                        "rustcraft.util.disintegrator.taking",
-                        "Taking apart: %s · durability %s",
-                        &[
-                            lit(st.item.trim_start_matches("minecraft:").replace('_', " ")),
-                            lit(format!("{:.0}%", durability * 100.0)),
-                        ],
-                    )
-                }
-                None => line("rustcraft.util.disintegrator.taking_none", "Taking apart: nothing", &[]),
-            };
-            s.rows.push(base::v(&row));
-            let percent = disassembly::share_percent(modules::count(&base::modules_at(game, pos), Module::Yield) as usize);
-            let kept: BTreeMap<String, u32> = entity.map(|e| read_json(&e.nbt, KEPT_KEY)).unwrap_or_default();
-            let kept_text = if kept.is_empty() {
-                "—".to_owned()
-            } else {
-                kept.iter().map(|(i, n)| format!("{:.1} {}", f64::from(*n) / 1000.0, i.trim_start_matches("minecraft:").replace('_', " "))).collect::<Vec<_>>().join(", ")
-            };
-            s.rows.push(base::v(&line(
-                "rustcraft.util.disintegrator.share",
-                "Share %s · kept for the next: %s",
-                &[lit(format!("{percent}%")), lit(kept_text)],
-            )));
-        }
-        Util::Charger => {
-            let slots = items(game, pos);
-            let charging = (0..4).find_map(|i| {
-                let st = slots.get(i).cloned().flatten()?;
-                battery_of(game, &st).map(|b| (st, b))
-            });
-            let (label, share) = match charging {
-                Some((st, b)) => (
-                    line(
-                        "rustcraft.util.charger.charge",
-                        "Charge: %s",
-                        &[lit(st.item.trim_start_matches("rustcraft:").replace('_', " "))],
-                    ),
-                    if b.capacity > 0.0 { (b.charge / b.capacity).clamp(0.0, 1.0) } else { 1.0 },
-                ),
-                None => (line("rustcraft.util.charger.charge_none", "Charge: nothing in it", &[]), 0.0),
-            };
-            s.bars.push(Bar {
-                label: base::v(&label),
-                value: base::v(&lit(format!("{:.0}%", share * 100.0))),
-                share,
-                energy: false,
-                colour: Some(0xFF69_D2D8),
-            });
-        }
+        Util::Trash => trash_sheet(game, dimension, pos, s),
+        Util::Disintegrator => disintegrator_sheet(game, dimension, pos, s),
+        Util::Charger => charger_sheet(game, pos, s),
         _ => {}
     }
 }
+
+/// Slice 18, wave 2 (`ui.js` trash): «Фильтр стыка», «Приоритет», «Сгорело за минуту», the
+/// throughput; the fluid bar over the energy bar; «Сгорает сейчас» and the arrow of its batch.
+fn trash_sheet(game: &Game<'_>, dimension: &str, pos: Pos, s: &mut Sheet) {
+    let lit = |s: String| Text::literal(s);
+    let t = crate::game::rustcraft_server::tuning();
+    let tier = crate::game::rustcraft_tiers::tier_at(game, pos);
+    let mode = machines::entity(game, pos).map_or(Default::default(), |e| machines::read_work(&e.nbt));
+    let (rate, _) = tiered::trash_rate(tier, &base::modules_at(game, pos), mode, t);
+    let (filters, priority) = trash_joints(game, pos);
+    let filter = match filters.first() {
+        None => line("rustcraft.util.trash.filter_none", "Joint filter: none (set it with the wrench)", &[]),
+        Some((allow, _)) => {
+            let all: Vec<String> = filters.iter().flat_map(|(_, i)| i.iter().cloned()).collect();
+            let key = if *allow { "rustcraft.util.trash.filter_allow" } else { "rustcraft.util.trash.filter_block" };
+            let names = if all.is_empty() {
+                line("rustcraft.util.trash.filter_all", "everything", &[])
+            } else {
+                names_of(game, &all)
+            };
+            line(key, "Joint filter: allow list: %s", &[names])
+        }
+    };
+    let priority = match priority {
+        None => lit("—".to_owned()),
+        Some(p) if p <= -rustcraft_rules::net::settings::PRIORITY_LIMIT => {
+            line("rustcraft.util.trash.priority_lowest", "the lowest", &[])
+        }
+        Some(p) => lit(p.to_string()),
+    };
+    let (fluid_minute, fluid_rate, fluid) = fluid_burnt(dimension, pos);
+    let items_minute = burnt_last_minute(dimension, pos);
+    let buckets = (fluid_minute as f64 / 1000.0).round() as u64;
+    let buckets_a_second = fluid_rate / 1000.0;
+    let now = f64::from(burnt_last_second(dimension, pos)) + buckets_a_second;
+    s.rows = vec![
+        base::v(&filter),
+        base::v(&line("rustcraft.util.trash.priority", "Priority: %s", &[priority])),
+        base::v(&line(
+            "rustcraft.util.trash.burnt_minute",
+            "Burnt in a minute: %s items · %s buckets",
+            &[lit(items_minute.to_string()), lit(buckets.to_string())],
+        )),
+        base::v(&line(
+            "rustcraft.util.trash.throughput",
+            "Throughput: %s of %s items a second",
+            &[lit(format!("{now:.0}")), lit(format!("{rate:.0}"))],
+        )),
+    ];
+    s.hints = vec![
+        vec![base::v(&line(
+            "rustcraft.util.trash.filter_hint",
+            "Set it on its joint with the wrench; with none it takes nothing",
+            &[],
+        ))],
+        vec![base::v(&line(
+            "rustcraft.util.trash.priority_hint",
+            "Only what no storage or machine took comes to it",
+            &[],
+        ))],
+        Vec::new(),
+        vec![base::v(&line(
+            "rustcraft.util.trash.throughput_hint",
+            "8 a second on tier 1, 16, 32 and 64 on the higher ones; a speed module doubles it",
+            &[],
+        ))],
+    ];
+    let value = match &fluid {
+        Some(f) => line(
+            "rustcraft.util.trash.fluid",
+            "%s · %s buckets a second",
+            &[name_of(game, f), lit(format!("{buckets_a_second:.1}").replace('.', ","))],
+        ),
+        None => line("rustcraft.util.trash.fluid_none", "nothing comes", &[]),
+    };
+    s.bars.insert(
+        0,
+        Bar {
+            label: base::v(&line("rustcraft.util.trash.fluid_label", "Fluid", &[])),
+            value: base::v(&value),
+            share: (buckets_a_second / rate.max(1.0)).clamp(0.0, 1.0),
+            energy: false,
+            colour: Some(fluid.as_deref().map_or(0xFF3F_76E4, fluid_colour)),
+        },
+    );
+    s.work = Some(step_share(dimension, pos, paced(game, pos, Util::Trash).0));
+    s.label = Some(base::v(&line("rustcraft.util.trash.burning", "Burning now", &[])));
+}
+
+/// Slice 18, wave 2 (`ui.js` disintegrator): its input, the arrow and «Разборка» (what comes
+/// out, in whole items and fractions); the durability bar; the share and «чары теряются», the
+/// kept fractions.
+fn disintegrator_sheet(game: &Game<'_>, dimension: &str, pos: Pos, s: &mut Sheet) {
+    let lit = |s: String| Text::literal(s);
+    let entity = machines::entity(game, pos);
+    let item = entity.and_then(|e| e.items.first().cloned().flatten()).filter(|s| s.count > 0);
+    let yields = modules::count(&base::modules_at(game, pos), Module::Yield);
+    let percent = disassembly::share_percent(yields as usize);
+    let (value, share) = match &item {
+        Some(st) => {
+            let left = durability_left(game, st);
+            let state = if left >= 1.0 {
+                line("rustcraft.util.disintegrator.whole", "whole", &[])
+            } else {
+                lit(format!("{:.0}%", left * 100.0))
+            };
+            (line("rustcraft.util.disintegrator.durability", "%s · %s", &[name_of(game, &st.item), state]), left)
+        }
+        None => (line("rustcraft.util.disintegrator.taking_none", "Taking apart: nothing", &[]), 0.0),
+    };
+    s.bars.insert(
+        0,
+        Bar {
+            label: base::v(&line("rustcraft.util.repair.bar", "Durability", &[])),
+            value: base::v(&value),
+            share,
+            energy: false,
+            colour: Some(0xFF59_D38C),
+        },
+    );
+    s.preview = match &item {
+        Some(st) => {
+            if state().recipes.is_none() {
+                let r = crafting_recipes(game);
+                state().recipes = Some(r);
+            }
+            let is_charged = charged(game, st);
+            let held = state();
+            let all = held.recipes.as_deref().unwrap_or_default();
+            disassembly::recipe_for(&st.item, all, is_charged)
+                .map(|r| disassembly::preview(r, percent, share))
+                .unwrap_or_default()
+                .into_iter()
+                .map(|(i, n)| (i, disassembly::amount_text(n)))
+                .collect()
+        }
+        None => Vec::new(),
+    };
+    let modules_text = match yields {
+        0 => line("rustcraft.util.disintegrator.no_yield", "No yield module", &[]),
+        n => line("rustcraft.util.disintegrator.yields", "Yield modules: %s", &[lit(n.to_string())]),
+    };
+    let kept: BTreeMap<String, u32> = entity.map(|e| read_json(&e.nbt, KEPT_KEY)).unwrap_or_default();
+    let mut kept_text = Text::literal("");
+    for (i, (id, n)) in kept.iter().enumerate() {
+        if i > 0 {
+            kept_text.push(Text::literal(", "));
+        }
+        kept_text.push(name_of(game, id));
+        kept_text.push(Text::literal(format!(" {}", disassembly::amount_text(*n))));
+    }
+    if kept.is_empty() {
+        kept_text = lit("—".to_owned());
+    }
+    s.rows = vec![
+        base::v(&line(
+            "rustcraft.util.disintegrator.share_lost",
+            "Share back %s · enchantments are lost",
+            &[lit(format!("{percent}%"))],
+        )),
+        base::v(&line("rustcraft.util.disintegrator.kept", "Kept: %s", &[kept_text])),
+    ];
+    s.hints = vec![
+        vec![
+            base::v(&modules_text),
+            base::v(&line(
+                "rustcraft.util.disintegrator.share_hint",
+                "A yield module: 60%, two 70%, never above 75%",
+                &[],
+            )),
+        ],
+        vec![base::v(&line(
+            "rustcraft.util.disintegrator.kept_hint",
+            "Fractions wait inside until they make a whole item",
+            &[],
+        ))],
+    ];
+    s.work = Some(step_share(dimension, pos, paced(game, pos, Util::Disintegrator).0));
+    s.label = Some(base::v(&line("rustcraft.util.disintegrator.preview", "Taking apart", &[])));
+}
+
+/// Slice 18, wave 2 (`ui.js` charger): «Броня», the charge of what charges now, by its name.
+fn charger_sheet(game: &Game<'_>, pos: Pos, s: &mut Sheet) {
+    s.rows.clear();
+    let slots = items(game, pos);
+    let held: Vec<(ItemStack, charge::Battery)> = (0..CHARGER_ARMOUR)
+        .filter_map(|i| {
+            let st = slots.get(i).cloned().flatten()?;
+            battery_of(game, &st).map(|b| (st, b))
+        })
+        .collect();
+    let charging = held.iter().find(|(_, b)| !b.full()).or(held.first());
+    let (label, share) = match charging {
+        Some((st, b)) => (
+            line("rustcraft.util.charger.charge", "Charge: %s", &[name_of(game, &st.item)]),
+            if b.capacity > 0.0 { (b.charge / b.capacity).clamp(0.0, 1.0) } else { 1.0 },
+        ),
+        None => (line("rustcraft.util.charger.charge_none", "Charge: nothing in it", &[]), 0.0),
+    };
+    s.bars.insert(
+        0,
+        Bar {
+            label: base::v(&label),
+            value: base::v(&Text::literal(format!("{:.0}%", share * 100.0))),
+            share,
+            energy: false,
+            colour: Some(0xFF69_D2D8),
+        },
+    );
+    s.label = Some(base::v(&line("rustcraft.util.charger.armour", "Armour", &[])));
+}
+
+/// Slice 18, wave 2: the charger's cells for gear (`ui.js` «Броня»); 4..8 are its hidden output.
+const CHARGER_ARMOUR: usize = 4;
 
 /// How much of a worn item's durability is left, 0 to 1 (1 for an item that does not wear).
 fn durability_left(game: &Game<'_>, st: &ItemStack) -> f64 {
@@ -2320,4 +2653,40 @@ fn durability_left(game: &Game<'_>, st: &ItemStack) -> f64 {
         return 1.0;
     }
     f64::from(max.saturating_sub(st.damage)) / f64::from(max)
+}
+
+// ---- Slice 18, wave 2: the charger's and the plate's glow (guide `charger`, `charge_plate`) ----
+
+/// `native_block_entity_submit` (API 71): while a charger or a charge plate charges (`lit`), its
+/// coils glow full bright in a pulse, drawn over the model each frame
+/// (rustcraft_rules::machines::charging::pulse); standing, nothing is drawn and kept. True for
+/// these two blocks.
+pub(super) fn draw_glow(
+    game: &Game<'_>,
+    block: &str,
+    state: horizon_world::registry::BlockStateId,
+    draw: &mut crate::game::native_block_entity_draw::BlockEntityDraw,
+) -> bool {
+    use crate::game::native_block_entity_draw::CubeFace;
+    use rustcraft_rules::machines::charging as c;
+    let (coils, uv, sprite): (&[([f32; 3], [f32; 3])], [f32; 4], &str) = match block {
+        "rustcraft:charger" => (&c::CHARGER_COILS, c::CHARGER_COIL_UV, "rustcraft:block/charger"),
+        "rustcraft:charge_plate" => (&c::PLATE_COILS, c::PLATE_COIL_UV, "rustcraft:block/charge_plate"),
+        _ => return false,
+    };
+    if game.native_block_state_property(state, "lit") != Some("true") {
+        draw.keep();
+        return true;
+    }
+    let t = (draw.game_time.rem_euclid(1_200_000) as f32 + draw.partial) / 20.0;
+    let tint = c::glow_tint(c::pulse(t));
+    let light = draw.light;
+    draw.light = 0xF0 | (0xF0 << 8);
+    let face = Some(CubeFace { sprite, uv: Some(uv) });
+    for coil in coils {
+        let (from, to) = c::glow_box(*coil);
+        game.native_draw_cube(draw, from, to, [face; 6], tint);
+    }
+    draw.light = light;
+    true
 }

@@ -75,9 +75,72 @@ pub fn take_apart(
     whole.into_iter().collect()
 }
 
+/// Slice 18, wave 2 (guide `ui.js` disintegrator, «Разборка»): what one item gives, before the
+/// kept fractions: each ingredient's share in thousandths (an iron pickaxe at 50%: 1500 iron
+/// ingots, 1000 sticks).
+pub fn preview(recipe: &Recipe, percent: u32, durability: f64) -> Vec<(String, u32)> {
+    let share = (f64::from(percent) * durability.clamp(0.0, 1.0) * 10.0).round() as u32;
+    recipe
+        .ingredients
+        .iter()
+        .map(|(item, count)| (item.clone(), count * share))
+        .filter(|(_, n)| *n > 0)
+        .collect()
+}
+
+/// An amount of thousandths as the guide writes it: whole items, then ½, ⅓, ⅔, ¼, ¾ or a tenth
+/// («1½», «½», «2», «0,3»).
+pub fn amount_text(thousandths: u32) -> String {
+    let whole = thousandths / 1000;
+    let part = thousandths % 1000;
+    let frac = match part {
+        0 => "",
+        245..=255 => "¼",
+        328..=338 => "⅓",
+        495..=505 => "½",
+        662..=672 => "⅔",
+        745..=755 => "¾",
+        _ => {
+            let tenths = (f64::from(thousandths) / 100.0).round() as u32;
+            return if tenths.is_multiple_of(10) {
+                (tenths / 10).to_string()
+            } else {
+                format!("{},{}", tenths / 10, tenths % 10)
+            };
+        }
+    };
+    match (whole, frac) {
+        (0, "") => "0".to_owned(),
+        (0, f) => f.to_owned(),
+        (w, f) => format!("{w}{f}"),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn preview_is_the_share_of_each_ingredient() {
+        let pick = r("minecraft:iron_pickaxe", 1, &[("minecraft:iron_ingot", 3), ("minecraft:stick", 2)]);
+        assert_eq!(
+            preview(&pick, 50, 1.0),
+            vec![("minecraft:iron_ingot".into(), 1500), ("minecraft:stick".into(), 1000)]
+        );
+        assert_eq!(preview(&pick, 60, 0.5)[0].1, 900);
+        assert!(preview(&pick, 50, 0.0).is_empty());
+    }
+
+    #[test]
+    fn amount_text_writes_whole_items_and_fractions() {
+        assert_eq!(amount_text(1500), "1½");
+        assert_eq!(amount_text(500), "½");
+        assert_eq!(amount_text(2000), "2");
+        assert_eq!(amount_text(333), "⅓");
+        assert_eq!(amount_text(1750), "1¾");
+        assert_eq!(amount_text(300), "0,3");
+        assert_eq!(amount_text(0), "0");
+    }
 
     fn r(result: &str, n: u32, ings: &[(&str, u32)]) -> Recipe {
         Recipe {
