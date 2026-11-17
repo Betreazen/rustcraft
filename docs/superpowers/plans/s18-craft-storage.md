@@ -188,7 +188,7 @@
 
 ### Task 26: O11 — an order's product goes straight to the next machine
 - Today an intermediate product rides to the storage and from there to the next step's machine (`orders.rs` `pull` with `own`, `queue.rs` `keep_for`). The product of a step whose next step runs on another machine goes from the first machine to the second.
-- [ ] not started. Way: in `follow_jobs`, when `own` and the order's next step needs that product, start the next step's job at once on a free machine of its kind and send the product as `Leg::Machine` of that job instead of `Leg::Products { own: true }` (queue: a `Queue::chain_next` that hands back the next step as a Job).
+- [x] done in s18-last Task 4: the product waits at its machine for the order (`orders::held`, the order's own stock in `Queue::round_with`) and rides from that machine straight to the next step's machine (`orders.rs` `deliver`); self-test `s18_o11_product_goes_straight_to_the_next_machine`.
 
 ### Task 27: O12 — the order brings its water
 - A mixer step's water (and any fluid input) comes with the order from the storage's tanks / the line's fluid net, not only from the mixer's own tank (`orders::reachable`).
@@ -204,4 +204,4 @@
 
 ### Task 30: order items visible in the housings
 - The items of an order's shipment drawn moving through the housings along their route (`rules/src/orders/ship.rs` gives the route and the time), as the client can draw them (block-entity drawing of the housings).
-- [ ] not started. Way: the server writes each housing's riding items (item, progress 0..1, direction) into the housing's update tag each second from `ship::advance`; the housing's block-entity draw (stream 1's transport.rs owns the housing's drawing) draws `native_draw_item` at the interpolated place.
+- [x] done in s18-last Task 5: `rustcraft_rules::orders::ride` lays each shipment on the housings of its way (`net::topology::pipe_path`) as spans (faces in and out, game ticks in and out); `orders.rs::show_rides` writes them into the housings once a second and syncs them; `pipe18.rs` sends them in the update tag and draws them with `native_draw_item` (`orders.rs::draw_riding`); self-test `s18_order_items_ride_the_housings`. Plain item-net moves have no riding item and are not drawn (s18-last «Пределы движка»).

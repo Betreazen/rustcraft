@@ -24,10 +24,17 @@
 // done. A furnace's, crusher's, smelter's or mixer's job is done when its inputs hold none of the
 // job's items.
 //
-// O11: a product made for a later step of the same order comes back into the storage's count as
-// the order's own (rustcraft_rules::orders::queue::Order::made), even past the storage's room and
-// limits, and the round of the same second hands it to the next machine; it stays in the storage
-// only while that machine is busy or missing.
+// O11: a product made for a later step of the same order goes straight to the next step's
+// machine (slice 18, spec 19: «промежуточный предмет идёт прямо в следующую машину заказа, если она
+// на той же магистрали»). It leaves the machine's output slots into the order's record «held at
+// machine A» (rustcraft_rules::orders::held), the order's own stock for its rounds and nobody
+// else's, not in the storage's counts; while a machine runs such a job the item nets' own moves
+// leave its product be (`kept_outputs`, read by rustcraft_transport). The next step's job takes
+// the held items first and they ride from machine A to its machine on the net that joins the
+// two (straight in where none does), the rest from the storage as before. Held items the order's
+// plan no longer needs, and those of an order cancelled or done, ride to the storage. A product
+// that rode back to the storage before slice 18 (a record's `Leg::Products { own: true }`) still
+// lands as the order's own (rustcraft_rules::orders::queue::Order::made).
 //
 // O12: the mixer's recipes are in the book with water as an input and their fluid as the output,
 // both in buckets. A mixer step needs a mixer on the line and the water for it in the mixers'
@@ -67,7 +74,9 @@ use rustcraft_rules::{
     net::{fluids::BUCKET, items::ItemKey},
     orders::{
         KINDS, PlanRecipe, Step, fluid_key, fluid_number, fluid_of,
+        held::{self, Held},
         queue::{FreeMachine, Job, Order, Queue, SMART_TIER, Wait, runs_that_fit},
+        ride,
         saved::{self, Record, SavedJob, SavedPage},
         ship::{self, Leg, Route, Shipment},
     },
@@ -127,6 +136,10 @@ struct Orders {
     jobs: HashMap<String, Vec<Running>>,
     /// Slice 17: the items riding the item channel for the level's jobs, in the order they set off.
     ships: HashMap<String, Vec<Shipment>>,
+    /// Slice 18 (O11): the products the level's orders hold at machines for their next steps.
+    held: HashMap<String, Vec<Held>>,
+    /// Slice 18: the housings each level's riding items were last written into.
+    ridden: HashMap<String, BTreeSet<Pos>>,
     book: Option<Arc<Book>>,
 }
 
@@ -206,6 +219,7 @@ fn records(
     state: &LevelOrders,
     jobs: &[Running],
     ships: &[Shipment],
+    held: &[Held],
     pages: &BTreeMap<Pos, TempPage>,
 ) -> BTreeMap<u32, Vec<String>> {
     let ids: BTreeSet<u32> = state
@@ -214,6 +228,7 @@ fn records(
         .copied()
         .chain(jobs.iter().map(|r| r.storage))
         .chain(ships.iter().map(|s| s.storage))
+        .chain(held.iter().map(|h| h.storage))
         .collect();
     ids.into_iter()
         .map(|id| {
@@ -232,6 +247,7 @@ fn records(
                     })
                     .collect(),
                 ships: ships.iter().filter(|s| s.storage == id).cloned().collect(),
+                held: held.iter().filter(|h| h.storage == id).cloned().collect(),
             };
             (id, saved::encode(&record))
         })
@@ -245,6 +261,7 @@ pub(super) fn restore(dimension: &str, saved: &BTreeMap<u32, Vec<String>>) {
     let mut queues = BTreeMap::new();
     let mut jobs = Vec::new();
     let mut ships = Vec::new();
+    let mut held = Vec::new();
     for (&id, strings) in saved {
         let Some(record) = saved::decode(strings) else {
             log::warn!("rustcraft: the orders of storage {id} were not read");
@@ -260,6 +277,7 @@ pub(super) fn restore(dimension: &str, saved: &BTreeMap<u32, Vec<String>>) {
                 .into_iter()
                 .map(|s| Shipment { storage: id, ..s }),
         );
+        held.extend(record.held.into_iter().map(|h| Held { storage: id, ..h }));
         jobs.extend(record.jobs.into_iter().map(|j| Running {
             storage: id,
             job: j.job,
@@ -281,6 +299,7 @@ pub(super) fn restore(dimension: &str, saved: &BTreeMap<u32, Vec<String>>) {
     level.revision += 1;
     o.jobs.insert(dimension.to_owned(), jobs);
     o.ships.insert(dimension.to_owned(), ships);
+    o.held.insert(dimension.to_owned(), held);
 }
 
 /// A job read back finds its machine: an autocrafter gets its page again, owing no more than its
@@ -630,6 +649,26 @@ pub(super) fn job_output_at(dimension: &str, pos: Pos) -> Option<ItemKey> {
         .map(|r| r.job.step.output.0.clone())
 }
 
+/// Slice 18 (O11): the machines of the level whose order job makes a product for a later step of
+/// its order, and that product: the item nets' own moves leave it in their output slots, for
+/// the order takes it straight to the next step's machine (rustcraft_transport's snapshot).
+pub(super) fn kept_outputs(dimension: &str) -> BTreeMap<Pos, ItemKey> {
+    let o = orders();
+    let (Some(jobs), Some(level)) = (o.jobs.get(dimension), o.levels.get(dimension)) else {
+        return BTreeMap::new();
+    };
+    jobs.iter()
+        .filter(|r| {
+            level
+                .queues
+                .get(&r.storage)
+                .and_then(|q| q.orders.iter().find(|x| x.id == r.job.order))
+                .is_some_and(|x| x.item != r.job.step.output.0)
+        })
+        .map(|r| (r.job.machine, r.job.step.output.0.clone()))
+        .collect()
+}
+
 /// The slots an order's items go into, and those its products come out of (none for the mixer,
 /// whose product is a fluid).
 fn slots_of(machine: Machine) -> (Range<usize>, Range<usize>) {
@@ -799,15 +838,55 @@ enum Sent {
     Riding,
 }
 
-/// A job's items out of the storage, into the machine's inputs or onto the item channel to it.
-/// A fluid input is not the storage's to give: the fluid nets bring it (O12).
+/// What a job took for its items: from the storage, and (O11) from what its order held at
+/// machines, each with the machine it waited at.
+#[derive(Default)]
+struct Taken {
+    storage: Vec<(ItemKey, u64)>,
+    held: Vec<(Pos, ItemKey, u64)>,
+}
+
+impl Taken {
+    /// All of it goes back where it was taken from.
+    fn undo(&self, dimension: &str, storage_id: u32, order: u16, held: &mut Vec<Held>) {
+        for (item, n) in &self.storage {
+            storage::restore_into(dimension, storage_id, item, *n);
+        }
+        for (machine, item, n) in &self.held {
+            held::add(held, storage_id, order, *machine, item, *n);
+        }
+    }
+
+    /// How many of each item came from what the order held.
+    fn from_held(&self) -> BTreeMap<ItemKey, u64> {
+        let mut out = BTreeMap::new();
+        for (_, item, n) in &self.held {
+            *out.entry(item.clone()).or_insert(0) += n;
+        }
+        out
+    }
+}
+
+fn counts(items: &[(ItemKey, u64)]) -> Vec<(ItemKey, u32)> {
+    items
+        .iter()
+        .map(|(i, n)| (i.clone(), u32::try_from(*n).unwrap_or(u32::MAX)))
+        .collect()
+}
+
+/// A job's items into the machine's inputs or onto the item channel to it: first what its order
+/// holds at machines (O11), riding from each of those machines straight to this one, then the
+/// rest out of the storage. A fluid input is not the storage's to give: the fluid nets bring it
+/// (O12). What came from the order's held items, by item.
 fn deliver(
     game: &mut Game<'_>,
     dimension: &str,
+    level: &LevelNet,
+    held: &mut Vec<Held>,
     way: &mut Way<'_>,
     machine: Machine,
     job: &Job,
-) -> Sent {
+) -> (Sent, BTreeMap<ItemKey, u64>) {
     let wants: Vec<(ItemKey, u64)> = job
         .step
         .items()
@@ -815,42 +894,175 @@ fn deliver(
         .map(|(i, n)| (i.clone(), u64::from(*n) * u64::from(job.runs)))
         .collect();
     let storage_id = way.storage;
-    let mut taken: Vec<(ItemKey, u64)> = Vec::new();
-    let give_back = |taken: &[(ItemKey, u64)]| {
-        for (item, n) in taken {
-            storage::restore_into(dimension, storage_id, item, *n);
-        }
-    };
+    let mut taken = Taken::default();
     for (item, want) in &wants {
-        let got = storage::take_from(dimension, storage_id, item, *want);
-        taken.push((item.clone(), got));
-        if got < *want {
-            give_back(&taken);
-            return Sent::No;
+        let mut got = 0;
+        for (at, n) in held::take(held, storage_id, job.order, item, *want) {
+            taken.held.push((at, item.clone(), n));
+            got += n;
+        }
+        if got == *want {
+            continue;
+        }
+        let from_storage = storage::take_from(dimension, storage_id, item, want - got);
+        taken.storage.push((item.clone(), from_storage));
+        if from_storage < want - got {
+            taken.undo(dimension, storage_id, job.order, held);
+            return (Sent::No, BTreeMap::new());
         }
     }
-    if way.route.is_some() {
-        if game.native_mod_block_entity(job.machine).is_none() {
-            give_back(&taken);
-            return Sent::No;
+    // Each part straight into the machine, or riding from where it is: the storage's part on the
+    // way's route, a held part on the net between its machine and this one.
+    let mut direct: Vec<(ItemKey, u64)> = Vec::new();
+    let mut rides: Vec<(Option<Pos>, Route, Vec<(ItemKey, u64)>)> = Vec::new();
+    let storage_part: Vec<(ItemKey, u64)> =
+        taken.storage.iter().filter(|(_, n)| *n > 0).cloned().collect();
+    if !storage_part.is_empty() {
+        match way.route {
+            Some(route) => rides.push((None, route, storage_part)),
+            None => direct.extend(storage_part),
         }
-        let items = wants
+    }
+    let machines_held: BTreeSet<Pos> = taken.held.iter().map(|(at, _, _)| *at).collect();
+    for at in machines_held {
+        let part: Vec<(ItemKey, u64)> = taken
+            .held
             .iter()
-            .map(|(i, n)| (i.clone(), u32::try_from(*n).unwrap_or(u32::MAX)))
+            .filter(|(m, _, _)| *m == at)
+            .map(|(_, i, n)| (i.clone(), *n))
             .collect();
-        way.send(
+        let route = (at != job.machine)
+            .then(|| {
+                level
+                    .transport
+                    .route(&level.layout, server::tuning(), at, job.machine)
+            })
+            .flatten();
+        match route {
+            Some(route) => rides.push((Some(at), route, part)),
+            None => direct.extend(part),
+        }
+    }
+    if !rides.is_empty() && game.native_mod_block_entity(job.machine).is_none() {
+        taken.undo(dimension, storage_id, job.order, held);
+        return (Sent::No, BTreeMap::new());
+    }
+    if !direct.is_empty() && !place_inputs(game, machine, job.machine, &direct) {
+        taken.undo(dimension, storage_id, job.order, held);
+        return (Sent::No, BTreeMap::new());
+    }
+    let tps = server::tuning().ticks_per_second;
+    let sent = if rides.is_empty() {
+        Sent::Placed
+    } else {
+        Sent::Riding
+    };
+    for (from, route, part) in rides {
+        let mut s = Shipment::new(
+            storage_id,
+            job.order,
             Leg::Machine {
                 machine: job.machine,
             },
-            items,
+            counts(&part),
+            &route,
+            tps,
         );
-        return Sent::Riding;
+        s.from = from;
+        way.ships.push(s);
     }
-    if !place_inputs(game, machine, job.machine, &wants) {
-        give_back(&taken);
-        return Sent::No;
+    (sent, taken.from_held())
+}
+
+/// O11: the plain stacks of `item` in the machine's output slots, made for a later step of the
+/// order `order`, leave them and are held for it at the machine.
+fn hold(
+    game: &mut Game<'_>,
+    held: &mut Vec<Held>,
+    storage_id: u32,
+    order: u16,
+    pos: Pos,
+    machine: Machine,
+    item: &str,
+) {
+    let (_, outputs) = slots_of(machine);
+    if outputs.is_empty() || fluid_of(item).is_some() {
+        return;
     }
-    Sent::Placed
+    let Some(entity) = game.native_mod_block_entity(pos) else {
+        return;
+    };
+    let plain: u32 = outputs
+        .clone()
+        .filter_map(|i| entity.items.get(i).cloned().flatten())
+        .filter(|s| &*s.item == item && s.extra.is_none() && s.damage == 0)
+        .map(|s| s.count)
+        .sum();
+    if plain == 0 {
+        return;
+    }
+    let written = game.native_with_mod_block_entity(pos, |e| {
+        let before: Vec<Slot> = outputs.clone().map(|i| slot_of(e, i)).collect();
+        let mut after = before.clone();
+        let left = slots::take_from(&mut after, item, plain);
+        write_slots(e, outputs.clone(), &before, &after, &[]);
+        plain - left
+    });
+    if let Some(took) = written {
+        held::add(held, storage_id, order, pos, item, u64::from(took));
+    }
+}
+
+/// O11: the products held at machines that their orders no longer need (the order is gone, or
+/// its plan of this round wants fewer) go to the storage, riding from their machine where a net
+/// joins the two; those of a storage that is gone drop where they wait.
+fn release_held(
+    game: &mut Game<'_>,
+    dimension: &str,
+    level: &LevelNet,
+    state: &LevelOrders,
+    held: &mut Vec<Held>,
+    ships: &mut Vec<Shipment>,
+    anchors: &BTreeMap<u32, Pos>,
+) {
+    let storages: BTreeSet<u32> = held.iter().map(|h| h.storage).collect();
+    for id in storages {
+        let queue = state.queues.get(&id);
+        let anchor = anchors.get(&id).copied();
+        // A storage that is gone needs nothing.
+        let need = |order: u16| -> Option<Option<BTreeMap<ItemKey, u64>>> {
+            anchor?;
+            queue
+                .and_then(|q| q.orders.iter().find(|o| o.id == order))
+                .map(|o| o.held_need.clone())
+        };
+        for h in held::release(held, id, &need) {
+            let Some(anchor) = anchor else {
+                let mut left = h.count;
+                while left > 0 {
+                    let part = left.min(u64::from(DROP_STACK));
+                    storage::drop_stack(game, dimension, h.machine, &h.item, part as u32);
+                    left -= part;
+                }
+                continue;
+            };
+            let route = level
+                .transport
+                .route(&level.layout, server::tuning(), h.machine, anchor);
+            match route {
+                // Order 0 is no order's: the ride holds no order back.
+                Some(route) => ships.push(Shipment::new(
+                    id,
+                    0,
+                    Leg::Back { from: h.machine },
+                    vec![(h.item.clone(), u32::try_from(h.count).unwrap_or(u32::MAX))],
+                    &route,
+                    server::tuning().ticks_per_second,
+                )),
+                None => storage::restore_into(dimension, id, &h.item, h.count),
+            }
+        }
+    }
 }
 
 /// The plain stacks of `item` in the machine's output slots go to the storage, as far as it
@@ -1092,11 +1304,16 @@ fn arrive(
                 }
                 if kind == Machine::Crafter {
                     let book = book_of(game, &level.recipes);
-                    let page = TempPage {
+                    // Slice 18 (O11): a job's items may come in two shipments (from the machine
+                    // that made them and from the storage): the second does not give the page
+                    // back the crafts the first let it make, only what its buffer can make now.
+                    let buffer = read_slots(game, machine, content::CRAFTER_BUFFER).unwrap_or_default();
+                    let can = saved::owed_after_load(r.job.runs, &r.job.step.inputs, &buffer);
+                    let page = level.temp_pages.entry(machine).or_insert_with(|| TempPage {
                         pattern: r.job.step.pattern(&book.recipes),
                         owed: r.job.runs,
-                    };
-                    level.temp_pages.insert(machine, page);
+                    });
+                    page.owed = page.owed.max(can);
                 }
             }
             Leg::Products { from, own } => {
@@ -1109,18 +1326,158 @@ fn arrive(
     *ships = kept;
 }
 
+// ---- Riding items seen in the housings ----
+//
+// Slice 18 (guide `orders`, the handbook's scene of items moving in the housings): once a second
+// the server lays each shipment on the housings between its two joints
+// (rustcraft_transport::Transport::path) and writes into each housing the items that ride or
+// will ride through it, with the faces they come in and leave by and the game ticks they do
+// (rustcraft_rules::orders::ride), clears the housings no longer ridden, and sends the changed
+// ones to clients (`native_block_entity_sync`, rustcraft_pipe18::update_tag). A client draws
+// each item at its place from the frame's game time and partial tick (`draw_riding`,
+// `native_draw_item`), and keeps no geometry while items ride. Plain item-net moves are instant
+// per tick and have no riding item: only orders' shipments are drawn.
+
+/// Proposal: the size a riding item is drawn at, of a block.
+const RIDING_SCALE: f32 = 0.35;
+
+/// The blocks a shipment rides from and to.
+fn ends_of(s: &Shipment, anchor: Pos) -> (Pos, Pos) {
+    match s.leg {
+        Leg::Machine { machine } => (s.from.unwrap_or(anchor), machine),
+        Leg::Products { from, .. } | Leg::Back { from } => (from, anchor),
+    }
+}
+
+fn ride_items(nbt: &Compound) -> Vec<ItemKey> {
+    match nbt.get(&JavaString::from(ride::RIDE_ITEMS_KEY)) {
+        Some(Tag::List(list)) => list
+            .iter()
+            .filter_map(|t| match t {
+                Tag::String(s) => Some(s.to_string_lossy()),
+                _ => None,
+            })
+            .collect(),
+        _ => Vec::new(),
+    }
+}
+
+fn ride_ints(nbt: &Compound) -> Vec<i32> {
+    match nbt.get(&JavaString::from(ride::RIDE_KEY)) {
+        Some(Tag::IntArray(v)) => v.clone(),
+        _ => Vec::new(),
+    }
+}
+
+/// Each housing the level's shipments ride gets their items' spans; one no longer ridden is
+/// cleared; a housing whose spans changed goes to clients.
+fn show_rides(
+    game: &mut Game<'_>,
+    dimension: &str,
+    level: &LevelNet,
+    ships: &[Shipment],
+    anchors: &BTreeMap<u32, Pos>,
+) {
+    let now = game.world.game_time;
+    let tuning = server::tuning();
+    let mut want: BTreeMap<Pos, Vec<(ItemKey, ride::Span)>> = BTreeMap::new();
+    for s in ships {
+        let Some(&anchor) = anchors.get(&s.storage) else {
+            continue;
+        };
+        let (from, to) = ends_of(s, anchor);
+        let Some(path) = level.transport.path(&level.layout, tuning, s.net, from, to) else {
+            continue;
+        };
+        let kinds = s.items.iter().filter(|(_, n)| *n > 0).take(ride::MAX_KINDS);
+        for (k, (item, _)) in kinds.enumerate() {
+            let lag = ride::LAG_TICKS * k as i32;
+            let drawn = keys::item_of(item).to_owned();
+            for (housing, span) in ride::spans(&level.layout, &path, from, to, s, now, lag) {
+                want.entry(housing).or_default().push((drawn.clone(), span));
+            }
+        }
+    }
+    let before = orders().ridden.remove(dimension).unwrap_or_default();
+    let touched: BTreeSet<Pos> = before.iter().chain(want.keys()).copied().collect();
+    for pos in touched {
+        let (ints, items) = ride::encode(want.get(&pos).map_or(&[][..], Vec::as_slice));
+        let Some(entity) = game.native_mod_block_entity(pos) else {
+            continue;
+        };
+        if entity.id != content::HOUSING
+            || (ride_ints(&entity.nbt) == ints && ride_items(&entity.nbt) == items)
+        {
+            continue;
+        }
+        game.native_with_mod_block_entity(pos, |e| {
+            if ints.is_empty() {
+                e.nbt.remove(&JavaString::from(ride::RIDE_KEY));
+                e.nbt.remove(&JavaString::from(ride::RIDE_ITEMS_KEY));
+            } else {
+                let list = items
+                    .iter()
+                    .map(|i| Tag::String(JavaString::from(i.as_str())))
+                    .collect();
+                e.nbt
+                    .insert(JavaString::from(ride::RIDE_KEY), Tag::IntArray(ints.clone()));
+                e.nbt
+                    .insert(JavaString::from(ride::RIDE_ITEMS_KEY), Tag::List(list));
+            }
+        });
+        game.native_block_entity_sync(pos);
+    }
+    orders()
+        .ridden
+        .insert(dimension.to_owned(), want.keys().copied().collect());
+}
+
+/// On a client: the order items riding the housing (what the server wrote, `show_rides`), each
+/// drawn where it is this frame; whether any of them has its ride through the housing still to
+/// come or under way, so that its geometry is not kept (spans long over, as a restart may leave
+/// them, keep it).
+pub(super) fn draw_riding(
+    game: &Game<'_>,
+    entity: &horizon_client::containers::ModBlockEntity,
+    draw: &mut crate::game::native_block_entity_draw::BlockEntityDraw,
+) -> bool {
+    let riding = ride::decode(&ride_ints(&entity.nbt), &ride_items(&entity.nbt));
+    let now = draw.game_time as i32;
+    if !riding.iter().any(|(_, s)| now.wrapping_sub(s.t1) <= 0) {
+        return false;
+    }
+    for (k, (item, span)) in riding.iter().enumerate() {
+        let Some(at) = ride::place(*span, draw.game_time, draw.partial) else {
+            continue;
+        };
+        draw.push();
+        draw.translate(at);
+        draw.scale([RIDING_SCALE; 3]);
+        game.native_draw_item(
+            draw,
+            &horizon_client::items::ItemStack::new(item.as_str(), 1),
+            horizon_assets::item_model::DisplayContext::Ground,
+            None,
+            k as i32,
+        );
+        draw.pop();
+    }
+    true
+}
+
 // ---- The tick ----
 
 /// Once a second from the level's tick: the shipments ride on and those that arrived land, the
 /// jobs looked at, the cancelled ones taken back, and a round of every storage's queue; then the
 /// storages' records of their orders brought up to date.
 pub(super) fn tick(game: &mut Game<'_>, dimension: &str, level: &mut LevelNet) {
-    let (mut state, mut jobs, mut ships) = {
+    let (mut state, mut jobs, mut ships, mut held) = {
         let mut o = orders();
         (
             o.levels.remove(dimension).unwrap_or_default(),
             o.jobs.remove(dimension).unwrap_or_default(),
             o.ships.remove(dimension).unwrap_or_default(),
+            o.held.remove(dimension).unwrap_or_default(),
         )
     };
     let before = state.clone();
@@ -1135,15 +1492,20 @@ pub(super) fn tick(game: &mut Game<'_>, dimension: &str, level: &mut LevelNet) {
     let storages = storage::level_storages(dimension);
     let anchors: BTreeMap<u32, Pos> = storages.iter().map(|(id, a, _)| (*id, *a)).collect();
     follow_jobs(
-        game, dimension, level, &mut state, &mut jobs, &mut ships, &anchors,
+        game, dimension, level, &mut state, &mut jobs, &mut ships, &mut held, &anchors,
     );
     for (id, anchor, terminals) in &storages {
         let started = storage_round(
-            game, dimension, level, &mut state, &jobs, &mut ships, *id, *anchor, terminals,
+            game, dimension, level, &mut state, &jobs, &mut ships, &mut held, *id, *anchor,
+            terminals,
         );
         jobs.extend(started);
         feed_crafters(game, dimension, level, &jobs, *id, *anchor);
     }
+    // Slice 18 (O11): held products no order needs go to the storage.
+    release_held(game, dimension, level, &state, &mut held, &mut ships, &anchors);
+    // Slice 18: the shipments' items in the housings they ride, for clients to draw.
+    show_rides(game, dimension, level, &ships, &anchors);
     // Storages that are gone take their orders with them.
     let live: BTreeSet<u32> = anchors.keys().copied().collect();
     state
@@ -1164,10 +1526,11 @@ pub(super) fn tick(game: &mut Game<'_>, dimension: &str, level: &mut LevelNet) {
                 merge_presses(state.queues.entry(id).or_default(), q);
             }
         }
-        let kept = records(&state, &jobs, &ships, &level.temp_pages);
+        let kept = records(&state, &jobs, &ships, &held, &level.temp_pages);
         o.levels.insert(dimension.to_owned(), state);
         o.jobs.insert(dimension.to_owned(), jobs);
         o.ships.insert(dimension.to_owned(), ships);
+        o.held.insert(dimension.to_owned(), held);
         kept
     };
     storage::set_order_records(dimension, kept);
@@ -1193,6 +1556,7 @@ fn follow_jobs(
     state: &mut LevelOrders,
     jobs: &mut Vec<Running>,
     ships: &mut Vec<Shipment>,
+    held: &mut Vec<Held>,
     anchors: &BTreeMap<u32, Pos>,
 ) {
     let mut kept = Vec::with_capacity(jobs.len());
@@ -1243,9 +1607,11 @@ fn follow_jobs(
         };
         let output = &r.job.step.output.0;
         let own = order_item.as_ref().is_some_and(|item| item != output);
-        let pulled = pull(game, dimension, &mut way, pos, machine, output, own);
-        if own && let Some(q) = state.queues.get_mut(&r.storage) {
-            q.keep_for(r.job.order, output, u64::from(pulled));
+        if own {
+            // Slice 18 (O11): held at the machine for the order's next step.
+            hold(game, held, r.storage, r.job.order, pos, machine, output);
+        } else {
+            pull(game, dimension, &mut way, pos, machine, output, false);
         }
         if order_item.is_none() {
             let left = match machine {
@@ -1337,6 +1703,7 @@ fn storage_round(
     state: &mut LevelOrders,
     jobs: &[Running],
     ships: &mut Vec<Shipment>,
+    held: &mut Vec<Held>,
     id: u32,
     anchor: Pos,
     terminals: &[Pos],
@@ -1427,8 +1794,9 @@ fn storage_round(
             let size = |item: &str| sizes.get(item).copied().unwrap_or(machines::FALLBACK_STACK);
             runs_that_fit(&slots, &items, want, &size)
         };
-        queue.round(
+        queue.round_with(
             &plan_stock,
+            &held::by_order(held, id),
             &book.recipes,
             &kinds,
             &free,
@@ -1447,11 +1815,24 @@ fn storage_round(
             route: route_of(level, Some(anchor), job.machine),
             ships: &mut *ships,
         };
-        let sent = deliver(game, dimension, &mut way, machine, &job);
+        let (sent, from_held) = deliver(game, dimension, level, held, &mut way, machine, &job);
         if sent == Sent::No {
             continue;
         }
-        queue.started(&job);
+        queue.started_with(&job, &from_held);
+        // What the job took of the order's held items, its plan needs held no more.
+        if let Some(need) = queue
+            .orders
+            .iter_mut()
+            .find(|o| o.id == job.order)
+            .and_then(|o| o.held_need.as_mut())
+        {
+            for (item, n) in &from_held {
+                if let Some(x) = need.get_mut(item) {
+                    *x = x.saturating_sub(*n);
+                }
+            }
+        }
         // Slice 18 (O12): a mixer step's water comes with the order.
         if machine == Machine::Mixer {
             let water: u64 = job

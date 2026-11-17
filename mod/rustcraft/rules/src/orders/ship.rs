@@ -105,6 +105,10 @@ pub struct Shipment {
     pub ride: u32,
     /// The whole ride, for the way back.
     pub full_ride: u32,
+    /// Slice 18 (O11): the machine a job's items set off from when not the storage: a product
+    /// one step made riding straight to the next step's machine (`held`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub from: Option<Pos>,
 }
 
 impl Shipment {
@@ -129,12 +133,25 @@ impl Shipment {
             load_rate: route.load_per_tick(ticks_per_second),
             ride,
             full_ride: ride,
+            from: None,
         }
     }
 
     /// How many items it carries.
     pub fn count(&self) -> u64 {
         self.items.iter().map(|(_, n)| u64::from(*n)).sum()
+    }
+
+    /// Slice 18: how far along its way its last item is, 0 to 1: at the start while it loads,
+    /// then the share of the ride done.
+    pub fn progress(&self) -> f64 {
+        if self.to_load > 0 {
+            return 0.0;
+        }
+        if self.full_ride == 0 {
+            return 1.0;
+        }
+        f64::from(self.full_ride - self.ride.min(self.full_ride)) / f64::from(self.full_ride)
     }
 
     /// Whether its last item is at the far end.
@@ -162,6 +179,7 @@ impl Shipment {
             leg: Leg::Back { from },
             to_load: self.count() * MILLI,
             ride: self.full_ride,
+            from: None,
             ..self
         }
     }
@@ -347,6 +365,27 @@ mod tests {
         assert!(!back.bound_for(3, 7, [9, 64, 0]));
         assert!(ship(1, &r).bound_for(3, 7, [9, 64, 0]));
         assert!(!ship(1, &r).bound_for(3, 8, [9, 64, 0]));
+    }
+
+    #[test]
+    fn a_shipment_stands_at_the_start_while_loading_then_rides_along() {
+        // Slice 18 (guide `orders`): where its last item is along its way, 0 to 1.
+        let r = route(1, 39);
+        let mut ships = vec![ship(8, &r)];
+        assert_eq!(ships[0].progress(), 0.0);
+        advance(&mut ships, 20);
+        assert_eq!(ships[0].progress(), 0.0);
+        // Loaded at tick 40, then 200 ticks of riding: a quarter along at tick 90.
+        advance(&mut ships, 70);
+        assert!((ships[0].progress() - 0.25).abs() < 1e-9);
+        ride_out(&mut ships, 0);
+        assert_eq!(ships[0].progress(), 1.0);
+        // A ride of no ticks is there at once.
+        let mut none = ship(1, &r);
+        none.to_load = 0;
+        none.ride = 0;
+        none.full_ride = 0;
+        assert_eq!(none.progress(), 1.0);
     }
 
     #[test]

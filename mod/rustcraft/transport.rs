@@ -162,6 +162,28 @@ impl Transport {
             })
     }
 
+    /// Slice 18: the housings an order's shipment on the net `key` rides from the block `from` to
+    /// the block `to`, each with its pipe from the first (rustcraft_rules::net::topology::pipe_path,
+    /// the way `route` measures); none when the net no longer joins them.
+    pub fn path(
+        &self,
+        layout: &Layout,
+        tuning: &Tuning,
+        key: NetKey,
+        from: Pos,
+        to: Pos,
+    ) -> Option<Vec<(Pos, u32)>> {
+        let net = self.nets.iter().find(|n| n.key == key)?;
+        let ends = |block: Pos| -> Vec<Pos> {
+            net.joints
+                .iter()
+                .filter(|j| j.block == block && j.mode != Mode::Off)
+                .map(|j| j.housing)
+                .collect()
+        };
+        rustcraft_rules::net::topology::pipe_path(layout, tuning, &net.housings, &ends(from), &ends(to))
+    }
+
     /// Slice 17: what the orders' shipments loaded on each net over the last `ticks` ticks
     /// (rustcraft_rules::orders::ship::advance); the nets they did not load on keep their
     /// throughput whole.
@@ -404,6 +426,8 @@ fn snapshot(
             .collect();
         read.insert(joint.block, slots);
     }
+    // Slice 18 (O11): a product an order takes straight to its next step's machine stays put.
+    let kept = crate::game::rustcraft_orders::kept_outputs(dimension);
     for (pos, slots) in read {
         let machine = machines.get(&pos).copied();
         let entity = machine.and_then(|_| crate::game::rustcraft_machines::entity(game, pos));
@@ -411,6 +435,9 @@ fn snapshot(
             .into_iter()
             .map(|(slot, held, can_take)| {
                 let input = machine.is_none_or(|m| m.inputs().contains(&slot));
+                let ordered = !input
+                    && held.as_ref().is_some_and(|(i, _)| kept.get(&pos) == Some(i));
+                let can_take = can_take && !ordered;
                 let only = entity.as_ref().filter(|_| input).map(|entity| {
                     seen.iter()
                         .filter(|item| slot_takes(entity, slot, keys::item_of(item), tuning))

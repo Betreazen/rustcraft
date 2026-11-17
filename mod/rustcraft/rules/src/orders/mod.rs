@@ -22,7 +22,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::net::items::ItemKey;
 
+pub mod held;
 pub mod queue;
+pub mod ride;
 pub mod saved;
 pub mod ship;
 
