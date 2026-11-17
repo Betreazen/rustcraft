@@ -59,7 +59,7 @@
 
 **Files:** Modify `rules/src/tiers.rs` (константа `CHASSIS: Family` — шасси не блок, в `FAMILIES` его нет), `rules/src/worker/chassis.rs` (`item`, `tier_of`, `swap` через `tiers::Family::item/tier_of` и `tiers::upgrade`).
 
-- [ ] Тесты шасси остаются зелёными; новый тест `chassis_items_come_from_the_tier_family`. Коммит `refactor: the chassis tiers on rustcraft_rules::tiers`.
+- [x] Тесты шасси остаются зелёными; новые тесты `chassis_items_come_from_the_tier_family`, `the_chassis_family_stops_at_its_third_tier`. У `Family` поле `last` и `Family::up_to(block, first, last)` (`new` — до `MAX_TIER`, `tools/tiers.py` читает только `Family::new`). Коммит `refactor: the chassis tiers on rustcraft_rules::tiers`.
 
 ### Task 3b: узлы на `rustcraft_rules::tiers` — [~] после слияния `s18/pipe`
 

@@ -199,7 +199,9 @@ fn order_bread_through_the_kitchen(o: Pos, _: &Tuning) -> Scenario {
         .until("the bread is back in the storage", 1200, move |b, _| Ok(held(b, o, BREAD)? == 1))
         .check("the wheat went into it and the order is done", move |b, _| {
             same("wheat", held(b, o, WHEAT)?, 0)?;
-            same("orders", b.orders(terminal_at(o)).len(), 0)
+            // Slice 18 (cross): what is left of an order that stays, to see why.
+            let left = b.orders(terminal_at(o));
+            if left.is_empty() { Ok(()) } else { Err(format!("orders left: {left:?}")) }
         })
 }
 

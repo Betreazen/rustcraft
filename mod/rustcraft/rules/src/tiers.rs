@@ -27,21 +27,29 @@ pub const ALLOYS: [&str; 4] = [
 /// The most module sockets a machine of any tier has (A5).
 pub const MAX_SOCKETS: usize = 4;
 
-/// A block made in several tiers, from the one it opens on (`first`) up to [`MAX_TIER`].
+/// A block made in several tiers, from the one it opens on (`first`) up to `last` ([`MAX_TIER`]
+/// for the blocks).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Family {
     pub block: &'static str,
     pub first: u8,
+    pub last: u8,
 }
 
 impl Family {
     pub const fn new(block: &'static str, first: u8) -> Family {
-        Family { block, first }
+        Family { block, first, last: MAX_TIER }
+    }
+
+    /// Slice 18 (cross): a family that stops below [`MAX_TIER`], as the worker's chassis (three
+    /// tiers: sparksteel, crystallite, starsteel).
+    pub const fn up_to(block: &'static str, first: u8, last: u8) -> Family {
+        Family { block, first, last }
     }
 
     /// The tiers it is made in.
     pub fn tiers(self) -> RangeInclusive<u8> {
-        self.first..=MAX_TIER
+        self.first..=self.last
     }
 
     /// The item of `tier`: the block's own on its first tier, `<block>_<tier>` above it; none for
@@ -86,6 +94,10 @@ pub const FAMILIES: &[Family] = &[
     Family::new("rustcraft:disintegrator", 3),
     Family::new("rustcraft:charger", 3),
 ];
+
+/// The worker's chassis (guide `chassis`, U4): no block, so not in [`FAMILIES`]; its tiers 1–3
+/// are `rustcraft:chassis`, `rustcraft:chassis_2`, `rustcraft:chassis_3`.
+pub const CHASSIS: Family = Family::up_to("rustcraft:chassis", 1, 3);
 
 /// The family of a placed `block`.
 pub fn family_of_block(block: &str) -> Option<Family> {
@@ -153,6 +165,26 @@ mod tests {
     use super::*;
 
     const FURNACE: Family = Family::new("rustcraft:furnace", 1);
+
+    #[test]
+    fn the_chassis_family_stops_at_its_third_tier() {
+        assert_eq!(CHASSIS.item(1).as_deref(), Some("rustcraft:chassis"));
+        assert_eq!(CHASSIS.item(3).as_deref(), Some("rustcraft:chassis_3"));
+        assert_eq!(CHASSIS.item(4), None);
+        assert_eq!(CHASSIS.tier_of("rustcraft:chassis_2"), Some(2));
+        assert_eq!(CHASSIS.tier_of("rustcraft:chassis_4"), None);
+        assert!(family_of_block(CHASSIS.block).is_none());
+    }
+
+    #[test]
+    fn placer_and_breaker_speed_up_from_tier_two() {
+        // Slice 18 (cross): A8 for the placer and the breaker, which open on tier 2.
+        for block in ["rustcraft:placer", "rustcraft:breaker"] {
+            let f = family_of_block(block).unwrap();
+            assert_eq!(speed(f, 2, 0.5), 1.0);
+            assert_eq!(speed(f, 4, 0.5), 2.0);
+        }
+    }
     const CRAFTER: Family = Family::new("rustcraft:crafter", 2);
 
     #[test]

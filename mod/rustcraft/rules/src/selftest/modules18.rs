@@ -68,19 +68,23 @@ fn step_shown(b: &dyn Bench, pos: Pos, seconds: &str) -> bool {
 }
 
 fn economy_slows_a_step(o: Pos, t: &Tuning) -> Scenario {
+    // Slice 18 (merge): the trash's window shows its throughput instead of the step since stream
+    // 3, so the step is read on the repair station, whose window keeps the row; its step comes
+    // from `tiered::step_ticks` on its first tier, as the merged `utility::paced` takes it.
     let bare = at(o, [2, 1, 0]);
     let eco = at(o, [5, 1, 0]);
-    let step = utility::step_ticks(Util::Trash);
+    let step = crate::machines::tiered::step_ticks(Util::Repair, 1);
     let slow = modules::paced_ticks(step, &[Some(Module::Economy)], t);
     let (bare_s, eco_s) = (format!("{:.1}", step as f64 / 20.0), format!("{:.1}", slow as f64 / 20.0));
     Scenario::new("module_economy_slows_a_step", plot_area(o))
-        .then("two trashes, one with an economy module", move |b, _| {
+        .then("two repair stations, one with an economy module", move |b, _| {
             floor(b, o)?;
-            machine(b, bare, "rustcraft:trash")?;
-            machine(b, eco, "rustcraft:trash")?;
+            machine(b, bare, "rustcraft:repair")?;
+            machine(b, eco, "rustcraft:repair")?;
             b.set_modules(eco, &[Module::Economy.item()])
         })
-        .until("the bare one steps every 1.0 s, the economy one every 1.2 s", 60, move |b, _| {
+        .check("economy makes the step longer", move |_, _| same("slower", slow > step, true))
+        .until("the bare one steps as its tier says, the economy one 1/0.85 slower", 60, move |b, _| {
             Ok(step_shown(b, bare, &bare_s) && step_shown(b, eco, &eco_s))
         })
 }

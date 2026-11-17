@@ -3,15 +3,15 @@
 //! the place of its old one: tool, upgrades and hold stay, the old chassis goes back to the
 //! player.
 //!
-//! Stream 3 of slice 18 builds the general tier mechanism `rustcraft_rules::tiers` (tier items,
-//! the U2 swap keeping contents). Until it is merged this module keeps the same shape — the
-//! tier's item, the item's tier, and a swap that answers what goes back — and the integrator
-//! switches it over after the merge.
+//! The tier items come from `rustcraft_rules::tiers` (`tiers::CHASSIS`), the general tier
+//! mechanism of slice 18; the chassis is no block, so it uses only the family's items and
+//! `tiers::upgrade`.
 
 use super::Worker;
+use crate::tiers::{self, CHASSIS};
 use crate::tuning::Tuning;
 
-/// The chassis items by tier, 1 to 3.
+/// The chassis items by tier, 1 to 3 (`tiers::CHASSIS`'s items).
 pub const ITEMS: [&str; 3] = ["rustcraft:chassis", "rustcraft:chassis_2", "rustcraft:chassis_3"];
 /// Sockets for upgrades and modules by tier (guide: «3 у шасси из искростали, 5 из кристаллита,
 /// 7 из звёздной стали»).
@@ -21,12 +21,16 @@ pub const MAX_SOCKETS: usize = 7;
 
 /// The tier of a chassis item.
 pub fn tier_of(item: &str) -> Option<u8> {
-    ITEMS.iter().position(|i| *i == item).map(|i| i as u8 + 1)
+    CHASSIS.tier_of(item)
 }
 
 /// The item of a chassis of `tier` (held to 1..=3).
 pub fn item(tier: u8) -> &'static str {
-    ITEMS[usize::from(tier.clamp(1, 3)) - 1]
+    let tier = tier.clamp(CHASSIS.first, CHASSIS.last);
+    ITEMS
+        .into_iter()
+        .find(|i| CHASSIS.tier_of(i) == Some(tier))
+        .unwrap_or(ITEMS[0])
 }
 
 /// Sockets of a chassis of `tier` (held to 1..=3).
@@ -47,7 +51,7 @@ pub enum Refused {
 /// upgrades and hold stay. The old chassis's item, which goes back to the player.
 pub fn swap(w: &mut Worker, new_item: &str, t: &Tuning) -> Result<&'static str, Refused> {
     let tier = tier_of(new_item).ok_or(Refused::NotAChassis)?;
-    if tier <= w.tier {
+    if !tiers::upgrade(w.tier, tier) {
         return Err(Refused::NotHigher);
     }
     let old = item(w.tier);
@@ -60,6 +64,14 @@ mod tests {
     use super::*;
     use crate::modules::Module;
     use crate::worker::Tool;
+
+    #[test]
+    fn chassis_items_come_from_the_tier_family() {
+        for tier in 1..=3u8 {
+            assert_eq!(CHASSIS.item(tier).as_deref(), Some(item(tier)));
+        }
+        assert_eq!(ITEMS.len(), usize::from(CHASSIS.last - CHASSIS.first + 1));
+    }
 
     #[test]
     fn each_tier_has_its_sockets() {
