@@ -47,18 +47,67 @@ pub struct Block {
     /// Its cell's corner (scene axes: x and y across, z up).
     pub at: [f32; 3],
     pub gone: f32,
+    /// Wave 2: the way it faces in the guide's scene (`face`), FACE_NONE when the guide gives none.
+    pub face: u8,
 }
+
+/// Wave 2: a block's facing in a scene (scenes.js `face`: `x+`, `x-`, `y+`, `y-`).
+pub const FACE_NONE: u8 = 0;
+pub const FACE_XP: u8 = 1;
+pub const FACE_XN: u8 = 2;
+pub const FACE_YP: u8 = 3;
+pub const FACE_YN: u8 = 4;
 
 pub const fn b(look: u16, at: [f32; 3]) -> Block {
     Block {
         look,
         at,
         gone: f32::INFINITY,
+        face: FACE_NONE,
     }
 }
 
 pub const fn bg(look: u16, at: [f32; 3], gone: f32) -> Block {
-    Block { look, at, gone }
+    Block { look, at, gone, face: FACE_NONE }
+}
+
+/// A block facing `face`.
+pub const fn bf(look: u16, at: [f32; 3], face: u8) -> Block {
+    Block { look, at, gone: f32::INFINITY, face }
+}
+
+/// A block facing `face` that vanishes at `gone`.
+pub const fn bgf(look: u16, at: [f32; 3], gone: f32, face: u8) -> Block {
+    Block { look, at, gone, face }
+}
+
+/// Wave 2: the game's `facing` of a scene's face. The scene draws its x as the world's east, its
+/// y as the world's south and its z as up (`world_of`), so `x+` faces east and `y+` south.
+pub fn facing_of(face: u8) -> Option<&'static str> {
+    match face {
+        FACE_XP => Some("east"),
+        FACE_XN => Some("west"),
+        FACE_YP => Some("south"),
+        FACE_YN => Some("north"),
+        _ => None,
+    }
+}
+
+/// Wave 2: a scene point in the world's axes (x east, y up, z south) for `native_draw_scene`.
+pub fn world_of(p: [f32; 3]) -> [f32; 3] {
+    [p[0], p[2], p[1]]
+}
+
+/// Wave 2: how `native_draw_scene` sees a scene so that it matches `project`: turned 135° and
+/// tilted 30° (the guide's dimetric view: x right and down, y left and down, z up), a block
+/// `EDGE × scale` pixels across, the panel's middle on the scene point that `fit` puts there.
+pub fn scene_view(fit: &Fit, size: [f32; 2]) -> ([f32; 3], f32, f32, f32) {
+    let mid = [(size[0] / 2.0 - fit.shift[0]) / fit.scale, (size[1] / 2.0 - fit.shift[1]) / fit.scale];
+    // project([x, y, 0]) = mid: x − y = mid.x / ACROSS, x + y = mid.y / DOWN.
+    let (d, s) = (mid[0] / ACROSS, mid[1] / DOWN);
+    let x = (s + d) / 2.0;
+    let y = (s - d) / 2.0;
+    (world_of([x, y, 0.0]), 135.0, 30.0, EDGE * fit.scale)
 }
 
 /// How a moving object goes along its path (engine.js `move`).
@@ -407,6 +456,12 @@ impl Drawn {
 /// The step's blocks and moving objects `t` seconds into it, back to front: a cell further
 /// along x, y or z is nearer the viewer and is drawn later.
 pub fn drawn(step: &Step, t: f32, fit: &Fit) -> Vec<Drawn> {
+    drawn_except(step, t, fit, |_| false)
+}
+
+/// Wave 2: `drawn` without the standing blocks whose look `skip` takes (the ones the window draws
+/// as a scene of blocks, `native_draw_scene`); moving objects stay.
+pub fn drawn_except(step: &Step, t: f32, fit: &Fit, skip: impl Fn(&Block) -> bool) -> Vec<Drawn> {
     let mut out: Vec<(Drawn, f32)> = Vec::new();
     let mut add = |look_id: u16, at: [f32; 3]| {
         let c = centre(at);
@@ -417,7 +472,7 @@ pub fn drawn(step: &Step, t: f32, fit: &Fit) -> Vec<Drawn> {
         };
         out.push((d, c[2]));
     };
-    for bl in step.blocks.iter().filter(|b| t < b.gone) {
+    for bl in step.blocks.iter().filter(|b| t < b.gone && !skip(b)) {
         add(bl.look, bl.at);
     }
     for m in step.movers {
@@ -631,3 +686,33 @@ impl Playback {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod wave2_view_tests {
+    use super::*;
+
+    /// native_scene.rs `scene_matrix`: translate(middle) · scale(−s) · rotX(−pitch) · rotY(yaw) ·
+    /// translate(−centre), applied to a world point, in panel pixels.
+    fn engine(p: [f32; 3], size: [f32; 2], view: ([f32; 3], f32, f32, f32)) -> [f32; 2] {
+        let (c, yaw, pitch, s) = view;
+        let q = [p[0] - c[0], p[1] - c[1], p[2] - c[2]];
+        let (sy, cy) = yaw.to_radians().sin_cos();
+        let r = [q[0] * cy + q[2] * sy, q[1], -q[0] * sy + q[2] * cy];
+        let (sp, cp) = (-pitch).to_radians().sin_cos();
+        let u = [r[0], r[1] * cp - r[2] * sp, r[1] * sp + r[2] * cp];
+        [size[0] / 2.0 - s * u[0], size[1] / 2.0 - s * u[1]]
+    }
+
+    #[test]
+    fn the_engines_scene_lies_where_the_guides_projection_puts_it() {
+        let size = [120.0, 90.0];
+        let fit = Fit { scale: 1.5, shift: [37.0, 21.0] };
+        let view = scene_view(&fit, size);
+        for p in [[0.0, 0.0, 0.0], [3.5, 1.0, 2.0], [-2.0, 4.0, 0.5], [1.0, 1.0, 1.0]] {
+            let want = fit.place(p);
+            let got = engine(world_of(p), size, view);
+            assert!((want[0] - got[0]).abs() < 0.01 && (want[1] - got[1]).abs() < 0.01, "{p:?}: {want:?} vs {got:?}");
+        }
+        assert_eq!(facing_of(FACE_YP), Some("south"));
+    }
+}
