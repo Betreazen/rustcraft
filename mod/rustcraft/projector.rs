@@ -293,7 +293,10 @@ fn to_hand(game: &mut Game<'_>, pos: Pos, entity: &ModBlockEntity) {
 }
 
 /// Its window's rows: what it remembers and what is missing, with the storage's counts.
-pub(super) fn projector_rows(game: &Game<'_>, dimension: &str, pos: Pos) -> Vec<Text> {
+/// Wave 2: the storage comes from `level` (the window's tick has the level out of the server's
+/// map, and the self-test's bench holds that map while it reads a window: asking the map again
+/// found no storage, or stood still for good).
+pub(super) fn projector_rows(game: &Game<'_>, dimension: &str, level: &crate::game::rustcraft_server::LevelNet, pos: Pos) -> Vec<Text> {
     let Some(e) = game.native_mod_block_entity(pos) else { return Vec::new() };
     let plan = plan_of(&e.nbt);
     let (q, m) = turn_of(&e.nbt);
@@ -311,7 +314,7 @@ pub(super) fn projector_rows(game: &Game<'_>, dimension: &str, pos: Pos) -> Vec<
         ],
     );
     let missing = Plan::counts(plan.missing(|o| block_at(game, offset(pos, o))));
-    let id = storage_of(dimension, pos);
+    let id = storage::storage_by(dimension, pos, &level.topology);
     let parts: Vec<String> = missing
         .iter()
         .take(3)

@@ -1914,7 +1914,7 @@ fn toggle_names(u: Util) -> Vec<(String, String)> {
 }
 
 /// Its window: what it does, its energy, its toggles and its slots.
-pub(super) fn sheet(game: &Game<'_>, dimension: &str, pos: Pos, u: Util, s: &mut Sheet) {
+pub(super) fn sheet(game: &Game<'_>, dimension: &str, level: &LevelNet, pos: Pos, u: Util, s: &mut Sheet) {
     let short = u.spec().block.trim_start_matches("rustcraft:");
     s.rows.push(base::v(&line(&format!("rustcraft.util.{short}.what"), title(u), &[])));
     s.rows.push(base::v(&match u {
@@ -1945,7 +1945,7 @@ pub(super) fn sheet(game: &Game<'_>, dimension: &str, pos: Pos, u: Util, s: &mut
     });
     sheet_extras(game, dimension, pos, u, s);
     // Slice 18, stream 5: the craft machines' own rows.
-    craft_sheet(game, dimension, pos, u, s);
+    craft_sheet(game, dimension, level, pos, u, s);
     let on = toggles_at(game, pos, spec.toggles);
     // Slice 18: the vein's window offers sand or gravel with the stratum module (guide
     // `mod_stratum`), the ores with the ore choice module (`mod_pick`), nothing without either.
@@ -2002,7 +2002,7 @@ pub(super) fn sheet(game: &Game<'_>, dimension: &str, pos: Pos, u: Util, s: &mut
 }
 
 /// Slice 18 (guide `ui.js`): each craft machine's own parts of its window, after the energy bar.
-fn craft_sheet(game: &Game<'_>, dimension: &str, pos: Pos, u: Util, s: &mut Sheet) {
+fn craft_sheet(game: &Game<'_>, dimension: &str, level: &LevelNet, pos: Pos, u: Util, s: &mut Sheet) {
     let _ = dimension;
     match u {
         Util::Repair => {
@@ -2036,7 +2036,7 @@ fn craft_sheet(game: &Game<'_>, dimension: &str, pos: Pos, u: Util, s: &mut Shee
         }
         Util::Kitchen => kitchen_sheet(game, pos, s),
         Util::Projector => {
-            s.rows = crate::game::rustcraft_projector::projector_rows(game, dimension, pos).iter().map(base::v).collect();
+            s.rows = crate::game::rustcraft_projector::projector_rows(game, dimension, level, pos).iter().map(base::v).collect();
         }
         Util::Builder => crate::game::rustcraft_projector::builder_sheet(game, pos, s),
         Util::Brewer => brew_sheet(game, pos, s),

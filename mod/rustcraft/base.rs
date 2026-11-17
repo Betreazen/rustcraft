@@ -1770,7 +1770,7 @@ pub(super) fn sheet(
         }
         SheetKind::Mixer => mixer::sheet(game, dimension, pos, t, &mut s),
         SheetKind::Butcher => butcher::sheet(game, dimension, pos, t, &mut s),
-        SheetKind::Util(u) => crate::game::rustcraft_utility::sheet(game, dimension, pos, u, &mut s),
+        SheetKind::Util(u) => crate::game::rustcraft_utility::sheet(game, dimension, level, pos, u, &mut s),
         SheetKind::Miner | SheetKind::Placer | SheetKind::Breaker => {
             mining::sheet(game, dimension, pos, kind, t, &mut s);
         }

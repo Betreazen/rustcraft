@@ -23,6 +23,9 @@
 
 - Kitchen and brewer: +2 hidden input cells a capacity module (Task 6).
 - Butcher: the economy module slows the strike ×0.85 (Task 5).
+- Both are wired with w2-machine-module's own rule lines (`butcher::strike_ticks`,
+  `utility::queue_cells`); feat/handbook-parity b271cd7 merged in (9108825), only the lang
+  files needed joining.
 
 ## Пределы движка / решения
 
