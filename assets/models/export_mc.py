@@ -706,8 +706,19 @@ def rail_halves_shown(mask):
     return sorted(sides)
 
 
+def rail_rise(m):
+    """The piece of a floor rail up the wall at its x+ side (rustcraft_rules::monorail::shape
+    `Rise`): the rail's section stood on end against that wall, from the floor to the top of the
+    cell, where the wall rail's lower half meets it, with a tie halfway up."""
+    m.box('steel_dark', 15.5, 6.5, 0, 0.5, 3, 16, part='rise')
+    m.box('tint', 14.25, 7, 0, 1.25, 2, 16, part='rise')
+    m.box('tint_light', 14, 7, 0, 0.25, 2, 16, part='rise')
+    m.box('steel_mid', 15.25, 5, 7.25, 0.75, 6, 1.5, part='rise')
+
+
 def monorail(out, report):
     boxes = read(transport.rail)
+    rise = read(rail_rise)
     by_part = {}
     for b in boxes:
         by_part.setdefault(b[0], []).append(b)
@@ -716,6 +727,7 @@ def monorail(out, report):
         parts['half%d' % k] = by_part[RAIL_HALVES[k]]
         parts['arc%d' % k] = by_part[RAIL_ARCS[k]]
         parts['climb%d' % k] = turned_boxes(by_part['slope'], k)
+        parts['rise%d' % k] = turned_boxes(rise, k)
     stats = {}
     for tier in range(1, 5):
         skin = Skin('monorail_t%d' % tier, {'tint': TIER[tier], 'tint_light': kit.shade(TIER[tier], 0.3)})
@@ -741,15 +753,29 @@ def monorail(out, report):
                 if shapes:
                     entries.append({'when': dict(when, shape='|'.join(shapes)),
                                     'apply': dict({'model': 'rustcraft:block/monorail_t%d_%s' % (tier, name)}, **turn)})
-            part('hub', ['s%d' % m for m in masks if m not in RAIL_CORNERS])
+            # The states of rustcraft_rules::monorail::shape::Shape::values: s<mask>, c<k>,
+            # c<k>f<fork> (a climb with a fork on its lower level) and r<k>s<mask> (a floor rail
+            # under a wall rail, mask holding k).
+            forks = [(k, f) for k in range(4) for f in (1, 2, 3)]
+            rises = [(k, m) for k in range(4) for m in masks if m >> k & 1]
+
+            def fork_halves(k, f):
+                return [(k + 2) % 4] + [(k + 1) % 4] * (f & 1) + [(k + 3) % 4] * (f >> 1 & 1)
+            part('hub', ['s%d' % m for m in masks if m not in RAIL_CORNERS]
+                 + ['c%df%d' % kf for kf in forks]
+                 + ['r%ds%d' % km for km in rises if km[1] not in RAIL_CORNERS])
+            for j in range(4):
+                part('half%d' % j, ['s%d' % m for m in masks if j in rail_halves_shown(m)]
+                     + ['c%df%d' % (k, f) for k, f in forks if j in fork_halves(k, f)]
+                     + ['r%ds%d' % (k, m) for k, m in rises if j in rail_halves_shown(m)])
+            for mask, j in sorted(RAIL_CORNERS.items(), key=lambda e: e[1]):
+                part('arc%d' % j, ['s%d' % mask] + ['r%ds%d' % (k, m) for k, m in rises if m == mask])
             for k in range(4):
-                part('half%d' % k, ['s%d' % m for m in masks if k in rail_halves_shown(m)])
-            for mask, k in sorted(RAIL_CORNERS.items(), key=lambda e: e[1]):
-                part('arc%d' % k, ['s%d' % mask])
+                part('climb%d' % k, ['c%d' % k] + ['c%df%d' % (k, f) for f in (1, 2, 3)])
             for k in range(4):
-                part('climb%d' % k, ['c%d' % k])
+                part('rise%d' % k, ['r%ds%d' % (k, m) for m in masks if m >> k & 1])
     out.text('blockstates/monorail.json', '{\n  "multipart": [\n%s\n  ]\n}\n' % ',\n'.join('    ' + json.dumps(e) for e in entries))
-    report.append(('rail', 'monorail_t1..4_{hub,half0..3,arc0..3,climb0..3,inventory}', stats))
+    report.append(('rail', 'monorail_t1..4_{hub,half0..3,arc0..3,climb0..3,rise0..3,inventory}', stats))
 
 
 # The capsule (rustcraft_rules::monorail::capsule): no block, a model the client draws round a

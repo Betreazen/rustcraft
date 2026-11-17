@@ -12,6 +12,12 @@
 //!   floor climb sits in the lower of its two cells, rising toward k; a ceiling climb sits in the
 //!   upper one, under the ceiling, and its piece is the floor's turned over, so it rises away
 //!   from local side k.
+//! - `c<k>f<fork>`: that climbing piece with a fork on its lower level (guide `monorail`, «Форма
+//!   сама: … подъём … развилка»): the hub, the half to the climb's foot and the halves to the
+//!   rails beside the cell (bit 0 side k + 1, bit 1 side k + 3);
+//! - `r<k>s<mask>`: a floor rail under a wall rail (a ceiling rail over one) whose block is at
+//!   local side k: the halves of `mask` (with k) and the piece up (down) that wall, which meets
+//!   the wall rail's lower (upper) half, so the turn from the floor onto the wall has no gap.
 //!
 //! A rail that ends beside a station turns into it (spec 18.6): its one half gets the half
 //! toward the station at its side.
@@ -88,6 +94,13 @@ pub enum Shape {
     Halves(u8),
     /// The climbing piece turned to local side k.
     Climb(u8),
+    /// The climbing piece turned to local side k with a fork on its lower level: the hub, the
+    /// half to the climb's foot (side k + 2) and the halves of `fork` (bit 0 for side k + 1,
+    /// bit 1 for side k + 3, both 1 to 3), whose rails stand beside the climb's cell.
+    ClimbFork(u8, u8),
+    /// A floor (ceiling) rail under (over) a wall rail: the halves of `mask`, which holds side k,
+    /// and the piece up (down) the wall at local side k to meet the wall rail's half.
+    Rise(u8, u8),
 }
 
 impl Shape {
@@ -95,14 +108,26 @@ impl Shape {
         match self {
             Shape::Halves(mask) => format!("s{mask}"),
             Shape::Climb(k) => format!("c{k}"),
+            Shape::ClimbFork(k, fork) => format!("c{k}f{fork}"),
+            Shape::Rise(k, mask) => format!("r{k}s{mask}"),
         }
     }
 
-    /// Every value the state takes, in the order the block declares them.
+    /// Every value the state takes, in the order the block declares them (the first twenty as
+    /// before slice 18, so no saved rail changes its piece).
     pub fn values() -> Vec<String> {
+        let forks = (0..4).flat_map(|k| (1..4).map(move |f| Shape::ClimbFork(k, f)));
+        let rises = (0..4u8).flat_map(|k| {
+            (0..16u8)
+                .filter(move |m| m >> k & 1 == 1)
+                .map(move |m| Shape::Rise(k, m))
+        });
         (0..16)
-            .map(|m| Shape::Halves(m).value())
-            .chain((0..4).map(|k| Shape::Climb(k).value()))
+            .map(Shape::Halves)
+            .chain((0..4).map(Shape::Climb))
+            .chain(forks)
+            .chain(rises)
+            .map(Shape::value)
             .collect()
     }
 }
@@ -127,28 +152,28 @@ pub fn shape_of(net: &Network, pos: Pos, stations: &BTreeSet<Pos>) -> Shape {
     let local = |face: Face| sides.iter().position(|&s| s == face).map(|k| k as u8);
     // The climbing piece: a floor rail with a floor rail one across and one up, or a ceiling rail
     // with a ceiling rail one across the other way and one down.
-    match rail.mount {
-        Face::YNeg => {
-            if let Some(d) = HORIZONTAL
-                .into_iter()
-                .find(|&d| rail_with(net, up(step(pos, d), 1), Face::YNeg))
-                && let Some(k) = local(d)
-            {
-                return Shape::Climb(k);
-            }
-        }
-        Face::YPos => {
-            // Rises toward d: its partner is behind it, one down; the turned piece is the one for
-            // the opposite side.
-            if let Some(d) = HORIZONTAL
-                .into_iter()
-                .find(|&d| rail_with(net, up(step(pos, d.opposite()), -1), Face::YPos))
-                && let Some(k) = local(d.opposite())
-            {
-                return Shape::Climb(k);
-            }
-        }
-        _ => {}
+    let climb = match rail.mount {
+        Face::YNeg => HORIZONTAL
+            .into_iter()
+            .find(|&d| rail_with(net, up(step(pos, d), 1), Face::YNeg))
+            .and_then(local),
+        // Rises toward d: its partner is behind it, one down; the turned piece is the one for
+        // the opposite side.
+        Face::YPos => HORIZONTAL
+            .into_iter()
+            .find(|&d| rail_with(net, up(step(pos, d.opposite()), -1), Face::YPos))
+            .and_then(|d| local(d.opposite())),
+        _ => None,
+    };
+    if let Some(k) = climb {
+        // A fork: rails beside the climb's cell on its lower level, across its way.
+        let beside = |j: u8| net.rails.contains_key(&step(pos, sides[usize::from(j % 4)]));
+        let fork = u8::from(beside(k + 1)) | u8::from(beside(k + 3)) << 1;
+        return if fork == 0 {
+            Shape::Climb(k)
+        } else {
+            Shape::ClimbFork(k, fork)
+        };
     }
     let mut mask = 0u8;
     for (k, &side) in sides.iter().enumerate() {
@@ -173,6 +198,20 @@ pub fn shape_of(net: &Network, pos: Pos, stations: &BTreeSet<Pos>) -> Shape {
         {
             mask |= 1 << turn;
         }
+    }
+    // A wall rail over a floor rail (under a ceiling rail) hangs on a block at one of its sides:
+    // the floor rail runs to that side and up it, so the two meet without a gap.
+    let away = match rail.mount {
+        Face::YNeg => Some(Face::YPos),
+        Face::YPos => Some(Face::YNeg),
+        _ => None,
+    };
+    if let Some(wall) = away
+        .and_then(|a| net.rails.get(&step(pos, a)))
+        .map(|r| r.mount)
+        && let Some(k) = local(wall)
+    {
+        return Shape::Rise(k, mask | 1 << k);
     }
     Shape::Halves(mask)
 }
@@ -292,10 +331,85 @@ mod tests {
     }
 
     #[test]
-    fn the_shape_values_are_twenty() {
+    fn a_climb_cell_forks_to_a_rail_beside_it() {
+        // The climb of a_floor_climb_sits_in_the_lower_cell with a branch to the south of its
+        // lower cell (local side 1, the first side after the climb's own 0).
+        let mut net = Network::default();
+        floor_rail(&mut net, [0, 0, 0]);
+        floor_rail(&mut net, [1, 0, 0]);
+        floor_rail(&mut net, [2, 1, 0]);
+        floor_rail(&mut net, [1, 0, 1]);
+        let none = BTreeSet::new();
+        assert_eq!(shape_of(&net, [1, 0, 0], &none), Shape::ClimbFork(0, 0b01));
+        assert_eq!(Shape::ClimbFork(0, 0b01).value(), "c0f1");
+        // Branches to both sides.
+        floor_rail(&mut net, [1, 0, -1]);
+        assert_eq!(shape_of(&net, [1, 0, 0], &none), Shape::ClimbFork(0, 0b11));
+        // The branch shows its half toward the climb cell.
+        assert_eq!(shape_of(&net, [1, 0, 1], &none), Shape::Halves(0b1000));
+    }
+
+    #[test]
+    fn a_ceiling_climb_forks_too() {
+        let mut net = Network::default();
+        rail(&mut net, [0, 0, 0], Face::YPos);
+        rail(&mut net, [1, 1, 0], Face::YPos);
+        rail(&mut net, [1, 1, 1], Face::YPos);
+        // Climb(2) on the ceiling; the south neighbour is local side 3 = (2 + 1) % 4: bit 0.
+        assert_eq!(
+            shape_of(&net, [1, 1, 0], &BTreeSet::new()),
+            Shape::ClimbFork(2, 0b01)
+        );
+    }
+
+    #[test]
+    fn a_floor_rail_rises_under_a_wall_rail() {
+        // A floor track from the west ends under a wall rail that runs up the wall to the south
+        // (its block at z 1): the floor rail shows its half to the wall and the piece up it.
+        let mut net = Network::default();
+        floor_rail(&mut net, [-1, 0, 0]);
+        floor_rail(&mut net, [0, 0, 0]);
+        rail(&mut net, [0, 1, 0], Face::ZPos);
+        rail(&mut net, [0, 2, 0], Face::ZPos);
+        let none = BTreeSet::new();
+        assert_eq!(shape_of(&net, [0, 0, 0], &none), Shape::Rise(1, 0b0110));
+        assert_eq!(Shape::Rise(1, 0b0110).value(), "r1s6");
+        // The wall rail shows its half down to the floor rail.
+        assert_eq!(shape_of(&net, [0, 1, 0], &none), Shape::Halves(0b1010));
+        // A wall rail beside a floor rail on the same level adds no piece up.
+        let mut beside = Network::default();
+        floor_rail(&mut beside, [0, 0, 0]);
+        rail(&mut beside, [1, 0, 0], Face::ZPos);
+        assert_eq!(shape_of(&beside, [0, 0, 0], &none), Shape::Halves(0b0001));
+    }
+
+    #[test]
+    fn a_ceiling_rail_drops_over_a_wall_rail() {
+        let mut net = Network::default();
+        rail(&mut net, [0, 5, 0], Face::YPos);
+        rail(&mut net, [0, 4, 0], Face::ZPos);
+        // The ceiling's local sides are east, north, west, south: the wall to the south is 3.
+        assert_eq!(
+            shape_of(&net, [0, 5, 0], &BTreeSet::new()),
+            Shape::Rise(3, 0b1000)
+        );
+    }
+
+    #[test]
+    fn the_shape_values_are_sixty_four_and_distinct() {
         let values = Shape::values();
-        assert_eq!(values.len(), 20);
+        assert_eq!(values.len(), 16 + 4 + 12 + 32);
         assert_eq!(values[0], "s0");
         assert_eq!(values[19], "c3");
+        let distinct: BTreeSet<&String> = values.iter().collect();
+        assert_eq!(distinct.len(), values.len());
+        // Every shape a network can give is one of them.
+        for v in [
+            Shape::ClimbFork(3, 0b11),
+            Shape::Rise(0, 0b0001),
+            Shape::Rise(3, 0b1111),
+        ] {
+            assert!(values.contains(&v.value()), "{v:?}");
+        }
     }
 }

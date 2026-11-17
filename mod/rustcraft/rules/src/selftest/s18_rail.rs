@@ -8,7 +8,9 @@ use crate::monorail::shape;
 use crate::tuning::Tuning;
 use crate::worker::{Errand, Tool, Worker};
 
-pub const ALL: [Build; 13] = [
+pub const ALL: [Build; 14] = [
+    rails_fork_on_a_climb_and_rise_to_a_wall,
+
     bore_follows_the_ground_with_its_best_rail,
 
     load_dock_takes_from_a_chest,
@@ -445,5 +447,56 @@ fn bore_follows_the_ground_with_its_best_rail(o: Pos, _: &Tuning) -> Scenario {
         })
         .until("a tier-3 rail lies a step down", 1200, move |b, _| {
             Ok(b.block(low) == MONORAIL && b.property(low, "tier").as_deref() == Some("3"))
+        })
+}
+
+fn rails_fork_on_a_climb_and_rise_to_a_wall(o: Pos, _: &Tuning) -> Scenario {
+    // T2 (guide `monorail`): a climb from x 1 (y 1) up to x 2 (y 2) with a branch to the south
+    // of its lower cell, and a floor track x 6..7 that ends under wall rails up a stone wall to
+    // the south of x 7.
+    let climb = at(o, [1, 1, 0]);
+    let foot = at(o, [7, 1, 0]);
+    let floor_rails = [
+        at(o, [0, 1, 0]),
+        climb,
+        at(o, [2, 2, 0]),
+        at(o, [3, 2, 0]),
+        at(o, [1, 1, 1]),
+        at(o, [6, 1, 0]),
+        foot,
+    ];
+    let wall_rails = [at(o, [7, 2, 0]), at(o, [7, 3, 0])];
+    Scenario::new("monorail_climb_forks_and_floor_rises_to_a_wall", plot_area(o))
+        .then("a climb with a branch, a floor track under a wall rail", move |b, _| {
+            floor(b, o, -1..=8, -2..=2)?;
+            b.place(at(o, [2, 1, 0]), STONE, &[])?;
+            b.place(at(o, [3, 1, 0]), STONE, &[])?;
+            for y in 1..=3 {
+                b.place(at(o, [7, y, 1]), STONE, &[])?;
+            }
+            for p in floor_rails {
+                rail(b, p, Face::YNeg)?;
+            }
+            for p in wall_rails {
+                rail(b, p, Face::ZPos)?;
+            }
+            Ok(())
+        })
+        .check("the climb shows its fork, the floor rail its piece up the wall", move |b, _| {
+            same(
+                "the climb's cell",
+                b.property(climb, shape::PROPERTY),
+                Some(shape::Shape::ClimbFork(0, 0b01).value()),
+            )?;
+            same(
+                "the floor rail under the wall rail",
+                b.property(foot, shape::PROPERTY),
+                Some(shape::Shape::Rise(1, 0b0110).value()),
+            )?;
+            same(
+                "the wall rail over it",
+                b.property(wall_rails[0], shape::PROPERTY),
+                Some(shape::Shape::Halves(0b1010).value()),
+            )
         })
 }
