@@ -17,6 +17,7 @@
 //! - The brewing vat brews swiftness from water bottles through every step by itself.
 //! - A projector's plan turned a quarter is built by the building machine from the storage on its
 //!   magistral.
+//! - An autocrafter on the storage's line gets the logs its page lacks from the storage.
 
 use super::transport::{chest, fill, item_line, joint};
 use super::{Bench, Build, Scenario, at, plot_area, same};
@@ -26,7 +27,8 @@ use crate::storage::modules::{FILTER, SOCKET_FILTER, SOCKET_STACK, STACK_MODULES
 use crate::storage::terminal::{self, Press};
 use crate::tuning::Tuning;
 
-pub const ALL: [Build; 14] = [
+pub const ALL: [Build; 15] = [
+    crafter_asks_the_storage,
     builder_builds_the_turned_plan_from_storage,
     brewer_brews_through_the_chain,
     butcher_energy_and_kill_xp,
@@ -409,4 +411,18 @@ fn builder_builds_the_turned_plan_from_storage(o: Pos, _: &Tuning) -> Scenario {
             same("left in storage", b.storage(t).map(|v| v.store.count(STONE)), Some(2))?;
             same("old cell", b.block(remembered), "minecraft:air".to_owned())
         })
+}
+
+fn crafter_asks_the_storage(o: Pos, _: &Tuning) -> Scenario {
+    use super::slice15::{CRAFTER, build, crafter_at, held, machine};
+    use crate::machines::windows::crafter::CELL_BUTTON;
+    const LOG: &str = "minecraft:oak_log";
+    Scenario::new("orders18_crafter_asks_the_storage", plot_area(o))
+        .then("a storage on a tier 3 line with three logs", move |b, _| build(b, o, &[(LOG, 3)]))
+        .until("the storage holds them", 200, move |b, _| Ok(held(b, o, LOG)? == 3))
+        .then("an autocrafter on the line with a page of a log and an empty buffer", move |b, _| {
+            machine(b, crafter_at(o), CRAFTER, true)?;
+            b.press(crafter_at(o), CELL_BUTTON + 4, Some((LOG, 1)))
+        })
+        .until("the storage gave it every log", 1200, move |b, _| Ok(held(b, o, LOG)? == 0))
 }
