@@ -76,6 +76,7 @@ use rustcraft_rules::{
         KINDS, PlanRecipe, Step, fluid_key, fluid_number, fluid_of,
         held::{self, Held},
         queue::{FreeMachine, Job, Order, Queue, SMART_TIER, Wait, runs_that_fit},
+        ride,
         saved::{self, Record, SavedJob, SavedPage},
         ship::{self, Leg, Route, Shipment},
     },
@@ -137,6 +138,8 @@ struct Orders {
     ships: HashMap<String, Vec<Shipment>>,
     /// Slice 18 (O11): the products the level's orders hold at machines for their next steps.
     held: HashMap<String, Vec<Held>>,
+    /// Slice 18: the housings each level's riding items were last written into.
+    ridden: HashMap<String, BTreeSet<Pos>>,
     book: Option<Arc<Book>>,
 }
 
@@ -1306,16 +1309,11 @@ fn arrive(
                     // back the crafts the first let it make, only what its buffer can make now.
                     let buffer = read_slots(game, machine, content::CRAFTER_BUFFER).unwrap_or_default();
                     let can = saved::owed_after_load(r.job.runs, &r.job.step.inputs, &buffer);
-                    match level.temp_pages.get_mut(&machine) {
-                        Some(page) => page.owed = page.owed.max(can),
-                        None => {
-                            let page = TempPage {
-                                pattern: r.job.step.pattern(&book.recipes),
-                                owed: r.job.runs,
-                            };
-                            level.temp_pages.insert(machine, page);
-                        }
-                    }
+                    let page = level.temp_pages.entry(machine).or_insert_with(|| TempPage {
+                        pattern: r.job.step.pattern(&book.recipes),
+                        owed: r.job.runs,
+                    });
+                    page.owed = page.owed.max(can);
                 }
             }
             Leg::Products { from, own } => {
@@ -1326,6 +1324,145 @@ fn arrive(
     }
     jobs.retain(|r| !failed.contains(&(r.storage, r.job.order, r.job.machine)));
     *ships = kept;
+}
+
+// ---- Riding items seen in the housings ----
+//
+// Slice 18 (guide `orders`, the handbook's scene of items moving in the housings): once a second
+// the server lays each shipment on the housings between its two joints
+// (rustcraft_transport::Transport::path) and writes into each housing the items that ride or
+// will ride through it, with the faces they come in and leave by and the game ticks they do
+// (rustcraft_rules::orders::ride), clears the housings no longer ridden, and sends the changed
+// ones to clients (`native_block_entity_sync`, rustcraft_pipe18::update_tag). A client draws
+// each item at its place from the frame's game time and partial tick (`draw_riding`,
+// `native_draw_item`), and keeps no geometry while items ride. Plain item-net moves are instant
+// per tick and have no riding item: only orders' shipments are drawn.
+
+/// Proposal: the size a riding item is drawn at, of a block.
+const RIDING_SCALE: f32 = 0.35;
+
+/// The blocks a shipment rides from and to.
+fn ends_of(s: &Shipment, anchor: Pos) -> (Pos, Pos) {
+    match s.leg {
+        Leg::Machine { machine } => (s.from.unwrap_or(anchor), machine),
+        Leg::Products { from, .. } | Leg::Back { from } => (from, anchor),
+    }
+}
+
+fn ride_items(nbt: &Compound) -> Vec<ItemKey> {
+    match nbt.get(&JavaString::from(ride::RIDE_ITEMS_KEY)) {
+        Some(Tag::List(list)) => list
+            .iter()
+            .filter_map(|t| match t {
+                Tag::String(s) => Some(s.to_string_lossy()),
+                _ => None,
+            })
+            .collect(),
+        _ => Vec::new(),
+    }
+}
+
+fn ride_ints(nbt: &Compound) -> Vec<i32> {
+    match nbt.get(&JavaString::from(ride::RIDE_KEY)) {
+        Some(Tag::IntArray(v)) => v.clone(),
+        _ => Vec::new(),
+    }
+}
+
+/// Each housing the level's shipments ride gets their items' spans; one no longer ridden is
+/// cleared; a housing whose spans changed goes to clients.
+fn show_rides(
+    game: &mut Game<'_>,
+    dimension: &str,
+    level: &LevelNet,
+    ships: &[Shipment],
+    anchors: &BTreeMap<u32, Pos>,
+) {
+    let now = game.world.game_time;
+    let tuning = server::tuning();
+    let mut want: BTreeMap<Pos, Vec<(ItemKey, ride::Span)>> = BTreeMap::new();
+    for s in ships {
+        let Some(&anchor) = anchors.get(&s.storage) else {
+            continue;
+        };
+        let (from, to) = ends_of(s, anchor);
+        let Some(path) = level.transport.path(&level.layout, tuning, s.net, from, to) else {
+            continue;
+        };
+        let kinds = s.items.iter().filter(|(_, n)| *n > 0).take(ride::MAX_KINDS);
+        for (k, (item, _)) in kinds.enumerate() {
+            let lag = ride::LAG_TICKS * k as i32;
+            let drawn = keys::item_of(item).to_owned();
+            for (housing, span) in ride::spans(&level.layout, &path, from, to, s, now, lag) {
+                want.entry(housing).or_default().push((drawn.clone(), span));
+            }
+        }
+    }
+    let before = orders().ridden.remove(dimension).unwrap_or_default();
+    let touched: BTreeSet<Pos> = before.iter().chain(want.keys()).copied().collect();
+    for pos in touched {
+        let (ints, items) = ride::encode(want.get(&pos).map_or(&[][..], Vec::as_slice));
+        let Some(entity) = game.native_mod_block_entity(pos) else {
+            continue;
+        };
+        if entity.id != content::HOUSING
+            || (ride_ints(&entity.nbt) == ints && ride_items(&entity.nbt) == items)
+        {
+            continue;
+        }
+        game.native_with_mod_block_entity(pos, |e| {
+            if ints.is_empty() {
+                e.nbt.remove(&JavaString::from(ride::RIDE_KEY));
+                e.nbt.remove(&JavaString::from(ride::RIDE_ITEMS_KEY));
+            } else {
+                let list = items
+                    .iter()
+                    .map(|i| Tag::String(JavaString::from(i.as_str())))
+                    .collect();
+                e.nbt
+                    .insert(JavaString::from(ride::RIDE_KEY), Tag::IntArray(ints.clone()));
+                e.nbt
+                    .insert(JavaString::from(ride::RIDE_ITEMS_KEY), Tag::List(list));
+            }
+        });
+        game.native_block_entity_sync(pos);
+    }
+    orders()
+        .ridden
+        .insert(dimension.to_owned(), want.keys().copied().collect());
+}
+
+/// On a client: the order items riding the housing (what the server wrote, `show_rides`), each
+/// drawn where it is this frame; whether any of them has its ride through the housing still to
+/// come or under way, so that its geometry is not kept (spans long over, as a restart may leave
+/// them, keep it).
+pub(super) fn draw_riding(
+    game: &Game<'_>,
+    entity: &horizon_client::containers::ModBlockEntity,
+    draw: &mut crate::game::native_block_entity_draw::BlockEntityDraw,
+) -> bool {
+    let riding = ride::decode(&ride_ints(&entity.nbt), &ride_items(&entity.nbt));
+    let now = draw.game_time as i32;
+    if !riding.iter().any(|(_, s)| now.wrapping_sub(s.t1) <= 0) {
+        return false;
+    }
+    for (k, (item, span)) in riding.iter().enumerate() {
+        let Some(at) = ride::place(*span, draw.game_time, draw.partial) else {
+            continue;
+        };
+        draw.push();
+        draw.translate(at);
+        draw.scale([RIDING_SCALE; 3]);
+        game.native_draw_item(
+            draw,
+            &horizon_client::items::ItemStack::new(item.as_str(), 1),
+            horizon_assets::item_model::DisplayContext::Ground,
+            None,
+            k as i32,
+        );
+        draw.pop();
+    }
+    true
 }
 
 // ---- The tick ----
@@ -1367,6 +1504,8 @@ pub(super) fn tick(game: &mut Game<'_>, dimension: &str, level: &mut LevelNet) {
     }
     // Slice 18 (O11): held products no order needs go to the storage.
     release_held(game, dimension, level, &state, &mut held, &mut ships, &anchors);
+    // Slice 18: the shipments' items in the housings they ride, for clients to draw.
+    show_rides(game, dimension, level, &ships, &anchors);
     // Storages that are gone take their orders with them.
     let live: BTreeSet<u32> = anchors.keys().copied().collect();
     state

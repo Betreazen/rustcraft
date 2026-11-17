@@ -204,4 +204,4 @@
 
 ### Task 30: order items visible in the housings
 - The items of an order's shipment drawn moving through the housings along their route (`rules/src/orders/ship.rs` gives the route and the time), as the client can draw them (block-entity drawing of the housings).
-- [ ] not started. Way: the server writes each housing's riding items (item, progress 0..1, direction) into the housing's update tag each second from `ship::advance`; the housing's block-entity draw (stream 1's transport.rs owns the housing's drawing) draws `native_draw_item` at the interpolated place.
+- [x] done in s18-last Task 5: `rustcraft_rules::orders::ride` lays each shipment on the housings of its way (`net::topology::pipe_path`) as spans (faces in and out, game ticks in and out); `orders.rs::show_rides` writes them into the housings once a second and syncs them; `pipe18.rs` sends them in the update tag and draws them with `native_draw_item` (`orders.rs::draw_riding`); self-test `s18_order_items_ride_the_housings`. Plain item-net moves have no riding item and are not drawn (s18-last «Пределы движка»).

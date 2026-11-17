@@ -57,7 +57,7 @@
 
 **Files:** `rules/src/net/topology.rs` (`pipe_path`: корпуса пути с расстояниями), `rules/src/orders/ship.rs` (место отправки на пути по времени), `mod/rustcraft/orders.rs` (раз в секунду — едущие предметы в NBT корпусов пути, тег обновления), `mod/rustcraft/pipe18.rs` (`update_tag` и `draw_housing`: `native_draw_item` в месте по `draw.game_time`), самотест (NBT корпуса на пути несёт едущий предмет).
 
-- [ ] RED/GREEN правил, бандл, самотест, коммит.
+- [x] RED/GREEN правил, бандл, самотест, коммит. Сделано: `topology::pipe_path` и `link_face`, `Shipment::progress`, `rules/src/orders/ride.rs` (участки «грань входа, грань выхода, тик входа и выхода» по корпусам пути; пока грузится — стоит у первого корпуса столько, сколько сеть грузила бы её одну; `place` — место предмета в корпусе по времени кадра; кодирование в NBT `ride`/`ride_items`); бандл: `Transport::path`, `orders.rs::show_rides` раз в секунду пишет корпуса пути, чистит оставленные и шлёт клиентам; `pipe18.rs` — ключи в теге обновления и `draw_riding` (`native_draw_item`, `Ground`) без `draw.keep()`, пока предмет едет. До трёх видов предметов отправки, каждый на 4 тика позади. Самотест `s18_order_items_ride_the_housings`.
 
 ### Task 6: проверка
 

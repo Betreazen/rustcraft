@@ -162,6 +162,28 @@ impl Transport {
             })
     }
 
+    /// Slice 18: the housings an order's shipment on the net `key` rides from the block `from` to
+    /// the block `to`, each with its pipe from the first (rustcraft_rules::net::topology::pipe_path,
+    /// the way `route` measures); none when the net no longer joins them.
+    pub fn path(
+        &self,
+        layout: &Layout,
+        tuning: &Tuning,
+        key: NetKey,
+        from: Pos,
+        to: Pos,
+    ) -> Option<Vec<(Pos, u32)>> {
+        let net = self.nets.iter().find(|n| n.key == key)?;
+        let ends = |block: Pos| -> Vec<Pos> {
+            net.joints
+                .iter()
+                .filter(|j| j.block == block && j.mode != Mode::Off)
+                .map(|j| j.housing)
+                .collect()
+        };
+        rustcraft_rules::net::topology::pipe_path(layout, tuning, &net.housings, &ends(from), &ends(to))
+    }
+
     /// Slice 17: what the orders' shipments loaded on each net over the last `ticks` ticks
     /// (rustcraft_rules::orders::ship::advance); the nets they did not load on keep their
     /// throughput whole.

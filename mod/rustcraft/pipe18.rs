@@ -450,6 +450,13 @@ pub(super) fn update_tag(entity: &horizon_client::containers::ModBlockEntity, ta
                 .insert(JavaString::from(key), v.clone());
         }
     }
+    // Slice 18 (s18-last): the order items riding it (rustcraft_orders::draw_riding).
+    for key in [rustcraft_rules::orders::ride::RIDE_KEY, rustcraft_rules::orders::ride::RIDE_ITEMS_KEY] {
+        if let Some(v) = entity.nbt.get(&JavaString::from(key)) {
+            tag.get_or_insert_with(Compound::new)
+                .insert(JavaString::from(key), v.clone());
+        }
+    }
 }
 
 /// On a client: whether the local player holds the wrench.
@@ -469,12 +476,16 @@ pub(super) fn draw_housing(
             game.native_draw_model(draw, STRIPS[i], rustcraft_rules::net::bottleneck::strip_colour(c.kind));
         }
     }
+    // Slice 18 (s18-last): an order's items riding it move each frame: nothing kept meanwhile.
+    let riding = crate::game::rustcraft_orders::draw_riding(game, entity, draw);
     let weak = match entity.nbt.get(&JavaString::from(WEAK_KEY)) {
         Some(Tag::Byte(b)) => *b as u8,
         _ => 0,
     };
     if weak == 0 {
-        draw.keep();
+        if !riding {
+            draw.keep();
+        }
         return;
     }
     if wrench_in_hand(game) {
