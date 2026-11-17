@@ -7,7 +7,7 @@ use crate::net::topology::ChannelKind;
 use crate::geom::Pos;
 use crate::tuning::Tuning;
 
-pub const ALL: [Build; 9] = [
+pub const ALL: [Build; 10] = [
     wrench_lifts_a_tier_3_machine,
     energy_channel_caps_all_its_passes,
     windmill_blades_where_the_rotor_turns,
@@ -17,6 +17,7 @@ pub const ALL: [Build; 9] = [
     miner_with_chest_and_magistral,
     two_miners_both_fill_their_docks,
     miner_stack_module_keeps_to_the_menu,
+    plain_flow_rides_the_housings,
 ];
 
 /// Guide `wrench`: a machine of a higher tier lifted by the wrench comes off as its tier's item
@@ -260,4 +261,28 @@ fn miner_stack_module_keeps_to_the_menu(o: Pos, _t: &Tuning) -> Scenario {
             let most = b.items(m).into_iter().flatten().map(|(_, n)| n).max().unwrap_or(0);
             if most <= 64 { Ok(()) } else { Err(format!("a window slot holds {most}")) }
         })
+}
+
+/// M5 («клиент рисует поток в окошках корпуса»): a chest giving into another along three
+/// housings; clients get the stream on the housings between them, and none once it stops.
+fn plain_flow_rides_the_housings(o: Pos, _t: &Tuning) -> Scenario {
+    use super::transport::{chest, fill, item_line, joint};
+    use crate::net::flow::FLOW_KEY;
+    use crate::net::items::Mode;
+    let flowing = move |b: &dyn super::Bench| (1..=3).filter(|&k| !b.int_array(at(o, [k, 0, 0]), FLOW_KEY).is_empty()).count();
+    Scenario::new("w2_plain_flow_rides_the_housings", plot_area(o))
+        .then("a chest of cobblestone giving along three housings into another", move |b, _| {
+            item_line(b, o, 1, 3, &[1, 3])?;
+            joint(b, o, 1, Mode::From, 0)?;
+            fill(b, chest(o, 1), "minecraft:cobblestone", 64)?;
+            b.refresh();
+            Ok(())
+        })
+        .until("all three housings carry the stream", 200, move |b, _| Ok(flowing(b) == 3))
+        .then("the giving chest emptied", move |b, _| {
+            b.place(chest(o, 1), "minecraft:air", &[])?;
+            b.refresh();
+            Ok(())
+        })
+        .until("the stream is gone from the housings", 200, move |b, _| Ok(flowing(b) == 0))
 }

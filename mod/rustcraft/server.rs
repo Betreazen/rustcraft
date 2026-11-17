@@ -254,6 +254,8 @@ pub(super) fn on_level_tick(game: &mut Game<'_>, dimension: &str) {
     // Slice 15: the orders' jobs and a round of every storage's queue, once a second.
     if second {
         orders::tick(game, dimension, &mut level);
+        // Wave 2: the plain item flow drawn in the housings (M5).
+        crate::game::rustcraft_pipe18::show_flow(game, dimension, &level);
     }
     storage::tick(game, dimension);
     monorail::tick(game, dimension, &TUNING);
