@@ -1346,5 +1346,11 @@
   "rustcraft.handbook.page.dusts.name": "Ore dust",
   "rustcraft.handbook.page.dusts.sum": "Iron, copper and gold dust from the crusher. Smelts into an ingot.",
   "rustcraft.handbook.page.fluids.name": "Solution and catalysts",
-  "rustcraft.handbook.page.fluids.sum": "Fluids from the mixer. Nutrient solution feeds crystal structures; catalysts boost machines."
+  "rustcraft.handbook.page.fluids.sum": "Fluids from the mixer. Nutrient solution feeds crystal structures; catalysts boost machines.",
+  "rustcraft.turret.healing_row": "Heals: %s · %s of 20 health",
+  "rustcraft.turret.shot_parts": "Shot: %s E + %s × %s E = %s E",
+  "rustcraft.turret.effect.slow_share": "−%s speed",
+  "rustcraft.turret.effects": "Effects: ",
+  "rustcraft.turret.reserve": "Energy reserve",
+  "rustcraft.turret.reserve_value": "%s of %s E"
 }

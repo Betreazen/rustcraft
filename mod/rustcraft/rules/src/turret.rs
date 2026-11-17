@@ -117,6 +117,38 @@ impl Loadout {
     pub fn support_draw(&self, t: &Tuning) -> f64 {
         t.support_energy * f64::from(self.support_modules()) * self.energy(t)
     }
+
+    /// Wave 2: E a second it draws now (ui.js «пока есть на кого действовать»): the guard, power
+    /// and haste modules while a player is in range, the heal module only while one is hurt.
+    pub fn support_draw_now(&self, t: &Tuning, players: bool, someone_hurt: bool) -> f64 {
+        if !players {
+            return 0.0;
+        }
+        let heal = if someone_hurt { self.heal } else { 0 };
+        let acting = self.guard + self.power + self.haste + heal;
+        t.support_energy * f64::from(acting) * self.energy(t)
+    }
+
+    /// Wave 2: the shot's price as the window spells it (ui.js «40 Е + 3 × 10 Е = 70 Е»): the
+    /// base, the effect modules, each one's price and the whole, speed and economy counted in.
+    pub fn shot_parts(&self, t: &Tuning) -> ShotParts {
+        let factor = self.energy(t) / self.work(t);
+        ShotParts {
+            base: t.turret_shot_energy * factor,
+            effects: self.effect_modules(),
+            each: t.turret_effect_energy * factor,
+            total: self.shot_energy(t),
+        }
+    }
+}
+
+/// A shot's price in parts (`Loadout::shot_parts`).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ShotParts {
+    pub base: f64,
+    pub effects: u32,
+    pub each: f64,
+    pub total: f64,
 }
 
 /// The effects a turret's shots can give.
@@ -351,6 +383,26 @@ pub const UNDEAD: [&str; 14] = [
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn wave2_the_shot_is_spelled_as_base_plus_effects() {
+        let t = Tuning::default();
+        let l = load(&[Module::Bleed, Module::Poison, Module::Slow]);
+        let p = l.shot_parts(&t);
+        assert_eq!((p.base, p.effects, p.each, p.total), (40.0, 3, 10.0, 70.0));
+        assert_eq!(slow_fraction(l.slow, &t), 0.2);
+    }
+
+    #[test]
+    fn wave2_the_heal_module_draws_only_while_someone_is_hurt() {
+        let t = Tuning::default();
+        let l = load(&[Module::Heal, Module::Guard, Module::Power]);
+        assert_eq!(l.support_draw(&t), 24.0);
+        assert_eq!(l.support_draw_now(&t, true, true), 24.0);
+        assert_eq!(l.support_draw_now(&t, true, false), 16.0);
+        assert_eq!(l.support_draw_now(&t, false, true), 0.0);
+        assert_eq!(load(&[Module::Heal]).support_draw_now(&t, true, false), 0.0);
+    }
 
     fn load(m: &[Module]) -> Loadout {
         let slots: Vec<Option<Module>> = m.iter().copied().map(Some).collect();

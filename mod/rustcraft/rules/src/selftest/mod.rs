@@ -53,6 +53,8 @@ pub mod gear18;
 // Slice 18, last leftovers: the backpack.
 pub mod s18_last_pack;
 pub mod s18_last_orders;
+// Slice 18, wave 2: rail, workers, base and gear.
+pub mod s18_w2_rail_gear;
 
 use std::collections::BTreeMap;
 
@@ -629,6 +631,8 @@ pub fn catalog() -> Vec<Build> {
     // Slice 18, last leftovers: the backpack.
     all.extend(s18_last_pack::ALL);
     all.extend(s18_last_orders::ALL);
+    // Slice 18, wave 2: rail, workers, base and gear.
+    all.extend(s18_w2_rail_gear::ALL);
     all
 }
 

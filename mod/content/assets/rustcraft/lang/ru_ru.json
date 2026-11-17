@@ -6721,5 +6721,11 @@
   "rustcraft.handbook.page.tool_map.part.4.w.4": "Построек",
   "rustcraft.handbook.page.tool_map.part.4.w.5": "деревня, руины портала",
   "rustcraft.handbook.page.tool_map.part.5.w.0": "Работает: наносит чанки",
-  "rustcraft.handbook.page.tool_map.window": "Картограф · шасси из кристаллита"
+  "rustcraft.handbook.page.tool_map.window": "Картограф · шасси из кристаллита",
+  "rustcraft.turret.healing_row": "Лечит: %s · %s из 20 здоровья",
+  "rustcraft.turret.shot_parts": "Выстрел: %s Е + %s × %s Е = %s Е",
+  "rustcraft.turret.effect.slow_share": "−%s скорости",
+  "rustcraft.turret.effects": "Эффекты: ",
+  "rustcraft.turret.reserve": "Запас энергии",
+  "rustcraft.turret.reserve_value": "%s из %s Е"
 }

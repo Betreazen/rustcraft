@@ -99,6 +99,8 @@ struct TurretState {
     target: Option<String>,
     /// The target's entity id: whether the engine lets poison onto it.
     target_id: Option<u32>,
+    /// Wave 2: E a second a support turret draws now (its window's «получает N из M Е/с»).
+    drawing: f64,
 }
 
 /// Who struck a mob last: a turret, slice 11's guard (P2) or butcher (round 26).
@@ -1083,12 +1085,16 @@ fn support(
     let players: Vec<_> = game
         .native_server_players()
         .into_iter()
-        .filter(|p| p.health > 0.0 && p.game_mode != 3 && distance(at, p.position) <= range)
+        .filter(|p| p.dimension == dimension && p.health > 0.0 && p.game_mode != 3 && distance(at, p.position) <= range)
         .collect();
     if players.is_empty() {
+        ts.drawing = 0.0;
         return turret::shown(l, true, Shown::NoPlayers);
     }
-    let cost = l.support_draw(t) / t.ticks_per_second;
+    // Wave 2: the heal module draws only while someone in range is hurt (#6).
+    let someone_hurt = players.iter().any(|p| p.health < 20.0);
+    ts.drawing = l.support_draw_now(t, true, someone_hurt);
+    let cost = ts.drawing / t.ticks_per_second;
     if energy < cost {
         return turret::shown(l, false, Shown::NoEnergy);
     }
@@ -1848,16 +1854,34 @@ fn turret_sheet(game: &Game<'_>, dimension: &str, pos: Pos, t: &Tuning, s: &mut 
         }
         role_rows(&slots, s);
     } else {
-        s.rows.push(v(&line(
-            "rustcraft.turret.shot",
-            "Shot: %s E",
-            &[Text::literal(format!("{:.0}", l.shot_energy(t)))],
-        )));
+        // Wave 2 (#12): «Выстрел: 40 Е + 3 × 10 Е = 70 Е», «Эффекты: … · −20% скорости».
+        let p = l.shot_parts(t);
+        let n = |x: f64| Text::literal(format!("{x:.0}"));
+        s.rows.push(v(&if p.effects == 0 {
+            line("rustcraft.turret.shot", "Shot: %s E", &[n(p.total)])
+        } else {
+            line(
+                "rustcraft.turret.shot_parts",
+                "Shot: %s E + %s × %s E = %s E",
+                &[n(p.base), Text::literal(p.effects.to_string()), n(p.each), n(p.total)],
+            )
+        }));
         let e = turret::effects(&l, t, &Resist::default(), false);
         if !e.is_empty() {
-            s.rows.push(v(&joined(
-                e.iter().map(|g| effect_name(g.effect)).collect(),
-            )));
+            let names = e
+                .iter()
+                .map(|g| match g.effect {
+                    Effect::Slow => line(
+                        "rustcraft.turret.effect.slow_share",
+                        "−%s speed",
+                        &[Text::literal(format!("{:.0}%", 100.0 * turret::slow_fraction(l.slow, t)))],
+                    ),
+                    other => effect_name(other),
+                })
+                .collect();
+            let mut row = line("rustcraft.turret.effects", "Effects: ", &[]);
+            row.push(joined(names));
+            s.rows.push(v(&row));
         }
     }
     let aimed = state()
@@ -1885,13 +1909,38 @@ fn turret_sheet(game: &Game<'_>, dimension: &str, pos: Pos, t: &Tuning, s: &mut 
         s.rows.push(v(&l2));
     }
     let e = machines::buffer_energy(game, pos);
-    s.bars.push(SheetBar {
-        label: v(&line("rustcraft.window.energy", "Energy", &[])),
-        value: v(&Text::literal(format!("{e:.0} / {:.0} E", t.turret_buffer))),
-        share: e / t.turret_buffer.max(1.0),
-        energy: true,
-        colour: None,
-    });
+    // Wave 2 (#12): a support turret's bar is what it draws (ui.js `energy(24, 24)`).
+    if support {
+        let need = l.support_draw(t);
+        let now = state()
+            .turrets
+            .get(&(dimension.to_owned(), pos))
+            .map_or(0.0, |x| x.drawing);
+        s.bars.push(SheetBar {
+            label: v(&line("rustcraft.window.energy", "Energy", &[])),
+            value: v(&line(
+                "rustcraft.anchor.gets",
+                "gets %s of %s E/s",
+                &[Text::literal(format!("{now:.0}")), Text::literal(format!("{need:.0}"))],
+            )),
+            share: if need > 0.0 { (now / need).clamp(0.0, 1.0) } else { 0.0 },
+            energy: true,
+            colour: None,
+        });
+    } else {
+        // ui.js «Запас энергии · 480 из 800 Е».
+        s.bars.push(SheetBar {
+            label: v(&line("rustcraft.turret.reserve", "Energy reserve", &[])),
+            value: v(&line(
+                "rustcraft.turret.reserve_value",
+                "%s of %s E",
+                &[Text::literal(format!("{e:.0}")), Text::literal(format!("{:.0}", t.turret_buffer))],
+            )),
+            share: e / t.turret_buffer.max(1.0),
+            energy: true,
+            colour: None,
+        });
+    }
     let shown = turret_shown(dimension, pos);
     let severity = match shown {
         Some(Shown::NoEnergy) => Severity::Bad,
@@ -1946,7 +1995,7 @@ fn support_rows(game: &Game<'_>, dimension: &str, pos: Pos, _slots: &[Option<Mod
         && let Some(p) = players.iter().find(|p| p.name == name)
     {
         s.rows.push(v(&line(
-            "rustcraft.turret.healing",
+            "rustcraft.turret.healing_row",
             "Heals: %s · %s of 20 health",
             &[Text::literal(name.clone()), Text::literal(format!("{:.0}", p.health))],
         )));
