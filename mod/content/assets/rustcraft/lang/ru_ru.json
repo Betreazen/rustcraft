@@ -6745,5 +6745,6 @@
   "rustcraft.gear.window.does.night": "видно в темноте",
   "rustcraft.gear.window.does.magnet": "притягивает предметы",
   "rustcraft.gear.window.does.damper": "после удара 5 с урон −20%",
-  "rustcraft.gear.window.does.jetpack": "полёт за заряд"
+  "rustcraft.gear.window.does.jetpack": "полёт за заряд",
+  "rustcraft.worker.unreadable": "Работник не читается: он остаётся у тебя"
 }

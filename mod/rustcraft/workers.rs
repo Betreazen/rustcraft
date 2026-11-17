@@ -276,6 +276,16 @@ pub(super) fn on_use_item_on(
         return;
     }
     let packed = packed_of(stack);
+    // Wave 2 (W3): a packed worker that does not read back stays in the hand with all it carries.
+    if packed.as_deref().is_some_and(|k| !Worker::reads_back(k)) {
+        log::warn!("rustcraft: a packed worker that does not read: left with the player");
+        tell(
+            game,
+            player.uuid,
+            line("rustcraft.worker.unreadable", "This worker does not read: it stays with you", &[]),
+        );
+        return;
+    }
     if player.game_mode != 1 {
         if packed.is_some() {
             take_exact(game, player.uuid, stack);
@@ -1295,6 +1305,7 @@ fn charge_from(game: &mut Game<'_>, w: &mut Worker, dock: Pos, t: &Tuning) {
         .min((cap - w.charge).max(0.0));
     if give > 0.0 {
         machines::set_buffer_energy(game, dock, buffer - give);
+        crate::game::rustcraft_base::dock_gave(dock, give);
         w.charge += give;
         let share = w.charge / cap.max(1.0);
         dock_log()
