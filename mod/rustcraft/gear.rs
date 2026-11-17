@@ -831,12 +831,15 @@ pub(super) fn draw_window(game: &Game<'_>, batch: &mut horizon_client::hud::HudB
         return;
     }
     let Some(v) = WINDOW.lock().unwrap_or_else(PoisonError::into_inner).clone() else { return };
-    let o = [screen.rect[0] + screen.rect[2] + PANEL_GAP, screen.rect[1]];
+    // Beside the menu, narrowed or moved so it stays on the screen (in-game check w3: at
+    // 1280 × 720 and GUI scale 3 it ran off the right edge).
+    let (x, width) = rules::window::panel(screen.rect, PANEL_WIDTH, PANEL_GAP);
+    let o = [x, screen.rect[1]];
     let height = 38.0 + LINE * v.modules.len() as f32;
-    kit::background(game, batch, o, [PANEL_WIDTH, height]);
+    kit::background(game, batch, o, [width, height]);
     kit::label(game, batch, &kit::tr("rustcraft.gear.window.charge", "Charge"), o, [8.0, 7.0]);
     let share = if v.capacity > 0.0 { v.charge / v.capacity } else { 0.0 };
-    kit::bar(game, batch, [o[0] + 8.0, o[1] + 17.0, PANEL_WIDTH - 16.0, 5.0], share, kit::ENERGY);
+    kit::bar(game, batch, [o[0] + 8.0, o[1] + 17.0, width - 16.0, 5.0], share, kit::ENERGY);
     let amount = kit::tr_with(
         "rustcraft.gear.window.amount",
         "%s of %s E",
@@ -863,7 +866,7 @@ pub(super) fn draw_window(game: &Game<'_>, batch: &mut horizon_client::hud::HudB
         };
         let line = format!("{name}: {state}");
         let colour = if *st == rules::window::State::Off { kit::TEXT } else { kit::TEXT_ON };
-        kit::text(game, batch, &kit::fit(game, &line, PANEL_WIDTH - 16.0), o, [8.0, 38.0 + LINE * i as f32], colour);
+        kit::text(game, batch, &kit::fit(game, &line, width - 16.0), o, [8.0, 38.0 + LINE * i as f32], colour);
     }
 }
 

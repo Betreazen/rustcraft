@@ -151,3 +151,45 @@ mod wave2_tests {
         assert_eq!(keys.len(), 2 * Module::ALL.len(), "a key each");
     }
 }
+
+#[cfg(test)]
+mod panel_tests {
+    use super::*;
+
+    #[test]
+    fn the_charge_panel_stays_on_the_screen() {
+        // A 176-wide menu centred on a 427-wide GUI (1280 × 720 at scale 3): 121.5 pixels on
+        // the right, so the panel narrows to that (the in-game check found it cut off).
+        let menu = [125.5, 40.0, 176.0, 166.0];
+        assert_eq!(panel(menu, 168.0, 4.0), (305.5, 121.5));
+        // A wide screen: the whole panel on the right, as before.
+        let wide = [372.0, 40.0, 176.0, 166.0];
+        assert_eq!(panel(wide, 168.0, 4.0), (552.0, 168.0));
+        // Too little room beside the menu: the whole panel against the screen's right edge.
+        let narrow = [40.0, 40.0, 176.0, 166.0];
+        assert_eq!(panel(narrow, 168.0, 4.0), (256.0 - 168.0, 168.0));
+        for r in [menu, wide, narrow] {
+            let (x, w) = panel(r, 168.0, 4.0);
+            assert!(x >= 0.0 && x + w <= r[0] * 2.0 + r[2]);
+        }
+    }
+}
+
+/// Where the gear window's charge panel goes and how wide it is, in GUI pixels: right of the menu
+/// `rect` (`[x, y, w, h]`, centred on the screen, so the screen is `2x + w` wide), narrowed to the
+/// room there when the whole panel does not fit, else against the screen's right edge. It never
+/// runs off the screen.
+pub fn panel(rect: [f32; 4], width: f32, gap: f32) -> (f32, f32) {
+    // The narrowest panel that still reads: the charge line and a module line cut with «…».
+    const NARROWEST: f32 = 96.0;
+    let screen = rect[0] * 2.0 + rect[2];
+    let right = rect[0] + rect[2] + gap;
+    let room = screen - right;
+    if room >= width {
+        (right, width)
+    } else if room >= NARROWEST {
+        (right, room)
+    } else {
+        ((screen - width).max(0.0), width.min(screen))
+    }
+}
