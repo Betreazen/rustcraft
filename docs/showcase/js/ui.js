@@ -157,10 +157,13 @@
     slots('Готовое', [['#c9a45a', 2], null, null], 'Готовые предметы. Их забирает магистраль; готовое заказа уходит на склад.'),
     energy(8, 8), mode(1), modules(SLOTS(2), [CHIP, '#c9a45a']), status('Работает: заказ, 2 из 4'),
   ]);
-  const simple = (id, title, tier, label, cells, note) =>
-    def(id, title + ' · ступень ' + tier, [slots(label, cells, note, 3), energy(2, 2), modules(SLOTS(tier)), status('Работает')]);
-  simple('placer', 'Установщик блоков', 2, 'Блоки', [['#b08a52', 32], [STONE, 64], null, null, null, null, null, null, null], 'Блоки, которые установщик ставит перед собой.');
-  simple('breaker', 'Разрушитель блоков', 2, 'Добыча', [['#b08a52', 11], null, null, null, null, null, null, null, null], 'То, что выпало из сломанных блоков и ждёт, пока его заберёт магистраль.');
+  const simple = (id, title, tier, label, cells, note, what) =>
+    def(id, title + ' · ступень ' + tier, [
+      rows([['Делает', what], ['Темп', 'блок за 1 с, 2 Е/с']], 'Что машина делает и как быстро: темп зависит от ступени, режима работы и модулей.'),
+      slots(label, cells, note, 3), energy(2, 2), mode(1), modules(SLOTS(tier)), status('Работает'),
+    ]);
+  simple('placer', 'Установщик блоков', 2, 'Блоки', [['#b08a52', 32], [STONE, 64], null, null, null, null, null, null, null], 'Блоки, которые установщик ставит перед собой.', 'ставит блок перед собой');
+  simple('breaker', 'Разрушитель блоков', 2, 'Добыча', [['#b08a52', 11], null, null, null, null, null, null, null, null], 'То, что выпало из сломанных блоков и ждёт, пока его заберёт магистраль.', 'ломает блок перед собой');
   def('mixer', 'Смеситель · ступень 2', [
     tank('Вода', '#3f76e4', 80, '12,8 из 16 вёдер'),
     slots('Ингредиенты', [['#e8e6da', 22], ['#e53b3b', 30], null], 'Предметы для смешивания. Их подаёт предметный канал.'),
