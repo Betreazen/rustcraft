@@ -312,8 +312,17 @@ fn sockets(game: &Game<'_>, batch: &mut HudBatch, o: [f32; 2], l: &Layout, s: &S
 fn rows(game: &Game<'_>, batch: &mut HudBatch, o: [f32; 2], l: &Layout, s: &Sheet) {
     let shown = s.rows.len().min(l.rows.len());
     for (i, (v, y)) in s.rows.iter().zip(&l.rows).enumerate() {
-        let line = kit::fit(game, &read(v), WIDTH - 16.0);
-        text(game, batch, &line, o, [8.0, *y], TEXT);
+        let whole = read(v);
+        // A row of `key\tvalue` (the circuit balance, rules `sheet::BALANCE_ROWS`): the key on
+        // the left, the value on the right, as ui.js `rows` draws them.
+        if let Some((key, value)) = whole.split_once('\t') {
+            let value = kit::fit(game, value, WIDTH - 24.0 - game.native_text_width(key));
+            text(game, batch, key, o, [8.0, *y], LABEL);
+            text_right(game, batch, &value, o, WIDTH - 8.0, *y, VALUE);
+        } else {
+            let line = kit::fit(game, &whole, WIDTH - 16.0);
+            text(game, batch, &line, o, [8.0, *y], TEXT);
+        }
         if i + 1 < shown {
             kit::fills(game, batch, o, &[style::kv_rule(8.0, WIDTH - 8.0, y + 9.0)]);
         }
@@ -443,7 +452,7 @@ pub(super) fn tooltip(game: &Game<'_>, block: &str, at: [f32; 2], lines: &mut Ve
     }
     for (i, y) in l.rows.iter().enumerate().take(s.rows.len()) {
         if inside([8.0, *y, WIDTH - 16.0, 9.0], at) {
-            lines.push(read(&s.rows[i]));
+            lines.push(read(&s.rows[i]).replacen('\t', ": ", 1));
             for h in s.hints.get(i).into_iter().flatten() {
                 hint(lines, read(h));
             }

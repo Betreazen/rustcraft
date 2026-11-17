@@ -1199,35 +1199,39 @@ fn gives_bar(now: f64, most: f64) -> SheetBar {
 }
 
 /// ui.js `balance`: the circuit's production and demand, its batteries and whether it is enough.
+/// Four rows of `key\tvalue` (rules `sheet::BALANCE_ROWS`), the words of the fuel generator's
+/// drawn window (panels.rs), so every window says the balance the same way.
 fn balance_rows(b: &GroupBalance) -> Vec<serde_json::Value> {
+    let per_second = |v: f64| line("rustcraft.window.per_second", "%s E/s", &[e(v)]);
     let stored = if b.capacity > 0.0 {
         line(
-            "rustcraft.power.balance_stored",
-            "stored %s of %s E",
+            "rustcraft.window.stored.of",
+            "%s of %s E",
             &[e(b.stored.floor()), e(b.capacity)],
         )
     } else {
-        line("rustcraft.power.balance_no_store", "no batteries", &[])
+        line("rustcraft.window.stored.none", "no batteries", &[])
     };
     let enough = if b.enough() {
-        line("rustcraft.power.balance_enough", "enough", &[])
+        line("rustcraft.window.enough.yes", "yes", &[])
     } else {
         line(
-            "rustcraft.power.balance_short",
-            "machines slowed by %s",
+            "rustcraft.window.enough.no",
+            "no, machines slowed by %s",
             &[Text::literal(format!("{}%", b.slowdown_percent()))],
         )
     };
-    let mut second = stored;
-    second.push(Text::literal(" · "));
-    second.push(enough);
+    let kv = |key: &str, fallback: &str, value: Text| {
+        let mut row = line(key, fallback, &[]);
+        row.push(Text::literal("\t"));
+        row.push(value);
+        base::v(&row)
+    };
     vec![
-        base::v(&line(
-            "rustcraft.power.balance",
-            "Circuit: makes %s E/s, uses %s E/s",
-            &[e(b.produced), e(b.requested)],
-        )),
-        base::v(&second),
+        kv("rustcraft.window.produced", "Production", per_second(b.produced)),
+        kv("rustcraft.window.used", "Consumption", per_second(b.requested)),
+        kv("rustcraft.window.stored", "Stored", stored),
+        kv("rustcraft.window.enough", "Enough", enough),
     ]
 }
 

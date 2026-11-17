@@ -156,8 +156,8 @@ fn structure_scenario(name: &'static str, o: crate::geom::Pos, t: &Tuning, fed: 
         .check("its window: crystals, form, output and solution bars, the limit", move |b, _| {
             let s = b.sheet(cells[3]).ok_or("no sheet for a crystal")?;
             same("bars", s.bars.len(), 2)?;
-            same("rows", s.rows.len(), 4)?;
-            for key in ["rustcraft.structure.crystals", "rustcraft.structure.form", limit] {
+            same("rows", s.rows.len(), 2 + crate::machines::sheet::BALANCE_ROWS)?;
+            for key in ["rustcraft.structure.crystals", "rustcraft.structure.form", "rustcraft.window.produced", "rustcraft.window.enough", limit] {
                 if !names(&s, key) {
                     return Err(format!("the window does not say {key}: {:?}", s.rows));
                 }
@@ -313,9 +313,9 @@ fn generator_windows(o: crate::geom::Pos, _t: &Tuning) -> Scenario {
             let Some(s) = b.sheet(lava_gen) else { return Ok(false) };
             let rows: Vec<String> = s.rows.iter().map(|r| r.to_string()).collect();
             Ok(s.bars.len() == 2
-                && rows.len() == 3
-                && rows[1].contains("rustcraft.power.balance")
-                && rows[2].contains("rustcraft.power.balance_stored"))
+                && rows.len() == 1 + crate::machines::sheet::BALANCE_ROWS
+                && rows[1].contains("rustcraft.window.produced")
+                && rows[3].contains("rustcraft.window.stored.of"))
         })
         .check("the battery's window says what it gives of its most", move |b, _| {
             let s = b.sheet(battery).ok_or("no sheet for the battery")?;

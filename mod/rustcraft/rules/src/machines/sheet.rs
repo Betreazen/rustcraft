@@ -214,7 +214,7 @@ impl Kind {
             // Slice 18 (ui.js `gen_lava`): the lava and output bars, the hint and the circuit's
             // balance.
             Kind::LavaGenerator => Shape {
-                rows: 3,
+                rows: 1 + BALANCE_ROWS,
                 bars: 2,
                 ..Shape::default()
             },
@@ -255,7 +255,7 @@ impl Kind {
             // Slice 18 (ui.js `structure`): crystals and form, the output and solution bars, the
             // circuit's balance.
             Kind::Structure => Shape {
-                rows: 4,
+                rows: 2 + BALANCE_ROWS,
                 bars: 2,
                 ..Shape::default()
             },
@@ -404,6 +404,10 @@ pub fn decode(bytes: &[u8]) -> Option<Sheet> {
 pub const WIDTH: f32 = 214.0;
 /// A window must fit 240 GUI pixels: a 1280 × 720 screen at GUI scale 3.
 pub const MAX_HEIGHT: f32 = 240.0;
+
+/// The circuit balance of ui.js `balance`: Производство, Потребление, В запасе, Хватает, one row
+/// each, a label on the left and its value on the right (a row of `key	value`).
+pub const BALANCE_ROWS: usize = 4;
 /// Where the parts start: under the title's rule.
 const TOP: f32 = 16.0;
 const LEFT: f32 = 8.0;
@@ -705,6 +709,14 @@ mod tests {
 
     fn overlap(a: Rect, b: Rect) -> bool {
         a[0] < b[0] + b[2] && b[0] < a[0] + a[2] && a[1] < b[1] + b[3] && b[1] < a[1] + a[3]
+    }
+
+    #[test]
+    fn the_structure_and_the_lava_generator_have_the_guides_four_balance_rows() {
+        // ui.js `balance`: Производство, Потребление, В запасе, Хватает, one row each (the
+        // in-game check found them squeezed into two cut lines).
+        assert_eq!(Kind::Structure.shape().rows, 2 + BALANCE_ROWS);
+        assert_eq!(Kind::LavaGenerator.shape().rows, 1 + BALANCE_ROWS);
     }
 
     #[test]
