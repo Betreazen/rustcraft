@@ -250,9 +250,15 @@ pub(super) fn bench(game: &mut Game<'_>, action: &str, pos: Pos) -> Result<Strin
             if game.native_block(pos) != "minecraft:air" {
                 return Err("the machine stayed".into());
             }
-            let state = game.native_default_state(&stack.item).ok_or("no state")?;
+            // Placed as the item places it: its family's block on the item's tier.
+            let (block, tier) = rustcraft_rules::tiers::family_of_item(&stack.item)
+                .map_or((stack.item.to_string(), None), |(f, t)| (f.block.to_owned(), Some(t)));
+            let state = game.native_default_state(&block).ok_or("no state")?;
             if !game.native_set_block(&dimension, pos, state, 3) {
                 return Err("not placed back".into());
+            }
+            if let Some(t) = tier {
+                game.native_set_block_property(pos, rustcraft_rules::tiers::PROPERTY, &t.to_string());
             }
             on_place_block(game, &stack, pos);
             Ok(stack.item.to_string())
@@ -318,6 +324,11 @@ pub(super) fn lift_machine(game: &mut Game<'_>, dimension: &str, pos: Pos) -> Op
     if content::Machine::of(&block).is_none() || !wrench::handles(&block) {
         return None;
     }
+    // A machine of tiers 2–4 is lifted as its tier's item (`rustcraft:furnace_3`), which places
+    // that tier again (rustcraft_tiers::state_for_placement).
+    let item = crate::game::rustcraft_tiers::family_at(game, pos)
+        .and_then(|(family, tier)| family.item(tier))
+        .unwrap_or_else(|| block.to_string());
     let entity = game.native_mod_block_entity(pos)?;
     let items: Vec<Tag> = entity
         .items
@@ -344,7 +355,7 @@ pub(super) fn lift_machine(game: &mut Game<'_>, dimension: &str, pos: Pos) -> Op
     if !game.native_set_block(dimension, pos, air, 3) {
         return None;
     }
-    let mut stack = ItemStack::new(&block, 1);
+    let mut stack = ItemStack::new(&item, 1);
     stack
         .data_mut()
         .set_other(CUSTOM_DATA, Some(Tag::Compound(data)));
@@ -483,7 +494,11 @@ pub(super) fn draw_housing(
         _ => 0,
     };
     if weak == 0 {
-        if !riding {
+        // F5: a housing under a facade is drawn bare only while the wrench is in hand; kept, it
+        // would stay bare after the wrench is put away (the kept geometry is not drawn again
+        // when the held item changes, SRC native_block_entity_draw.rs:199-212).
+        let covered = crate::game::rustcraft_builder::has_facade(&entity.nbt);
+        if !riding && !covered {
             draw.keep();
         }
         return;
