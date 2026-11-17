@@ -473,10 +473,11 @@ pub fn declare_blocks(blocks: &mut Vec<Block>) {
             ..BlockProperties::default()
         },
         connects_to: Some(JOINS.into()),
-        thickness: Some(HOUSING_THICKNESS),
         // s18/pipe, F4: a facade makes the housing a whole block (`covered`, set by
-        // rustcraft_builder); open, its outline and collision are the pipe's, as `thickness`
-        // builds them. 64 states become 128.
+        // rustcraft_builder); open, its outline and collision are the pipe's, HOUSING_THICKNESS
+        // across, as `thickness` built them. The engine takes `thickness` or `shapes`, never
+        // both (SRC horizon-mods/src/content.rs:1164-1166), so the shapes table builds the pipe
+        // too. 64 states become 128.
         state_properties: BTreeMap::from([(
             rustcraft_rules::housing::COVERED.to_owned(),
             StateProperty::Boolean,
