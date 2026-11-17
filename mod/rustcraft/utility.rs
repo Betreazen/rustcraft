@@ -939,7 +939,7 @@ fn kitchen_stash(game: &mut Game<'_>, pos: Pos) -> Vec<rustcraft_rules::machines
     let mut visible = visible_before.clone();
     let mut cells = cells_before.clone();
     let max = |i: &str| machines::max_stack(game, i);
-    kitchen::stash(&mut visible, &mut cells, stacked, |i| rustcraft_rules::modules::machine_stack(&modules, max(i)), max);
+    kitchen::stash(&mut visible, &mut cells, stacked, |i| rustcraft_rules::modules::machine_stack(&modules, max(i)), &max);
     if visible == visible_before && cells == cells_before {
         return cells;
     }
@@ -991,7 +991,7 @@ fn cook(game: &mut Game<'_>, dimension: &str, level: &LevelNet, pos: Pos, cost: 
             .cloned()
             .collect();
         let have = |item: &str| count_of(&slots, 0..9, item) + rustcraft_rules::machines::slots::count_in(&cells, item);
-        if !items_need.iter().all(|(item, n)| have(item) >= *n) {
+        if !items_need.iter().all(|(item, n)| have(item.as_str()) >= *n) {
             no_milk |= milk > 0 && !from_tank;
             continue;
         }
