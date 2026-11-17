@@ -102,7 +102,7 @@ pub fn amount_text(thousandths: u32) -> String {
         745..=755 => "¾",
         _ => {
             let tenths = (f64::from(thousandths) / 100.0).round() as u32;
-            return if tenths % 10 == 0 {
+            return if tenths.is_multiple_of(10) {
                 (tenths / 10).to_string()
             } else {
                 format!("{},{}", tenths / 10, tenths % 10)
