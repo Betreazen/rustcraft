@@ -141,7 +141,7 @@ fn mode_name(mode: Mode) -> String {
     match mode {
         Mode::Into => tr("rustcraft.mode.into", "into the block"),
         Mode::From => tr("rustcraft.mode.from", "out of the block"),
-        Mode::Both => tr("rustcraft.mode.both", "both ways"),
+        Mode::Both => tr("rustcraft.mode.both", "default"),
         Mode::Off => tr("rustcraft.mode.off", "off"),
     }
 }

@@ -15,3 +15,5 @@ pub mod topology;
 pub mod wrench;
 // s18/pipe: the joint window drawn as the guide's table.
 pub mod joint_screen;
+// Slice 18, wave 2: the plain item flow drawn in the housings (M5).
+pub mod flow;

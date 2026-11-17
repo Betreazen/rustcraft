@@ -62,6 +62,15 @@ pub(super) fn node_modules(game: &Game<'_>, nodes: impl Iterator<Item = Pos>) ->
         .collect()
 }
 
+/// Wave 2: what the node at `pos` gives back when it is broken, besides itself: its facade and
+/// the block of its look (guide `facade`: «блок тратится и возвращается») and its line-boost
+/// modules.
+pub(super) fn node_returns(game: &Game<'_>, pos: Pos) -> Vec<String> {
+    let mut out = crate::game::rustcraft_pipe18::facade_items(game, pos);
+    out.extend(nw::returned_modules(modules_of(game, pos)).into_iter().map(str::to_owned));
+    out
+}
+
 pub(super) fn set_modules(game: &mut Game<'_>, pos: Pos, n: u8) -> bool {
     game.native_with_mod_block_entity(pos, |e| {
         e.nbt.insert(JavaString::from(MODULES_KEY), Tag::Byte(n.min(nw::SOCKETS) as i8));
@@ -157,6 +166,10 @@ fn view_of(
         let balance = ledger.balance(&members, got);
         view.made = balance.produced;
         view.used = balance.requested;
+        // Wave 2 (ui.js `balance`: «В запасе 12 400 из 40 000 Е»): the batteries on those circuits.
+        let stored = crate::game::rustcraft_power::with_storage(&level.sources, &members, balance);
+        view.stored = stored.stored;
+        view.capacity = stored.capacity;
     }
     Some(view)
 }
@@ -381,10 +394,10 @@ pub(super) fn draw(
         }
     }
     for (i, (k, val)) in rows(&v).iter().enumerate() {
-        let y = if i < 3 {
+        let y = if i < nw::BALANCE_ROWS {
             nw::BALANCE_Y + nw::ROW * i as f32
         } else {
-            nw::LINE_ROWS_Y + nw::ROW * (i - 3) as f32
+            nw::LINE_ROWS_Y + nw::ROW * (i - nw::BALANCE_ROWS) as f32
         };
         kit::text(game, batch, k, o, [8.0, y], kit::TEXT);
         kit::text_right(game, batch, val, o, nw::WIDTH - 8.0, y, kit::VALUE);
@@ -412,7 +425,7 @@ pub(super) fn draw(
     kit::status_line(game, batch, o, nw::STATUS, severity, &status);
 }
 
-/// The window's rows: the balance (production, consumption, enough), then the line (housings,
+/// The window's rows: the balance (production, consumption, stored, enough), then the line (housings,
 /// the farthest, the item channel on the section).
 fn rows(v: &NodeView) -> Vec<(String, String)> {
     use crate::game::rustcraft_screens::{tr, tr_with};
@@ -436,6 +449,17 @@ fn rows(v: &NodeView) -> Vec<(String, String)> {
             )
         },
     );
+    // Wave 2: the batteries on the line's circuits, as the generators' windows show them.
+    let stored = if v.capacity > 0.0 {
+        use rustcraft_rules::machines::panel::energy_text;
+        tr_with(
+            "rustcraft.window.stored.of",
+            "%s of %s E",
+            &[energy_text(v.stored), energy_text(v.capacity)],
+        )
+    } else {
+        tr("rustcraft.window.stored.none", "no batteries")
+    };
     let farthest = tr_with(
         "rustcraft.node.window.of_blocks",
         "%s of %s blocks",
@@ -444,6 +468,7 @@ fn rows(v: &NodeView) -> Vec<(String, String)> {
     vec![
         (tr("rustcraft.node.window.made", "Production"), es(v.made)),
         (tr("rustcraft.node.window.used", "Consumption"), es(v.used)),
+        (tr("rustcraft.window.stored", "Stored"), stored),
         (tr("rustcraft.node.window.enough", "Enough"), enough),
         (tr("rustcraft.node.window.housings", "Housings"), v.housings.to_string()),
         (tr("rustcraft.node.window.farthest", "Farthest"), farthest),

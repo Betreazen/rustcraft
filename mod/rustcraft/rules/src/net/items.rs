@@ -28,8 +28,12 @@ pub enum Mode {
 }
 
 impl Mode {
-    /// The order the joint window steps through a joint's modes.
-    const CYCLE: [Mode; 4] = [Mode::Into, Mode::From, Mode::Both, Mode::Off];
+    /// The order the joint window steps through a joint's modes: the handbook's three (data.js
+    /// `Направление`: «в машину», «из машины», «выключен»). `Both` is no step of it: it is a
+    /// block's default before its joint is set (data.js: «По умолчанию магистраль сама подаёт
+    /// машине то, что она принимает, и забирает готовое»), and the window names it so.
+    const CYCLE: [Mode; 3] = [Mode::Into, Mode::From, Mode::Off];
+    const ALL: [Mode; 4] = [Mode::Into, Mode::From, Mode::Both, Mode::Off];
 
     /// The net may put into the block.
     pub fn takes(self) -> bool {
@@ -41,14 +45,20 @@ impl Mode {
         matches!(self, Mode::From | Mode::Both)
     }
 
-    /// The mode a click sets next: into, from, both, off, and round again.
+    /// The mode a click sets next: into, from, off, and round again; the default goes to into.
     pub fn next(self) -> Mode {
+        if self == Mode::Both {
+            return Mode::Into;
+        }
         let at = Self::CYCLE.iter().position(|&m| m == self).unwrap_or(0);
         Self::CYCLE[(at + 1) % Self::CYCLE.len()]
     }
 
-    /// The mode before this one in that order (a right click).
+    /// The mode before this one in that order (a right click); the default goes to off.
     pub fn previous(self) -> Mode {
+        if self == Mode::Both {
+            return Mode::Off;
+        }
         let at = Self::CYCLE.iter().position(|&m| m == self).unwrap_or(0);
         Self::CYCLE[(at + Self::CYCLE.len() - 1) % Self::CYCLE.len()]
     }
@@ -66,7 +76,7 @@ impl Mode {
     /// The mode `code` wrote; none for a byte it does not know, so a damaged save falls back
     /// to the block's default.
     pub fn from_code(code: u8) -> Option<Mode> {
-        Self::CYCLE.into_iter().find(|m| m.code() == code)
+        Self::ALL.into_iter().find(|m| m.code() == code)
     }
 }
 
@@ -575,18 +585,18 @@ mod tests {
     }
 
     #[test]
-    fn the_wrench_cycles_into_from_both_off() {
-        // Slice 2: Into → From → Both → Off → Into.
-        let mut mode = Mode::Into;
+    fn the_wrench_cycles_the_handbooks_three_directions() {
+        // Wave 2 (data.js `Направление`): Into → From → Off → Into; the default is left for into
+        // (or, back, for off) and never comes round again.
+        let mut mode = Mode::Both;
         let mut seen = vec![mode];
         for _ in 0..4 {
             mode = mode.next();
             seen.push(mode);
         }
-        assert_eq!(
-            seen,
-            [Mode::Into, Mode::From, Mode::Both, Mode::Off, Mode::Into]
-        );
+        assert_eq!(seen, [Mode::Both, Mode::Into, Mode::From, Mode::Off, Mode::Into]);
+        assert_eq!(Mode::Both.previous(), Mode::Off);
+        assert_eq!(Mode::Into.previous(), Mode::Off);
     }
 
     #[test]
