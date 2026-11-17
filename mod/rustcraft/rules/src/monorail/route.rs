@@ -329,6 +329,9 @@ mod tests {
     use super::super::tests::{floor_rail, fork, rail};
     use super::*;
 
+    /// The feet over a floor rail cell's floor.
+    const F: f64 = capsule::FEET_OVER_FLOOR;
+
     fn close(a: [f64; 3], b: [f64; 3]) -> bool {
         distance(a, b) < 1e-6
     }
@@ -338,8 +341,8 @@ mod tests {
         let net = fork();
         let path: Vec<Pos> = (0..=10).map(|x| [x, 0, 0]).collect();
         let r = route(&net, &RailSpec::default(), &path);
-        assert!(close(r.start(), [0.5, 0.05, 0.5]));
-        assert!(close(r.end(), [10.5, 0.05, 0.5]));
+        assert!(close(r.start(), [0.5, F, 0.5]));
+        assert!(close(r.end(), [10.5, F, 0.5]));
         assert!((r.length() - 10.0).abs() < 1e-9);
         // 10 blocks at 8 a second.
         assert!((r.seconds() - 1.25).abs() < 1e-9);
@@ -358,8 +361,8 @@ mod tests {
             &[[0, 0, 0], [1, 0, 0], [1, 0, 1]],
         );
         // No point at the corner cell's middle; every point of the arc 0.5 from the cell corner.
-        assert!(!r.points.iter().any(|p| close(p.at, [1.5, 0.05, 0.5])));
-        let corner = [1.0, 0.05, 1.0];
+        assert!(!r.points.iter().any(|p| close(p.at, [1.5, F, 0.5])));
+        let corner = [1.0, F, 1.0];
         let on_arc: Vec<_> = r.points[1..r.points.len() - 1].iter().collect();
         assert_eq!(on_arc.len(), 5);
         for p in on_arc {
@@ -379,12 +382,12 @@ mod tests {
         let at: Vec<[f64; 3]> = r.points.iter().map(|p| p.at).collect();
         // Middle of the first, the piece's foot, its top, the middle of the next and so on.
         let expected = [
-            [0.5, 0.05, 0.5],
-            [1.0, 0.05, 0.5],
-            [2.0, 1.05, 0.5],
-            [2.5, 1.05, 0.5],
-            [3.0, 1.05, 0.5],
-            [3.5, 1.05, 0.5],
+            [0.5, F, 0.5],
+            [1.0, F, 0.5],
+            [2.0, 1.0 + F, 0.5],
+            [2.5, 1.0 + F, 0.5],
+            [3.0, 1.0 + F, 0.5],
+            [3.5, 1.0 + F, 0.5],
         ];
         assert_eq!(at.len(), expected.len(), "{at:?}");
         for (a, e) in at.iter().zip(expected) {
@@ -455,6 +458,6 @@ mod tests {
         assert_eq!(r.points[0].mount, Face::YNeg);
         // From the joint on, the wall's bracket.
         assert_eq!(r.points[1].mount, Face::ZNeg);
-        assert!(close(r.end(), [2.5, 0.05, 0.5 + capsule::WALL_SHIFT]));
+        assert!(close(r.end(), [2.5, F, 0.5 + capsule::WALL_SHIFT]));
     }
 }

@@ -134,13 +134,22 @@ Audit lines: chassis «Ставится на монорельс», «Ездит 
 ### Task 14: Monorail shape, cabin room, scheme labels and lift floors
 
 - [x] Scheme labels set apart, lift floors told apart: `window::place_labels`, test `lift_floors_and_near_names_do_not_overlap`.
-- [ ] Left: a climb cell with a fork and the floor rail's half up under a wall rail (both need new `shape` states and rail models from export_mc.py); the cabin's room checked over every cell it touches and the capsule's 2.5× scale (capsule.rs). Not started for want of time in this run.
-- [ ] Commit.
+- [x] Climb fork and the floor rail's half up a wall: `Shape::ClimbFork(k, fork)` (`c<k>f<fork>`: climb + hub + half to its foot + halves to the rails beside its lower cell) and `Shape::Rise(k, mask)` (`r<k>s<mask>`: a floor rail under a wall rail, a ceiling rail over one: its halves with the wall's side and the piece up/down that wall). 64 shape values, the first 20 unchanged. Rise models `monorail_t<n>_rise<k>` from `export_mc.py` (`rail_rise`, written there, not in transport.py, so the guide's rail.glb is unchanged); blockstate regenerated. Tests `a_climb_cell_forks_to_a_rail_beside_it`, `a_ceiling_climb_forks_too`, `a_floor_rail_rises_under_a_wall_rail`, `a_ceiling_rail_drops_over_a_wall_rail`, `the_shape_values_are_sixty_four_and_distinct`; self-test `monorail_climb_forks_and_floor_rises_to_a_wall`. Commit e2380aa.
+- [x] Capsule: `MODEL_SCALE` 2.5 → 2.0, so the cabin's 8 pixels are one block and it keeps inside a one-block passage (the guide draws it inside one cell; the guide's 1× would leave a seated player 1.4 blocks tall in a 0.6-block cabin, which T8/T9 «сажает игрока» rule out, so the scale is the largest that keeps it in a one-block passage). The rider is centred (`FEET_OVER_FLOOR` derived, now −0.2): shoes and hair show 0.1 block past floor and roof. `WALL_SHIFT` 0. `room_cells(cell, mount, ways)`: every block the cabin and its rider reach into deeper than 1/16 across its width and floor-to-roof, for each way it faces there (`ways_at`); its ends along the way stay over the next rail of the way (decision: at a stop and on a corner's arc the cabin turns about its middle, the ends' third of a block is not checked; README gap line). Going straight up or down a wall the cabin faces along the wall (`along_wall`, station.rs `heading`). Route tests take `FEET_OVER_FLOOR` instead of 0.05. Self-test `monorail_lift_needs_room_for_the_cabin`. Commit ff9437b.
+- [x] Commit.
+
+### Task 14b: Tests for what was left unchecked
+
+- [x] `worker_grown_block_reaches_the_archeology_table`: a grab's hold of grown suspicious sand → unload dock → magistral housing → archaeology table (not beside the dock); the table brushes sand out of it and sends no PCT `brush` (ST4 → ST5).
+- [x] `worker_guard_kill_drops_where_the_mob_fell`: a weak zoglin (rotten flesh 1–3, no condition) shot dead by a guard: its loot lies on the plot. Finding (DIFFERS, not an engine limit): loot with `killed_by_player` (spider eye, blaze rod, zombie rares) never drops, because the guard's and turret's shot has no attacker (`base.rs` «Shots», so PCT does not count the kill as the player's own) and `horizon-world/src/loot.rs:1264` needs a player in the context. Fix path for base.rs's owner: a mod loot condition `rustcraft:killed_by_guard` (`native_loot_condition`, API 133, matched on `ctx.place`, API 156, against deaths `on_living_death` records) OR-ed into every `killed_by_player` of the mob tables in `native_loot_table_load` (API 75); the hooks run in `horizon-world`, so the shot state must reach that crate. Not done here: base.rs's shots are not this stream's code.
+- [x] W5 board over the mod model: cannot be self-tested (the server's `CustomName` is checked; whether the client draws it over the model needs eyes). For the integrator's bots: a screenshot of a worker from 3–5 blocks, README item 12.
+- [x] Commit 486206f.
 
 ### Task 15: Hand-off
 
 - [x] `mod/README.md` «Что проверить в игре: срез 18» — this stream's part.
 - [x] Last `try` green: 35ceb15, RustCraft 156 passed 0 failed, PCT 42/0, SoulsCraft 87/0 (exit 0).
+- [x] Resumed run's `try` green: 486206f, RustCraft 160 passed 0 failed (4 new), PCT 42/0, SoulsCraft 87/0 (exit 0).
 
 ## Commits
 
@@ -149,10 +158,8 @@ Audit lines: chassis «Ставится на монорельс», «Ездит 
 ## Left after this run (for a resumed run or the owning stream)
 
 - Portal dock: fluids with a 16-bucket buffer, the window's «Тот мир · выгружен», a 27-slot buffer laid out as the handbook's window (now 18 to send + 9 received). The code is stream 5's (`builder.rs`, `rules/src/utility`).
-- Monorail shapes: a climb cell with a fork, a floor rail's half up under a wall rail (new `shape` states and models). Cabin room over every cell the 2.5× cabin touches; the capsule's scale.
 - The miner putting into a load dock (`mining.rs`, stream 2).
-- The grab's grown block through unload dock → magistral → archaeology table: no self-test yet.
-- The guard's kill drops that need a player's kill: not checked.
+- The guard's (and turret's) kill drops no `killed_by_player` loot: fix path in Task 14b, base.rs's owner.
 - The cartographer's structure detection limits (`/place structure`, deep structures): unchanged.
 - W5 board over the mod's model: needs a look in the game (README item 12).
 

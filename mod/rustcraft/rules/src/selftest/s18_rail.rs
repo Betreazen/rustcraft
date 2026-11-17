@@ -8,7 +8,12 @@ use crate::monorail::shape;
 use crate::tuning::Tuning;
 use crate::worker::{Errand, Tool, Worker};
 
-pub const ALL: [Build; 13] = [
+pub const ALL: [Build; 17] = [
+    rails_fork_on_a_climb_and_rise_to_a_wall,
+    lift_needs_room_for_the_cabin,
+    grown_block_reaches_the_archeology_table,
+    guard_kill_drops_where_the_mob_fell,
+
     bore_follows_the_ground_with_its_best_rail,
 
     load_dock_takes_from_a_chest,
@@ -445,5 +450,178 @@ fn bore_follows_the_ground_with_its_best_rail(o: Pos, _: &Tuning) -> Scenario {
         })
         .until("a tier-3 rail lies a step down", 1200, move |b, _| {
             Ok(b.block(low) == MONORAIL && b.property(low, "tier").as_deref() == Some("3"))
+        })
+}
+
+fn rails_fork_on_a_climb_and_rise_to_a_wall(o: Pos, _: &Tuning) -> Scenario {
+    // T2 (guide `monorail`): a climb from x 1 (y 1) up to x 2 (y 2) with a branch to the south
+    // of its lower cell, and a floor track x 6..7 that ends under wall rails up a stone wall to
+    // the south of x 7.
+    let climb = at(o, [1, 1, 0]);
+    let foot = at(o, [7, 1, 0]);
+    let floor_rails = [
+        at(o, [0, 1, 0]),
+        climb,
+        at(o, [2, 2, 0]),
+        at(o, [3, 2, 0]),
+        at(o, [1, 1, 1]),
+        at(o, [6, 1, 0]),
+        foot,
+    ];
+    let wall_rails = [at(o, [7, 2, 0]), at(o, [7, 3, 0])];
+    Scenario::new("monorail_climb_forks_and_floor_rises_to_a_wall", plot_area(o))
+        .then("a climb with a branch, a floor track under a wall rail", move |b, _| {
+            floor(b, o, -1..=8, -2..=2)?;
+            b.place(at(o, [2, 1, 0]), STONE, &[])?;
+            b.place(at(o, [3, 1, 0]), STONE, &[])?;
+            for y in 1..=3 {
+                b.place(at(o, [7, y, 1]), STONE, &[])?;
+            }
+            for p in floor_rails {
+                rail(b, p, Face::YNeg)?;
+            }
+            for p in wall_rails {
+                rail(b, p, Face::ZPos)?;
+            }
+            Ok(())
+        })
+        .check("the climb shows its fork, the floor rail its piece up the wall", move |b, _| {
+            same(
+                "the climb's cell",
+                b.property(climb, shape::PROPERTY),
+                Some(shape::Shape::ClimbFork(0, 0b01).value()),
+            )?;
+            same(
+                "the floor rail under the wall rail",
+                b.property(foot, shape::PROPERTY),
+                Some(shape::Shape::Rise(1, 0b0110).value()),
+            )?;
+            same(
+                "the wall rail over it",
+                b.property(wall_rails[0], shape::PROPERTY),
+                Some(shape::Shape::Halves(0b1010).value()),
+            )
+        })
+}
+
+fn lift_needs_room_for_the_cabin(o: Pos, _: &Tuning) -> Scenario {
+    // T8.b over every block the cabin touches: a floor track x 0..2 at y 1, a lift up a stone
+    // wall at x 3 (wall rails x 2, y 2..5), a top floor rail x 1 at y 5 on a stone deck. The
+    // cabin turns along the wall going up and is one block wide: the lift needs only the block
+    // over its top wall rail; a stone there refuses the trip at that block.
+    use crate::monorail::TripError;
+    let from = at(o, [0, 1, -1]);
+    let to = at(o, [1, 5, -1]);
+    let over_the_lift = at(o, [2, 6, 0]);
+    Scenario::new("monorail_lift_needs_room_for_the_cabin", plot_area(o))
+        .then("a track up a lift between two stations", move |b, _| {
+            floor(b, o, -1..=4, -2..=2)?;
+            for x in 0..=2 {
+                rail(b, at(o, [x, 1, 0]), Face::YNeg)?;
+            }
+            for y in 1..=5 {
+                b.place(at(o, [3, y, 0]), STONE, &[])?;
+            }
+            for y in 2..=5 {
+                rail(b, at(o, [2, y, 0]), Face::XPos)?;
+            }
+            b.place(at(o, [1, 4, 0]), STONE, &[])?;
+            rail(b, at(o, [1, 5, 0]), Face::YNeg)?;
+            b.place(at(o, [1, 4, -1]), STONE, &[])?;
+            b.place(from, "rustcraft:station", &[])?;
+            b.place(to, "rustcraft:station", &[])?;
+            b.set_station_energy(from, 100.0)
+        })
+        .check("the trip goes up the lift", move |b, _| {
+            b.plan_trip(from, to, false)
+                .map(|_| ())
+                .map_err(|e| format!("refused: {e:?}"))
+        })
+        .then("a stone over the lift's top rail", move |b, _| {
+            b.place(over_the_lift, STONE, &[])
+        })
+        .check("the trip is refused at that block", move |b, _| {
+            same(
+                "answer",
+                b.plan_trip(from, to, false).map(|t| t.length),
+                Err(TripError::NoRoom { at: over_the_lift }),
+            )
+        })
+}
+
+fn grown_block_reaches_the_archeology_table(o: Pos, t: &Tuning) -> Scenario {
+    // ST4 → ST5 (guide `tool_grab`, slice 14): a grab whose hold is full of grown suspicious
+    // sand unloads at a dock; the dock gives it to the magistral, whose housing feeds an
+    // archaeology table (not beside the dock, so only the magistral can bring it). The table
+    // brushes it and, the block being grown, tells Path-of-craft-tree no `brush`.
+    use super::magistral::{channel, place_node};
+    use crate::net::topology::ChannelKind;
+    use crate::utility::grown;
+    const SUSPICIOUS: &str = "minecraft:suspicious_sand";
+    let n = t.worker_hold as u32;
+    let dock = at(o, [6, 1, 1]);
+    let housing = at(o, [6, 1, 2]);
+    let table = at(o, [5, 1, 2]);
+    let node = at(o, [7, 1, 2]);
+    let owner = OWNER;
+    Scenario::new("worker_grown_block_reaches_the_archeology_table", plot_area(o))
+        .then("a track, a dock, a magistral to an archaeology table with a brush", move |b, _| {
+            floor(b, o, -1..=8, -2..=3)?;
+            for x in 0..=6 {
+                rail(b, at(o, [x, 1, 0]), Face::YNeg)?;
+            }
+            b.place(dock, DOCK_UNLOAD, &[])?;
+            place_node(b, node, 1)?;
+            b.place(housing, "rustcraft:housing", &[])?;
+            b.set_channels(housing, [channel(ChannelKind::Item, 1), None, None, None])?;
+            b.place(table, "rustcraft:archeo", &[])?;
+            b.set_owner(table, owner, 1)?;
+            b.set_buffer(table, 1000.0)?;
+            b.put(table, 1, "minecraft:brush", 1)
+        })
+        .then("a grab with a hold full of grown suspicious sand", move |b, m| {
+            let grown_sand = grown::hold_name(SUSPICIOUS, true);
+            spawn(b, m, at(o, [0, 1, 0]), Tool::Grab, &[(grown_sand.as_str(), 64 * n)])
+        })
+        .until("the table brushed sand out of it", 2400, move |b, _| {
+            Ok(count_of(&b.items(table), "minecraft:sand") >= 1)
+        })
+        .check("as a grown block, without a `brush` for the owner", move |b, _| {
+            let head = format!("pct-machine brush {owner:032x} ");
+            if b.reports().iter().any(|r| r.starts_with(&head)) {
+                return Err("the grown block was reported as a brush".to_owned());
+            }
+            Ok(())
+        })
+}
+
+fn guard_kill_drops_where_the_mob_fell(o: Pos, _: &Tuning) -> Scenario {
+    // Guide `tool_gun`: «Добыча падает на месте: её подбирает вагонетка с захватом или
+    // магистраль рядом». A weak zoglin (rotten flesh 1 to 3, no condition) beside a guard's
+    // track: once shot dead its loot lies where it fell. Loot the base game gives only to a
+    // player's kill (`killed_by_player`: a spider's eye, a blaze's rod) does not drop, as the
+    // guard's shot has no attacker (base.rs, «Shots»); see the stream plan.
+    const ZOGLIN: &str = "minecraft:zoglin";
+    let mob_at = [f64::from(o[0]) + 3.5, f64::from(o[1] + 1), f64::from(o[2]) + 2.5];
+    Scenario::new("worker_guard_kill_drops_where_the_mob_fell", plot_area(o))
+        .then("a track and a weak zoglin beside it", move |b, m| {
+            floor(b, o, -1..=7, -2..=4)?;
+            for x in 0..=6 {
+                rail(b, at(o, [x, 1, 0]), Face::YNeg)?;
+            }
+            let id = b.spawn_mob(ZOGLIN, mob_at, Some(2.0))?;
+            m.mark("mob", f64::from(id));
+            Ok(())
+        })
+        .then("a guard on the track", move |b, m| {
+            spawn(b, m, at(o, [1, 1, 0]), Tool::Shooter, &[])
+        })
+        .until("the zoglin dies", 300, |b, m| Ok(b.mob(m.get("mob") as u32).is_none()))
+        .until("its rotten flesh lies on the plot", 40, move |b, _| {
+            let lying = b.lying(
+                at(o, [-2, 0, -3]).map(f64::from),
+                at(o, [9, 6, 6]).map(f64::from),
+            );
+            Ok(lying.iter().any(|(item, _)| item == "minecraft:rotten_flesh"))
         })
 }

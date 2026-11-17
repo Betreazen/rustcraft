@@ -779,18 +779,25 @@ fn segment_at(points: &[Point], feet: [f64; 3]) -> Option<usize> {
 }
 
 /// The heading (vanilla's yaw: 0 south, 90 west) of segment `i`, or of the nearest segment
-/// before it, then after it, that is not straight up or down.
+/// before it, then after it, that is not straight up or down; on a stretch straight up or down a
+/// wall, along the wall (capsule::along_wall), so the cabin does not ride with its nose in it.
 fn heading(points: &[Point], i: usize) -> f32 {
     let yaw_of = |j: usize| -> Option<f32> {
         let (a, b) = (points.get(j)?.at, points.get(j + 1)?.at);
         let (dx, dz) = (b[0] - a[0], b[2] - a[2]);
         (dx.hypot(dz) > 1e-6).then(|| (-dx).atan2(dz).to_degrees() as f32)
     };
-    (0..=i)
+    let nearest = (0..=i)
         .rev()
         .find_map(yaw_of)
         .or_else(|| (i..points.len()).find_map(yaw_of))
-        .unwrap_or(0.0)
+        .unwrap_or(0.0);
+    match points.get(i).map(|p| p.mount) {
+        Some(wall @ (Face::XNeg | Face::XPos | Face::ZNeg | Face::ZPos)) if yaw_of(i).is_none() => {
+            capsule::along_wall(wall, nearest)
+        }
+        _ => nearest,
+    }
 }
 
 /// `native_mob_submit`: a harpoon's seat drawn as its rope, from the rider's hands to the hook
