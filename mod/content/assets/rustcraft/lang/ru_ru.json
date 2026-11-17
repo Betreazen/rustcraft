@@ -6737,5 +6737,7 @@
   "item.rustcraft.shearer_3": "Стригаль-доильщик · ступень 3",
   "item.rustcraft.shearer_4": "Стригаль-доильщик · ступень 4",
   "item.rustcraft.apiary_3": "Пасечный сборщик · ступень 3",
-  "item.rustcraft.apiary_4": "Пасечный сборщик · ступень 4"
+  "item.rustcraft.apiary_4": "Пасечный сборщик · ступень 4",
+  "rustcraft.storage.extra": "Нарушена форма склада: лишняя ячейка %s",
+  "rustcraft.terminal.extra_at": "Лишняя ячейка: %s"
 }

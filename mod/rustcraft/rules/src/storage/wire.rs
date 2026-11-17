@@ -36,6 +36,8 @@ pub enum State {
     Holes,
     /// The terminal touches no cell.
     NoCells,
+    /// Wave 2 (S8, guide `cell`): a protrusion: the cells in `holes` stick out of the box.
+    Extra,
 }
 
 impl State {
@@ -44,6 +46,7 @@ impl State {
             State::Works => 0,
             State::Holes => 1,
             State::NoCells => 2,
+            State::Extra => 3,
         }
     }
 
@@ -51,6 +54,7 @@ impl State {
         match code {
             1 => State::Holes,
             2 => State::NoCells,
+            3 => State::Extra,
             _ => State::Works,
         }
     }

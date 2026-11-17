@@ -1362,5 +1362,7 @@
   "item.rustcraft.shearer_3": "Shearer-Milker · tier 3",
   "item.rustcraft.shearer_4": "Shearer-Milker · tier 4",
   "item.rustcraft.apiary_3": "Apiary Collector · tier 3",
-  "item.rustcraft.apiary_4": "Apiary Collector · tier 4"
+  "item.rustcraft.apiary_4": "Apiary Collector · tier 4",
+  "rustcraft.storage.extra": "The storage is no solid box: a cell sticks out at %s",
+  "rustcraft.terminal.extra_at": "A cell sticks out at %s"
 }

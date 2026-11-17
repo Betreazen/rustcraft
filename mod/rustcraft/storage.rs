@@ -420,18 +420,18 @@ pub(super) fn rescan(
         .collect();
     level.found = found;
     level.cell_of = cell_of;
-    let holes: Vec<(Pos, Vec<Pos>)> = level
+    // Wave 2: and the cells sticking out of the box (a protrusion), drawn over the cell.
+    let holes: Vec<(Pos, Vec<Pos>, Vec<Pos>)> = level
         .terminals
         .iter()
         .map(|(&t, id)| {
-            let h = id
-                .and_then(|id| level.found.get(&id))
-                .map(|f| match &f.shape {
-                    Shape::Solid => Vec::new(),
-                    Shape::Holes(h) => h.iter().copied().take(HOLES_SHOWN).collect(),
-                })
-                .unwrap_or_default();
-            (t, h)
+            let shape = id.and_then(|id| level.found.get(&id)).map(|f| &f.shape);
+            let take = |h: &BTreeSet<Pos>| h.iter().copied().take(HOLES_SHOWN).collect();
+            match shape {
+                Some(Shape::Holes(h)) => (t, take(h), Vec::new()),
+                Some(Shape::Extra(e)) => (t, Vec::new(), take(e)),
+                _ => (t, Vec::new(), Vec::new()),
+            }
         })
         .collect();
     let ids: Vec<u32> = level.found.keys().copied().collect();
@@ -441,8 +441,9 @@ pub(super) fn rescan(
         refresh_stack_module(game, dimension, id, None);
     }
     // S8: each terminal shows its storage's missing cells in the world.
-    for (t, h) in holes {
-        write_holes(game, t, &h);
+    for (t, h, e) in holes {
+        write_holes(game, t, HOLES_KEY, &h);
+        write_holes(game, t, EXTRAS_KEY, &e);
     }
     save(game, dimension);
 }
@@ -493,18 +494,21 @@ pub(super) fn link_far_terminals(
 /// A terminal's compound keeps its storage's missing cells, as offsets from it, under this key
 /// (three ints a cell); clients draw red glass there.
 const HOLES_KEY: &str = "holes";
+/// Wave 2: and the cells that stick out of the box, under this key.
+const EXTRAS_KEY: &str = "extras";
 /// The most missing cells a terminal draws.
 const HOLES_SHOWN: usize = 64;
 
-/// The missing cells into the terminal at `t`, and the clients told when they changed.
-fn write_holes(game: &mut Game<'_>, t: Pos, holes: &[Pos]) {
+/// The missing (or sticking-out) cells into the terminal at `t` under `key`, and the clients
+/// told when they changed.
+fn write_holes(game: &mut Game<'_>, t: Pos, key: &str, holes: &[Pos]) {
     let flat: Vec<i32> = holes
         .iter()
         .flat_map(|h| [h[0] - t[0], h[1] - t[1], h[2] - t[2]])
         .collect();
     let changed = game
         .native_with_mod_block_entity(t, |e| {
-            let key = JavaString::from(HOLES_KEY);
+            let key = JavaString::from(key);
             let old = match e.nbt.get(&key) {
                 Some(Tag::IntArray(v)) => v.clone(),
                 _ => Vec::new(),
@@ -526,7 +530,11 @@ fn write_holes(game: &mut Game<'_>, t: Pos, holes: &[Pos]) {
 }
 
 fn holes_of(entity: &ModBlockEntity) -> Vec<[i32; 3]> {
-    match entity.nbt.get(&JavaString::from(HOLES_KEY)) {
+    marks_of(entity, HOLES_KEY)
+}
+
+fn marks_of(entity: &ModBlockEntity, key: &str) -> Vec<[i32; 3]> {
+    match entity.nbt.get(&JavaString::from(key)) {
         Some(Tag::IntArray(v)) => v.chunks_exact(3).map(|c| [c[0], c[1], c[2]]).collect(),
         _ => Vec::new(),
     }
@@ -537,9 +545,11 @@ pub(super) fn update_tag(entity: &ModBlockEntity, tag: &mut Option<Compound>) {
     if entity.id != content::TERMINAL {
         return;
     }
-    if let Some(v) = entity.nbt.get(&JavaString::from(HOLES_KEY)) {
-        tag.get_or_insert_with(Compound::new)
-            .insert(JavaString::from(HOLES_KEY), v.clone());
+    for key in [HOLES_KEY, EXTRAS_KEY] {
+        if let Some(v) = entity.nbt.get(&JavaString::from(key)) {
+            tag.get_or_insert_with(Compound::new)
+                .insert(JavaString::from(key), v.clone());
+        }
     }
 }
 
@@ -564,11 +574,21 @@ pub(super) fn draw_holes(
         game.native_draw_block(draw, "minecraft:red_stained_glass", &[]);
         draw.pop();
     }
+    // Wave 2: red glass a little bigger than a block over each cell that sticks out.
+    const OVER: f32 = 1.04;
+    for h in marks_of(entity, EXTRAS_KEY) {
+        draw.push();
+        let k = (1.0 - OVER) / 2.0;
+        draw.translate([h[0] as f32 + k, h[1] as f32 + k, h[2] as f32 + k]);
+        draw.scale([OVER; 3]);
+        game.native_draw_block(draw, "minecraft:red_stained_glass", &[]);
+        draw.pop();
+    }
 }
 
 /// The terminal's culling box takes in its missing cells.
 pub(super) fn hole_bounds(entity: &ModBlockEntity, bounds: &mut [f32; 6]) {
-    for h in holes_of(entity) {
+    for h in holes_of(entity).into_iter().chain(marks_of(entity, EXTRAS_KEY)) {
         for k in 0..3 {
             bounds[k] = bounds[k].min(h[k] as f32);
             bounds[k + 3] = bounds[k + 3].max(h[k] as f32 + 1.0);
@@ -905,14 +925,15 @@ fn listing(game: &Game<'_>, dimension: &str, terminal: Pos, id: Option<u32>) -> 
         let id = id?;
         let store = level.stores.get(&id)?.clone();
         let found = level.found.get(&id)?;
-        let holes = match &found.shape {
-            Shape::Solid => Vec::new(),
-            Shape::Holes(h) => h.iter().copied().collect(),
+        let (holes, extra) = match &found.shape {
+            Shape::Solid => (Vec::new(), false),
+            Shape::Holes(h) => (h.iter().copied().collect(), false),
+            Shape::Extra(e) => (e.iter().copied().collect(), true),
         };
-        Some((store, holes))
+        Some((store, holes, extra))
     })
     .flatten();
-    let Some((store, holes)) = shown else {
+    let Some((store, holes, extra)) = shown else {
         return Listing {
             terminal,
             state: State::NoCells,
@@ -968,6 +989,8 @@ fn listing(game: &Game<'_>, dimension: &str, terminal: Pos, id: Option<u32>) -> 
         terminal,
         state: if holes.is_empty() {
             State::Works
+        } else if extra {
+            State::Extra
         } else {
             State::Holes
         },
@@ -1614,9 +1637,29 @@ pub(super) fn diagnosis(game: &Game<'_>, dimension: &str, pos: Pos, block: &str)
                 ],
             ),
             Shape::Holes(holes) => holes_text(holes),
+            Shape::Extra(cells) => extra_text(cells),
         })
     })
     .flatten()
+}
+
+/// Wave 2: «Нарушена форма склада: лишняя ячейка 10 64 -3 (и ещё 2)».
+pub(super) fn extra_text(cells: &BTreeSet<Pos>) -> Text {
+    let first = cells.first().copied().unwrap_or_default();
+    let at = Text::literal(format!("{} {} {}", first[0], first[1], first[2]));
+    let mut text = line(
+        "rustcraft.storage.extra",
+        "The storage is no solid box: a cell sticks out at %s",
+        &[at],
+    );
+    if cells.len() > 1 {
+        text.push(line(
+            "rustcraft.storage.holes_more",
+            " (and %s more)",
+            &[Text::literal((cells.len() - 1).to_string())],
+        ));
+    }
+    text
 }
 
 /// «Нарушена форма склада: нет ячейки 10 64 -3 (и ещё 2)».

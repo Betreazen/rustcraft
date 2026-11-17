@@ -10,6 +10,7 @@
 //! - A projector showing its ghost with no storage on its magistral says «Нет склада на
 //!   магистрали».
 //! - The kitchen bakes a cake with milk from a tank it does not touch, through a fluid channel.
+//! - A cell sticking out of the storage's box is the one the terminal marks (not two holes).
 
 use super::craft18::{basin, socket, status_key, storage_on_a_net};
 use crate::storage::modules::{SOCKET_STACK, STACK_MODULES};
@@ -17,13 +18,14 @@ use super::{Build, Scenario, at, plot_area, same};
 use crate::geom::Pos;
 use crate::tuning::Tuning;
 
-pub const ALL: [Build; 6] = [
+pub const ALL: [Build; 7] = [
     projector_is_not_turned_by_the_wrench,
     terminal_takes_the_crystallite_stack_module,
     two_fisheries_on_one_patch,
     craft_machines_up_to_tier_four,
     projector_says_no_storage,
     kitchen_milk_through_a_channel,
+    terminal_marks_the_extra_cell,
 ];
 
 fn projector_is_not_turned_by_the_wrench(o: Pos, _: &Tuning) -> Scenario {
@@ -103,8 +105,7 @@ fn craft_machines_up_to_tier_four(o: Pos, _: &Tuning) -> Scenario {
         .check("the kitchen of tier 4 steps twice as often", move |b, _| {
             let step = |p| {
                 b.sheet(p)
-                    .and_then(|s| s.rows.get(1).cloned())
-                    .map(|r| format!("{r:?}"))
+                    .and_then(|s| s.rows.into_iter().map(|r| format!("{r:?}")).find(|r| r.contains("rustcraft.util.step")))
                     .unwrap_or_default()
             };
             let (l, h) = (step(low), step(high));
@@ -164,5 +165,22 @@ fn kitchen_milk_through_a_channel(o: Pos, _: &Tuning) -> Scenario {
         })
         .check("the milk came from the tank down the channel", move |b, _| {
             same("milk", b.tank(tank).map(|g| g.amount), Some(0))
+        })
+}
+
+fn terminal_marks_the_extra_cell(o: Pos, _: &Tuning) -> Scenario {
+    const CELL: &str = "rustcraft:cell";
+    let t = at(o, [5, 0, 1]);
+    let extra = at(o, [3, 1, 1]);
+    Scenario::new("w2_terminal_marks_the_extra_cell", plot_area(o))
+        .then("a storage of four cells in a 2x2 and one on top", move |b, _| {
+            storage_on_a_net(b, o)?;
+            b.place(at(o, [3, 0, 2]), CELL, &[])?;
+            b.place(at(o, [4, 0, 2]), CELL, &[])?;
+            b.place(extra, CELL, &[])
+        })
+        .until("the terminal keeps the cell that sticks out, and no hole", 60, move |b, _| {
+            Ok(b.int_array(t, "extras") == vec![extra[0] - t[0], extra[1] - t[1], extra[2] - t[2]]
+                && b.int_array(t, "holes").is_empty())
         })
 }

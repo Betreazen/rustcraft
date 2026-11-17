@@ -898,6 +898,12 @@ fn status(game: &Game<'_>, batch: &mut HudBatch, o: [f32; 2], listing: Option<&L
                 tr("rustcraft.terminal.holes", "The storage is no solid box"),
                 holes_line(l),
             ),
+            // Wave 2: a protrusion names the cells to take away.
+            State::Extra => (
+                Severity::Bad,
+                tr("rustcraft.terminal.holes", "The storage is no solid box"),
+                extra_line(l),
+            ),
             State::NoCells => (
                 Severity::Bad,
                 tr(
@@ -910,6 +916,17 @@ fn status(game: &Game<'_>, batch: &mut HudBatch, o: [f32; 2], listing: Option<&L
     };
     kit::status_line(game, batch, o, term::STATUS, severity, &s);
     text(game, batch, &detail, o, term::DETAIL, TEXT);
+}
+
+/// Wave 2: «Лишняя ячейка: 10 64 -3; 11 64 -3 и ещё 2».
+fn extra_line(l: &Listing) -> String {
+    let shown: Vec<String> = l.holes.iter().take(2).map(|h| format!("{} {} {}", h[0], h[1], h[2])).collect();
+    let mut s = tr_with("rustcraft.terminal.extra_at", "A cell sticks out at %s", &[shown.join("; ")]);
+    let rest = l.hole_count as usize - shown.len().min(l.hole_count as usize);
+    if rest > 0 {
+        s.push_str(&tr_with("rustcraft.terminal.holes_more", " and %s more", &[rest.to_string()]));
+    }
+    s
 }
 
 /// «Нет ячейки: 10 64 -3; 11 64 -3 и ещё 2».
@@ -1199,7 +1216,7 @@ pub(super) fn tooltip(game: &Game<'_>, at: [f32; 2], lines: &mut Vec<String>) {
         Part::Cancel => hint(lines, "rustcraft.terminal.cancel_hint", "Cancel the order"),
         Part::Status => {
             let v = view_for(game);
-            if let Some(l) = listing_of(v.terminal).filter(|l| l.state == State::Holes) {
+            if let Some(l) = listing_of(v.terminal).filter(|l| matches!(l.state, State::Holes | State::Extra)) {
                 for h in &l.holes {
                     lines.push(format!("{} {} {}", h[0], h[1], h[2]));
                 }
