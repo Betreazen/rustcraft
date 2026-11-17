@@ -96,7 +96,9 @@ pub mod generator {
     }
 
     pub const FUEL: [f32; 2] = [12.0, 26.0];
-    pub const FLAME: Rect = [34.0, 31.0, 80.0, 8.0];
+    /// In-game check w3: long enough that «ХОД РАБОТЫ» over its right end stands apart from
+    /// «ТОПЛИВО» over the slot.
+    pub const FLAME: Rect = [34.0, 31.0, 150.0, 8.0];
     pub const LABEL_SLOTS_Y: f32 = 16.0;
     pub const LABEL_GIVES_Y: f32 = 47.0;
     pub const GIVES_BAR: Rect = [8.0, 56.0, 198.0, 5.0];
