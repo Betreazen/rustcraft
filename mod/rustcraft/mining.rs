@@ -18,7 +18,7 @@ use crate::game::{
     rustcraft_server::line,
     rustcraft_transport as transport,
 };
-use horizon_client::{items::ItemStack, mod_api::NativeUseTarget, text::Text};
+use horizon_client::{containers::ModBlockEntity, items::ItemStack, mod_api::NativeUseTarget, text::Text};
 use horizon_world::nbt::{Compound, JavaString, Tag};
 use rustcraft_rules::{
     geom::{Face, Pos, step},
@@ -162,6 +162,10 @@ pub(super) fn read(game: &Game<'_>, pos: Pos, machine: Machine, t: &Tuning) -> O
     let slots = base::modules_at(game, pos);
     let mode = machines::read_work(&entity.nbt);
     let (work, energy) = rules::factors(mode, &slots, t);
+    // Slice 18 (cross, A8): the placer and the breaker work faster on a higher tier, for as much
+    // more energy, as the pump does.
+    let tier = tier_speed(game, pos, machine, entity, t);
+    let (work, energy) = (work * tier, energy * tier);
     let cycle = Cycle {
         progress: read_f64(&entity.nbt, PROGRESS_KEY),
     };
@@ -232,6 +236,15 @@ pub(super) fn read(game: &Game<'_>, pos: Pos, machine: Machine, t: &Tuning) -> O
         }
     };
     Some(held)
+}
+
+/// Slice 18 (cross, A8): how much faster the placer or the breaker at `pos` works on its tier
+/// than on its first; 1 for the miner, which has no tiers.
+fn tier_speed(game: &Game<'_>, pos: Pos, machine: Machine, entity: &ModBlockEntity, t: &Tuning) -> f64 {
+    match machine {
+        Machine::Placer | Machine::Breaker => machines::fitted(game, pos, entity).speed(machine, t),
+        _ => 1.0,
+    }
 }
 
 /// Runs the block on `share` of its request.
@@ -760,13 +773,20 @@ pub(super) fn sheet(
                 t.breaker_ticks,
             )
         };
-        let secs = ticks / t.ticks_per_second;
+        // Slice 18 (cross): the pace on its tier, mode and modules, as it works.
+        let machine = if kind == SheetKind::Placer { Machine::Placer } else { Machine::Breaker };
+        let mode = machines::read_work(&entity.nbt);
+        let (work, draw) = rules::factors(mode, &slots, t);
+        let tier = tier_speed(game, pos, machine, entity, t);
+        let secs = ticks / (work * tier).max(0.01) / t.ticks_per_second;
+        let energy = energy * draw * tier;
+        let secs = format!("{secs:.1}").trim_end_matches(".0").replace('.', ",");
         s.rows.push(base::v(&title));
         s.rows.push(base::v(&line(
             "rustcraft.placer.pace",
             "A block in %s s, %s E/s",
             &[
-                Text::literal(format!("{secs:.0}")),
+                Text::literal(secs),
                 Text::literal(format!("{energy:.0}")),
             ],
         )));

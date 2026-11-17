@@ -69,7 +69,7 @@
 
 **Files:** Modify `mod/rustcraft/mining.rs` (`read`: `work *= tiers::speed(family, tier, step)`, энергия ×ту же скорость, как у насоса; строка темпа окна), `rules/src/tiers.rs` (тест `placer_and_breaker_speed_up_from_tier_two`), самотест `placer_tier_three_is_faster`.
 
-- [ ] RED/GREEN, бандл, самотест, коммит `feat: the placer and the breaker work faster on a higher tier`.
+- [x] RED/GREEN (`placer_and_breaker_speed_up_from_tier_two`), бандл (`mining::tier_speed`: работа и расход ×скорость ступени; строка темпа окна считает ступень, режим и модули), самотест `s18_placer_and_breaker_by_tier` (темп в окне на ступенях 2/4 и 2/3), коммит.
 
 ### Task 5: ускорение линии на жидкостных и энергосетях — [~] после слияния `s18/pipe`
 
