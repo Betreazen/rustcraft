@@ -124,6 +124,8 @@ struct Hit {
 /// The turret's own bleeding on a mob, without SoulsCraft.
 struct Bleed {
     dimension: String,
+    /// Wave 2: whose turret bled it, to strike the killing bleed as the owner.
+    owner: Option<u128>,
     damage: f64,
     until: u64,
 }
@@ -542,6 +544,8 @@ pub(super) fn tick(game: &mut Game<'_>, dimension: &str, level: &LevelNet, t: &T
     crate::game::rustcraft_utility::tick(game, dimension, level, t);
     crate::game::rustcraft_gear::tick(game, dimension);
     bleed(game, dimension, now, t);
+    // Wave 2: SoulsCraft's shared bleeding kills outside this mod's hits.
+    mark_hits(game, dimension);
     unslow(game, dimension, now);
     deaths(game, t);
     if now.is_multiple_of(ANCHOR_EVERY) {
@@ -775,6 +779,7 @@ fn attack(
                         id,
                         Bleed {
                             dimension: dimension.to_owned(),
+                            owner,
                             damage: g.damage,
                             until,
                         },
@@ -787,6 +792,7 @@ fn attack(
         aim_and_beam(game, pos, to, Some(SHOT_BEAM));
     }
     if !owner_shot(game, dimension, id, owner, t.turret_damage as f32) {
+        mark_hits(game, dimension);
         game.native_hurt_entity(dimension, id, t.turret_damage as f32, SHOT_TYPE, None);
     }
     turret::shown(l, true, Shown::Shooting(kind))
@@ -931,24 +937,51 @@ fn bleed(game: &mut Game<'_>, dimension: &str, now: u64, t: &Tuning) {
     if !now.is_multiple_of(period) {
         return;
     }
-    let due: Vec<(u32, f64)> = {
+    let due: Vec<(u32, f64, Option<u128>)> = {
         let mut s = state();
         s.bleeds.retain(|_, b| b.until > now);
         s.bleeds
             .iter()
             .filter(|(_, b)| b.dimension == dimension)
-            .map(|(id, b)| (*id, b.damage))
+            .map(|(id, b)| (*id, b.damage, b.owner))
             .collect()
     };
-    for (id, damage) in due {
+    for (id, damage, owner) in due {
+        // Wave 2 (#3): the bleed that kills is the owner's when he is in this level, as a shot.
+        if owner_shot(game, dimension, id, owner, damage as f32) {
+            continue;
+        }
+        mark_hits(game, dimension);
         if !game.native_hurt_entity(dimension, id, damage as f32, BLEED_TYPE, None) {
             state().bleeds.remove(&id);
         }
     }
 }
 
+/// Wave 2 (#3, guide `tool_gun`): where the mobs a guard or turret hit lately stand, for the loot
+/// hooks (horizon_world::loot::rustcraft_loot_marks): such a mob's death drops the loot only a
+/// player's kill gets, as vanilla's 100 ticks of a player's hit. Not a kill the owner struck
+/// (the game counts that one) nor a butcher's animal.
+fn mark_hits(game: &Game<'_>, dimension: &str) {
+    use horizon_world::loot::rustcraft_loot_marks as marks;
+    let (now, hit): (u64, Vec<u32>) = {
+        let s = state();
+        let hit = s
+            .hits
+            .iter()
+            .filter(|(_, h)| h.by != Striker::Butcher && !h.by_owner && s.ticks.saturating_sub(h.tick) <= KILL_MEMORY)
+            .map(|(id, _)| *id)
+            .collect();
+        (s.ticks, hit)
+    };
+    for m in game.mobs.iter().filter(|m| !m.removed && hit.contains(&m.id)) {
+        marks::mark(dimension, m.id, [m.position.x, m.position.y, m.position.z], now);
+    }
+    marks::forget_before(now.saturating_sub(KILL_MEMORY));
+}
+
 /// D5, X8: a turret's kill gives its owner the kill's experience and Path-of-craft-tree a `kill`.
-fn deaths(game: &mut Game<'_>, t: &Tuning) {
+fn deaths(game: &mut Game<'_>, _t: &Tuning) {
     let (deaths, now) = {
         let mut s = state();
         (std::mem::take(&mut s.deaths), s.ticks)
@@ -974,7 +1007,11 @@ fn deaths(game: &mut Game<'_>, t: &Tuning) {
         if hit.by_owner {
             continue;
         }
-        game.native_give_experience(hit.owner, t.turret_kill_experience);
+        // Wave 2 (#3): the mob's own experience, as the owner's kill would give.
+        let experience = turret_owner::kill_experience(&kind).unwrap_or(0);
+        if experience > 0 {
+            game.native_give_experience(hit.owner, experience);
+        }
         // SoulsCraft's hunter book (spec 27.1), apart from Path-of-craft-tree's report.
         state().souls_kills.push(SoulsKill {
             source: if hit.by == Striker::Guard {
@@ -1027,6 +1064,7 @@ pub(super) fn guard_shot(
     // blaze rod) «как если бы владелец убил его сам».
     remember_hit(id, owner, Striker::Guard);
     if !owner_shot(game, dimension, id, Some(owner), damage as f32) {
+        mark_hits(game, dimension);
         game.native_hurt_entity(dimension, id, damage as f32, SHOT_TYPE, None);
     }
     Some(kind)

@@ -6,7 +6,7 @@ use crate::geom::Pos;
 use crate::modules::Module;
 use crate::tuning::Tuning;
 
-pub const ALL: &[Build] = &[turret_window_spells_the_shot];
+pub const ALL: &[Build] = &[turret_window_spells_the_shot, turret_kill_drops_the_owners_loot];
 
 const OWNER: u128 = 0x5e1f_7e57_0000_0000_0000_0000_0000_00c1;
 
@@ -56,5 +56,46 @@ fn turret_window_spells_the_shot(o: Pos, _: &Tuning) -> Scenario {
                 }
             }
             Ok(())
+        })
+}
+
+/// Task 2 (base-gear #3, rail-worker «Страж: добыча killed_by_player»): with the owner away (the
+/// bench has no player) a turret's kills still drop the loot only a player's kill gets. A spider
+/// drops its eye on a player's kill a third of the time: of 14 such kills at least one drops one
+/// (all fourteen without one: 0.3%).
+fn turret_kill_drops_the_owners_loot(o: Pos, t: &Tuning) -> Scenario {
+    const NAMES: [&str; 14] = ["s0", "s1", "s2", "s3", "s4", "s5", "s6", "s7", "s8", "s9", "s10", "s11", "s12", "s13"];
+    let turret = at(o, [10, 1, 0]);
+    let full = t.turret_buffer;
+    Scenario::new("w2_turret_kill_drops_the_owners_loot", plot_area(o))
+        .then("a floor walled in and the turret with a full buffer, its owner away", move |b, _| {
+            for x in 0..24 {
+                for z in -4..=4 {
+                    b.place(at(o, [x, 0, z]), "minecraft:stone", &[])?;
+                    if x == 0 || x == 23 || z.abs() == 4 {
+                        for y in 1..=3 {
+                            b.place(at(o, [x, y, z]), "minecraft:stone", &[])?;
+                        }
+                    }
+                }
+            }
+            b.place(turret, "rustcraft:turret", &[])?;
+            b.set_owner(turret, OWNER, 1)?;
+            b.set_buffer(turret, full)
+        })
+        .then("fourteen weak spiders", move |b, m| {
+            for (i, name) in (0i32..).zip(NAMES) {
+                let x = f64::from(o[0] + 3 + i);
+                let id = b.spawn_mob("minecraft:spider", [x + 0.5, f64::from(o[1] + 1), f64::from(o[2]) + 2.5], Some(1.0))?;
+                m.mark(name, f64::from(id));
+            }
+            Ok(())
+        })
+        .until("the turret shot them all", 1200, move |b, m| {
+            Ok(NAMES.iter().all(|n| b.mob(m.get(n) as u32).is_none()))
+        })
+        .until("a spider eye lies on the plot", 60, move |b, _| {
+            let lying = b.lying(at(o, [-1, 0, -5]).map(f64::from), at(o, [25, 5, 5]).map(f64::from));
+            Ok(lying.iter().any(|(item, _)| item == "minecraft:spider_eye"))
         })
 }
