@@ -76,10 +76,14 @@ fn secs(v: f64) -> String {
 }
 
 fn pace_shown(b: &dyn super::Bench, pos: Pos, secs: &str) -> bool {
+    // The seconds are the pace row's first argument. A whole number goes as a JSON number («1»),
+    // as vanilla passes numbers (SRC crates/horizon-client-core/src/text.rs:342-355), a
+    // fraction as a string («0,5»): both read the same in the window.
     b.sheet(pos).is_some_and(|s| {
         s.rows.iter().any(|r| {
-            let r = r.to_string();
-            r.contains("rustcraft.placer.pace") && r.contains(&format!("\"{secs}\""))
+            let first = &r["with"][0];
+            let shown = first.as_str().map(str::to_owned).unwrap_or_else(|| first.to_string());
+            r["translate"] == "rustcraft.placer.pace" && shown == secs
         })
     })
 }
