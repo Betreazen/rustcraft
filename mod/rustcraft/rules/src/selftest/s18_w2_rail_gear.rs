@@ -6,7 +6,7 @@ use crate::geom::Pos;
 use crate::modules::Module;
 use crate::tuning::Tuning;
 
-pub const ALL: &[Build] = &[turret_window_spells_the_shot, turret_kill_drops_the_owners_loot, rail_takes_another_tier_in_place];
+pub const ALL: &[Build] = &[turret_window_spells_the_shot, turret_kill_drops_the_owners_loot, rail_takes_another_tier_in_place, chassis_window_sets_the_bores_height];
 
 const OWNER: u128 = 0x5e1f_7e57_0000_0000_0000_0000_0000_00c1;
 
@@ -127,5 +127,44 @@ fn rail_takes_another_tier_in_place(o: Pos, _: &Tuning) -> Scenario {
                 return Err("the same tier swapped".into());
             }
             Ok(())
+        })
+}
+
+/// Task 12 (guide `chassis`, `mod_height`): the chassis window's presses reach the worker — the
+/// filter clears, the bore's height field rises by one and by ten (right click) — and a bore with
+/// the height module and a height set two above its rails climbs a step a rail to it, then
+/// keeps level.
+fn chassis_window_sets_the_bores_height(o: Pos, _: &Tuning) -> Scenario {
+    use crate::monorail::shape;
+    use crate::worker::{Tool, screen::{FILTER, Press}};
+    const MONORAIL: &str = "rustcraft:monorail";
+    let top = at(o, [6, 3, 0]);
+    Scenario::new("w2_chassis_window_sets_the_bores_height", plot_area(o))
+        .then("rails on a floor, a bore with the height module, rails and cobblestone", move |b, m| {
+            for x in -1..=10 {
+                for z in -2..=2 {
+                    b.place(at(o, [x, 0, z]), "minecraft:stone", &[])?;
+                }
+            }
+            for x in 0..=3 {
+                b.place(at(o, [x, 1, 0]), MONORAIL, &[(shape::MOUNT, shape::mount_value(crate::geom::Face::YNeg))])?;
+            }
+            let id = b.spawn_worker(at(o, [0, 1, 0]), OWNER, Some(Tool::Bore), &[(MONORAIL, 8), ("minecraft:cobblestone", 16)], None)?;
+            m.mark("worker", id as f64);
+            b.set_worker_modules(id, &[crate::modules::Module::Height.item()])?;
+            b.set_worker_filter(id, &["minecraft:stone"])
+        })
+        .then("the window: the filter cleared, the height up by ten then down by eight", move |b, m| {
+            let id = m.get("worker") as u64;
+            b.chassis_press(id, Press::Cell { cell: FILTER, right: false })?;
+            b.chassis_press(id, Press::Height { by: 10 })?;
+            b.chassis_press(id, Press::Height { by: -8 })
+        })
+        .until("the worker holds the height two over its rails and no filter", 40, move |b, m| {
+            let w = b.worker(m.get("worker") as u64).ok_or("no worker")?;
+            Ok(w.filter.is_empty() && w.height == Some(o[1] + 3))
+        })
+        .until("its rails climb to the height and go on level", 1600, move |b, _| {
+            Ok(b.block(at(o, [4, 2, 0])) == MONORAIL && b.block(at(o, [5, 3, 0])) == MONORAIL && b.block(top) == MONORAIL)
         })
 }

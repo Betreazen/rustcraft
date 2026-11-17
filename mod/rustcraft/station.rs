@@ -44,7 +44,7 @@ use rustcraft_rules::{
         window::{self as win, Part, Projection},
         wire::{self, CapsuleNote, Destination, Listing, Reach, Rename},
     },
-    worker::{pose as worker_pose, wire as worker_wire},
+    worker::{pose as worker_pose, screen as worker_screen, wire as worker_wire},
 };
 use std::{
     collections::HashMap,
@@ -104,8 +104,6 @@ static ROPES: LazyLock<Mutex<HashMap<u32, Option<(f64, [f64; 3])>>>> = LazyLock:
 /// The workers the server told of, by seat mob: their heading and tool (0 none, 1 saw, 2 reaper).
 static WORKER_SEATS: LazyLock<Mutex<HashMap<u32, worker_wire::Seat>>> = LazyLock::new(Mutex::default);
 /// The worker's parts as standalone models (assets/models/transport.py `worker`).
-/// The open chassis window's panel, as its server sent it last.
-static CHASSIS_PANEL: Mutex<Option<worker_wire::Panel>> = Mutex::new(None);
 const WORKER_BODY: &str = "rustcraft:block/worker_body";
 
 const WORKER_PAINT: &str = "rustcraft:block/worker_paint";
@@ -157,8 +155,11 @@ pub(super) fn on_net(channel: &str, data: &[u8]) {
         let mut seats = WORKER_SEATS.lock().unwrap_or_else(PoisonError::into_inner);
         seats.clear();
         seats.extend(list.into_iter().map(|s| (s.seat, s)));
-    } else if channel == worker_wire::PANEL {
-        *CHASSIS_PANEL.lock().unwrap_or_else(PoisonError::into_inner) = worker_wire::Panel::decode(data);
+    } else if channel == worker_screen::VIEW_CHANNEL {
+        match worker_screen::View::decode(data) {
+            Some(v) => chassis_view(v),
+            None => log::warn!("rustcraft: a chassis window that does not read"),
+        }
     } else if channel == CAPSULE {
         match wire::decode_capsule(data) {
             Some(CapsuleNote::Ride { seat, rise, points }) => {
@@ -659,6 +660,8 @@ pub(super) fn on_key(
 
 /// `native_tick` on a client of a server: a name kept with Enter goes to the server.
 pub(super) fn on_tick(game: &mut Game<'_>) {
+    // Wave 2: the chassis window, in single player too.
+    chassis_tick(game);
     if game.remote.is_none() {
         return;
     }
@@ -1046,109 +1049,250 @@ pub(super) fn draw_worker(
     draw.light = light;
 }
 
-// ---- The chassis window ----
+/// ---- The chassis window (wave 2: the mod's own screen, ui.js `chassis`) ----
 
-/// The panel's size and the gap to the menu's slots.
-const PANEL_W: f32 = 128.0;
-const PANEL_H: f32 = 132.0;
-const PANEL_GAP: f32 = 4.0;
+/// The chassis window on this client: what the server showed last, and what waits for the tick.
+#[derive(Default)]
+struct ChassisClient {
+    view: Option<worker_screen::View>,
+    open_due: bool,
+    close_due: bool,
+    shown: bool,
+    presses: Vec<worker_screen::Press>,
+}
 
-/// `native_screen_render_post` (API 78): beside the chassis's server menu, whose slots hold its
-/// tool, sockets, state and hold, the rest of the guide's window (`ui.js` `chassis`): the tool's
-/// name, «Улучшения и модули» with the sockets in use, the bars «Заряд» and «Трюм», the filter
-/// and the status line. Told apart from other menus by its title, one of the chassis's three.
-pub(super) fn draw_chassis(game: &Game<'_>, batch: &mut HudBatch, screen: &NativeScreenView<'_>) {
-    let Some(title) = screen.title.map(|t| t.plain()) else {
-        return;
-    };
-    let ours = (1..=3u8).any(|tier| {
-        let (key, fallback) = worker_wire::window_key(tier);
-        tr(key, fallback) == title
-    });
-    if !ours {
+static CHASSIS: LazyLock<Mutex<ChassisClient>> = LazyLock::new(Mutex::default);
+
+fn chassis() -> MutexGuard<'static, ChassisClient> {
+    CHASSIS.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+/// The server's view of the chassis window (over the net, or straight from a single player's
+/// own server): opens, refreshes or closes it at the next tick.
+pub(super) fn chassis_view(v: worker_screen::View) {
+    let mut c = chassis();
+    if v.close {
+        c.close_due = true;
+        c.view = None;
         return;
     }
-    let Some(p) = CHASSIS_PANEL
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner)
-        .clone()
-    else {
-        return;
+    c.open_due |= v.open;
+    c.view = Some(v);
+}
+
+fn chassis_open(game: &Game<'_>) -> bool {
+    game.native_mod_screen() == Some(worker_screen::SCREEN)
+}
+
+/// The client's tick: the window opens or closes as the server said; a window the player closed
+/// (Escape) is told to the server; the presses go.
+fn chassis_tick(game: &mut Game<'_>) {
+    let (open, close, mut presses) = {
+        let mut c = chassis();
+        (std::mem::take(&mut c.open_due), std::mem::take(&mut c.close_due), std::mem::take(&mut c.presses))
     };
-    let [x, y, w, _] = screen.rect;
-    let o = [(x + w + PANEL_GAP).round(), y.round()];
-    kit::background(game, batch, o, [PANEL_W, PANEL_H]);
-    let inner = PANEL_W - 12.0;
-    let mut row = 6.0;
-    let (tool_key, tool_fallback) = worker_wire::tool_key(p.tool);
-    kit::label(game, batch, &tr("rustcraft.worker.tool_slot", "Tool"), o, [6.0, row]);
-    row += 10.0;
-    text(game, batch, &fit(game, &tr(tool_key, tool_fallback), inner), o, [6.0, row], VALUE);
-    row += 13.0;
-    kit::label(
-        game,
-        batch,
-        &fit(game, &tr("rustcraft.worker.sockets_title", "Upgrades and modules"), inner),
-        o,
-        [6.0, row],
-    );
-    row += 10.0;
-    let sockets = tr_with(
-        "rustcraft.worker.sockets",
-        "%s of %s sockets",
-        &[p.sockets.0.to_string(), p.sockets.1.to_string()],
-    );
-    text(game, batch, &sockets, o, [6.0, row], VALUE);
-    row += 13.0;
-    let charge = format!("{:.0}%", 100.0 * p.charge);
-    gauge(game, batch, o, row, &tr("rustcraft.worker.charge_title", "Charge"), &charge, p.charge, ENERGY);
-    row += 22.0;
-    let hold_share = p.hold.0 as f64 / (p.hold.1.max(1)) as f64;
-    let hold = tr_with(
-        "rustcraft.worker.hold_slots",
-        "%s of %s slots",
-        &[p.hold.0.to_string(), p.hold.1.to_string()],
-    );
-    gauge(game, batch, o, row, &tr("rustcraft.worker.hold_title", "Hold"), &hold, hold_share, HOT);
-    row += 22.0;
-    let filter = if p.filter.is_empty() {
+    if close && chassis_open(game) {
+        game.native_mod_screen_close(worker_screen::SCREEN);
+        chassis().shown = false;
+    }
+    if open && game.native_mod_screen_open(worker_screen::SCREEN) {
+        chassis().shown = true;
+    }
+    {
+        let mut c = chassis();
+        if c.shown && !chassis_open(game) {
+            c.shown = false;
+            c.view = None;
+            presses.push(worker_screen::Press::Closed);
+        }
+    }
+    for p in presses {
+        if game.remote.is_none() {
+            let me = game.native_acting_id();
+            crate::game::rustcraft_workers::press(me, p);
+        } else if let Err(e) = game.native_net_send_to_server(worker_screen::PRESS_CHANNEL, &worker_screen::encode_press(&p)) {
+            log::debug!("rustcraft: a chassis window press not sent: {e}");
+        }
+    }
+}
+
+fn chassis_layout(v: &worker_screen::View) -> worker_screen::Layout {
+    worker_screen::layout(v.sockets.len(), v.cargo.len(), v.height.is_some())
+}
+
+/// The window's corner: in the middle of the screen.
+fn chassis_corner(screen: &NativeScreenView<'_>, size: [f32; 2]) -> [f32; 2] {
+    [
+        screen.rect[0] + ((screen.rect[2] - size[0]) / 2.0).floor(),
+        screen.rect[1] + ((screen.rect[3] - size[1]) / 2.0).floor(),
+    ]
+}
+
+fn draw_stack(game: &Game<'_>, batch: &mut HudBatch, o: [f32; 2], at: [f32; 2], item: &str, count: u32) {
+    let stack = horizon_client::items::ItemStack::new(item, count.max(1));
+    let shown = (count > 1).then(|| count.to_string());
+    game.native_gui_draw_item_with(batch, &stack, [o[0] + at[0], o[1] + at[1]], shown.as_deref());
+}
+
+/// `native_screen_render_post`: the chassis window, as ui.js draws it, with the player's
+/// inventory under it from the client's own items and the tooltip under the mouse.
+pub(super) fn draw_chassis(game: &Game<'_>, batch: &mut HudBatch, screen: &NativeScreenView<'_>) {
+    if !chassis_open(game) {
+        return;
+    }
+    let Some(v) = chassis().view.clone() else { return };
+    let l = chassis_layout(&v);
+    let o = chassis_corner(screen, l.size);
+    kit::background(game, batch, o, l.size);
+    let (key, fallback) = worker_wire::window_key(v.tier);
+    kit::title_line(game, batch, o, &tr(key, fallback), None, l.size[0]);
+    let w = worker_screen::WIDTH;
+    kit::label(game, batch, &tr("rustcraft.worker.tool_slot", "Tool"), o, [8.0, worker_screen::LABELS_Y]);
+    let sockets = fit(game, &tr("rustcraft.worker.sockets_title", "Upgrades and modules"), w - 52.0);
+    kit::label(game, batch, &sockets, o, [worker_screen::SOCKETS_AT[0], worker_screen::LABELS_Y]);
+    kit::slot(game, batch, o, worker_screen::TOOL_AT);
+    kit::hover(game, batch, o, style::slot_rect(worker_screen::TOOL_AT));
+    if let Some(tool) = v.tool {
+        draw_stack(game, batch, o, worker_screen::TOOL_AT, tool.item(), 1);
+    }
+    for (i, m) in v.sockets.iter().enumerate() {
+        let at = l.socket(i);
+        kit::socket(game, batch, o, at, m.is_none());
+        kit::hover(game, batch, o, style::slot_rect(at));
+        if let Some(m) = m {
+            draw_stack(game, batch, o, at, m, 1);
+        }
+    }
+    // «Заряд» and «Трюм» side by side.
+    let half = (w - 24.0) / 2.0;
+    let charge = format!("{:.0}%", 100.0 * v.charge);
+    let hold = tr_with("rustcraft.worker.hold_slots", "%s of %s slots", &[v.hold.0.to_string(), v.hold.1.to_string()]);
+    let hold_share = v.hold.0 as f64 / v.hold.1.max(1) as f64;
+    for (x, label, value, share, fill) in [
+        (8.0, tr("rustcraft.worker.charge_title", "Charge"), charge, v.charge, ENERGY),
+        (16.0 + half, tr("rustcraft.worker.hold_title", "Hold"), hold, hold_share, HOT),
+    ] {
+        kit::label(game, batch, &label, o, [x, worker_screen::GAUGES_Y]);
+        kit::text_right(game, batch, &fit(game, &value, half - 30.0), o, x + half, worker_screen::GAUGES_Y, VALUE);
+        kit::bar(game, batch, [o[0] + x, o[1] + worker_screen::GAUGES_Y + 10.0, half, 6.0], share, fill);
+    }
+    kit::label(game, batch, &tr("rustcraft.worker.cargo_title", "Cargo"), o, [8.0, worker_screen::CARGO_LABEL_Y]);
+    if v.hidden > 0 {
+        let more = tr_with("rustcraft.worker.cargo_hidden", "+ %s more in the hold", &[v.hidden.to_string()]);
+        kit::text_right(game, batch, &more, o, w - 8.0, worker_screen::CARGO_LABEL_Y, LABEL);
+    }
+    for (i, cell) in v.cargo.iter().enumerate() {
+        let at = l.cargo_slot(i);
+        kit::slot(game, batch, o, at);
+        kit::hover(game, batch, o, style::slot_rect(at));
+        if let Some((item, n)) = cell {
+            draw_stack(game, batch, o, at, item, *n);
+        }
+    }
+    let filter = if v.filter.is_empty() {
         tr("rustcraft.worker.filter_all", "Filter: takes everything")
     } else {
-        let names: Vec<String> = p.filter.iter().map(|f| item_name(f)).collect();
+        let names: Vec<String> = v.filter.iter().map(|f| item_name(f)).collect();
         tr_with("rustcraft.worker.filter", "Filter: %s", &[names.join(", ")])
     };
-    text(game, batch, &fit(game, &filter, inner), o, [6.0, row], TEXT);
-    row += 12.0;
-    let (key, fallback, mood) = worker_wire::note_key(p.note);
+    text(game, batch, &fit(game, &filter, w - 16.0), o, [8.0, l.filter_y], TEXT);
+    if let (Some((set, _)), Some([down, value, up]), Some(y)) = (v.height, l.height_rects(), l.height_y) {
+        kit::label(game, batch, &tr("rustcraft.worker.height_title", "Height"), o, [8.0, y + 2.0]);
+        button(game, batch, o, down, "−", false);
+        button(game, batch, o, up, "+", false);
+        let shown = set.map_or_else(|| tr("rustcraft.worker.height_level", "level"), |h| h.to_string());
+        kit::centred(game, batch, o, value, &fit(game, &shown, value[2]), VALUE);
+    }
+    let (key, fallback, mood) = worker_wire::note_key(v.note);
     let severity = match mood {
         worker_wire::Mood::Fine => Severity::Ok,
         worker_wire::Mood::Waiting => Severity::Warn,
         worker_wire::Mood::Stopped => Severity::Bad,
     };
-    kit::status_line(game, batch, o, [4.0, row, PANEL_W - 8.0, 14.0], severity, &tr(key, fallback));
+    kit::status_line(game, batch, o, [4.0, l.status_y, w - 8.0, 14.0], severity, &tr(key, fallback));
+    kit::inventory(game, batch, o, l.inventory, l.inventory_label_y);
+    for i in 0..worker_screen::INVENTORY {
+        let at = l.inventory_slot(i);
+        kit::hover(game, batch, o, style::slot_rect(at));
+        if let Some(stack) = game.inventory.get(i).cloned().flatten() {
+            let count = (stack.count != 1).then(|| stack.count.to_string());
+            game.native_gui_draw_item_with(batch, &stack, [o[0] + at[0], o[1] + at[1]], count.as_deref());
+        }
+    }
+    let mouse = [screen.mouse[0] - o[0], screen.mouse[1] - o[1]];
+    let lines = l.at(mouse).map(|p| chassis_tooltip(game, &v, p)).unwrap_or_default();
+    if !lines.is_empty() {
+        let texts: Vec<horizon_client::text::Text> = lines.iter().map(|s| horizon_client::text::Text::literal(s.as_str())).collect();
+        game.native_gui_tooltip(batch, &texts, game.native_cursor());
+    }
 }
 
-/// A labelled bar: the label left, the value right, the bar under them.
-#[allow(clippy::too_many_arguments)]
-fn gauge(
-    game: &Game<'_>,
-    batch: &mut HudBatch,
-    o: [f32; 2],
-    row: f32,
-    label: &str,
-    value: &str,
-    share: f64,
-    fill: u32,
-) {
-    kit::label(game, batch, label, o, [6.0, row]);
-    kit::text_right(game, batch, value, o, PANEL_W - 6.0, row, VALUE);
-    kit::bar(
-        game,
-        batch,
-        [o[0] + 6.0, o[1] + row + 10.0, PANEL_W - 12.0, 6.0],
-        share,
-        fill,
-    );
+/// The lines over a part of the chassis window.
+fn chassis_tooltip(game: &Game<'_>, v: &worker_screen::View, part: worker_screen::Part) -> Vec<String> {
+    use worker_screen::Part as P;
+    let mut lines = Vec::new();
+    match part {
+        P::Tool => {
+            let (key, fallback) = worker_wire::tool_key(v.tool);
+            lines.push(tr(key, fallback));
+            if v.tool.is_some() {
+                lines.push(tr("rustcraft.worker.tool_hint", "Click: take the tool back"));
+            } else {
+                lines.push(tr("rustcraft.worker.tool_empty_hint", "Click a tool in the inventory to put it here"));
+            }
+        }
+        P::Socket(i) => match v.sockets.get(i).cloned().flatten() {
+            Some(m) => {
+                lines.push(item_name(&m));
+                lines.push(tr("rustcraft.worker.socket_take", "Click: the module back into the inventory"));
+            }
+            None => lines.push(tr("rustcraft.worker.socket_put", "Click an upgrade or a module in the inventory to put it here")),
+        },
+        P::Cargo(i) => {
+            if let Some((item, n)) = v.cargo.get(i).cloned().flatten() {
+                lines.push(format!("{} × {n}", item_name(&item)));
+                lines.push(tr("rustcraft.worker.cargo_take", "Click: into the inventory"));
+            }
+        }
+        P::Inventory(i) => {
+            if let Some(stack) = game.inventory.get(i).cloned().flatten() {
+                lines.push(item_name(&stack.item));
+                lines.push(tr("rustcraft.worker.inventory_hint", "Click: into the chassis · right click: into the filter"));
+            }
+        }
+        P::Filter => lines.push(tr("rustcraft.worker.filter_hint", "Click: clear the filter")),
+        P::HeightDown | P::HeightUp => lines.push(tr("rustcraft.worker.height_hint", "Click: one block · right click: ten")),
+        P::Height => lines.push(tr("rustcraft.worker.height_reset", "Click: keep the way on its level")),
+    }
+    lines
+}
+
+/// `native_screen_mouse_button_pressed_pre`: a click in the chassis window.
+pub(super) fn chassis_mouse(game: &Game<'_>, screen: &NativeScreenView<'_>, button: i32, canceled: &mut bool) {
+    if *canceled || !chassis_open(game) {
+        return;
+    }
+    *canceled = true;
+    if button != 0 && button != 1 {
+        return;
+    }
+    let mut c = chassis();
+    let Some(v) = c.view.as_ref() else { return };
+    let l = chassis_layout(v);
+    let o = chassis_corner(screen, l.size);
+    let Some(part) = l.at([screen.mouse[0] - o[0], screen.mouse[1] - o[1]]) else { return };
+    // An empty inventory slot or hold slot does nothing.
+    let empty = match part {
+        worker_screen::Part::Inventory(i) => game.inventory.get(i).is_none_or(Option::is_none),
+        worker_screen::Part::Cargo(i) => v.cargo.get(i).is_none_or(Option::is_none),
+        _ => false,
+    };
+    if empty {
+        return;
+    }
+    if let Some(p) = worker_screen::press_of(part, button == 1) {
+        c.presses.push(p);
+    }
 }
 
 /// An item's or block's name in the player's language.

@@ -468,6 +468,8 @@ pub(super) fn on_button(game: &Game<'_>, pos: Pos, entity: &ModBlockEntity, id: 
 
 /// `native_net_from_client`: a station's new name, for the next tick of its level.
 pub(super) fn on_client_message(player: u128, channel: &str, data: &[u8]) {
+    // Wave 2: a press in a chassis window (rustcraft_workers).
+    crate::game::rustcraft_workers::on_client_message(player, channel, data);
     if channel != RENAME {
         return;
     }

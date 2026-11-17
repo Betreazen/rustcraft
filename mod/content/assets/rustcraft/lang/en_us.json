@@ -1372,5 +1372,16 @@
   "rustcraft.gear.window.does.damper": "−20% damage for 5 s after a hit",
   "rustcraft.gear.window.does.jetpack": "flight on charge",
   "rustcraft.worker.unreadable": "This worker does not read: it stays with you",
-  "rustcraft.monorail.tier_swapped": "Monorail: tier %s took the place of tier %s"
+  "rustcraft.monorail.tier_swapped": "Monorail: tier %s took the place of tier %s",
+  "rustcraft.worker.cargo_title": "Cargo",
+  "rustcraft.worker.cargo_hidden": "+ %s more in the hold",
+  "rustcraft.worker.height_title": "Height",
+  "rustcraft.worker.height_level": "level",
+  "rustcraft.worker.tool_empty_hint": "Click a tool in the inventory to put it here",
+  "rustcraft.worker.socket_take": "Click: the module back into the inventory",
+  "rustcraft.worker.socket_put": "Click an upgrade or a module in the inventory to put it here",
+  "rustcraft.worker.cargo_take": "Click: into the inventory",
+  "rustcraft.worker.inventory_hint": "Click: into the chassis · right click: into the filter",
+  "rustcraft.worker.height_hint": "Click: one block · right click: ten",
+  "rustcraft.worker.height_reset": "Click: keep the way on its level"
 }

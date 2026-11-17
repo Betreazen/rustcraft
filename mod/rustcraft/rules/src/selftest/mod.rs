@@ -437,6 +437,16 @@ pub trait Bench {
         let _ = (pos, item);
         Err("no rails on this bench".into())
     }
+    /// A press in worker `id`'s chassis window (rustcraft_workers::press_for_selftest).
+    fn chassis_press(&mut self, id: u64, press: crate::worker::screen::Press) -> Result<(), String> {
+        let _ = (id, press);
+        Err("no chassis windows on this bench".into())
+    }
+    /// Worker `id`'s sockets hold `modules`.
+    fn set_worker_modules(&mut self, id: u64, modules: &[&str]) -> Result<(), String> {
+        let _ = (id, modules);
+        Err("no workers on this bench".into())
+    }
 }
 
 /// A mob as the self-test reads it.

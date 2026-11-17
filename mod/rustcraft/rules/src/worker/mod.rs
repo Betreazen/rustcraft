@@ -19,6 +19,7 @@ pub mod hold;
 pub mod plants;
 pub mod pivots;
 pub mod pose;
+pub mod screen;
 pub mod trees;
 pub mod wire;
 
@@ -206,6 +207,10 @@ pub struct Worker {
     /// Slice 18: the block its tool works on now, for the client's pose (not saved).
     #[serde(skip)]
     pub aim: Option<Pos>,
+    /// Wave 2 (guide `mod_height`): the height the bore's height module takes its way to, set in
+    /// the chassis window; none keeps the way on its level.
+    #[serde(default)]
+    pub height: Option<i32>,
 }
 
 fn first_tier() -> u8 {
@@ -324,6 +329,7 @@ impl Worker {
             tier: 1,
             carry: 0.0,
             aim: None,
+            height: None,
         }
     }
 
@@ -655,6 +661,7 @@ impl Worker {
         w.hold = old.hold;
         w.charge = old.charge;
         w.filter = old.filter;
+        w.height = old.height;
         w.set_tier(old.tier, t);
         w.upgrades = old.upgrades;
         w.note = if w.tool.is_some() { Note::Working } else { Note::NoTool };
