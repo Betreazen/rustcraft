@@ -4,6 +4,8 @@
 //!   three times the energy, and its window shows the mode.
 //! - The placer and the breaker work faster on a higher tier (A8): their windows' pace.
 //! - A line-boost module in a node raises a fluid net's flow by half (guide `mod_line`).
+//! - The electric furnace and the autocrafter report their work to Path-of-craft-tree (`smelt`,
+//!   `craft`).
 //! - A broken tiered block drops its own tier's item: the loot tables in 26.3's form
 //!   (`match_block`), which the old `block_state_property` list was not.
 
@@ -14,11 +16,12 @@ use crate::machines::panel::ENERGY_SCALE;
 use crate::machines::processor::WorkMode;
 use crate::tuning::Tuning;
 
-pub const ALL: [Build; 4] = [
+pub const ALL: [Build; 5] = [
     pump_boost_mode,
     placer_and_breaker_by_tier,
     tiered_blocks_drop_their_tier,
     line_boost_on_a_fluid_net,
+    machines_report_smelt_and_craft,
 ];
 
 const STONE: &str = "minecraft:stone";
@@ -188,6 +191,46 @@ fn line_boost_on_a_fluid_net(o: Pos, t: &Tuning) -> Scenario {
             } else {
                 Err(format!("plain {plain} mB, boosted {boosted} mB in {FLOW_WINDOW} ticks: ×{ratio:.2}, not ×{boost}"))
             }
+        })
+}
+
+/// The owner of the reporting machines.
+const OWNER: u128 = 0x5e1f_7e57_0000_0000_0000_0000_0000_0c05;
+
+fn machines_report_smelt_and_craft(o: Pos, _: &Tuning) -> Scenario {
+    use crate::machines::windows::crafter::CELL_BUTTON;
+    const LOG: &str = "minecraft:oak_log";
+    const CRYSTAL: &str = "rustcraft:crystal";
+    let furnace = at(o, [1, 1, 0]);
+    let crafter = at(o, [5, 1, 0]);
+    let owner = format!("{OWNER:032x}");
+    Scenario::new("s18_machines_report_smelt_and_craft", plot_area(o))
+        .then("a furnace with raw iron and an autocrafter with a log pattern, both owned and powered", move |b, _| {
+            for p in [furnace, crafter] {
+                b.place(at(p, [0, -1, 0]), STONE, &[])?;
+                b.place(at(p, [-1, -1, 0]), STONE, &[])?;
+                b.place(at(p, [1, -1, 0]), STONE, &[])?;
+            }
+            b.place(furnace, "rustcraft:furnace", &[])?;
+            b.set_owner(furnace, OWNER, 1)?;
+            b.place(at(furnace, [-1, 0, 0]), CRYSTAL, &[])?;
+            b.place(at(furnace, [1, 0, 0]), CRYSTAL, &[])?;
+            b.put(furnace, 0, "minecraft:raw_iron", 2)?;
+            b.place(crafter, "rustcraft:crafter", &[])?;
+            b.set_owner(crafter, OWNER, 1)?;
+            b.place(at(crafter, [-1, 0, 0]), CRYSTAL, &[])?;
+            b.place(at(crafter, [1, 0, 0]), CRYSTAL, &[])?;
+            b.press(crafter, CELL_BUTTON + 4, Some((LOG, 1)))?;
+            let k = b.inputs(crafter).first().copied().ok_or("the crafter has no input")?;
+            b.put(crafter, k, LOG, 1)
+        })
+        .until("Path-of-craft-tree heard a smelt of iron and a craft of planks", 600, move |b, _| {
+            let lines = b.reports();
+            let smelt = lines.iter().any(|r| r.contains(&format!("smelt {owner} minecraft:iron_ingot ")));
+            let craft = lines
+                .iter()
+                .any(|r| r.contains(&format!("craft {owner} ")) && r.contains("minecraft:oak_planks 4 1"));
+            Ok(smelt && craft)
         })
 }
 

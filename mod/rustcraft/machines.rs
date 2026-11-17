@@ -899,6 +899,8 @@ fn run(
         || modules::yield_lucky(&fitted.modules, roll());
     let before = processor.clone();
     let state = processor.tick(&recipes, &spec, share);
+    // Slice 18 (cross): what the electric furnace gave goes to Path-of-craft-tree (`smelt`).
+    report_smelt(game, pos, &before.output, &processor.output);
     let working = state == State::Working;
     let catalyst_before = catalyst.clone();
     if working {
@@ -958,6 +960,21 @@ fn run(
         }
         shown
     })
+}
+
+/// Slice 18 (cross): the `smelt` report of the electric furnace at `pos` for what its output
+/// gained (docs/design/path-of-craft-tree-contract.md); the crusher reports nothing.
+fn report_smelt(game: &Game<'_>, pos: Pos, before: &Option<(String, u32)>, after: &Option<(String, u32)>) {
+    let as_ref = |o: &Option<(String, u32)>| o.as_ref().map(|(i, n)| (i.as_str(), *n)).into_iter().collect::<Vec<_>>();
+    let gained = rustcraft_rules::reports::gained(as_ref(before), as_ref(after));
+    if gained.is_empty() || game.native_block(pos) != content::FURNACE {
+        return;
+    }
+    if let Some(owner) = base::owner_at(game, pos) {
+        for (item, count) in gained {
+            base::report(rustcraft_rules::reports::Report::Smelt { owner, item, count });
+        }
+    }
 }
 
 /// The work mode (A1) the machine saved; normal when none.

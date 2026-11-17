@@ -320,6 +320,35 @@ pub(super) fn read(
 
 /// One tick on `share` of its request; writes back the buffer, the output, its progress and its
 /// window. What it shows.
+/// Slice 18 (cross): the `craft` report of a craft of `page` (docs/design/
+/// path-of-craft-tree-contract.md): the game's recipe id of its pattern, its result and count.
+fn report_craft(game: &Game<'_>, pos: Pos, before: &Crafter, page: Option<usize>, pattern: Option<&Pattern>) {
+    let Some(owner) = crate::game::rustcraft_base::owner_at(game, pos) else {
+        return;
+    };
+    let Some(made) = page
+        .and_then(|p| before.pages.get(p))
+        .and_then(|p| p.recipe.as_ref())
+        .and_then(|r| r.products.first())
+    else {
+        return;
+    };
+    let grid: Vec<Option<ItemStack>> = pattern
+        .map(|p| p.iter().map(|c| c.as_ref().map(|item| ItemStack::new(item, 1))).collect())
+        .unwrap_or_default();
+    let recipe = game
+        .recipes()
+        .find(&grid, 3)
+        .map_or_else(|| made.item.clone(), |(name, _)| name.to_owned());
+    crate::game::rustcraft_base::report(rustcraft_rules::reports::Report::Craft {
+        owner,
+        recipe,
+        item: made.item.clone(),
+        count: made.count,
+        crafts: 1,
+    });
+}
+
 pub(super) fn run(
     game: &mut Game<'_>,
     pos: Pos,
@@ -345,7 +374,14 @@ pub(super) fn run(
         data: shown_data,
     } = held;
     let before = crafter.clone();
+    let temp_pattern = temp.as_ref().map(|t| t.pattern.clone());
     let state = crafter.tick(&spec(tuning, &fitted), share);
+    // Slice 18 (cross): a craft done goes to Path-of-craft-tree (`craft`, one craft a report).
+    if state == rustcraft_rules::machines::processor::State::Working && crafter.current.is_none() {
+        let page = before.pick();
+        let pattern = page.and_then(|p| patterns.get(p).cloned().or(temp_pattern));
+        report_craft(game, pos, &before, page, pattern.as_ref());
+    }
     // O4: the crafts the order's page still owes; none once it is gone.
     if let Some(t) = temp {
         t.owed = crafter.pages.iter().find_map(|p| p.order).unwrap_or(0);

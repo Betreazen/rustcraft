@@ -79,7 +79,7 @@
 
 **Files:** Modify `rules/src/reports.rs` (`Report::Smelt { owner, item, count }` → `pct-machine smelt <владелец> <предмет> <количество>`, вид из контракта), `mod/rustcraft/machines.rs` (печь: выданный результат), `mod/rustcraft/alloy.rs` (плавильня), `mod/rustcraft/crafter.rs` (`Report::Craft`, рецепт — id рецепта страницы), самотест `machines_report_smelt_and_craft`.
 
-- [ ] RED: тест команды `smelt`; GREEN; бандл; самотест: печь с сырым железом и энергией → в `reports()` строка `smelt … minecraft:iron_ingot 1`; автокрафтер → `craft …`. Коммит `feat: the furnace, the alloy smelter and the autocrafter report their work to Path-of-craft-tree`.
+- [x] RED: тесты `a_smelt_report_is_the_contracts`, `gained_counts_only_what_came_out` (`reports::gained` — прирост ячеек готового по предметам); GREEN; бандл: печь (`machines::report_smelt`, дробилка не шлёт — контракт), плавильня (`alloy.rs`, вид `smelt` есть в контракте, PCT за сплавы опыта не даёт, но отчёт принимает), автокрафтер (`crafter::report_craft`: id рецепта игры по образцу страницы, результат, количество, 1 крафт); самотест `s18_machines_report_smelt_and_craft`. Подходящие виды нашлись в контракте, PCT не менялся.
 
 ### Task 7: катализаторы в других машинах
 
