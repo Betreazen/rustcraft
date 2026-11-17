@@ -844,25 +844,28 @@ fn orders_status(
         return;
     }
     v.shown_order %= orders.len();
-    let order = &orders[v.shown_order];
-    // Slice 18: a running order shows its chain of steps, the running one in brackets.
-    let what = if order.steps.is_empty() || order.wait != OrderWait::Running {
-        order_text(game, order)
-    } else {
-        format!(
-            "{} {}/{}: {}",
-            name_of(game, order.item),
-            order.done,
-            order.count,
-            chain_text(game, order)
-        )
-    };
-    let line = format!("{}/{} {what}", v.shown_order + 1, orders.len());
-    let r = term::QUEUE;
-    kit::hover(game, batch, o, r);
-    let shown = kit::fit(game, &line, r[2] - 2.0);
-    text(game, batch, &shown, o, term::DETAIL, TEXT);
-    button(game, batch, o, term::CANCEL, "x", false);
+    // Wave 2 (ui.js `terminal`): the queue as a list, QUEUE_ROWS orders a page, each its chain of
+    // steps with the running one in brackets, and its own cancel button.
+    for (k, i) in term::queue_page(orders.len(), v.shown_order).into_iter().enumerate() {
+        let order = &orders[i];
+        let what = if order.steps.is_empty() || order.wait != OrderWait::Running {
+            order_text(game, order)
+        } else {
+            format!(
+                "{} {}/{}: {}",
+                name_of(game, order.item),
+                order.done,
+                order.count,
+                chain_text(game, order)
+            )
+        };
+        let line = format!("{}/{} {what}", i + 1, orders.len());
+        let (r, cancel) = term::queue_row(k);
+        kit::hover(game, batch, o, r);
+        let shown = kit::fit(game, &line, r[2] - 2.0);
+        text(game, batch, &shown, o, [r[0], r[1] + 1.0], TEXT);
+        button(game, batch, o, cancel, "x", false);
+    }
 }
 
 /// The status line and the line under it: the storage's state, its slots or its missing cells.
@@ -1062,10 +1065,12 @@ pub(super) fn on_click(game: &Game<'_>, at: [f32; 2], right: bool) -> Option<i32
             };
             return term::encode(Press::Keep { item, change }).or(Some(NO_PRESS));
         }
-        Part::Queue => v.shown_order += 1,
-        Part::Cancel => {
+        // Wave 2: a click on a row shows the next page of the queue; × cancels that row's order.
+        Part::Queue(_) => v.shown_order += term::QUEUE_ROWS,
+        Part::Cancel(k) => {
             let orders = listing.as_ref().map_or(&[][..], |l| &l.orders[..]);
-            let order = orders.get(v.shown_order % orders.len().max(1))?.id;
+            let i = *term::queue_page(orders.len(), v.shown_order).get(k)?;
+            let order = orders.get(i)?.id;
             return term::encode(Press::Cancel { order }).or(Some(NO_PRESS));
         }
     }
@@ -1212,8 +1217,8 @@ pub(super) fn tooltip(game: &Game<'_>, at: [f32; 2], lines: &mut Vec<String>) {
                 "Left click: by 64 · right click: by 1",
             );
         }
-        Part::Queue => queue_tooltip(game, lines),
-        Part::Cancel => hint(lines, "rustcraft.terminal.cancel_hint", "Cancel the order"),
+        Part::Queue(_) => queue_tooltip(game, lines),
+        Part::Cancel(_) => hint(lines, "rustcraft.terminal.cancel_hint", "Cancel the order"),
         Part::Status => {
             let v = view_for(game);
             if let Some(l) = listing_of(v.terminal).filter(|l| matches!(l.state, State::Holes | State::Extra)) {

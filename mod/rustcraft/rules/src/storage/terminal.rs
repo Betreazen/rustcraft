@@ -10,8 +10,9 @@
 //!
 //! The window has three modes: taking items (the default), «Лимиты» (S5) and «Заказы» (O3, O8,
 //! O14). In the orders mode a click on an item chooses it for the row under the grid (order ×1,
-//! ×8, ×64; «держать N»), and the line under the status shows one order of the queue with its
-//! cancel button; a click on that line shows the next order.
+//! ×8, ×64; «держать N»), and the rows under the status list the queue (wave 2, `ui.js`: «каждый
+//! заказ — цепочка шагов»), QUEUE_ROWS orders at a time, each with its chain and its cancel button;
+//! a click on a row shows the next ones.
 
 use crate::machines::panel::{Rect, inside, slot_frame};
 use crate::net::items::ItemKey;
@@ -69,14 +70,33 @@ pub const KEEP_PLUS: Rect = [180.0, 100.0, 13.0, 12.0];
 pub const KEEP_CLEAR: Rect = [194.0, 100.0, 12.0, 12.0];
 pub const STATUS: Rect = [8.0, 114.0, 198.0, 12.0];
 pub const DETAIL: [f32; 2] = [8.0, 129.0];
-/// The orders mode: the line of one order of the queue, and its cancel button.
-pub const QUEUE: Rect = [8.0, 127.0, 184.0, 11.0];
-pub const CANCEL: Rect = [194.0, 127.0, 12.0, 11.0];
-pub const INVENTORY: [f32; 2] = [26.0, 152.0];
+/// The orders mode: the rows of the queue (wave 2: a list, QUEUE_ROWS orders at a time), each
+/// with its cancel button.
+pub const QUEUE_ROWS: usize = 2;
+pub const QUEUE_ROW_H: f32 = 10.0;
+pub const QUEUE: Rect = [8.0, 127.0, 184.0, QUEUE_ROW_H];
+pub const CANCEL: Rect = [194.0, 127.0, 12.0, QUEUE_ROW_H];
+pub const INVENTORY: [f32; 2] = [26.0, 158.0];
 pub const INVENTORY_LABEL_Y: f32 = INVENTORY[1] - 10.0;
 pub const HEIGHT: f32 = INVENTORY[1] + 80.0;
 /// The most one order press orders (the press's count field).
 pub const MAX_ORDER: u16 = MAX_DAMAGE as u16;
+
+/// Wave 2: the queue's row `k` and its cancel button.
+pub fn queue_row(k: usize) -> (Rect, Rect) {
+    let dy = QUEUE_ROW_H * k as f32;
+    ([QUEUE[0], QUEUE[1] + dy, QUEUE[2], QUEUE[3]], [CANCEL[0], CANCEL[1] + dy, CANCEL[2], CANCEL[3]])
+}
+
+/// Wave 2: the orders the queue's rows show, from the page `first` is on: their places in the
+/// queue of `len`, QUEUE_ROWS at most.
+pub fn queue_page(len: usize, first: usize) -> Vec<usize> {
+    if len == 0 {
+        return Vec::new();
+    }
+    let start = (first % len) / QUEUE_ROWS * QUEUE_ROWS;
+    (start..len.min(start + QUEUE_ROWS)).collect()
+}
 
 /// Slice 18: the order count after «−» or «+» by `delta`, never below 1 nor past MAX_ORDER.
 pub fn step_count(count: u16, delta: i32) -> u16 {
@@ -124,8 +144,9 @@ pub enum Part {
     KeepPlus,
     KeepClear,
     Status,
-    Queue,
-    Cancel,
+    /// Wave 2: a row of the queue, and its cancel button, by the row.
+    Queue(usize),
+    Cancel(usize),
 }
 
 /// The part at `at`, in window pixels, in the taking or the limits mode.
@@ -166,9 +187,12 @@ pub fn part_in(at: [f32; 2], orders: bool) -> Option<Part> {
         (KEEP_MINUS, Part::KeepMinus),
         (KEEP_PLUS, Part::KeepPlus),
         (KEEP_CLEAR, Part::KeepClear),
-        (QUEUE, Part::Queue),
-        (CANCEL, Part::Cancel),
     ];
+    if orders
+        && let Some(k) = (0..QUEUE_ROWS).find(|&k| inside(queue_row(k).0, at) || inside(queue_row(k).1, at))
+    {
+        return Some(if inside(queue_row(k).1, at) { Part::Cancel(k) } else { Part::Queue(k) });
+    }
     let own: &[(Rect, Part)] = if orders { &order_parts } else { &limits };
     shared
         .iter()
@@ -697,8 +721,10 @@ mod tests {
         assert_eq!(part_in([30.0, 104.0], true), Some(Part::Order(0)));
         assert_eq!(part_in([70.0, 104.0], true), Some(Part::Order(2)));
         assert_eq!(part_in([200.0, 104.0], true), Some(Part::KeepClear));
-        assert_eq!(part_in([100.0, 131.0], true), Some(Part::Queue));
-        assert_eq!(part_in([198.0, 131.0], true), Some(Part::Cancel));
+        assert_eq!(part_in([100.0, 131.0], true), Some(Part::Queue(0)));
+        assert_eq!(part_in([198.0, 131.0], true), Some(Part::Cancel(0)));
+        assert_eq!(part_in([100.0, 141.0], true), Some(Part::Queue(1)));
+        assert_eq!(part_in([198.0, 141.0], true), Some(Part::Cancel(1)));
         assert_eq!(part_in([150.0, 104.0], true), None);
         assert_eq!(part_in([100.0, 131.0], false), None);
         // The book's socket and the grid do not touch.
@@ -706,5 +732,17 @@ mod tests {
         assert!(book[0] + book[2] <= slot_frame(cell(0))[0]);
         // The window fits a 1280×720 screen at GUI scale 3.
         const { assert!(HEIGHT <= 240.0) };
+    }
+
+    #[test]
+    fn the_queue_is_a_list_a_page_at_a_time() {
+        // Wave 2: two orders a page; a click goes on to the next page and round.
+        assert_eq!(queue_page(5, 0), vec![0, 1]);
+        assert_eq!(queue_page(5, 3), vec![2, 3]);
+        assert_eq!(queue_page(5, 4), vec![4]);
+        assert_eq!(queue_page(5, 6), vec![0, 1]);
+        assert!(queue_page(0, 3).is_empty());
+        // The last row ends above the inventory's label.
+        assert!(queue_row(QUEUE_ROWS - 1).0[1] + QUEUE_ROW_H <= INVENTORY_LABEL_Y);
     }
 }
