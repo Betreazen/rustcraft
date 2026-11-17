@@ -177,3 +177,25 @@
 
 ### Task 25: `mod/README.md` «Что проверить в игре: срез 18» (stream 5 section), last try green, report
 - [ ] done
+
+## Part F — orders handed over from stream 1 (orders.rs is this stream's)
+
+### Task 26: O11 — an order's product goes straight to the next machine
+- Today an intermediate product rides to the storage and from there to the next step's machine (`orders.rs` `pull` with `own`, `queue.rs` `keep_for`). The product of a step whose next step runs on another machine goes from the first machine to the second.
+- [ ] done
+
+### Task 27: O12 — the order brings its water
+- A mixer step's water (and any fluid input) comes with the order from the storage's tanks / the line's fluid net, not only from the mixer's own tank (`orders::reachable`).
+- [ ] done
+
+### Task 28: the autocrafter asks the storage for a missing ingredient
+- An autocrafter on the storage's magistral, short of an ingredient of its page, gets it from the storage (an order-like pull of one craft's worth).
+- [ ] done
+
+### Task 29: all machines take part in orders
+- Beyond crafter, furnace, crusher, alloy, mixer and (task 8) the kitchen: every machine whose recipes the book can name (the disintegrator, the brewer for its pages' potions…), or a recorded reason why not.
+- [ ] done
+
+### Task 30: order items visible in the housings
+- The items of an order's shipment drawn moving through the housings along their route (`rules/src/orders/ship.rs` gives the route and the time), as the client can draw them (block-entity drawing of the housings).
+- [ ] done
