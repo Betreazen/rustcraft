@@ -438,6 +438,9 @@ fn owner(game: &Game<'_>, pos: Pos) -> Option<u128> {
 
 // ---- The trash ----
 
+/// UT7: what the trash burns a step on the first tier.
+const TRASH_BATCH: u32 = 8;
+
 fn trash(game: &mut Game<'_>, pos: Pos, _t: &Tuning) -> Shown {
     let slots = items(game, pos);
     // Slice 18 (guide `trash`): the filter is its joints' (the wrench); its own filter cells, if
@@ -1263,7 +1266,9 @@ fn grow(game: &mut Game<'_>, dimension: &str, pos: Pos, cost: f64) -> Shown {
     let slots = items(game, pos);
     let mods = base::modules_at(game, pos);
     let stratum = modules::count(&mods, Module::Stratum) > 0;
-    let wanted = |item: &str| if stratum { vein::stratum(item).is_some() } else { vein::is_stone(item) };
+    // Slice 18: the stratum takes the rock its window chose (sand or gravel).
+    let chosen_rock = vein::stratum_rock(choice(game, pos, vein::STRATUM_ROCKS.len()));
+    let wanted = |item: &str| if stratum { item == chosen_rock } else { vein::is_stone(item) };
     let Some(slot) = slots.iter().position(|s| s.as_ref().is_some_and(|s| s.count > 0 && wanted(&s.item))) else {
         return Shown::Idle("vein_no_rock");
     };
@@ -1397,13 +1402,29 @@ pub(super) fn sheet(game: &Game<'_>, dimension: &str, pos: Pos, u: Util, s: &mut
     });
     sheet_extras(game, dimension, pos, u, s);
     let on = toggles_at(game, pos, spec.toggles);
-    s.toggles = toggle_names(u)
+    // Slice 18: the vein's window offers sand or gravel with the stratum module (guide
+    // `mod_stratum`), the ores with the ore choice module (`mod_pick`), nothing without either.
+    let names = if u == Util::Vein {
+        let mods = base::modules_at(game, pos);
+        if modules::count(&mods, Module::Stratum) > 0 {
+            rustcraft_rules::utility::vein::STRATUM_ROCKS.iter().map(|r| ((*r).to_owned(), (*r).to_owned())).collect()
+        } else if modules::count(&mods, Module::Pick) > 0 {
+            toggle_names(u)
+        } else {
+            Vec::new()
+        }
+    } else {
+        toggle_names(u)
+    };
+    let shown_n = names.len();
+    s.toggles = names
+        .into_iter()
         .into_iter()
         .enumerate()
         .map(|(i, (key, icon))| Toggle {
             icon,
             name: base::v(&line(&format!("rustcraft.util.{short}.toggle.{}", key.replace([':', '/'], "_")), &key, &[])),
-            on: on.get(i).copied().unwrap_or(false) || (matches!(u, Util::Archeo | Util::Enchanter | Util::Vein) && i == 0 && !on.iter().any(|t| *t)),
+            on: on.get(i).copied().unwrap_or(false) || (matches!(u, Util::Archeo | Util::Enchanter | Util::Vein) && i == 0 && !on.iter().take(shown_n).any(|t| *t)),
             hint: base::v(&line(&format!("rustcraft.util.{short}.hint"), "Click to turn on or off", &[])),
         })
         .collect();

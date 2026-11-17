@@ -11,9 +11,11 @@
 //   damage from their entity), so the game drops the mob's own experience and player-only loot
 //   and Path-of-craft-tree counts their ranged kill itself; no fixed experience or report then.
 // - Effects: the base game's `MobEffectInstance` on the mob, as `/effect give` puts it on one
-//   (game/commands/effects.rs:74-90): poison, slowness, and SoulsCraft's `soulscraft:bleeding`
+//   (game/commands/effects.rs:74-90): poison and SoulsCraft's `soulscraft:bleeding`
 //   when that effect is registered (`horizon_client::brewing::effect`); without SoulsCraft the
 //   turret keeps its own bleeding timer, damage of `minecraft:magic`, which armour does not cut.
+//   Slowness (slice 18) is a movement speed modifier on the mob (`horizon_client::mobs::finalize`,
+//   what `/attribute .. modifier add` edits), exactly −20% a module, taken off when it runs out.
 // - Resistances: SoulsCraft's mobs.json, where Tuning::soulscraft_mobs says it may be, read once;
 //   undead from the world's `#minecraft:undead` entity tag.
 // - Support buffs: heal through `native_set_player_status`; guard in
@@ -72,7 +74,9 @@ const MODULE_SLOTS: usize = rustcraft_rules::tiers::MAX_SOCKETS;
 const SHOT_TYPE: &str = "minecraft:generic";
 const BLEED_TYPE: &str = "minecraft:magic";
 const POISON: &str = "minecraft:poison";
-const SLOWNESS: &str = "minecraft:slowness";
+/// Slice 18: a turret's slowness is a movement speed modifier of this id on the mob (exactly −20% a
+/// module, guide `mod_slow`), not the base game's effect with its 15% steps.
+pub(super) const SLOW_ID: &str = "rustcraft:turret_slow";
 const OWN_BLEED: &str = "soulscraft:bleeding";
 /// A death this long after a turret's hit is the turret's kill (the base game's 100 ticks for a
 /// player's).
@@ -137,6 +141,8 @@ struct Base {
     turrets: HashMap<(String, Pos), TurretState>,
     hits: HashMap<u32, Hit>,
     bleeds: HashMap<u32, Bleed>,
+    /// Slice 18: (dimension, mob) → the tick its turret slowness comes off.
+    slows: HashMap<(String, u32), u64>,
     deaths: Vec<(u32, String, Pos)>,
     /// Player → the buffs on them now, and what was applied as modifiers.
     buffs: HashMap<u128, Buff>,
@@ -534,6 +540,7 @@ pub(super) fn tick(game: &mut Game<'_>, dimension: &str, level: &LevelNet, t: &T
     crate::game::rustcraft_utility::tick(game, dimension, level, t);
     crate::game::rustcraft_gear::tick(game, dimension);
     bleed(game, dimension, now, t);
+    unslow(game, dimension, now);
     deaths(game, t);
     if now.is_multiple_of(ANCHOR_EVERY) {
         buffs(game, now);
@@ -677,7 +684,7 @@ fn run_turret(game: &mut Game<'_>, dimension: &str, pos: Pos, now: u64, t: &Tuni
     let energy = machines::buffer_energy(game, pos);
     let doing = match l.role() {
         Role::Attack => attack(game, dimension, pos, &l, owner, energy, now, &mut ts, t),
-        Role::Support => support(game, pos, &l, energy, now, &mut ts, t),
+        Role::Support => support(game, dimension, pos, &l, energy, now, &mut ts, t),
     };
     ts.shown = Some(doing);
     state().turrets.insert(key, ts);
@@ -755,7 +762,7 @@ fn attack(
                 give_mob_effect(game, id, POISON, g.ticks, g.amplifier);
             }
             Effect::Slow => {
-                give_mob_effect(game, id, SLOWNESS, g.ticks, g.amplifier);
+                slow_mob(game, dimension, id, g.slow, now + u64::from(g.ticks));
             }
             Effect::Bleed => {
                 if !(shared_bleeding()
@@ -866,6 +873,53 @@ fn aim_and_beam(game: &mut Game<'_>, pos: Pos, to: [f64; 3], particle: Option<&s
     let options = horizon_client::particles::ParticleOptions::named(particle.to_owned());
     for p in aim::beam(from, to, 0.5) {
         game.with_level(|_, level, _| level.native_send_particles(&options, None, p, [0.0; 3], 0.0, 1));
+    }
+}
+
+/// Slice 18: a turret's slowness on mob `id`: `share` of its speed off until tick `until`
+/// (`add_multiplied_total` −share, what `/attribute .. modifier add` puts on a mob).
+fn slow_mob(game: &mut Game<'_>, dimension: &str, id: u32, share: f64, until: u64) {
+    use horizon_client::mobs::finalize::{self, Attr, Op};
+    let Some(m) = game.mobs.iter_mut().find(|m| m.id == id && !m.removed) else {
+        return;
+    };
+    finalize::add_modifier(m, Attr::MovementSpeed, SLOW_ID, -share, Op::AddMultipliedTotal);
+    state().slows.insert((dimension.to_owned(), id), until);
+}
+
+/// Ticks left of a turret's slowness on mob `id` (the self-test reads it).
+pub(super) fn slow_ticks_left(id: u32) -> Option<u32> {
+    let s = state();
+    s.slows
+        .iter()
+        .find(|((_, m), _)| *m == id)
+        .map(|(_, until)| u32::try_from(until.saturating_sub(s.ticks)).unwrap_or(u32::MAX))
+}
+
+/// Slowness past its time comes off; once a second also from a mob nobody remembers slowing (a
+/// restart forgets the timers, the modifier stays on the mob).
+fn unslow(game: &mut Game<'_>, dimension: &str, now: u64) {
+    use horizon_client::mobs::finalize::{self, Attr};
+    let (due, known): (Vec<u32>, BTreeSet<u32>) = {
+        let mut s = state();
+        let due = s
+            .slows
+            .iter()
+            .filter(|((d, _), until)| d == dimension && **until <= now)
+            .map(|((_, id), _)| *id)
+            .collect::<Vec<_>>();
+        for id in &due {
+            s.slows.remove(&(dimension.to_owned(), *id));
+        }
+        let known = s.slows.keys().filter(|(d, _)| d == dimension).map(|(_, id)| *id).collect();
+        (due, known)
+    };
+    let sweep = now.is_multiple_of(ANCHOR_EVERY);
+    for m in game.mobs.iter_mut() {
+        let off = due.contains(&m.id) || (sweep && !known.contains(&m.id));
+        if off && finalize::has_modifier(m, Attr::MovementSpeed, SLOW_ID) {
+            finalize::remove_modifier(m, Attr::MovementSpeed, SLOW_ID);
+        }
     }
 }
 
@@ -993,8 +1047,10 @@ pub(super) fn strike(
     game.native_hurt_entity(dimension, id, amount, SHOT_TYPE, None)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn support(
     game: &mut Game<'_>,
+    dimension: &str,
     pos: Pos,
     l: &Loadout,
     energy: f64,
@@ -1058,10 +1114,31 @@ fn support(
                     aim_and_beam(game, pos, to, Some(HEAL_BEAM));
                 }
             }
+            // Slice 18, guide `mod_heal`: a beam from the turret shows whom it heals.
+            if now.is_multiple_of(BEAM_EVERY)
+                && let Some(p) = players.iter().find(|p| p.uuid == who)
+            {
+                heal_beam(game, dimension, at, p.position);
+            }
             doing = Shown::Healing(name);
         }
     }
     turret::shown(l, true, doing)
+}
+
+/// Ticks between two draws of the heal beam.
+const BEAM_EVERY: u64 = 10;
+
+/// The heal beam: pink dust every half block from the turret's top to the player's chest
+/// (`/particle minecraft:dust`, which Horizon sends to the players near each point).
+fn heal_beam(game: &mut Game<'_>, dimension: &str, turret: [f64; 3], feet: [f64; 3]) {
+    let from = [turret[0], turret[1] + 0.2, turret[2]];
+    let chest = [feet[0], feet[1] + 1.2, feet[2]];
+    for [x, y, z] in turret::beam_points(from, chest, 0.5) {
+        game.native_run_command(&format!(
+            "execute in {dimension} run particle minecraft:dust{{color:[1.0,0.42,0.54],scale:1.0}} {x:.2} {y:.2} {z:.2} 0 0 0 0 1 force"
+        ));
+    }
 }
 
 /// Each second: buffs past their time come off; power and haste follow as modifiers.

@@ -148,6 +148,10 @@ pub struct Given {
     pub amplifier: u8,
     /// Bleeding: damage a second, for the turret's own timer when SoulsCraft is not there.
     pub damage: f64,
+    /// Slowness: the share of the mob's speed it takes, exactly (guide `mod_slow`: 0.2 a module,
+    /// at most 0.6), given as a movement speed modifier rather than the base game's effect, whose
+    /// steps are 15%.
+    pub slow: f64,
 }
 
 /// A mob's resistances: duration multipliers by effect key (0 immune, a missing key 1).
@@ -160,9 +164,9 @@ impl Resist {
     }
 }
 
-/// The slowness level that comes nearest to `percent` in the base game's steps of 15% a level.
-pub fn slowness_amplifier(percent: f64) -> u8 {
-    ((percent / 15.0).round().max(1.0) - 1.0) as u8
+/// The share of speed `slow` slowness modules take: 20% each, never past the cap (TR2).
+pub fn slow_fraction(slow: u32, t: &Tuning) -> f64 {
+    (t.slow_percent * f64::from(slow)).min(t.slow_cap) / 100.0
 }
 
 /// TR1, TR2, TR5: what one shot of `l` gives a mob with `resist`, undead or not.
@@ -180,6 +184,7 @@ pub fn effects(l: &Loadout, t: &Tuning, resist: &Resist, undead: bool) -> Vec<Gi
             ticks: ticks(Effect::Bleed, t.bleed_seconds),
             amplifier: (l.bleed - 1).min(255) as u8,
             damage: t.bleed_damage * f64::from(l.bleed),
+            slow: 0.0,
         });
     }
     if l.poison > 0 && !undead {
@@ -188,15 +193,16 @@ pub fn effects(l: &Loadout, t: &Tuning, resist: &Resist, undead: bool) -> Vec<Gi
             ticks: ticks(Effect::Poison, t.poison_seconds),
             amplifier: (l.poison - 1).min(255) as u8,
             damage: 0.0,
+            slow: 0.0,
         });
     }
     if l.slow > 0 {
-        let percent = (t.slow_percent * f64::from(l.slow)).min(t.slow_cap);
         out.push(Given {
             effect: Effect::Slow,
             ticks: ticks(Effect::Slow, t.slow_seconds),
-            amplifier: slowness_amplifier(percent),
+            amplifier: 0,
             damage: 0.0,
+            slow: slow_fraction(l.slow, t),
         });
     }
     out.retain(|g| g.ticks > 0);
@@ -228,6 +234,22 @@ pub fn buffs(l: &Loadout, t: &Tuning) -> Buffs {
     }
 }
 
+/// Guide `mod_heal`: the beam that shows whom a support turret heals, as points every `step`
+/// blocks from `from` (the turret) to `to` (the player's chest), both ends included.
+pub fn beam_points(from: [f64; 3], to: [f64; 3], step: f64) -> Vec<[f64; 3]> {
+    let d = [to[0] - from[0], to[1] - from[1], to[2] - from[2]];
+    let length = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt();
+    let n = (length / step.max(1e-3)).round() as usize;
+    if n == 0 {
+        return vec![from];
+    }
+    (0..=n)
+        .map(|i| {
+            let k = i as f64 / n as f64;
+            [from[0] + d[0] * k, from[1] + d[1] * k, from[2] + d[2] * k]
+        })
+        .collect()
+}
 /// The player a heal goes to: the most hurt below their maximum, by (id, health, maximum).
 pub fn most_hurt(players: &[(u128, f64, f64)]) -> Option<u128> {
     players
@@ -372,11 +394,12 @@ mod tests {
         assert_eq!(two[0].amplifier, 1);
         let slows = |n: usize| {
             let l = load(&vec![Module::Slow; n]);
-            effects(&l, &t, &Resist::default(), false)[0].amplifier
+            effects(&l, &t, &Resist::default(), false)[0].slow
         };
-        // 20% → level 1 (15%), 40% → level 3 (45%), 60% → level 4 (60%), 80% still 60%.
-        assert_eq!(slows(1), 0);
-        assert_eq!(slows(3), 3);
+        // Guide `mod_slow`: exactly −20% a module, −40% with two, never past −60%.
+        assert!((slows(1) - 0.2).abs() < 1e-9);
+        assert!((slows(2) - 0.4).abs() < 1e-9);
+        assert!((slows(3) - 0.6).abs() < 1e-9);
         assert_eq!(slows(4), slows(3));
     }
 
@@ -438,6 +461,19 @@ mod tests {
         assert_eq!(fast.shot_energy(&t), 40.0 * 2.5 / 2.0);
         let eco = load(&[Module::Economy]);
         assert!(eco.shot_energy(&t) < 40.0);
+    }
+
+    #[test]
+    fn the_heal_beam_runs_from_the_turret_to_the_player() {
+        // Guide `mod_heal`: «луч от неё показывает, кого» it heals.
+        let from = [0.5, 1.0, 0.5];
+        let to = [4.5, 1.0, 0.5];
+        let p = beam_points(from, to, 0.5);
+        assert_eq!(p.len(), 9, "every half block, both ends included");
+        assert_eq!(p[0], from);
+        assert_eq!(p[8], to);
+        assert!((p[4][0] - 2.5).abs() < 1e-9);
+        assert_eq!(beam_points(from, from, 0.5), vec![from]);
     }
 
     #[test]

@@ -18,6 +18,8 @@ pub mod fluids;
 pub mod handbook;
 pub mod magistral;
 pub mod miners;
+// Slice 18, the module stream.
+pub mod modules18;
 pub mod monorail;
 pub mod orders2;
 pub mod rest;
@@ -394,6 +396,11 @@ pub struct MobView {
     pub pos: [f64; 3],
     pub health: f32,
     pub effects: Vec<(String, u32, u8)>,
+    /// Slice 18: the share of its speed a turret's slowness takes now (its movement speed
+    /// modifier `rustcraft:turret_slow`), if it is slowed.
+    pub slow: Option<f64>,
+    /// Ticks left of that slowness.
+    pub slow_ticks: Option<u32>,
 }
 
 impl MobView {
@@ -569,6 +576,8 @@ pub fn catalog() -> Vec<Build> {
     all.extend(gear18::ALL);
     // Slice 18, stream 3.
     all.extend(slice18_machine::ALL);
+    // Slice 18, the module stream.
+    all.extend(modules18::ALL);
     all
 }
 

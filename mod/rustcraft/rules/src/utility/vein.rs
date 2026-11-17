@@ -7,12 +7,13 @@ pub const STEP_TICKS: u64 = 1200;
 pub const BLOCK_ENERGY: f64 = 2000.0;
 pub const REACH: i32 = 2;
 
-/// The ores and their chances in percent (guide `vein`); the last seven are the rare ones.
+/// The ores and their chances in percent (guide `vein`); the last six are the rare ones the rarity
+/// module makes twice as likely (guide `mod_rare`: gold, lapis, quartz, emerald, diamond, debris).
 pub const ORES: [(&str, f64, bool); 10] = [
     ("minecraft:coal_ore", 30.0, false),
     ("minecraft:copper_ore", 25.0, false),
     ("minecraft:iron_ore", 20.0, false),
-    ("minecraft:redstone_ore", 8.0, true),
+    ("minecraft:redstone_ore", 8.0, false),
     ("minecraft:lapis_ore", 6.0, true),
     ("minecraft:gold_ore", 6.0, true),
     ("minecraft:nether_quartz_ore", 3.0, true),
@@ -41,8 +42,9 @@ pub const PICKS: [&str; 9] = [
     "minecraft:emerald_ore",
     "minecraft:diamond_ore",
 ];
-/// The pick module's price: three times the energy.
-pub const PICK_FACTOR: f64 = 3.0;
+/// The pick module's price: the block costs what it costs without it (guide `mod_pick`: the module
+/// itself is the dear part; `mod_rare`: "темп роста и цена блока не меняются").
+pub const PICK_FACTOR: f64 = 1.0;
 /// ST3: the stratum grows a block in 120 s for 3000 E.
 pub const STRATUM_TICKS: u64 = 2400;
 pub const STRATUM_ENERGY: f64 = 3000.0;
@@ -54,6 +56,15 @@ pub fn stratum(rock: &str) -> Option<&'static str> {
         "minecraft:gravel" => Some("minecraft:suspicious_gravel"),
         _ => None,
     }
+}
+
+/// Slice 18 (guide `mod_stratum`): with the stratum module the vein's window offers sand or gravel;
+/// the vein takes the chosen one and grows its suspicious block.
+pub const STRATUM_ROCKS: [&str; 2] = ["minecraft:sand", "minecraft:gravel"];
+
+/// The rock the stratum takes for window choice `choice` (0 sand, 1 gravel; sand for any other).
+pub fn stratum_rock(choice: usize) -> &'static str {
+    STRATUM_ROCKS.get(choice).copied().unwrap_or(STRATUM_ROCKS[0])
 }
 
 /// Whether `rock` feeds ore (not the stratum).
@@ -102,5 +113,27 @@ mod tests {
         assert!(is_rock("minecraft:cobblestone") && !is_rock("minecraft:dirt"));
         assert_eq!(stratum("minecraft:gravel"), Some("minecraft:suspicious_gravel"));
         assert!(is_stone("minecraft:stone") && !is_stone("minecraft:sand"));
+    }
+
+    #[test]
+    fn the_stratum_takes_the_rock_its_window_chose() {
+        assert_eq!(stratum_rock(0), "minecraft:sand");
+        assert_eq!(stratum_rock(1), "minecraft:gravel");
+        assert_eq!(stratum_rock(7), "minecraft:sand");
+        for r in STRATUM_ROCKS {
+            assert!(stratum(r).is_some());
+        }
+    }
+
+    #[test]
+    fn redstone_is_not_rare_and_the_pick_costs_no_more() {
+        // Guide `mod_rare` names gold, lapis, quartz, emerald, diamond and ancient debris only.
+        let rare: Vec<&str> = ORES.iter().filter(|o| o.2).map(|o| o.0).collect();
+        assert_eq!(
+            rare,
+            ["minecraft:lapis_ore", "minecraft:gold_ore", "minecraft:nether_quartz_ore", "minecraft:emerald_ore", "minecraft:diamond_ore", "minecraft:ancient_debris"]
+        );
+        // Guide `mod_pick`/`mod_rare`: the block's price does not change.
+        assert_eq!(PICK_FACTOR, 1.0);
     }
 }

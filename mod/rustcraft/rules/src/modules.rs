@@ -579,7 +579,8 @@ mod tests {
         let (a2, a3, a4) = ("rustcraft:sparksteel", "rustcraft:crystallite", "rustcraft:starsteel");
         let shard = "minecraft:amethyst_shard";
         let modr = |a: &str, x: &str| (vec!["axa", "xsx", "axa"], keyed(&[("a", a), ("x", x), ("s", shard)]));
-        let cases: Vec<(Module, (Vec<&str>, Vec<(String, String)>))> = vec![
+        type Shaped<'a> = (Vec<&'a str>, Vec<(String, String)>);
+        let cases: Vec<(Module, Shaped)> = vec![
             (M::Stack, (vec!["b b", " c ", "b b"], keyed(&[("b", a2), ("c", "minecraft:chest")]))),
             (M::Stack2, (vec!["b b", " c ", "b b"], keyed(&[("b", a3), ("c", "minecraft:chest")]))),
             (M::Stack3, (vec!["b b", " c ", "b b"], keyed(&[("b", a4), ("c", "minecraft:chest")]))),

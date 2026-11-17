@@ -350,8 +350,8 @@ impl Worker {
         if self.tool == Some(Tool::Hold) {
             return t.cargo_hold.min(t.worker_hold_max);
         }
-        (t.worker_hold + t.worker_hold_per_storage * self.count(Module::Storage) as usize)
-            .min(t.worker_hold_max)
+        // Guide `mod_storage`: ×2 a module (slice 18), at most the window's rows.
+        (t.worker_hold * modules::storage_factor(&self.upgrades)).min(t.worker_hold_max)
     }
 
     /// Slice 11: a guard's range, blocks; a radius upgrade doubles it (A7).
@@ -921,9 +921,10 @@ pub(crate) mod tests {
         ];
         assert_eq!(w.capacity(&t), t.worker_battery * t.worker_battery_upgrade);
         assert!(w.refit(&t).is_empty());
+        // Guide `mod_storage`: ×2 a module, as far as the window's five rows go.
         assert_eq!(
             w.hold.slots.len(),
-            t.worker_hold + t.worker_hold_per_storage
+            (t.worker_hold * 2).min(t.worker_hold_max)
         );
         assert_eq!(w.work_ticks(8.0, &t), 8.0 / t.speed_work);
         w.upgrades[0] = Some(Module::Radius);
@@ -1151,7 +1152,6 @@ pub(crate) mod tests {
 
     #[test]
     fn a_worker_packs_into_its_chassis_and_back() {
-
         let t = Tuning::default();
         let mut f = Fleet::default();
         let id = f.add(7, [1, 2, 3], &t);
@@ -1170,7 +1170,9 @@ pub(crate) mod tests {
         assert_eq!((w.owner, w.cell, w.tool), (9, [5, 6, 7], Some(Tool::Reaper)));
         assert_eq!(w.upgrades[1], Some(Module::Storage));
         assert_eq!(w.hold.count("minecraft:wheat_seeds"), 40);
-        assert_eq!(w.hold.slots.len(), t.worker_hold + t.worker_hold_per_storage);
+        // Guide `mod_storage`: the hold doubles a module, up to the window's rows (rules::modules).
+        assert_eq!(w.hold.slots.len(), w.hold_size(&t));
+        assert!(w.hold.slots.len() > t.worker_hold);
         assert_eq!((w.charge, w.errand), (123.0, Errand::Work));
         assert!(f.put_back(9, [0, 0, 0], "not json", &t).is_none());
     }
