@@ -232,6 +232,8 @@ pub(super) fn bench(game: &mut Game<'_>, action: &str, pos: Pos) -> Result<Strin
                 .ok_or_else(|| format!("no housing taken at {pos:?}"))
         }
         "facade_items" => Ok(facade_items(game, pos).join(",")),
+        // Wave 2: what a broken node gives back (rustcraft_server::on_destroy_block).
+        "node_returns" => Ok(crate::game::rustcraft_node_window::node_returns(game, pos).join(",")),
         "weak" => Ok(game
             .native_mod_block_entity(pos)
             .and_then(|e| match e.nbt.get(&JavaString::from(WEAK_KEY)) {
@@ -250,9 +252,15 @@ pub(super) fn bench(game: &mut Game<'_>, action: &str, pos: Pos) -> Result<Strin
             if game.native_block(pos) != "minecraft:air" {
                 return Err("the machine stayed".into());
             }
-            let state = game.native_default_state(&stack.item).ok_or("no state")?;
+            // Placed as the item places it: its family's block on the item's tier.
+            let (block, tier) = rustcraft_rules::tiers::family_of_item(&stack.item)
+                .map_or((stack.item.to_string(), None), |(f, t)| (f.block.to_owned(), Some(t)));
+            let state = game.native_default_state(&block).ok_or("no state")?;
             if !game.native_set_block(&dimension, pos, state, 3) {
                 return Err("not placed back".into());
+            }
+            if let Some(t) = tier {
+                game.native_set_block_property(pos, rustcraft_rules::tiers::PROPERTY, &t.to_string());
             }
             on_place_block(game, &stack, pos);
             Ok(stack.item.to_string())
@@ -318,6 +326,11 @@ pub(super) fn lift_machine(game: &mut Game<'_>, dimension: &str, pos: Pos) -> Op
     if content::Machine::of(&block).is_none() || !wrench::handles(&block) {
         return None;
     }
+    // A machine of tiers 2–4 is lifted as its tier's item (`rustcraft:furnace_3`), which places
+    // that tier again (rustcraft_tiers::state_for_placement).
+    let item = crate::game::rustcraft_tiers::family_at(game, pos)
+        .and_then(|(family, tier)| family.item(tier))
+        .unwrap_or_else(|| block.to_string());
     let entity = game.native_mod_block_entity(pos)?;
     let items: Vec<Tag> = entity
         .items
@@ -344,7 +357,7 @@ pub(super) fn lift_machine(game: &mut Game<'_>, dimension: &str, pos: Pos) -> Op
     if !game.native_set_block(dimension, pos, air, 3) {
         return None;
     }
-    let mut stack = ItemStack::new(&block, 1);
+    let mut stack = ItemStack::new(&item, 1);
     stack
         .data_mut()
         .set_other(CUSTOM_DATA, Some(Tag::Compound(data)));
@@ -451,6 +464,13 @@ pub(super) fn update_tag(entity: &horizon_client::containers::ModBlockEntity, ta
         }
     }
     // Slice 18 (s18-last): the order items riding it (rustcraft_orders::draw_riding).
+    // Wave 2: the plain flow of its item nets (show_flow).
+    for key in [rustcraft_rules::net::flow::FLOW_KEY, rustcraft_rules::net::flow::FLOW_ITEMS_KEY] {
+        if let Some(v) = entity.nbt.get(&JavaString::from(key)) {
+            tag.get_or_insert_with(Compound::new)
+                .insert(JavaString::from(key), v.clone());
+        }
+    }
     for key in [rustcraft_rules::orders::ride::RIDE_KEY, rustcraft_rules::orders::ride::RIDE_ITEMS_KEY] {
         if let Some(v) = entity.nbt.get(&JavaString::from(key)) {
             tag.get_or_insert_with(Compound::new)
@@ -478,12 +498,18 @@ pub(super) fn draw_housing(
     }
     // Slice 18 (s18-last): an order's items riding it move each frame: nothing kept meanwhile.
     let riding = crate::game::rustcraft_orders::draw_riding(game, entity, draw);
+    // Wave 2: and the plain flow of its item nets (M5).
+    let riding = draw_flow(game, entity, draw) || riding;
     let weak = match entity.nbt.get(&JavaString::from(WEAK_KEY)) {
         Some(Tag::Byte(b)) => *b as u8,
         _ => 0,
     };
     if weak == 0 {
-        if !riding {
+        // F5: a housing under a facade is drawn bare only while the wrench is in hand; kept, it
+        // would stay bare after the wrench is put away (the kept geometry is not drawn again
+        // when the held item changes, SRC native_block_entity_draw.rs:199-212).
+        let covered = crate::game::rustcraft_builder::has_facade(&entity.nbt);
+        if !riding && !covered {
             draw.keep();
         }
         return;
@@ -528,6 +554,29 @@ pub(super) fn mark_weak(game: &mut Game<'_>, level: &server::LevelNet) {
 // chunk is not gone.
 
 static HANDLED: LazyLock<Mutex<BTreeSet<(String, Pos)>>> = LazyLock::new(Mutex::default);
+
+/// Wave 2: each housing's facade and block of its look as items, as last seen (at a rescan or a
+/// facade click), so that a housing gone without a player drops them too: by then its block
+/// entity is gone.
+static FACADES: LazyLock<Mutex<HashMap<(String, Pos), Vec<String>>>> = LazyLock::new(Mutex::default);
+
+fn facades() -> MutexGuard<'static, HashMap<(String, Pos), Vec<String>>> {
+    FACADES.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+/// A facade was set, changed or taken off the housing at `pos`: what it would give back now.
+pub(super) fn remember_facade(game: &Game<'_>, dimension: &str, pos: Pos) {
+    if game.native_block(pos) != content::HOUSING {
+        return;
+    }
+    let items = facade_items(game, pos);
+    let key = (dimension.to_owned(), pos);
+    if items.is_empty() {
+        facades().remove(&key);
+    } else {
+        facades().insert(key, items);
+    }
+}
 
 fn handled() -> MutexGuard<'static, BTreeSet<(String, Pos)>> {
     HANDLED.lock().unwrap_or_else(PoisonError::into_inner)
@@ -580,5 +629,164 @@ pub(super) fn drop_lost(
         for c in housing.slots.into_iter().flatten() {
             server::drop_one(game, dimension, pos, content::channel_item(c.kind, c.tier));
         }
+        // Wave 2: and its facade and the block of its look (guide `facade`).
+        let covered = facades().remove(&(dimension.to_owned(), pos)).unwrap_or_default();
+        for item in covered {
+            server::drop_one(game, dimension, pos, &item);
+        }
     }
+    // What the level's housings would give back now, for the next rescan.
+    let now_covered: Vec<(Pos, Vec<String>)> = now
+        .housings
+        .keys()
+        .map(|&p| (p, facade_items(game, p)))
+        .filter(|(_, items)| !items.is_empty())
+        .collect();
+    let mut f = facades();
+    f.retain(|(d, _), _| d != dimension);
+    for (p, items) in now_covered {
+        f.insert((dimension.to_owned(), p), items);
+    }
+}
+
+// ---- Wave 2: the plain item flow seen in the housings (M5, rustcraft_rules::net::flow) ----
+
+#[derive(Default)]
+struct FlowLevel {
+    /// This second's moves, as the item nets made them.
+    moves: Vec<rustcraft_rules::net::flow::Move>,
+    /// The housings that carry a flow now.
+    shown: BTreeSet<Pos>,
+}
+
+static FLOW: LazyLock<Mutex<HashMap<String, FlowLevel>>> = LazyLock::new(Mutex::default);
+
+fn flow() -> MutexGuard<'static, HashMap<String, FlowLevel>> {
+    FLOW.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+/// rustcraft_transport::tick: the moves one item net `key` made.
+pub(super) fn moved(
+    dimension: &str,
+    key: rustcraft_rules::orders::ship::NetKey,
+    transfers: &[rustcraft_rules::net::items::Transfer],
+) {
+    if transfers.is_empty() {
+        return;
+    }
+    let mut f = flow();
+    let level = f.entry(dimension.to_owned()).or_default();
+    // A second of a busy net is many moves of a few pairs; a pair once is enough to draw it.
+    for t in transfers {
+        if level.moves.len() >= 4 * rustcraft_rules::net::flow::MAX_HOUSINGS {
+            break;
+        }
+        if !level.moves.iter().any(|m| m.0 == key && m.1 == t.from && m.2 == t.to) {
+            level.moves.push((key, t.from, t.to, t.item.clone()));
+        }
+    }
+}
+
+/// Once a second: each housing the second's moves went through gets the stream's spans; one no
+/// longer flowing is cleared; a housing whose spans changed goes to clients.
+pub(super) fn show_flow(game: &mut Game<'_>, dimension: &str, level: &server::LevelNet) {
+    use rustcraft_rules::{net::flow, orders::ride};
+    let (moves, before) = {
+        let mut f = flow();
+        let l = f.entry(dimension.to_owned()).or_default();
+        (std::mem::take(&mut l.moves), std::mem::take(&mut l.shown))
+    };
+    let now = game.world.game_time;
+    let tuning = server::tuning();
+    let mut want: std::collections::BTreeMap<Pos, Vec<(String, ride::Span)>> = Default::default();
+    for (key, from, to, item) in flow::pick(&moves) {
+        if want.len() >= flow::MAX_HOUSINGS {
+            break;
+        }
+        let Some(path) = level.transport.path(&level.layout, tuning, key, from, to) else {
+            continue;
+        };
+        let drawn = rustcraft_rules::storage::keys::item_of(&item).to_owned();
+        for (housing, span) in flow::spans(&level.layout, &path, from, to, now) {
+            want.entry(housing).or_default().push((drawn.clone(), span));
+        }
+    }
+    let touched: BTreeSet<Pos> = before.iter().chain(want.keys()).copied().collect();
+    for pos in touched {
+        let (ints, items) = ride::encode(want.get(&pos).map_or(&[][..], Vec::as_slice));
+        let Some(entity) = game.native_mod_block_entity(pos) else {
+            continue;
+        };
+        let had = match entity.nbt.get(&JavaString::from(flow::FLOW_KEY)) {
+            Some(Tag::IntArray(v)) => v.clone(),
+            _ => Vec::new(),
+        };
+        if entity.id != content::HOUSING || had == ints {
+            continue;
+        }
+        game.native_with_mod_block_entity(pos, |e| {
+            if ints.is_empty() {
+                e.nbt.remove(&JavaString::from(flow::FLOW_KEY));
+                e.nbt.remove(&JavaString::from(flow::FLOW_ITEMS_KEY));
+            } else {
+                let list = items.iter().map(|i| Tag::String(JavaString::from(i.as_str()))).collect();
+                e.nbt.insert(JavaString::from(flow::FLOW_KEY), Tag::IntArray(ints.clone()));
+                e.nbt.insert(JavaString::from(flow::FLOW_ITEMS_KEY), Tag::List(list));
+            }
+        });
+        game.native_block_entity_sync(pos);
+    }
+    flow()
+        .entry(dimension.to_owned())
+        .or_default()
+        .shown = want.keys().copied().collect();
+}
+
+/// Proposal: the size a flowing item is drawn at, of a block (as an order's riding items).
+const FLOW_SCALE: f32 = 0.35;
+
+/// On a client: the plain flow's items in the housing, each where it is this frame; whether any
+/// of them is still to come or under way (then its geometry is not kept).
+fn draw_flow(
+    game: &Game<'_>,
+    entity: &horizon_client::containers::ModBlockEntity,
+    draw: &mut crate::game::native_block_entity_draw::BlockEntityDraw,
+) -> bool {
+    use rustcraft_rules::{net::flow, orders::ride};
+    let ints = match entity.nbt.get(&JavaString::from(flow::FLOW_KEY)) {
+        Some(Tag::IntArray(v)) => v.clone(),
+        _ => return false,
+    };
+    let items: Vec<String> = match entity.nbt.get(&JavaString::from(flow::FLOW_ITEMS_KEY)) {
+        Some(Tag::List(list)) => list
+            .iter()
+            .filter_map(|t| match t {
+                Tag::String(s) => Some(s.to_string_lossy()),
+                _ => None,
+            })
+            .collect(),
+        _ => Vec::new(),
+    };
+    let riding = ride::decode(&ints, &items);
+    let now = draw.game_time as i32;
+    if !riding.iter().any(|(_, s)| now.wrapping_sub(s.t1) <= 0) {
+        return false;
+    }
+    for (k, (item, span)) in riding.iter().enumerate() {
+        let Some(at) = ride::place(*span, draw.game_time, draw.partial) else {
+            continue;
+        };
+        draw.push();
+        draw.translate(at);
+        draw.scale([FLOW_SCALE; 3]);
+        game.native_draw_item(
+            draw,
+            &ItemStack::new(item.as_str(), 1),
+            horizon_assets::item_model::DisplayContext::Ground,
+            None,
+            k as i32,
+        );
+        draw.pop();
+    }
+    true
 }

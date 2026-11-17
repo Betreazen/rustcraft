@@ -117,10 +117,16 @@ fn stratum_grows_the_chosen_rock(o: Pos, _: &Tuning) -> Scenario {
             b.set_modules(p, &[Module::Stratum.item()])?;
             b.put(p, 0, "minecraft:sand", 8)?;
             b.put(p, 1, "minecraft:gravel", 8)?;
-            b.press_cursor(p, crate::machines::sheet::Press::Toggle(1).id(), None).map(|_| ())
+            b.press_cursor(p, crate::machines::sheet::Press::Toggle(1).id(), None)?;
+            // Slice 18, wave 2: and the warm ocean ruins' find table.
+            b.press_cursor(p, crate::machines::sheet::Press::Toggle(4).id(), None).map(|_| ())
         })
-        .check("its window offers sand and gravel", move |b, _| {
-            same("choices", b.sheet(p).map(|s| s.toggles.len()), Some(crate::utility::vein::STRATUM_ROCKS.len()))
+        .check("its window offers sand and gravel, then the find tables, one of each chosen", move |b, _| {
+            use crate::utility::vein::{STRATUM_ROCKS, STRATUM_TABLES};
+            let s = b.sheet(p).ok_or("no sheet")?;
+            same("choices", s.toggles.len(), STRATUM_ROCKS.len() + STRATUM_TABLES.len())?;
+            let on: Vec<usize> = s.toggles.iter().enumerate().filter(|(_, t)| t.on).map(|(i, _)| i).collect();
+            same("chosen", on, vec![1, 4])
         })
         .until("suspicious gravel grew beside it", 2700, move |b, _| Ok(grew(b, "minecraft:suspicious_gravel")))
         .check("and no suspicious sand", move |b, _| same("suspicious sand", grew(b, "minecraft:suspicious_sand"), false))

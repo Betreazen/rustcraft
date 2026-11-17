@@ -67,6 +67,46 @@ pub fn stratum_rock(choice: usize) -> &'static str {
     STRATUM_ROCKS.get(choice).copied().unwrap_or(STRATUM_ROCKS[0])
 }
 
+/// Slice 18, wave 2 (guide `mod_stratum`: «и таблицу находок»): with the stratum module the
+/// window's toggles are the two rocks, then the archaeology table's find tables; each group is a
+/// choice of one.
+pub const STRATUM_TABLES: [&str; 5] = crate::utility::ARCHEO_TABLES;
+
+/// The rock (0 sand, 1 gravel) and the find table chosen by the stratum window's `toggles`; the
+/// first of each when none is on.
+pub fn stratum_choice(toggles: &[bool]) -> (usize, usize) {
+    let rocks = STRATUM_ROCKS.len();
+    let rock = toggles.iter().take(rocks).position(|t| *t).unwrap_or(0);
+    let table = toggles
+        .iter()
+        .skip(rocks)
+        .take(STRATUM_TABLES.len())
+        .position(|t| *t)
+        .unwrap_or(0);
+    (rock, table)
+}
+
+/// A press on the stratum window's toggle `i`: that one on, the others of its group off.
+pub fn stratum_press(toggles: &[bool], i: usize) -> Vec<bool> {
+    let rocks = STRATUM_ROCKS.len();
+    let n = rocks + STRATUM_TABLES.len();
+    let mut t = toggles.to_vec();
+    t.resize(n.max(t.len()), false);
+    let group = if i < rocks { 0..rocks } else { rocks..n };
+    if !group.contains(&i) {
+        return t;
+    }
+    for k in group {
+        t[k] = k == i;
+    }
+    t
+}
+
+/// The find table of the stratum window's choice.
+pub fn stratum_table(toggles: &[bool]) -> &'static str {
+    STRATUM_TABLES[stratum_choice(toggles).1]
+}
+
 /// Whether `rock` feeds ore (not the stratum).
 pub fn is_stone(rock: &str) -> bool {
     is_rock(rock) && stratum(rock).is_none()
@@ -101,6 +141,18 @@ pub fn cells() -> Vec<[i32; 3]> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_stratum_window_chooses_a_rock_and_a_table() {
+        assert_eq!(stratum_choice(&[]), (0, 0));
+        let t = stratum_press(&[], 1);
+        let t = stratum_press(&t, 2 + 3);
+        assert_eq!(stratum_choice(&t), (1, 3));
+        assert_eq!(stratum_table(&t), crate::utility::ARCHEO_TABLES[3]);
+        // A table press leaves the rock; another rock leaves the table.
+        let t = stratum_press(&t, 0);
+        assert_eq!(stratum_choice(&t), (0, 3));
+    }
 
     #[test]
     fn common_ores_come_first_and_rarity_shifts_the_chances() {

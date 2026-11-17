@@ -35,6 +35,8 @@ pub mod slice13;
 pub mod slice14;
 pub mod slice15;
 pub mod slice18_machine;
+// Slice 18, wave 2: machines and modules.
+pub mod w2_machine;
 // Slice 18, cross-stream agent.
 pub mod s18_cross;
 pub mod s18_last;
@@ -55,6 +57,8 @@ pub mod s18_last_pack;
 pub mod s18_last_orders;
 // Slice 18, wave 2: rail, workers, base and gear.
 pub mod s18_w2_rail_gear;
+// Slice 18, wave 2: the magistral and the energy.
+pub mod w2_pipe_energy;
 
 use std::collections::BTreeMap;
 
@@ -650,6 +654,9 @@ pub fn catalog() -> Vec<Build> {
     all.extend(s18_last_orders::ALL);
     // Slice 18, wave 2: rail, workers, base and gear.
     all.extend(s18_w2_rail_gear::ALL);
+    all.extend(w2_pipe_energy::ALL);
+    // Slice 18, wave 2: machines and modules.
+    all.extend(w2_machine::ALL);
     all
 }
 

@@ -889,12 +889,17 @@ pub(super) fn on_click(
     }
 }
 
-/// The lines over a module slot that no module fills yet.
-pub(super) fn module_slot_tooltip(lines: &mut Vec<String>) {
+/// The lines over module socket `k` that its tier keeps closed (slice 18, wave 2: the fourth
+/// opens on tier 3).
+pub(super) fn module_slot_tooltip(k: usize, lines: &mut Vec<String>) {
     lines.push(tr("rustcraft.window.module_slot", "Module slot"));
     lines.push(format!(
         "§7{}",
-        tr("rustcraft.window.module_slot.none", "No modules exist yet")
+        tr_with(
+            "rustcraft.window.module_slot.locked",
+            "Closed: opens on tier %s",
+            &[rustcraft_rules::machines::sockets::opens_on_tier(k).to_string()],
+        )
     ));
 }
 

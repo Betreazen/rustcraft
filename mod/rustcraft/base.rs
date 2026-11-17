@@ -1134,7 +1134,7 @@ fn support(
         return turret::shown(l, true, Shown::NoPlayers);
     }
     // Wave 2: the heal module draws only while someone in range is hurt (#6).
-    let someone_hurt = players.iter().any(|p| p.health < 20.0);
+    let someone_hurt = players.iter().any(|p| p.health > 0.0 && p.health < 20.0);
     ts.drawing = l.support_draw_now(t, true, someone_hurt);
     let cost = ts.drawing / t.ticks_per_second;
     if energy < cost {

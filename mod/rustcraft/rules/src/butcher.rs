@@ -58,6 +58,13 @@ pub fn strike_energy(ticks: u64, economy: u32) -> f64 {
     ENERGY_PER_SECOND * ticks as f64 / 20.0 * 0.6f64.powi(economy as i32)
 }
 
+/// Slice 18, wave 2 (A9, guide `mod_eco`: работа ×0,85): ticks between a butcher's strikes
+/// with `economy` economy modules: `base` over `economy_work` (0.85) for each. A strike still
+/// costs [`strike_energy`] of `base`, so its energy is ×0.6 a strike.
+pub fn strike_ticks(base: u64, economy: u32, economy_work: f64) -> u64 {
+    ((base as f64 / economy_work.powi(economy as i32)).round() as u64).max(1)
+}
+
 /// Slice 18: what Looting adds to a farm animal's drops, as the game's loot tables add it (0 to
 /// `level` more of each looting drop, `random` 0..1 a drop); with Fire Aspect the meat cooked.
 pub fn looting_bonus(kind: &str, level: u32, fire: bool, random: &mut dyn FnMut() -> f64) -> Vec<(String, u32)> {
@@ -209,6 +216,15 @@ pub fn worn(damage: u32, max_damage: u32) -> Option<u32> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn economy_slows_the_strike() {
+        let t = crate::tuning::Tuning::default();
+        assert_eq!(super::strike_ticks(t.butcher_ticks, 0, t.economy_work), t.butcher_ticks);
+        let one = super::strike_ticks(200, 1, t.economy_work);
+        assert_eq!(one, 235);
+        assert!(super::strike_ticks(200, 2, t.economy_work) > one);
+    }
 
     #[test]
     fn the_blade_strikes_and_looting_adds_fire_cooks() {

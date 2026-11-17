@@ -266,6 +266,28 @@ pub const STACK_MODULES: [&str; 3] = [
     "rustcraft:module_stack_3",
 ];
 
+/// The most a menu slot holds (`native_menu_slot_rules` keeps `max_stack` to 1–99,
+/// SRC/docs/native-mods.md:4617-4627).
+pub const MENU_SLOT_MAX: u32 = 99;
+
+/// Wave 2: a window slot of the miner holds its item's own stack, no more than a menu slot
+/// takes: a stack module's four times as much is not shown in the window.
+pub fn window_max(base_max: u32) -> u32 {
+    base_max.clamp(1, MENU_SLOT_MAX)
+}
+
+/// Wave 2 (guide `mod_stack`, against the menu's 99): the miner's hidden cells with its
+/// modules, `usable` window slots and `hidden` cells past them. A stack module makes every slot
+/// hold four times as much; the window's slots cannot, so the three more stacks of each go into
+/// hidden cells of four stacks each, as the furnace keeps its reserve past its slot.
+pub fn stacked_hidden(modules: &[Option<String>], usable: usize, hidden: usize) -> usize {
+    if slot_max(modules, 2) > 2 {
+        hidden + (usable * 3).div_ceil(4)
+    } else {
+        hidden
+    }
+}
+
 /// A miner's slot size for an item the game stacks to `base_max`: with a stack module in it, 64
 /// becomes 256 (16 becomes 64); a single item stays single.
 pub fn slot_max(modules: &[Option<String>], base_max: u32) -> u32 {
@@ -550,6 +572,12 @@ pub fn front(facing: &str) -> Option<Face> {
     }
 }
 
+/// Wave 2: whether a miner, a placer or a breaker on its `count`th tick hands out what it holds,
+/// once every `every` of its own ticks.
+pub fn push_due(count: u64, every: u64) -> bool {
+    every > 0 && count.is_multiple_of(every)
+}
+
 /// MN1 (guide `miner`): where the miner puts what it dug, in order: a chest beside it, else the
 /// magistral (a housing beside it takes from its slots), else a load dock beside it, where a cargo
 /// worker picks it up.
@@ -639,6 +667,37 @@ impl Shown {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn a_stack_module_keeps_the_window_slots_to_a_stack_and_adds_hidden_cells() {
+        let none: Vec<Option<String>> = vec![None];
+        let stack = vec![Some("rustcraft:module_stack".to_owned())];
+        assert_eq!(stacked_hidden(&none, 27, 9), 9);
+        assert_eq!(stacked_hidden(&stack, 27, 9), 9 + 21);
+        assert_eq!(stacked_hidden(&stack, 9, 0), 7);
+        // Nine slots of 64 and seven cells of 256 hold at least nine slots of 256.
+        assert!(9 * 64 + 7 * slot_max(&stack, 64) >= 9 * 256);
+        assert_eq!(window_max(64), 64);
+        assert_eq!(window_max(256), MENU_SLOT_MAX);
+        assert_eq!(window_max(0), 1);
+    }
+
+    #[test]
+    fn each_of_four_machines_pushes_on_its_own_count() {
+        // Four machines ticked in turn: one shared count gave three of them no push ever.
+        let mut own = [0u64; 4];
+        let mut pushed = [0u32; 4];
+        for _ in 0..64 {
+            for m in 0..4 {
+                own[m] += 1;
+                if push_due(own[m], 8) {
+                    pushed[m] += 1;
+                }
+            }
+        }
+        assert_eq!(pushed, [8, 8, 8, 8]);
+        assert!(!push_due(5, 0));
+    }
 
     #[test]
     fn storage_doubles_past_the_window() {

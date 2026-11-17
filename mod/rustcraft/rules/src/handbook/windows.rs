@@ -93,14 +93,18 @@ pub const WINDOWS: &[(&str, &[Widget])] = &[
         Widget::Status { tone: 0 },
     ]),
     ("placer", &[
+        Widget::Rows { n: 2 },
         Widget::Slots { cols: 3, cells: &[Cell { rgb: 0xb08a52, count: "32", ghost: false }, Cell { rgb: 0x8b8d91, count: "64", ghost: false }, Cell { rgb: 0x000000, count: "", ghost: false }, Cell { rgb: 0x000000, count: "", ghost: false }, Cell { rgb: 0x000000, count: "", ghost: false }, Cell { rgb: 0x000000, count: "", ghost: false }, Cell { rgb: 0x000000, count: "", ghost: false }, Cell { rgb: 0x000000, count: "", ghost: false }, Cell { rgb: 0x000000, count: "", ghost: false }] },
         Widget::Bar { pct: 100, rgb: 0xffe14a },
+        Widget::Mode { active: 1 },
         Widget::Sockets { filled: &[0x000000, 0x000000, 0x000000] },
         Widget::Status { tone: 0 },
     ]),
     ("breaker", &[
+        Widget::Rows { n: 2 },
         Widget::Slots { cols: 3, cells: &[Cell { rgb: 0xb08a52, count: "11", ghost: false }, Cell { rgb: 0x000000, count: "", ghost: false }, Cell { rgb: 0x000000, count: "", ghost: false }, Cell { rgb: 0x000000, count: "", ghost: false }, Cell { rgb: 0x000000, count: "", ghost: false }, Cell { rgb: 0x000000, count: "", ghost: false }, Cell { rgb: 0x000000, count: "", ghost: false }, Cell { rgb: 0x000000, count: "", ghost: false }, Cell { rgb: 0x000000, count: "", ghost: false }] },
         Widget::Bar { pct: 100, rgb: 0xffe14a },
+        Widget::Mode { active: 1 },
         Widget::Sockets { filled: &[0x000000, 0x000000, 0x000000] },
         Widget::Status { tone: 0 },
     ]),

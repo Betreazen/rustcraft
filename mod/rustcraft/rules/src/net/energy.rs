@@ -185,7 +185,20 @@ pub fn supply_report(
     circuits: &[Circuit],
     dt: f64,
 ) -> Supply {
-    let (got, left) = share_out(producers, consumers, circuits, dt);
+    let mut caps: Vec<f64> = circuits.iter().map(|c| c.cap).collect();
+    supply_capped(producers, consumers, circuits, &mut caps, dt)
+}
+
+/// `supply_report` with what each circuit's channel still lets through this tick (`caps`, one a
+/// circuit), lowered by what it carries: the passes of one tick share their channels' cap.
+fn supply_capped(
+    producers: &[Producer],
+    consumers: &[Consumer],
+    circuits: &[Circuit],
+    caps: &mut [f64],
+    dt: f64,
+) -> Supply {
+    let (got, left) = share_out(producers, consumers, circuits, caps, dt);
     let used = producers
         .iter()
         .map(|p| {
@@ -331,7 +344,9 @@ pub fn supply_with_storage(
     circuits: &[Circuit],
     dt: f64,
 ) -> Shared {
-    let first = supply_report(producers, consumers, circuits, dt);
+    // ch_energy: a channel passes its tier's E a tick in all, over the three passes.
+    let mut caps: Vec<f64> = circuits.iter().map(|c| c.cap).collect();
+    let first = supply_capped(producers, consumers, circuits, &mut caps, dt);
     let lacking: Vec<Consumer> = consumers
         .iter()
         .map(|c| Consumer {
@@ -353,7 +368,7 @@ pub fn supply_with_storage(
     let second = if givers.is_empty() || lacking.is_empty() {
         Supply::default()
     } else {
-        supply_report(&givers, &lacking, circuits, dt)
+        supply_capped(&givers, &lacking, circuits, &mut caps, dt)
     };
     let left: Vec<Producer> = producers
         .iter()
@@ -374,7 +389,7 @@ pub fn supply_with_storage(
     let third = if left.is_empty() || takers.is_empty() {
         Supply::default()
     } else {
-        supply_report(&left, &takers, circuits, dt)
+        supply_capped(&left, &takers, circuits, &mut caps, dt)
     };
     let mut got = first.got;
     for (b, e) in second.got {
@@ -431,6 +446,7 @@ fn share_out(
     producers: &[Producer],
     consumers: &[Consumer],
     circuits: &[Circuit],
+    caps: &mut [f64],
     dt: f64,
 ) -> (BTreeMap<Pos, f64>, BTreeMap<Pos, f64>) {
     let feed = direct_feed(producers, consumers);
@@ -453,7 +469,7 @@ fn share_out(
             )
         })
         .collect();
-    for circuit in circuits {
+    for (circuit, cap) in circuits.iter().zip(caps.iter_mut()) {
         // By the circuit's own members, not the level's every source and consumer: a level of
         // many small nets made this pass nets × blocks. Both are in block order, as before.
         let ps: Vec<Producer> = circuit
@@ -472,11 +488,12 @@ fn share_out(
             })
             .filter(|c| c.request > 0.0)
             .collect();
-        if ps.is_empty() || cs.is_empty() {
+        if ps.is_empty() || cs.is_empty() || *cap <= 1e-9 {
             continue;
         }
-        let b = balance(&ps, &cs, &mut [], Some(circuit.cap), dt);
+        let b = balance(&ps, &cs, &mut [], Some(*cap), dt);
         let used: f64 = b.supplied.values().sum();
+        *cap = (*cap - used).max(0.0);
         for (block, e) in b.supplied {
             *got.entry(block).or_insert(0.0) += e;
             if let Some(w) = wanting.get_mut(&block) {
@@ -841,6 +858,33 @@ mod tests {
         assert!(contact_circuits(&[lone], |_| true).is_empty());
         let far: BTreeSet<Pos> = [[30, 0, 0], [31, 0, 0]].into();
         assert!(contact_circuits(&[far], |_| false).is_empty());
+    }
+
+    #[test]
+    fn a_channel_passes_no_more_than_its_cap_a_tick_over_all_three_passes() {
+        // ch_energy (guide: «32 / 128 / 512 / 2048 Е за тик»): a 100 E/s source, a machine
+        // asking 100 and a charged battery that takes 32, apart on one tier-1 net. The machine's
+        // feed, the battery's cover and the battery's charge all go through the one channel.
+        let s = supply_with_storage(
+            &[producer(0, 100.0)],
+            &[consumer(5, 100.0)],
+            &[store(10, 32.0, 32.0)],
+            &[circuit(&[0, 5, 10], 32.0)],
+            DT,
+        );
+        let through = s.got.values().sum::<f64>() + s.taken.values().sum::<f64>();
+        assert!(through <= 32.0 + 1e-6, "{through} through a 32 E/s channel");
+        assert!(close(s.got[&[5, 0, 0]], 32.0), "the machine first");
+        assert!(s.given.is_empty() && s.taken.is_empty(), "nothing left for the battery");
+        // Two nets have a cap each.
+        let s = supply_with_storage(
+            &[producer(0, 100.0)],
+            &[consumer(5, 100.0)],
+            &[store(10, 32.0, 32.0)],
+            &[circuit(&[0, 5], 32.0), circuit(&[5, 10], 32.0)],
+            DT,
+        );
+        assert!(close(s.got[&[5, 0, 0]], 64.0), "32 from the source, 32 from the battery");
     }
 
     #[test]

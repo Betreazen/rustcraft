@@ -35,6 +35,12 @@ pub fn boost(modules: u8) -> f64 {
     1.0 + BOOST_PER_MODULE * f64::from(modules.min(SOCKETS))
 }
 
+/// Wave 2: what a broken node with `modules` line-boost modules gives back of them: one item a
+/// module, no more than its sockets hold.
+pub fn returned_modules(modules: u8) -> Vec<&'static str> {
+    vec![LINE_MODULE; usize::from(modules.min(SOCKETS))]
+}
+
 /// The axes of a node of tiers 1–3, as the window names them: west–east, north–south, up–down.
 pub const AXES: [[Face; 2]; 3] = [
     [Face::XNeg, Face::XPos],
@@ -226,6 +232,8 @@ const AXIS_GAP: f32 = 2.0;
 /// The balance's four rows, then the line's three.
 pub const BALANCE_Y: f32 = 47.0;
 pub const LINE_ROWS_Y: f32 = 90.0;
+/// Wave 2: the balance's rows (ui.js `balance`: Производство, Потребление, В запасе, Хватает).
+pub const BALANCE_ROWS: usize = 4;
 pub const ROW: f32 = 10.0;
 /// The «Модули» label and the sockets' items.
 pub const MODULES_LABEL_Y: f32 = 123.0;
@@ -331,6 +339,13 @@ mod tests {
     }
 
     #[test]
+    fn a_broken_node_gives_back_one_item_a_module() {
+        assert!(returned_modules(0).is_empty());
+        assert_eq!(returned_modules(2), [LINE_MODULE, LINE_MODULE]);
+        assert_eq!(returned_modules(9).len(), 3, "no more than its sockets");
+    }
+
+    #[test]
     fn a_net_takes_its_weakest_sections_boost() {
         let t = Tuning::default();
         // Two nodes, a line between: housings at x 1..=4, nodes at x 0 and x 5.
@@ -366,6 +381,7 @@ mod tests {
         assert_eq!(press_at([s[0] + 8.0, s[1] + 8.0], false), Some(Press::Socket(2)));
         assert_eq!(press_at([1.0, 1.0], false), None);
         assert!(STATUS[1] + STATUS[3] <= HEIGHT);
+        assert!(BALANCE_Y + ROW * BALANCE_ROWS as f32 <= LINE_ROWS_Y, "the four balance rows fit");
     }
 
     #[test]
