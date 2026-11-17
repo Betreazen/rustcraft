@@ -23,6 +23,8 @@
 
 - 2026-11-17, snapshot 1e5ccb6: the game built with this branch; self-tests PCT 42/42, SoulsCraft 87/87, RustCraft 157/158 — the one failure `storage18_keeps_component_stacks` checked before the net had brought all five stones (fixed in db6fee7, the scenario waits for them). Every other stream-5 scenario passed (`storage18_*`, `orders18_*`, `util18_*`, `kitchen18_*`, `repair18_*`, `fishery18_*`, `butcher18_*`, `brewer18_*`, `builder18_*`) and the updated slice-11/12/15 scenarios.
 
+- 2026-11-17, snapshot db6fee7: green — RustCraft 158/158, PCT 42/42, SoulsCraft 87/87 (not published, -Path).
+
 ## Cross-stream contracts this plan relies on
 
 - **Module items (stream 4).** The stack and filter modules are stream 4's items. This stream recognises them by item id in ONE place, `rules/src/storage/modules.rs`: `STACK_MODULES = [("rustcraft:module_stack", 1), ("rustcraft:module_stack_1024", 2), ("rustcraft:module_stack_4096", 3)]`, `FILTER_MODULE = "rustcraft:module_filter"`, `CAPACITY_MODULE = "rustcraft:module_capacity"` (exists today). If stream 4 names them otherwise, the integrator edits that one file.
@@ -61,21 +63,21 @@
 **Files:** `rules/src/storage/modules.rs` (new: ids above, `stack_tier(items) -> u8`), `rules/src/storage/terminal.rs` (sockets rects `SOCKETS: [[f32;2];3]`, `Press::Socket(k)` replacing `Press::Book`), `storage.rs` (sockets saved in the terminal's compound `sockets`; `Store::stack_module` set from the storage's terminals on rescan/press), `terminal.rs` (draw three sockets).
 - rules: `stack_tier(&[Some("rustcraft:module_stack_1024")]) == 2`; the best module of all the storage's terminals counts; `Store::stack_of(64)` = 1024 with tier 2.
 - self-test `storage_stack_module_raises_the_stack`: a 1-cell storage takes 27×256 stone with the module.
-- [x] done 7827b42 (with Task 3; self-tests `storage18_stack_module_raises_the_stack`, `storage18_filter_socket`; try pending)
+- [x] done 7827b42 (with Task 3; self-tests `storage18_stack_module_raises_the_stack`, `storage18_filter_socket`)
 
 ### Task 3: Filter module and the «своя» tab (TM1)
 
 **Files:** `rules/src/storage/view.rs` (`Tab::Own`, `Facts.own`), `rules/src/storage/filter.rs` (new: the filter's list in custom data `rustcraft:filter`: item ids, at most 27), `storage.rs` (Listing `own: Vec<u16>` from the filter module in a socket), `terminal.rs` (fifth tab), filter window: right click with the filter module opens a three-row server menu (`native_open_menu`, the tablet's way) — a click with an item on the cursor marks it, a click on a marked item unmarks it (`filter_menu.rs`, new, own file).
 - rules tests: mark / unmark / limit 27; `Tab::Own.shows` only marked ids.
 - self-test `storage_filter_tab_lists_marked`: (rules-level view with a filter list; in world: filter module in a socket makes `Listing.own` non-empty).
-- [x] done 7827b42 (filter window = bundle `filter.rs`: a click on an inventory item marks it, since a server menu has no cursor; try pending)
+- [x] done 7827b42 (filter window = bundle `filter.rs`: a click on an inventory item marks it, since a server menu has no cursor)
 
 ### Task 4: Extra terminals anywhere on the magistral (S6)
 
 **Files:** `rules/src/storage/cells.rs` (`terminal_storage_on_net(terminal, cell_of, topology)`: a terminal touching no cell takes the storage that is a joint of an item net its touched housing is on), `storage.rs` (rescan uses it; needs the level topology → `rescan` gets `&Topology`; the caller in `server.rs` passes it — one added argument).
 - rules test: terminal two housings away on the same item net finds the storage; on another net — none.
 - self-test `storage_far_terminal_sees_the_storage`.
-- [x] done d6fb79c (`cells::terminal_on_net`, `storage::link_far_terminals` called after the topology in server.rs; self-test `storage18_far_terminal_on_the_net`; try pending)
+- [x] done d6fb79c (`cells::terminal_on_net`, `storage::link_far_terminals` called after the topology in server.rs; self-test `storage18_far_terminal_on_the_net`)
 
 ### Task 5: Terminal window: any count, limits list, order chain, «Склад полон», «Нет свободного автокрафтера»
 
@@ -87,7 +89,7 @@
 - [x] rules: count row, limits rows, OrderStep chain in the wire tail (ecc342b)
 - [x] orders: `Order.chain` filled by `Queue::round`, `orders.rs` sends it
 - [x] client: count row, limits rows, chain line, «Склад полон», busy texts per kind; lang
-- [x] self-test `storage18_full_says_so`, commits ce3946d f5613fd 828ef3a (try pending)
+- [x] self-test `storage18_full_says_so`, commits ce3946d f5613fd 828ef3a
 
 ### Task 6: Tablet: drawn window (API 111), deposit, search, tabs, limits
 
@@ -100,14 +102,14 @@
 
 **Files:** `storage.rs` (holes written into each terminal's block entity `holes` int array on rescan), `terminal.rs` client block-entity draw: red stained glass at each hole relative to the terminal (`native_draw_block`, as the projector's ghost).
 - rules test: none new (shape exists); self-test `storage_holes_written_to_terminal`.
-- [x] done (self-test `storage18_terminal_keeps_its_holes`; red glass at 0.9 scale; a far terminal (S6) does not draw them; try pending)
+- [x] done (self-test `storage18_terminal_keeps_its_holes`; red glass at 0.9 scale; a far terminal (S6) does not draw them)
 
 ### Task 8: Orders through the kitchen (and the brewer)
 
 **Files:** `rules/src/orders/mod.rs` (`KINDS` + kitchen kind, steps for food recipes), `orders.rs` (dispatch to the kitchen: put ingredients into its slots 0..9, take the dish from 9..13), `terminal.rs` `KIND_BLOCKS`.
 - rules test: an order for bread plans a kitchen step.
 - self-test `orders_bread_through_kitchen`.
-- [x] done (KINDS + kitchen, `orders::kitchen_copy`, kitchen cooks the job's dish first; self-test `orders18_bread_through_the_kitchen`; brewer and other slice-12 machines not order kinds: their outputs are potions/enchanted items from player-chosen settings, recorded as a remaining gap; try pending)
+- [x] done (KINDS + kitchen, `orders::kitchen_copy`, kitchen cooks the job's dish first; self-test `orders18_bread_through_the_kitchen`; brewer and other slice-12 machines not order kinds: their outputs are potions/enchanted items from player-chosen settings, recorded as a remaining gap)
 
 ## Part B — the craft machines, common
 
@@ -116,7 +118,7 @@
 **Files:** `rules/src/utility/mod.rs` (`has_modes(u)`, `step_ticks/step_energy` with a `WorkMode`), `rules/src/machines/sheet.rs` (`Kind::Util` shape `mode: u.has_modes()` — one changed line, stream 3's file, flagged), `utility.rs` (`paced` reads the mode `util_mode`; `on_button` handles `Press::Mode`; `sheet` sets `s.mode`).
 - rules test: boost halves ticks ×3 energy (via `WorkMode::factors`), eco ×2 ticks ×0.35.
 - self-test `util_modes_switch` (press Boost on a repair stand → `util_mode` = 2, step 2.5 s in its row).
-- [x] done 81b0781 (`utility::paced` in rules; sheet.rs one line, flagged; self-test `util18_work_mode_switch`; try pending)
+- [x] done 81b0781 (`utility::paced` in rules; sheet.rs one line, flagged; self-test `util18_work_mode_switch`)
 
 ### Task 10: Sockets 3/3/4/4 by tier; module effects capacity / stack / storage
 
@@ -136,35 +138,35 @@
 
 ### Task 12: Repair — string for rod, bow, crossbow; slots 3 / 2 / 3; durability bar «алмазная кирка · 970 из 1561»
 - `rules/src/utility/repair.rs` (`material_of`), `rules/src/utility/mod.rs` slots `Repair => s(8, 0..5, 5..8)` (0..3 to repair, 3..5 material, 5..8 out), `utility.rs`, update `selftest/slice12.rs` output slot.
-- [x] done cabeef1 (capacity read from raw module items via `utility::module_items`; machines.rs Util slot rule passes them, flagged; `Util::bars` + sheet.rs line, flagged; self-test `repair18_mends_a_rod_with_string`; try pending)
+- [x] done cabeef1 (capacity read from raw module items via `utility::module_items`; machines.rs Util slot rule passes them, flagged; `Util::bars` + sheet.rs line, flagged; self-test `repair18_mends_a_rod_with_string`)
 
 ### Task 13: Kitchen — pages, milk from a tank, empty buckets back/none, 4 s, «Нет молока в баке», handbook dish list
 - Pages: page = chosen dish (toggle row picks the dish of the page in view; pages 1 + capacity modules); `KITCHEN_RECIPES` without the golden carrot / apple (not in the handbook); milk: a recipe with `milk_bucket` takes 1000 mB of `rustcraft:milk` from a tank it touches instead (helper `fluids::take_touching` / `put_touching`, added block in `fluids.rs`, flagged), no bucket item; step 80 ticks; window rows: page tabs, the dish, its ingredients, milk bar.
-- [x] done (rules `utility::kitchen`; fluids.rs block `touching_amount/take_touching/put_touching`, flagged; tank = the one it touches, as the mixer's water — a fluid-channel joint for the kitchen would need fluids.rs net code of stream 3; milk buckets as items still work and leave their buckets; self-test `kitchen18_cake_with_milk_from_a_tank`; try pending)
+- [x] done (rules `utility::kitchen`; fluids.rs block `touching_amount/take_touching/put_touching`, flagged; tank = the one it touches, as the mixer's water — a fluid-channel joint for the kitchen would need fluids.rs net code of stream 3; milk buckets as items still work and leave their buckets; self-test `kitchen18_cake_with_milk_from_a_tank`)
 
 ### Task 14: Fishery — sky over the water, Lure, rod kept at its last point («Удочка изношена»), storage module, no speed, window rows
-- [x] done 8bc4712 (`Util::paced_by_nature`: speed modules do nothing in the four farm machines; storage module read both as Module::Storage and as the raw item; rows: water, rod·wait (240 px); test `every_machine_window_fits_the_screen`; self-test `fishery18_keeps_the_rods_last_point`; try pending)
+- [x] done 8bc4712 (`Util::paced_by_nature`: speed modules do nothing in the four farm machines; storage module read both as Module::Storage and as the raw item; rows: water, rod·wait (240 px); test `every_machine_window_fits_the_screen`; self-test `fishery18_keeps_the_rods_last_point`)
 
 ### Task 15: Feeder — babies fed (age +10%), head counts per kind in the window, «Предел животных», a pair every 20 s, 3 food slots
-- [x] done 01aaddd (rules `baby_fed`, `baby_to_feed`, `herd_full`, `heads`; food level on the model; no in-world self-test for babies: the bench spawns no baby mob — bots check; slice12 feeder test waits 2×LIMIT for the 20 s pace; try pending)
+- [x] done 01aaddd (rules `baby_fed`, `baby_to_feed`, `herd_full`, `heads`; food level on the model; no in-world self-test for babies: the bench spawns no baby mob — bots check; slice12 feeder test waits 2×LIMIT for the 20 s pace)
 
 ### Task 16: Butcher — recipe `bsb|bhb|brb`, energy blade accepted, 4 E/s and «Нет энергии», looting / fire aspect, kill XP into a condenser beside it, economy module effect
-- [x] done 8e38c52 (machines.rs: Butcher gets a buffer, flagged; looting as the tables add it (0..level a drop), fire aspect sets the animal alight and the bonus cooked; blade spends 25 E a strike; recipe key s lists the iron sword and the blades; slice11 butcher scenarios get a full buffer; self-test `butcher18_energy_and_kill_xp`; try pending)
+- [x] done 8e38c52 (machines.rs: Butcher gets a buffer, flagged; looting as the tables add it (0..level a drop), fire aspect sets the animal alight and the bonus cooked; blade spends 25 E a strike; recipe key s lists the iron sword and the blades; slice11 butcher scenarios get a full buffer; self-test `butcher18_energy_and_kill_xp`)
 
 ### Task 17: Shearer — built-in shears, milking into a tank (cows, mooshrooms, goats), «Некуда сливать молоко», window rows and milk bar
-- [x] done (slots: 9 wool; milk 1000 mB a milking into the touching tank, fluid `rustcraft:milk`; slice12 `util_shearer_shears`/`util_shearer_milks` updated; try pending)
+- [x] done (slots: 9 wool; milk 1000 mB a milking into the touching tank, fluid `rustcraft:milk`; slice12 `util_shearer_shears`/`util_shearer_milks` updated)
 
 ### Task 18: Apiary — choice honey / combs in the window, «Нет пустых бутылок», hive rows
-- [x] done (choice toggles, `farm::harvest_of`; levels on the model for the feeder, shearer and apiary (task 11 except the brewer: task 19); try pending)
+- [x] done (choice toggles, `farm::harvest_of`; levels on the model for the feeder, shearer and apiary (task 11 except the brewer: task 19))
 
 ### Task 19: Brewer — pages: potion + kind; automatic steps (nether wart → effect ingredient → redstone / glowstone / gunpowder / dragon breath); capacity pages; steps and fuel bar in the window
-- [x] done 27ab28c (rules `utility::brew`: pages, chain, `next_step`; slots 3 bottles / 4 ingredients / powder / 3 out; window: 4 page buttons + 5 kind buttons, rows page and fuel (no room for a bar in 240 px); bottles on the model; self-test `brewer18_brews_through_the_chain`; stack module in machines: not made (a slot of 256 needs per-slot max stack in content menus, stream 4/3); try pending)
+- [x] done 27ab28c (rules `utility::brew`: pages, chain, `next_step`; slots 3 bottles / 4 ingredients / powder / 3 out; window: 4 page buttons + 5 kind buttons, rows page and fuel (no room for a bar in 240 px); bottles on the model; self-test `brewer18_brews_through_the_chain`; stack module in machines: not made (a slot of 256 needs per-slot max stack in content menus, stream 4/3))
 
 ### Task 20: Experience condenser — 30 970 points, give 1 / 10 / all, take 1 / 10 / all, 2 E/s while moving, «Конденсатор полон», bar «Хранит», condenser keeps its points when broken
 - [x] done df07e2f (2 E a press from its buffer; points kept on break is not in the handbook: left out; slice12 window test: six buttons and the bar)
 
 ### Task 21: Enchanter — level 1–30 chosen (− / + buttons), cost 1/2/3 by level, condenser must hold ≥ level levels, 10 s; archeo — the table of where the block lay (the toggle row becomes a line «Расчищает: …»), 10 s
-- [x] done (level buttons −10/−1/+1/+10, `apply_enchantment` at the chosen level and its row; a block that remembers no place brushes by `found::default_table`; try pending)
+- [x] done (level buttons −10/−1/+1/+10, `apply_enchantment` at the chosen level and its row; a block that remembers no place brushes by `found::default_table`)
 
 ## Part D — the projector and the builder
 
@@ -175,7 +177,7 @@
 - [x] done 4c05f7d (rows: remembers/turn, missing with storage counts; «В руку» from `storage::storage_by`; red stained glass in a foreign cell; `ghost_lit` off without energy)
 
 ### Task 24: Builder — blocks from the storage on the same magistral, 2 blocks/s, places block states, waits naming what is missing, «Клетка занята чужим блоком», window rows (layer N of M, progress, missing, skipped)
-- [x] done 4c05f7d 914c6ac (from the storage on its magistral first, then own slots; self-test `builder18_turned_plan_from_storage`; try pending)
+- [x] done 4c05f7d 914c6ac (from the storage on its magistral first, then own slots; self-test `builder18_turned_plan_from_storage`)
 
 ## Part E — hand-off
 
@@ -190,11 +192,11 @@
 
 ### Task 27: O12 — the order brings its water
 - A mixer step's water (and any fluid input) comes with the order from the storage's tanks / the line's fluid net, not only from the mixer's own tank (`orders::reachable`).
-- [x] done (`fluids::bring_water`, added block in fluids.rs, flagged: when a mixer job starts, the water of its runs moves from the tanks `reachable` counts into the mixer's tank; no in-world self-test yet; try pending)
+- [x] done (`fluids::bring_water`, added block in fluids.rs, flagged: when a mixer job starts, the water of its runs moves from the tanks `reachable` counts into the mixer's tank; no in-world self-test yet)
 
 ### Task 28: the autocrafter asks the storage for a missing ingredient
 - An autocrafter on the storage's magistral, short of an ingredient of its page, gets it from the storage (an order-like pull of one craft's worth).
-- [x] done 0eb4b03 (`orders::page_shortfall`, `orders.rs feed_crafters` each orders round, `crafter::pages_and_buffer` added to crafter.rs, flagged; straight into the buffer (no ride); self-test `orders18_crafter_asks_the_storage`; try pending)
+- [x] done 0eb4b03 (`orders::page_shortfall`, `orders.rs feed_crafters` each orders round, `crafter::pages_and_buffer` added to crafter.rs, flagged; straight into the buffer (no ride); self-test `orders18_crafter_asks_the_storage`)
 
 ### Task 29: all machines take part in orders
 - Beyond crafter, furnace, crusher, alloy, mixer and (task 8) the kitchen: every machine whose recipes the book can name (the disintegrator, the brewer for its pages' potions…), or a recorded reason why not.
