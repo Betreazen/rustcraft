@@ -380,10 +380,12 @@ pub(super) fn on_place_block(game: &mut Game<'_>, stack: &ItemStack, pos: Pos) {
     };
     game.native_with_mod_block_entity(pos, move |e| {
         e.nbt = nbt;
+        // A block entity just made may have no slots yet: they grow to the lifted ones.
         for (slot, item) in items {
-            if let Some(s) = e.items.get_mut(slot) {
-                *s = Some(item);
+            if e.items.len() <= slot {
+                e.items.resize(slot + 1, None);
             }
+            e.items[slot] = Some(item);
         }
     });
     game.native_block_entity_sync(pos);

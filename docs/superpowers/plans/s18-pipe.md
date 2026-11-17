@@ -107,7 +107,7 @@ Files: `window.rs` (rows «Гнездо / Канал / Направление / 
 
 ### Task 13: README «Что проверить в игре: срез 18» (поток 1), last try, report.
 - [x] README section (325d069).
-- [ ] last try green: try 2 (pwsh PID 27036, log scratchpad/try2.log) still queued behind four other streams' tries after 1 h+; it stages the live tree when it starts (all commits to 48bbb58). Check its log; on a failure fix and re-run on this worktree.
+- [ ] last try green. try 2 never reported (scratchpad/try2.log was another stream's). try 3 (staged 3c63049, log scratchpad/try-pipe-3.log): build OK, but RC 5/152: the engine refused every RustCraft block, «block rustcraft:housing: thickness sets the shapes» (Task 6 set both `thickness` and `shapes`); fixed f3203ef. try 4 (staged f3203ef, scratchpad/try-pipe-4.log): RC 151/152, PCT 42/42, SC 87/87; `pipe_joint_window_is_the_guides_table` passes; `pipe_wrench_turns_and_lifts_machines` failed «0 raw iron after the lift»: a new block entity has no slots yet, the lifted ones were dropped (fixed: slots grow). try 5 (scratchpad/try-pipe-5.log) running.
 
 ### Left (resume here)
 
