@@ -1,11 +1,13 @@
 //! Slice 18, wave 2: the magistral's and the energy's leftovers of the second audit
 //! (docs/superpowers/plans/s18-w2-pipe-energy.md).
 
-use super::{Build, Scenario, at, count_of, plot_area};
+use super::magistral::{channel, line};
+use super::{Build, Scenario, at, count_of, expect, plot_area};
+use crate::net::topology::ChannelKind;
 use crate::geom::Pos;
 use crate::tuning::Tuning;
 
-pub const ALL: [Build; 1] = [wrench_lifts_a_tier_3_machine];
+pub const ALL: [Build; 2] = [wrench_lifts_a_tier_3_machine, energy_channel_caps_all_its_passes];
 
 /// Guide `wrench`: a machine of a higher tier lifted by the wrench comes off as its tier's item
 /// and is placed back on that tier, with what it held.
@@ -25,5 +27,42 @@ fn wrench_lifts_a_tier_3_machine(o: Pos, _t: &Tuning) -> Scenario {
             } else {
                 Err(format!("lifted as {item}, tier {tier:?}, {n} raw iron"))
             }
+        })
+}
+
+/// Guide `ch_energy` (32 / 128 / 512 / 2048 a tick): a tier-1 energy net with a 16 E/s fuel
+/// generator, a charged battery and five furnaces asking 40 in all. The generator gives 16 and
+/// the battery covers the rest only as far as the channel lets through: 32 of 40, not 40.
+fn energy_channel_caps_all_its_passes(o: Pos, t: &Tuning) -> Scenario {
+    let generator = at(o, [1, 0, -1]);
+    let battery = at(o, [2, 0, 1]);
+    let furnaces = [
+        at(o, [4, 0, -1]),
+        at(o, [5, 0, -1]),
+        at(o, [6, 0, -1]),
+        at(o, [5, 0, 1]),
+        at(o, [6, 0, 1]),
+    ];
+    let request = t.furnace_energy * furnaces.len() as f64;
+    let supply = t.energy_of(1).min(request);
+    let want = expect::working_shown(expect::share(supply, request));
+    Scenario::new("w2_energy_channel_caps_all_its_passes", plot_area(o))
+        .then("a generator, a charged battery and five furnaces on a tier-1 energy net", move |b, _| {
+            line(b, o, 1, 6, [channel(ChannelKind::Energy, 1), None, None, None])?;
+            b.place(generator, "rustcraft:gen_fuel", &[])?;
+            let fuel = b.inputs(generator).first().copied().ok_or("no fuel slot")?;
+            b.put(generator, fuel, "minecraft:coal", 16)?;
+            b.place(battery, "rustcraft:battery", &[])?;
+            b.set_buffer(battery, 20_000.0)?;
+            for f in furnaces {
+                b.place(f, "rustcraft:furnace", &[])?;
+                let slot = b.inputs(f).first().copied().ok_or("no input slot")?;
+                b.put(f, slot, "minecraft:raw_iron", 64)?;
+            }
+            b.refresh();
+            Ok(())
+        })
+        .until("every furnace works on its share of the channel's 32", 200, move |b, _| {
+            Ok(furnaces.iter().all(|&f| b.shown(f) == Some(want)))
         })
 }
