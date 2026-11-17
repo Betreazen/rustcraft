@@ -83,6 +83,26 @@ pub enum Aim {
     Valid { block: Pos, anchor: Pos },
 }
 
+/// Slice 18: the anchor's ghost before it is set (guide `zipline`: «Виден контур якоря»): the
+/// anchor model's boxes (zip_anchor.json, block sixteenths), drawn translucent.
+pub const GHOST_BOXES: [([f64; 3], [f64; 3]); 3] = [
+    ([5.0, 0.0, 5.0], [11.0, 1.0, 11.0]),
+    ([7.0, 1.0, 7.0], [9.0, 10.0, 9.0]),
+    ([6.0, 10.0, 6.0], [10.0, 12.0, 10.0]),
+];
+
+/// The ghost's boxes of an anchor at `anchor`, in world coordinates.
+pub fn ghost_boxes(anchor: Pos) -> Vec<([f64; 3], [f64; 3])> {
+    let base = anchor.map(f64::from);
+    GHOST_BOXES
+        .iter()
+        .map(|(lo, hi)| {
+            let at = |v: &[f64; 3]| [base[0] + v[0] / 16.0, base[1] + v[1] / 16.0, base[2] + v[2] / 16.0];
+            (at(lo), at(hi))
+        })
+        .collect()
+}
+
 /// Z1: where the zipline aims, along `path` (the look's cells from the eye's, ray::blocks_along).
 pub fn aim(path: &[Pos], cell: impl Fn(Pos) -> Cell) -> Aim {
     let Some(&hit) = path.iter().skip(1).find(|p| !cell(**p).passed()) else {
@@ -140,7 +160,14 @@ pub struct Rope {
     /// The start anchor, which draws the rope (rustcraft_zipline::draw_anchor).
     pub a: Pos,
     pub b: Pos,
+    /// Slice 18: when it was tied, ms of the wall clock (0: an older store's, stamped on load).
+    #[serde(default)]
+    pub tied_ms: u64,
 }
+
+/// Slice 18: a rope comes down by itself this long after it was tied (guide `zipline`: «Трос
+/// держится 5 минут»), ms.
+pub const ROPE_LIFE_MS: u64 = 5 * 60 * 1000;
 
 /// One end of a rope.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -206,7 +233,7 @@ impl Ropes {
         self.next += 1;
         let id = self.next;
         let key = owner_key(owner);
-        self.ropes.push(Rope { id, owner: key.clone(), dimension: dimension.to_owned(), a, b });
+        self.ropes.push(Rope { id, owner: key.clone(), dimension: dimension.to_owned(), a, b, tied_ms: 0 });
         let mut theirs: Vec<u64> = self.ropes.iter().filter(|r| r.owner == key).map(|r| r.id).collect();
         theirs.sort_unstable();
         let over = theirs.len().saturating_sub(MAX_ROPES);
@@ -233,6 +260,22 @@ impl Ropes {
 
     pub fn in_level<'a>(&'a self, dimension: &'a str) -> impl Iterator<Item = &'a Rope> + 'a {
         self.ropes.iter().filter(move |r| r.dimension == dimension)
+    }
+
+    /// Ropes with no time yet (just tied, or from an older store) count from `now_ms`.
+    pub fn stamp(&mut self, now_ms: u64) {
+        for r in self.ropes.iter_mut().filter(|r| r.tied_ms == 0) {
+            r.tied_ms = now_ms.max(1);
+        }
+    }
+
+    /// The ropes whose time is up at `now_ms`.
+    pub fn expired(&self, now_ms: u64) -> Vec<u64> {
+        self.ropes
+            .iter()
+            .filter(|r| r.tied_ms != 0 && now_ms.saturating_sub(r.tied_ms) >= ROPE_LIFE_MS)
+            .map(|r| r.id)
+            .collect()
     }
 
     pub fn count_of(&self, owner: u128) -> usize {
@@ -457,6 +500,28 @@ mod tests {
     }
 
     #[test]
+    fn a_rope_comes_down_five_minutes_after_it_was_tied() {
+        let mut ropes = Ropes::default();
+        let (id, _) = ropes.tie(5, "o", [0, 64, 0], [0, 64, 9]);
+        assert!(ropes.expired(u64::MAX).is_empty(), "not stamped yet");
+        ropes.stamp(1_000);
+        assert!(ropes.expired(1_000 + ROPE_LIFE_MS - 1).is_empty());
+        assert_eq!(ropes.expired(1_000 + ROPE_LIFE_MS), vec![id]);
+        ropes.stamp(9_999_999);
+        assert_eq!(ropes.get(id).map(|r| r.tied_ms), Some(1_000), "a stamped rope keeps its time");
+        let old: Ropes = serde_json::from_str(r#"{"next":1,"ropes":[{"id":1,"owner":"x","dimension":"o","a":[0,0,0],"b":[1,0,0]}]}"#).expect("an older store reads");
+        assert_eq!(old.ropes[0].tied_ms, 0);
+    }
+
+    #[test]
+    fn the_ghost_stands_where_the_anchor_goes() {
+        let b = ghost_boxes([10, 64, -3]);
+        assert_eq!(b.len(), 3);
+        assert_eq!(b[0].0, [10.3125, 64.0, -2.6875]);
+        assert_eq!(b[2].1, [10.625, 64.75, -2.375]);
+    }
+
+    #[test]
     fn a_player_keeps_four_ropes_and_the_oldest_goes() {
         let mut ropes = Ropes::default();
         let me = 7u128;
@@ -496,7 +561,7 @@ mod tests {
     }
 
     fn rope() -> Rope {
-        Rope { id: 1, owner: owner_key(1), dimension: "o".into(), a: [0, 64, 0], b: [20, 70, 0] }
+        Rope { id: 1, owner: owner_key(1), dimension: "o".into(), a: [0, 64, 0], b: [20, 70, 0], tied_ms: 0 }
     }
 
     #[test]

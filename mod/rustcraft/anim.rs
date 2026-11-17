@@ -117,11 +117,14 @@ pub(super) fn update_tag(entity: &ModBlockEntity, tag: &mut Option<Compound>) {
     let zipline = crate::game::rustcraft_zipline::KEYS;
     // Slice 18: what the crystals, panels and windmills draw (rustcraft_power).
     let power = crate::game::rustcraft_power::DRAW_KEYS;
+    // Slice 18: the turret's aim (rustcraft_base).
+    let aim = crate::game::rustcraft_base::AIM_KEYS;
     for key in [ON_KEY, LEVEL_KEY, COLOUR_KEY]
         .into_iter()
         .chain(EXTRA_KEYS)
         .chain(zipline)
         .chain(power)
+        .chain(aim)
     {
         if let Some(v) = entity.nbt.get(&JavaString::from(key)) {
             c.insert(JavaString::from(key), v.clone());
@@ -169,6 +172,10 @@ pub(super) fn draw(
             continue;
         };
         draw.push();
+        // Slice 18: the turret's head turns to its target, the barrel tilts with it.
+        if block == "rustcraft:turret" {
+            crate::game::rustcraft_base::turn_to_aim(&entity.nbt, p.model, facing_degrees(game, state), draw);
+        }
         for step in steps {
             match step {
                 Step::Turn { axis, radians, pivot } => {

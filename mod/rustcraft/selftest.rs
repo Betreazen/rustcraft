@@ -887,6 +887,40 @@ impl Bench for GameBench<'_, '_> {
             .map(|e| (e.stack.item.to_string(), e.stack.count))
             .collect()
     }
+
+    // ---- Slice 18, base and gear (stream 7) ----
+
+    fn put_gear_held(&mut self, pos: Pos, slot: usize, item: &str, held: rustcraft_rules::gear::Held) -> Result<(), String> {
+        let mut stack = ItemStack::new(item, 1);
+        crate::game::rustcraft_gear::number(&mut stack);
+        crate::game::rustcraft_gear::set_held(&stack, held);
+        self.change_entity(pos, move |e| {
+            if e.items.len() <= slot {
+                e.items.resize(slot + 1, None);
+            }
+            e.items[slot] = Some(stack);
+        })
+    }
+
+    fn gear_held(&self, pos: Pos, slot: usize) -> Option<rustcraft_rules::gear::Held> {
+        let stack = self.game.native_mod_block_entity(pos)?.items.get(slot).cloned().flatten()?;
+        crate::game::rustcraft_gear::held(&stack)
+    }
+
+    fn anvil_capacity(&mut self, piece: &str, level: u8, books: usize) -> Vec<Option<u8>> {
+        crate::game::rustcraft_gear::anvil_for_selftest(piece, level, books)
+    }
+
+    fn age_rope(&mut self, id: u64, ms: u64) -> Result<(), String> {
+        crate::game::rustcraft_zipline::age_rope_for_selftest(self.game, id, ms)
+    }
+
+    fn turret_aim(&self, pos: Pos) -> Option<(f32, f32)> {
+        let e = self.game.native_mod_block_entity(pos)?;
+        e.nbt
+            .contains_key(&horizon_world::nbt::JavaString::from(base::AIM_KEYS[0]))
+            .then(|| base::aim_of(&e.nbt))
+    }
 }
 
 /// The slice-7 half of the bench.

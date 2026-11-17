@@ -9,7 +9,14 @@ use serde::{Deserialize, Serialize};
 
 use crate::geom::Pos;
 
+pub mod compass;
+pub mod enchant;
+pub mod keys;
+pub mod looks;
+pub mod moves;
+pub mod shield;
 pub mod shot;
+pub mod window;
 
 /// A piece of technical armour.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -245,6 +252,16 @@ pub const RIFLE_DAMAGE: f32 = 16.0;
 pub const RIFLE_RANGE: f64 = 64.0;
 pub const RIFLE_COOLDOWN_TICKS: u64 = 25;
 pub const RIFLE_SHOT: f64 = 400.0;
+/// Slice 18: aiming the rifle (its use key held) halves the field of view (guide `rifle`:
+/// «при прицеливании правой кнопкой вид приближается вдвое»).
+pub const RIFLE_ZOOM: f32 = 0.5;
+/// Beam points along a rifle shot or a turret's, this far apart, blocks.
+pub const BEAM_STEP: f64 = 0.5;
+
+/// The field-of-view scale while aiming, from the game's own.
+pub fn zoom(modifier: f32) -> f32 {
+    modifier * RIFLE_ZOOM
+}
 
 /// 12.5: the zipline reaches 32 blocks, holds 16 charges (a string gives one back) and carries its
 /// rider at a cart's 8 blocks a second.
@@ -274,8 +291,8 @@ pub fn blade_bonus(tier: u8) -> f32 {
     if tier >= 4 { 1.0 } else { 0.0 }
 }
 
-/// The technical enchantments' books (4.12 K3, round 14: made on the crafting table, levels by
-/// how many go into a piece's window, up to III).
+/// The technical enchantments' books (4.12 K3: made on the crafting table; slice 18: put on a
+/// piece at the anvil, up to III, rustcraft_rules::gear::enchant).
 pub const BOOK_CAPACITY: &str = "rustcraft:book_capacity";
 pub const BOOK_THRIFT: &str = "rustcraft:book_thrift";
 pub const MAX_LEVEL: u8 = 3;
@@ -288,6 +305,13 @@ pub struct Held {
     pub modules: Vec<String>,
     pub capacity: u8,
     pub thrift: u8,
+    /// Whether the piece was last worn in a suit whose chestplate holds the suit capacity module
+    /// (G6); the chargers fill it to that battery when it is off the player.
+    #[serde(default)]
+    pub suit: bool,
+    /// Slice 18: the keyed modules switched on (night vision, magnet), by item id.
+    #[serde(default)]
+    pub on: Vec<String>,
 }
 
 impl Held {
@@ -306,6 +330,59 @@ pub fn capacity(g: Gear, h: &Held, suit_capacity: bool) -> f64 {
     c
 }
 
+/// The battery a charger or the plate fills `g` holding `h` to: the suit capacity module counts
+/// for the chestplate holding it and for a piece last worn with that chestplate. None for the
+/// zipline: its charges come back from string only.
+pub fn charger_capacity(g: Gear, h: &Held) -> Option<f64> {
+    if g.kind == Kind::Zipline {
+        return None;
+    }
+    let own = matches!(g.kind, Kind::Armor(Piece::Chestplate)) && h.has(Module::Capacity);
+    Some(capacity(g, h, h.suit || own))
+}
+
+/// A charger's fill: the charge goes up to `to`, never above `cap`, and never down (a piece
+/// holding more than its battery now, after the suit module came off, keeps it).
+pub fn add_charge(h: &mut Held, cap: f64, to: f64) {
+    h.charge = h.charge.max(to.min(cap));
+}
+
+/// Slice 18: the bar under a piece's icon (guide `armor`: its charge seen), as vanilla's
+/// durability bar: 0..=13 pixels wide.
+pub const BAR_WIDTH: u8 = 13;
+/// The custom-data key the server writes the bar's width under, for clients.
+pub const BAR_KEY: &str = "rustcraft:bar";
+
+/// The bar's width for `charge` of `cap`: any charge shows at least a pixel.
+pub fn bar(charge: f64, cap: f64) -> u8 {
+    if cap <= 0.0 || charge <= 0.0 || !charge.is_finite() {
+        return 0;
+    }
+    let w = (charge / cap).min(1.0) * f64::from(BAR_WIDTH);
+    (w.round() as u8).clamp(1, BAR_WIDTH)
+}
+
+/// The bar's colour (0xRRGGBB) at `width`: red when nearly empty, through amber, to the energy
+/// cyan when full.
+pub fn bar_rgb(width: u8) -> u32 {
+    match width {
+        0..=3 => 0xE0_3C_3C,
+        4..=8 => 0xF0_B4_3C,
+        _ => 0x4C_D8_F0,
+    }
+}
+
+/// Slice 18: whether a blade's or a shield's field is lit (guide `blade`: «без заряда гаснет»,
+/// `eshield`: «поле светится, пока есть заряд»): it holds a hit's or a block's charge. None for
+/// other gear, whose look does not change.
+pub fn lit(g: Gear, h: &Held) -> Option<bool> {
+    match g.kind {
+        Kind::Blade => Some(h.charge + 1e-9 >= cost(BLADE_HIT, h)),
+        Kind::Shield => Some(h.charge + 1e-9 >= SHIELD_PER_DAMAGE),
+        _ => None,
+    }
+}
+
 /// A cost after Thrift: −10 % a level.
 pub fn cost(base: f64, h: &Held) -> f64 {
     base * (1.0 - 0.1 * f64::from(h.thrift.min(MAX_LEVEL)))
@@ -320,33 +397,23 @@ pub fn spend(h: &mut Held, amount: f64) -> bool {
     true
 }
 
-/// The window of a piece: its module sockets, then the two book slots.
+/// The window of a piece: its module sockets (slice 18: the books go on at the anvil).
 pub fn window_slots(g: Gear) -> usize {
-    g.sockets() + 2
+    g.sockets()
 }
 
-/// Whether `item` may stay in slot `slot` of `g`'s window: a module of its piece in a socket
-/// (no two alike), a book of its kind in the book slots (up to III).
+/// Whether `item` may stay in socket `slot` of `g`'s window: a module of its piece (no two alike).
 pub fn window_takes(g: Gear, slot: usize, item: &str, count: u32) -> bool {
-    let sockets = g.sockets();
-    if slot < sockets {
-        let Kind::Armor(piece) = g.kind else {
-            return false;
-        };
-        return Module::of(item).is_some_and(|m| m.piece() == piece) && count == 1;
-    }
-    match slot - sockets {
-        0 => item == BOOK_CAPACITY && count <= u32::from(MAX_LEVEL),
-        1 => item == BOOK_THRIFT && count <= u32::from(MAX_LEVEL),
-        _ => false,
-    }
+    let Kind::Armor(piece) = g.kind else {
+        return false;
+    };
+    slot < g.sockets() && Module::of(item).is_some_and(|m| m.piece() == piece) && count == 1
 }
 
-/// The window's slots as `Held` keeps them: (modules, capacity level, thrift level).
-pub fn from_window(g: Gear, slots: &[Option<(String, u32)>]) -> (Vec<String>, u8, u8) {
-    let sockets = g.sockets();
+/// The window's sockets as `Held` keeps them: its modules.
+pub fn from_window(g: Gear, slots: &[Option<(String, u32)>]) -> Vec<String> {
     let mut modules: Vec<String> = Vec::new();
-    for (i, s) in slots.iter().enumerate().take(sockets) {
+    for (i, s) in slots.iter().enumerate().take(g.sockets()) {
         if let Some((item, n)) = s
             && window_takes(g, i, item, *n)
             && !modules.contains(item)
@@ -354,15 +421,7 @@ pub fn from_window(g: Gear, slots: &[Option<(String, u32)>]) -> (Vec<String>, u8
             modules.push(item.clone());
         }
     }
-    let level = |i: usize, book: &str| {
-        slots
-            .get(sockets + i)
-            .cloned()
-            .flatten()
-            .filter(|(item, _)| item == book)
-            .map_or(0, |(_, n)| n.min(u32::from(MAX_LEVEL)) as u8)
-    };
-    (modules, level(0, BOOK_CAPACITY), level(1, BOOK_THRIFT))
+    modules
 }
 
 #[cfg(test)]
@@ -393,21 +452,15 @@ mod tests {
     }
 
     #[test]
-    fn a_window_keeps_modules_of_its_piece_and_books() {
+    fn a_window_keeps_modules_of_its_piece() {
         let boots = Gear { kind: Kind::Armor(Piece::Boots), tier: 3 };
-        assert_eq!(window_slots(boots), 4);
-        let slots = vec![
-            Some(("rustcraft:pm_jump".to_owned(), 1)),
-            Some(("rustcraft:pm_night".to_owned(), 1)),
-            Some((BOOK_CAPACITY.to_owned(), 2)),
-            Some((BOOK_THRIFT.to_owned(), 5)),
-        ];
-        let (modules, cap, thrift) = from_window(boots, &slots);
-        assert_eq!(modules, vec!["rustcraft:pm_jump".to_owned()], "night vision is the helmet's");
-        assert_eq!((cap, thrift), (2, 3), "more than three books give level III");
+        assert_eq!(window_slots(boots), 2);
+        let slots = vec![Some(("rustcraft:pm_jump".to_owned(), 1)), Some(("rustcraft:pm_night".to_owned(), 1))];
+        assert_eq!(from_window(boots, &slots), vec!["rustcraft:pm_jump".to_owned()], "night vision is the helmet's");
         let blade = Gear { kind: Kind::Blade, tier: 2 };
-        assert_eq!(window_slots(blade), 2);
+        assert_eq!(window_slots(blade), 0, "a weapon has no window: its books go on at the anvil");
         assert!(!window_takes(blade, 0, "rustcraft:pm_run", 1));
+        assert!(!window_takes(boots, 0, BOOK_CAPACITY, 1));
     }
 
     #[test]
@@ -432,6 +485,52 @@ mod tests {
         assert_eq!(harpoon_anchor(hit, Some([3, 10, 0]), false, false), None);
         assert_eq!(harpoon_anchor(hit, None, false, true), None);
         assert!((HARPOON_CAPACITY / HARPOON_SHOT - 40.0).abs() < 1e-9, "forty shots a charge");
+    }
+
+    #[test]
+    fn the_suit_module_lets_chargers_fill_half_again() {
+        let chest = Gear { kind: Kind::Armor(Piece::Chestplate), tier: 3 };
+        let mut h = Held { modules: vec![Module::Capacity.item().to_owned()], ..Held::default() };
+        assert_eq!(charger_capacity(chest, &h), Some(30_000.0), "the chestplate counts its own module");
+        let legs = Gear { kind: Kind::Armor(Piece::Leggings), tier: 3 };
+        assert_eq!(charger_capacity(legs, &Held::default()), Some(20_000.0));
+        assert_eq!(charger_capacity(legs, &Held { suit: true, ..Held::default() }), Some(30_000.0));
+        let zip = Gear::of("rustcraft:zipline").expect("the zipline is gear");
+        assert_eq!(charger_capacity(zip, &Held::default()), None, "string only");
+        h.charge = 31_000.0;
+        add_charge(&mut h, 30_000.0, 30_010.0);
+        assert_eq!(h.charge, 31_000.0, "a charger never lowers the charge");
+        h.charge = 100.0;
+        add_charge(&mut h, 30_000.0, 40_000.0);
+        assert_eq!(h.charge, 30_000.0);
+    }
+
+    #[test]
+    fn the_bar_under_the_icon_follows_the_charge() {
+        assert_eq!(bar(0.0, 10_000.0), 0);
+        assert_eq!(bar(10_000.0, 10_000.0), BAR_WIDTH);
+        assert_eq!(bar(5_000.0, 10_000.0), 7);
+        assert_eq!(bar(12_000.0, 10_000.0), BAR_WIDTH, "above the battery is full");
+        assert_eq!(bar(8.0, ZIP_CHARGES), 7);
+        assert_eq!(bar(1.0, 0.0), 0);
+        assert_ne!(bar_rgb(2), bar_rgb(13));
+        assert!(bar(1.0, 10_000.0) >= 1, "a little charge still shows");
+    }
+
+    #[test]
+    fn aiming_the_rifle_zooms_twice() {
+        assert_eq!(zoom(1.0), 0.5);
+        assert_eq!(zoom(1.1), 0.55);
+    }
+
+    #[test]
+    fn a_blade_and_a_shield_go_dark_without_charge() {
+        let blade = Gear { kind: Kind::Blade, tier: 2 };
+        assert_eq!(lit(blade, &Held { charge: 25.0, ..Held::default() }), Some(true));
+        assert_eq!(lit(blade, &Held { charge: 24.0, ..Held::default() }), Some(false));
+        let shield = Gear { kind: Kind::Shield, tier: 3 };
+        assert_eq!(lit(shield, &Held::default()), Some(false));
+        assert_eq!(lit(Gear { kind: Kind::Rifle, tier: 4 }, &Held::default()), None);
     }
 
     #[test]

@@ -132,16 +132,21 @@ impl Kind {
     pub fn shape(self) -> Shape {
         let sockets = self.holder().is_some();
         match self {
+            // Slice 18 (base and gear): the targets as chips; the support window's players in
+            // range, the one healed and the role's working modules.
             Kind::Turret => Shape {
                 sockets,
                 role: true,
-                rows: 4,
+                rows: 5,
                 bars: 1,
+                toggles: 4,
                 ..Shape::default()
             },
+            // Slice 18: its owner and area, then the energy bar.
             Kind::Anchor => Shape {
                 sockets,
-                rows: 3,
+                rows: 2,
+                bars: 1,
                 ..Shape::default()
             },
             Kind::DockUnload => Shape {

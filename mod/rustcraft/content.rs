@@ -816,6 +816,13 @@ pub fn declare_items(items: &mut Vec<Item>) {
             ..Item::default()
         });
     }
+    // Slice 18: starsteel's backpack, worn on the back (rustcraft_backpack).
+    items.push(Item {
+        id: rustcraft_rules::backpack::STAR.into(),
+        template: "minecraft:iron_ingot".into(),
+        max_stack_size: Some(1),
+        ..Item::default()
+    });
     for (_, id) in rustcraft_rules::modules::ITEMS {
         items.push(Item {
             id: id.into(),
@@ -956,6 +963,10 @@ fn declare_gear(items: &mut Vec<Item>) {
             ("!minecraft:max_damage".to_owned(), serde_json::json!({})),
             ("!minecraft:damage".to_owned(), serde_json::json!({})),
         ]);
+        // Slice 18: an axe switches the energy shield off for 5 / 3 / 1.5 s by tier.
+        if g.kind == gear::Kind::Shield {
+            components.insert("minecraft:blocks_attacks".to_owned(), gear::shield::blocks_attacks(g.tier));
+        }
         if let Some(slot) = g.slot_name() {
             components.insert(
                 "minecraft:equippable".to_owned(),
@@ -998,11 +1009,14 @@ fn declare_gear(items: &mut Vec<Item>) {
         max_stack_size: Some(1),
         ..Item::default()
     });
+    // Slice 18: the books shine like enchanted ones (their level is in their custom data and
+    // goes on at the anvil, rustcraft_gear).
     for book in [gear::BOOK_CAPACITY, gear::BOOK_THRIFT] {
         items.push(Item {
             id: book.into(),
             template: "minecraft:book".into(),
             max_stack_size: Some(16),
+            components: BTreeMap::from([("minecraft:enchantment_glint_override".to_owned(), serde_json::json!(true))]),
             ..Item::default()
         });
     }

@@ -166,11 +166,17 @@ const MAP_IDLE_CELLS: u32 = 64;
 
 
 /// Twice a second for a player of this level: their biome and the structures round their feet
-/// are visited; the compass speaks.
-pub(super) fn player(game: &mut Game<'_>, p: &horizon_client::mod_api::NativeServerPlayer, holds_compass: bool) {
+/// are visited; the compass speaks. Slice 18: `compass` is the held compass's mode (structures or
+/// biomes, rustcraft_rules::gear::compass), and its target comes back for its needle.
+pub(super) fn player(
+    game: &mut Game<'_>,
+    p: &horizon_client::mod_api::NativeServerPlayer,
+    compass: Option<rustcraft_rules::gear::compass::Mode>,
+) -> Option<[i32; 3]> {
+    let holds_compass = compass.is_some();
     let at = p.position;
     let cell = at.map(|v| v.floor() as i32);
-    let Some(biome) = game.native_biome(cell) else { return };
+    let Some(biome) = game.native_biome(cell) else { return None };
     let inside = game.structures_at(cell);
     let target = {
         let mut s = state();
@@ -184,11 +190,12 @@ pub(super) fn player(game: &mut Game<'_>, p: &horizon_client::mod_api::NativeSer
                 s.dirty = true;
             }
         }
-        if holds_compass { s.atlas.target(p.uuid, &p.dimension, at) } else { None }
+        compass.and_then(|mode| rustcraft_rules::gear::compass::target(&s.atlas, mode, p.uuid, &p.dimension, at))
     };
     if !holds_compass {
-        return;
+        return None;
     }
+    let needle = target.as_ref().map(|t| t.at);
     let text = match target {
         Some(target) => {
             let way = rules::direction(at, target.at);
@@ -213,6 +220,7 @@ pub(super) fn player(game: &mut Game<'_>, p: &horizon_client::mod_api::NativeSer
         None => line("rustcraft.compass.none", "No new places on the map", &[]),
     };
     tell(game, p.uuid, text);
+    needle
 }
 
 /// Slice 18 (guide `tool_map`: «Найденные биомы и постройки … появляются на схеме в окне любой

@@ -7,6 +7,9 @@
 //   and Path-of-craft-tree do not take the kill for a player's own; the owner gets the kill's
 //   experience from RustCraft (`native_give_experience`, API 101) and Path-of-craft-tree the
 //   `kill` report (D5, X8), both from `native_living_death` of a mob a turret hit lately.
+//   Slice 18: the shot that kills is the owner's when they are in the turret's level (an arrow's
+//   damage from their entity), so the game drops the mob's own experience and player-only loot
+//   and Path-of-craft-tree counts their ranged kill itself; no fixed experience or report then.
 // - Effects: the base game's `MobEffectInstance` on the mob, as `/effect give` puts it on one
 //   (game/commands/effects.rs:74-90): poison, slowness, and SoulsCraft's `soulscraft:bleeding`
 //   when that effect is registered (`horizon_client::brewing::effect`); without SoulsCraft the
@@ -35,7 +38,9 @@ use horizon_client::{
 };
 use horizon_world::nbt::{Compound, JavaString, Tag};
 use rustcraft_rules::{
+    aim,
     anchor::{self, Anchor, State as AnchorState},
+    turret_owner,
     geom::Pos,
     machines::{
         sheet::{
@@ -104,6 +109,8 @@ struct Hit {
     owner: u128,
     tick: u64,
     by: Striker,
+    /// Slice 18: the owner struck the killing shot themselves (rustcraft_rules::turret_owner).
+    by_owner: bool,
 }
 
 /// The turret's own bleeding on a mob, without SoulsCraft.
@@ -140,6 +147,11 @@ struct Base {
     held: HashMap<String, BTreeSet<[i32; 2]>>,
     anchors: HashMap<String, Vec<Anchor>>,
     anchors_loaded: BTreeSet<String>,
+    /// Slice 18: every level's anchors (the world's `data/rustcraft_anchor_levels.json`), so a
+    /// level nobody is in opens for its anchors after a restart.
+    index: Option<anchor::Index>,
+    /// Slice 18: the share of its draw each anchor got last second, for its window's bar.
+    anchor_shares: HashMap<(String, Pos), f64>,
     /// Blocks placed by a player, owners due.
     owners_due: Vec<(u128, String, Pos)>,
     broken: Vec<(String, Pos)>,
@@ -513,6 +525,7 @@ pub(super) fn tick(game: &mut Game<'_>, dimension: &str, level: &LevelNet, t: &T
     deaths(game, t);
     if now.is_multiple_of(ANCHOR_EVERY) {
         buffs(game, now);
+        wake_levels(game);
         anchors(game, dimension, level, t);
     }
     windows(game, dimension, level, t);
@@ -693,6 +706,13 @@ fn attack(
     };
     ts.target = Some(kind.clone());
     ts.target_id = Some(id);
+    // Slice 18: the head follows the target between shots too.
+    let mob_at = game.mobs.iter().find(|m| m.id == id).map(|m| {
+        [m.position.x, m.position.y + f64::from(m.height()) * 0.6, m.position.z]
+    });
+    if let Some(to) = mob_at {
+        aim_and_beam(game, pos, to, None);
+    }
     let cost = l.shot_energy(t);
     if energy < cost {
         return turret::shown(l, false, Shown::NoEnergy);
@@ -709,6 +729,7 @@ fn attack(
                 owner,
                 tick: now,
                 by: Striker::Turret,
+                by_owner: false,
             },
         );
     }
@@ -741,8 +762,99 @@ fn attack(
             }
         }
     }
-    game.native_hurt_entity(dimension, id, t.turret_damage as f32, SHOT_TYPE, None);
+    if let Some(to) = mob_at {
+        aim_and_beam(game, pos, to, Some(SHOT_BEAM));
+    }
+    if !owner_shot(game, dimension, id, owner, t.turret_damage as f32) {
+        game.native_hurt_entity(dimension, id, t.turret_damage as f32, SHOT_TYPE, None);
+    }
     turret::shown(l, true, Shown::Shooting(kind))
+}
+
+/// Slice 18: the shot that kills is the owner's when they are in this level
+/// (rustcraft_rules::turret_owner); true when it was struck so.
+fn owner_shot(game: &mut Game<'_>, dimension: &str, id: u32, owner: Option<u128>, damage: f32) -> bool {
+    let Some(owner) = owner else { return false };
+    let health = game.mobs.iter().find(|m| m.id == id).map_or(0.0, |m| m.health);
+    let entity = game
+        .native_server_players()
+        .into_iter()
+        .find(|p| p.uuid == owner && p.dimension == dimension && p.health > 0.0)
+        .map(|p| p.entity_id);
+    let Some(entity) = entity.filter(|_| turret_owner::owner_blow(health, damage, true)) else {
+        return false;
+    };
+    let Ok(attacker) = u32::try_from(entity) else { return false };
+    if !game.native_hurt_entity(dimension, id, damage, turret_owner::OWNER_SHOT, Some(attacker)) {
+        return false;
+    }
+    if let Some(h) = state().hits.get_mut(&id) {
+        h.by_owner = true;
+    }
+    true
+}
+
+// ---- Slice 18: the head turns to its target, the shot and the heal are beams ----
+
+/// The block entity keys of the turret's aim (degrees), in its update tag for clients.
+pub(super) const AIM_KEYS: [&str; 2] = ["aim_y", "aim_p"];
+const SHOT_BEAM: &str = "minecraft:electric_spark";
+const HEAL_BEAM: &str = "minecraft:happy_villager";
+/// The head's middle above the block's corner: the barrel's pivot height.
+const HEAD: [f64; 3] = [0.5, 0.6, 0.5];
+
+fn short(nbt: &Compound, key: &str) -> f32 {
+    match nbt.get(&JavaString::from(key)) {
+        Some(Tag::Short(v)) => f32::from(*v),
+        _ => 0.0,
+    }
+}
+
+/// The turret's aim on a client: (yaw, pitch) in degrees, world frame.
+pub(super) fn aim_of(nbt: &Compound) -> (f32, f32) {
+    (short(nbt, AIM_KEYS[0]), short(nbt, AIM_KEYS[1]))
+}
+
+/// On a client, inside the turret's frame (already turned by `facing` degrees): turns its head
+/// part `model`, and the barrel riding on it, to the aim the server sent.
+pub(super) fn turn_to_aim(nbt: &Compound, model: &str, facing: f32, draw: &mut crate::game::native_block_entity_draw::BlockEntityDraw) {
+    let (yaw, pitch) = aim_of(nbt);
+    let turn = |draw: &mut crate::game::native_block_entity_draw::BlockEntityDraw| {
+        draw.rotate_about([0.0, 1.0, 0.0], yaw - facing, [0.5, 0.40625, 0.5]);
+    };
+    match model {
+        "rustcraft:block/turret__aim_yaw" => turn(draw),
+        "rustcraft:block/turret__aim_pitch" => {
+            turn(draw);
+            draw.rotate_about([0.0, 0.0, 1.0], pitch, [0.8125, 0.59375, 0.5]);
+        }
+        _ => {}
+    }
+}
+
+/// Points the turret at `to` (clients told when it turned enough) and draws a beam of
+/// `particle` from its barrel there.
+fn aim_and_beam(game: &mut Game<'_>, pos: Pos, to: [f64; 3], particle: Option<&str>) {
+    let from = [f64::from(pos[0]) + HEAD[0], f64::from(pos[1]) + HEAD[1], f64::from(pos[2]) + HEAD[2]];
+    let new = aim::aim(from, to);
+    let turned = game
+        .native_with_mod_block_entity(pos, |e| {
+            if !aim::aim_changed(aim_of(&e.nbt), new) && e.nbt.contains_key(&JavaString::from(AIM_KEYS[0])) {
+                return false;
+            }
+            e.nbt.insert(JavaString::from(AIM_KEYS[0]), Tag::Short(new.0.round() as i16));
+            e.nbt.insert(JavaString::from(AIM_KEYS[1]), Tag::Short(new.1.round() as i16));
+            true
+        })
+        .unwrap_or(false);
+    if turned {
+        game.native_block_entity_sync(pos);
+    }
+    let Some(particle) = particle else { return };
+    let options = horizon_client::particles::ParticleOptions::named(particle.to_owned());
+    for p in aim::beam(from, to, 0.5) {
+        game.with_level(|_, level, _| level.native_send_particles(&options, None, p, [0.0; 3], 0.0, 1));
+    }
 }
 
 /// The turret's own bleeding: its damage once a second while it lasts.
@@ -787,6 +899,11 @@ fn deaths(game: &mut Game<'_>, t: &Tuning) {
                 entity,
                 kind,
             });
+            continue;
+        }
+        // Slice 18: the owner's own killing shot: the game gave its experience and loot, and
+        // Path-of-craft-tree counts the owner's ranged kill itself.
+        if hit.by_owner {
             continue;
         }
         game.native_give_experience(hit.owner, t.turret_kill_experience);
@@ -858,6 +975,7 @@ pub(super) fn strike(
             owner,
             tick: now,
             by,
+            by_owner: false,
         },
     );
     game.native_hurt_entity(dimension, id, amount, SHOT_TYPE, None)
@@ -922,6 +1040,11 @@ fn support(
                     .find(|p| p.uuid == who)
                     .map_or(0.0, |p| p.health);
                 game.native_set_player_status(who, Some(health + b.heal as f32), None, None);
+                // Slice 18: the heal is a beam to the one healed.
+                if let Some(p) = players.iter().find(|p| p.uuid == who) {
+                    let to = [p.position[0], p.position[1] + 1.0, p.position[2]];
+                    aim_and_beam(game, pos, to, Some(HEAL_BEAM));
+                }
             }
             doing = Shown::Healing(name);
         }
@@ -1051,16 +1174,82 @@ fn load_anchors(game: &mut Game<'_>, dimension: &str) {
     }
     let host: &mut dyn Host = game;
     let list = ANCHORS.get(host, Holder::Level).unwrap_or_default();
-    let mut s = state();
-    s.anchors.insert(dimension.to_owned(), list);
-    s.anchors_loaded.insert(dimension.to_owned());
+    {
+        let mut s = state();
+        s.anchors.insert(dimension.to_owned(), list.clone());
+        s.anchors_loaded.insert(dimension.to_owned());
+    }
+    index_level(game, dimension, &list);
 }
 
 fn save_anchors(game: &mut Game<'_>, dimension: &str) {
     let list = state().anchors.get(dimension).cloned().unwrap_or_default();
     let host: &mut dyn Host = game;
-    if let Err(e) = ANCHORS.set(host, Holder::Level, list) {
+    if let Err(e) = ANCHORS.set(host, Holder::Level, list.clone()) {
         log::warn!("rustcraft: the anchors not saved: {e:?}");
+    }
+    index_level(game, dimension, &list);
+}
+
+// ---- Slice 18: anchors in every level ----
+
+const INDEX_FILE: &str = "rustcraft_anchor_levels.json";
+
+fn index_path(game: &Game<'_>) -> Option<std::path::PathBuf> {
+    game.native_world_dir().map(|w| w.join("data").join(INDEX_FILE))
+}
+
+/// The index of every level's anchors, read from the world's file the first time.
+fn index(game: &Game<'_>) -> anchor::Index {
+    if let Some(i) = state().index.clone() {
+        return i;
+    }
+    let read = index_path(game)
+        .and_then(|p| std::fs::read_to_string(p).ok())
+        .and_then(|text| serde_json::from_str::<anchor::Index>(&text).ok())
+        .unwrap_or_default();
+    state().index = Some(read.clone());
+    read
+}
+
+/// The level's anchors go into the index, written when it changed.
+fn index_level(game: &Game<'_>, dimension: &str, list: &[Anchor]) {
+    let mut i = index(game);
+    let before = i.clone();
+    i.set(dimension, list);
+    if i == before {
+        return;
+    }
+    state().index = Some(i.clone());
+    let Some(path) = index_path(game) else { return };
+    let written = serde_json::to_string(&i)
+        .map_err(std::io::Error::other)
+        .and_then(|json| {
+            let fresh = path.with_extension("json.tmp");
+            path.parent().map_or(Ok(()), std::fs::create_dir_all)?;
+            std::fs::write(&fresh, json)?;
+            std::fs::rename(&fresh, &path)
+        });
+    if let Err(e) = written {
+        log::warn!("rustcraft: the anchors' index was not saved: {e}");
+    }
+}
+
+/// Each second: a level not read yet that holds an anchor of a player on the server is opened at
+/// that anchor's chunk (`native_force_chunk_in`, API 413); the ticket goes into the level's held
+/// chunks, so its own anchors' tick keeps or lets it go.
+fn wake_levels(game: &mut Game<'_>) {
+    let mut online: BTreeSet<u128> = game.native_server_players().into_iter().map(|p| p.uuid).collect();
+    online.extend(pretended());
+    let loaded = state().anchors_loaded.clone();
+    for (dimension, chunk) in index(game).to_wake(&loaded, &online) {
+        if state().held.get(&dimension).is_some_and(|h| h.contains(&chunk)) {
+            continue;
+        }
+        if game.native_force_chunk_in(TICKET, &dimension, chunk, true) {
+            log::info!("rustcraft: {dimension} opened for an anchor at chunk {chunk:?}");
+            state().held.entry(dimension).or_default().insert(chunk);
+        }
     }
 }
 
@@ -1180,7 +1369,14 @@ fn anchors(game: &mut Game<'_>, dimension: &str, level: &LevelNet, t: &Tuning) {
             want.extend(anchor::chunks(a.pos, &slots, t));
         }
     }
-    state().shares.clear();
+    {
+        let mut s = state();
+        let got: Vec<(Pos, f64)> = s.shares.iter().map(|(p, v)| (*p, *v)).collect();
+        for (p, share) in got {
+            s.anchor_shares.insert((dimension.to_owned(), p), share);
+        }
+        s.shares.clear();
+    }
     let held = state().held.remove(dimension).unwrap_or_default();
     for c in held.difference(&want) {
         game.native_force_chunk(TICKET, *c, false);
@@ -1487,6 +1683,7 @@ fn turret_sheet(game: &Game<'_>, dimension: &str, pos: Pos, t: &Tuning, s: &mut 
             &[],
         )),
     ];
+    s.toggles = target_chips();
     let range = Text::literal(format!("{:.0}", l.range(t)));
     s.rows.push(v(&line(
         "rustcraft.turret.range",
@@ -1494,6 +1691,7 @@ fn turret_sheet(game: &Game<'_>, dimension: &str, pos: Pos, t: &Tuning, s: &mut 
         &[range],
     )));
     if support {
+        support_rows(game, dimension, pos, &slots, &l, t, s);
         let b = turret::buffs(&l, t);
         let pct = |f: f64| Text::literal(format!("{:.0}%", f * 100.0));
         let mut parts = Vec::new();
@@ -1531,8 +1729,7 @@ fn turret_sheet(game: &Game<'_>, dimension: &str, pos: Pos, t: &Tuning, s: &mut 
         if !parts.is_empty() {
             s.rows.push(v(&joined(parts)));
         }
-        s.rows
-            .push(v(&Text::literal(format!("{:.0} E/s", l.support_draw(t)))));
+        role_rows(&slots, s);
     } else {
         s.rows.push(v(&line(
             "rustcraft.turret.shot",
@@ -1591,6 +1788,70 @@ fn turret_sheet(game: &Game<'_>, dimension: &str, pos: Pos, t: &Tuning, s: &mut 
     s.status = status(severity, &text);
 }
 
+// ---- Slice 18: the turret's window as the handbook draws it ----
+
+/// The targets as chips (ui.js `turret`): hostile mobs on; players, pets and peaceful mobs off,
+/// always (they are not switches).
+fn target_chips() -> Vec<rustcraft_rules::machines::sheet::Toggle> {
+    let fixed = line("rustcraft.turret.targets_fixed", "Fixed: a turret never shoots players, pets or peaceful mobs", &[]);
+    [
+        ("minecraft:zombie_head", "rustcraft.turret.target_hostile", "hostile mobs", true),
+        ("minecraft:player_head", "rustcraft.turret.target_players", "players", false),
+        ("minecraft:bone", "rustcraft.turret.target_pets", "pets", false),
+        ("minecraft:wheat", "rustcraft.turret.target_peaceful", "peaceful mobs", false),
+    ]
+    .into_iter()
+    .map(|(icon, key, fallback, on)| rustcraft_rules::machines::sheet::Toggle {
+        icon: icon.to_owned(),
+        name: v(&line(key, fallback, &[])),
+        on,
+        hint: v(&fixed),
+    })
+    .collect()
+}
+
+/// The support window's players in range and the one healed, «Лечит: Alex · 6 из 20».
+#[allow(clippy::too_many_arguments)]
+fn support_rows(game: &Game<'_>, dimension: &str, pos: Pos, _slots: &[Option<Module>], l: &Loadout, t: &Tuning, s: &mut Sheet) {
+    let at = center(pos);
+    let range = l.range(t);
+    let players: Vec<_> = game
+        .native_server_players()
+        .into_iter()
+        .filter(|p| p.dimension == dimension && p.health > 0.0 && p.game_mode != 3 && distance(at, p.position) <= range)
+        .collect();
+    s.rows.push(v(&line(
+        "rustcraft.turret.players",
+        "Players in range: %s",
+        &[Text::literal(players.len().to_string())],
+    )));
+    if let Some(Shown::Healing(name)) = turret_shown(dimension, pos)
+        && let Some(p) = players.iter().find(|p| p.name == name)
+    {
+        s.rows.push(v(&line(
+            "rustcraft.turret.healing",
+            "Heals: %s · %s of 20 health",
+            &[Text::literal(name.clone()), Text::literal(format!("{:.0}", p.health))],
+        )));
+    }
+}
+
+/// A support turret holding effect modules: which modules work and which do not (ui.js).
+fn role_rows(slots: &[Option<Module>], s: &mut Sheet) {
+    let effect = |m: &Module| matches!(m, Module::Bleed | Module::Poison | Module::Slow);
+    let name = |m: &Module| Text::translate(&format!("item.{}", m.item().replace(':', ".")), &[]);
+    let idle: Vec<Text> = slots.iter().flatten().filter(|m| effect(*m)).map(name).collect();
+    if idle.is_empty() {
+        return;
+    }
+    let working: Vec<Text> = slots.iter().flatten().filter(|m| !effect(*m)).map(name).collect();
+    s.rows.push(v(&line(
+        "rustcraft.turret.working",
+        "Work: %s · do not work: %s",
+        &[joined(working), joined(idle)],
+    )));
+}
+
 fn anchor_sheet(game: &Game<'_>, dimension: &str, pos: Pos, t: &Tuning, s: &mut Sheet) {
     let slots = modules_at(game, pos);
     let name = owner_at(game, pos)
@@ -1608,7 +1869,7 @@ fn anchor_sheet(game: &Game<'_>, dimension: &str, pos: Pos, t: &Tuning, s: &mut 
                     &[],
                 )
             },
-            Text::literal,
+            |n| line("rustcraft.anchor.owner_on", "%s · on the server", &[Text::literal(n)]),
         );
     s.rows
         .push(v(&line("rustcraft.anchor.owner", "Owner: %s", &[name])));
@@ -1627,11 +1888,22 @@ fn anchor_sheet(game: &Game<'_>, dimension: &str, pos: Pos, t: &Tuning, s: &mut 
             &[],
         ))],
     ];
-    s.rows.push(v(&Text::literal(format!(
-        "{:.0} E/s",
-        anchor::draw(chunks.len(), &slots, t)
-    ))));
+    // Slice 18: the energy bar, «получает X из Y Е/с» (guide `anchor`).
+    let draw = anchor::draw(chunks.len(), &slots, t);
+    let share = state().anchor_shares.get(&(dimension.to_owned(), pos)).copied().unwrap_or(0.0).clamp(0.0, 1.0);
     let st = anchor_state(dimension, pos);
+    let share = if matches!(st, Some(AnchorState::Holding | AnchorState::NoEnergy)) { share } else { 0.0 };
+    s.bars.push(SheetBar {
+        label: v(&line("rustcraft.window.energy", "Energy", &[])),
+        value: v(&line(
+            "rustcraft.anchor.gets",
+            "gets %s of %s E/s",
+            &[Text::literal(format!("{:.0}", draw * share)), Text::literal(format!("{draw:.0}"))],
+        )),
+        share,
+        energy: true,
+        colour: None,
+    });
     let severity = match st {
         Some(AnchorState::Holding) => Severity::Ok,
         Some(AnchorState::NoEnergy | AnchorState::NoOwner) => Severity::Bad,

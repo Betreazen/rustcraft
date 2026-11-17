@@ -39,6 +39,8 @@ pub mod windows;
 pub mod workers;
 // Slice 18, stream 6 (rail and workers).
 pub mod s18_rail;
+// Slice 18, base and gear (stream 7).
+pub mod gear18;
 
 use std::collections::BTreeMap;
 
@@ -345,6 +347,30 @@ pub trait Bench {
     fn worker_room(&self, owner: u128, limit: u32) -> bool;
     /// H6: worker `id`'s filter set to `items`.
     fn set_worker_filter(&mut self, id: u64, items: &[&str]) -> Result<(), String>;
+    // ---- Slice 18, base and gear (stream 7) ----
+
+    /// `put_gear` of a piece holding `held` (its charge, modules, levels).
+    /// (Defaults keep other benches compiling; the game's bench answers.)
+    fn put_gear_held(&mut self, _pos: Pos, _slot: usize, _item: &str, _held: crate::gear::Held) -> Result<(), String> {
+        Err("not on this bench".to_owned())
+    }
+    /// The held data of the gear piece in slot `slot` at `pos`.
+    fn gear_held(&self, _pos: Pos, _slot: usize) -> Option<crate::gear::Held> {
+        None
+    }
+    /// The aim a turret's block entity tells clients: (yaw, pitch) in degrees, None before any.
+    fn turret_aim(&self, _pos: Pos) -> Option<(f32, f32)> {
+        None
+    }
+    /// What the anvil makes of a piece `piece` (with no enchantment yet) and `books` Capacity
+    /// books of level `level` one after another: the piece's Capacity level after each.
+    fn anvil_capacity(&mut self, _piece: &str, _level: u8, _books: usize) -> Vec<Option<u8>> {
+        Vec::new()
+    }
+    /// Rope `id` as if tied `ms` earlier.
+    fn age_rope(&mut self, _id: u64, _ms: u64) -> Result<(), String> {
+        Err("not on this bench".to_owned())
+    }
 }
 
 /// A mob as the self-test reads it.
@@ -526,6 +552,8 @@ pub fn catalog() -> Vec<Build> {
     all.extend(s18_energy::ALL);
     // Slice 18, stream 6 (rail and workers).
     all.extend(s18_rail::ALL);
+    // Slice 18, base and gear (stream 7).
+    all.extend(gear18::ALL);
     all
 }
 

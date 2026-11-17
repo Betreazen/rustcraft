@@ -377,6 +377,8 @@ pub(super) fn on_menu_clicked(
     base::on_menu_clicked(uuid, window_id, slot, mode);
     tablet::on_menu_clicked(uuid, window_id, slot, mode);
     window::on_menu_clicked(game, uuid, window_id, slot, button, mode);
+    // Slice 18, base and gear: the starsteel backpack's page arrows.
+    crate::game::rustcraft_backpack::on_menu_clicked(game, uuid, window_id, slot);
 }
 
 pub(super) fn on_menu_closed(uuid: u128, window_id: i32) {
