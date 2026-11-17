@@ -989,7 +989,9 @@ impl Bench for GameBench<'_, '_> {
 
     // Slice 18, last leftovers: the backpack's store.
     fn backpack_store(&mut self) -> Result<(), String> {
-        crate::game::rustcraft_backpack::self_test_store(self.game)
+        crate::game::rustcraft_backpack::self_test_store(self.game)?;
+        // In-game check w3: the key on a worn backpack hung the server.
+        crate::game::rustcraft_backpack::self_test_key(self.game)
     }
 
     fn int_array(&self, pos: Pos, key: &str) -> Vec<i32> {
