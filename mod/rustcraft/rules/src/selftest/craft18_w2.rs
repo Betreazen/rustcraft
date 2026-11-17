@@ -9,6 +9,7 @@
 //!   and its fourth takes a module; a kitchen of tier 4 cooks twice as fast as one of tier 2.
 //! - A projector showing its ghost with no storage on its magistral says «Нет склада на
 //!   магистрали».
+//! - The kitchen bakes a cake with milk from a tank it does not touch, through a fluid channel.
 
 use super::craft18::{basin, socket, status_key, storage_on_a_net};
 use crate::storage::modules::{SOCKET_STACK, STACK_MODULES};
@@ -16,12 +17,13 @@ use super::{Build, Scenario, at, plot_area, same};
 use crate::geom::Pos;
 use crate::tuning::Tuning;
 
-pub const ALL: [Build; 5] = [
+pub const ALL: [Build; 6] = [
     projector_is_not_turned_by_the_wrench,
     terminal_takes_the_crystallite_stack_module,
     two_fisheries_on_one_patch,
     craft_machines_up_to_tier_four,
     projector_says_no_storage,
+    kitchen_milk_through_a_channel,
 ];
 
 fn projector_is_not_turned_by_the_wrench(o: Pos, _: &Tuning) -> Scenario {
@@ -127,5 +129,40 @@ fn projector_says_no_storage(o: Pos, _: &Tuning) -> Scenario {
         })
         .until("its ghost shows and it says there is no storage on its magistral", 60, move |b, _| {
             Ok(status_key(b, p) == "rustcraft.util.projector_no_storage")
+        })
+}
+
+fn kitchen_milk_through_a_channel(o: Pos, _: &Tuning) -> Scenario {
+    use super::magistral::{channel, line};
+    use crate::geom::Face;
+    use crate::machines::sheet::Press;
+    use crate::net::items::Mode;
+    use crate::net::settings::JointSetting;
+    use crate::net::topology::ChannelKind;
+    let tank = at(o, [1, 0, -1]);
+    let p = at(o, [4, 0, -1]);
+    Scenario::new("w2_kitchen_milk_through_a_channel", plot_area(o))
+        .then("a fluid line from a tank of milk (its joint gives) to a kitchen", move |b, _| {
+            line(b, o, 1, 4, [channel(ChannelKind::Fluid, 1), None, None, None])?;
+            b.place(tank, "rustcraft:tank", &[])?;
+            b.set_tank(tank, "rustcraft:milk", 3000)?;
+            b.place(p, "rustcraft:kitchen", &[])?;
+            b.set_buffer(p, 400.0)?;
+            b.set_joint(at(o, [1, 0, 0]), Face::ZNeg, 0, JointSetting::of_mode(Mode::From))?;
+            b.put(p, 0, "minecraft:sugar", 2)?;
+            b.put(p, 1, "minecraft:egg", 1)?;
+            b.put(p, 2, "minecraft:wheat", 3)
+        })
+        .then("the first page set to cake", move |b, _| {
+            for _ in 0..4 {
+                b.press_cursor(p, Press::Toggle(0).id(), None)?;
+            }
+            Ok(())
+        })
+        .until("a cake in its output", 400, move |b, _| {
+            Ok(b.items(p).iter().skip(9).flatten().any(|s| s.0 == "minecraft:cake"))
+        })
+        .check("the milk came from the tank down the channel", move |b, _| {
+            same("milk", b.tank(tank).map(|g| g.amount), Some(0))
         })
 }

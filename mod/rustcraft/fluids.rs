@@ -128,7 +128,8 @@ pub(super) fn default_mode(block: &str) -> Option<Mode> {
         // Slice 18 (guide `trash`): the trash destroys fluids its joint's filter lets in.
         Some(TANK_DEFAULT)
     } else {
-        None
+        // Wave 2 (w2-craft): the kitchen and the shearer, at the stream-5 block below.
+        craft_default_mode(block)
     }
 }
 
@@ -961,12 +962,51 @@ pub(super) fn reachable(
 }
 
 // ---- Slice 18 (stream 5): the kitchen and the shearer use the tank they touch ----
+//
+// Wave 2 (guide `kitchen`, `shearer`: «из бака жидкостным каналом», «в бак жидкостным каналом»):
+// and the tanks of a fluid net they are joints of. The kitchen's joint takes by default, the
+// shearer's gives (`craft_default_mode`); the kitchen draws from a tank whose joint gives (From or
+// Both), the shearer fills one whose joint takes (Into, the tank's default, or Both), as a mixer's
+// order brings its water (`bring_water`). Their joints carry none of the net's own flow: the
+// net's inventories give them no room and nothing offered.
 
-/// The tank group touching `pos` that holds `fluid` or is empty (for `fill`), and its index.
+/// Wave 2: the default fluid joint of the kitchen (takes milk) and the shearer (gives it).
+fn craft_default_mode(block: &str) -> Option<Mode> {
+    use rustcraft_rules::utility::Util;
+    if block == Util::Kitchen.spec().block {
+        Some(Mode::Into)
+    } else if block == Util::Shearer.spec().block {
+        Some(Mode::From)
+    } else {
+        None
+    }
+}
+
+/// Wave 2: the blocks a craft machine at `pos` reaches on the fluid nets it is a joint of: to take
+/// (`fill` false) the joints that give, to fill the joints that take.
+fn net_reach(level: &LevelNet, pos: Pos, fill: bool) -> BTreeSet<Pos> {
+    let (mine, theirs) = if fill { (Mode::Into, Mode::From) } else { (Mode::From, Mode::Into) };
+    let mut out = BTreeSet::new();
+    for net in &level.fluids.nets {
+        if net.joints.iter().any(|j| j.block == pos && j.mode != mine && j.mode != Mode::Off) {
+            out.extend(
+                net.joints
+                    .iter()
+                    .filter(|j| j.block != pos && j.mode != theirs && j.mode != Mode::Off)
+                    .map(|j| j.block),
+            );
+        }
+    }
+    out
+}
+
+/// The tank group touching `pos`, or on a fluid net it is a joint of (wave 2), that holds `fluid`
+/// or is empty (for `fill`), and its index.
 fn touching_group(game: &Game<'_>, level: &LevelNet, pos: Pos, fluid: &str, fill: bool, tuning: &Tuning) -> Option<(Vec<TankGroup>, usize)> {
     let per_block = tuning.tank_buckets * BUCKET;
     let groups = read_groups(game, &level.fluids.tanks, per_block);
-    let near: BTreeSet<Pos> = Face::ALL.into_iter().map(|f| step(pos, f)).collect();
+    let mut near: BTreeSet<Pos> = Face::ALL.into_iter().map(|f| step(pos, f)).collect();
+    near.extend(net_reach(level, pos, fill));
     let i = groups.iter().position(|g| {
         g.blocks.iter().any(|b| near.contains(b))
             && (g.fluid.as_deref() == Some(fluid) || (fill && g.fluid.is_none()))
