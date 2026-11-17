@@ -1371,5 +1371,6 @@
   "rustcraft.gear.window.does.magnet": "pulls items in",
   "rustcraft.gear.window.does.damper": "−20% damage for 5 s after a hit",
   "rustcraft.gear.window.does.jetpack": "flight on charge",
-  "rustcraft.worker.unreadable": "This worker does not read: it stays with you"
+  "rustcraft.worker.unreadable": "This worker does not read: it stays with you",
+  "rustcraft.monorail.tier_swapped": "Monorail: tier %s took the place of tier %s"
 }

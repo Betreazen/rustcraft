@@ -369,6 +369,8 @@ pub(super) fn on_right_click_block(
     canceled: &mut bool,
 ) {
     zipline::on_right_click_block(game, pos, canceled);
+    // Slice 18, wave 2: a rail clicked with a rail of another tier takes that tier.
+    crate::game::rustcraft_monorail::on_right_click_block(game, pos, canceled);
     // s18/pipe: an empty hand opens the node's window.
     crate::game::rustcraft_node_window::on_right_click_block(game, pos, face, canceled);
     base::on_right_click_block(game, pos, canceled);

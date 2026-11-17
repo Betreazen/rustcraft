@@ -430,6 +430,13 @@ pub trait Bench {
     fn backpack_store(&mut self) -> Result<(), String> {
         Err("no backpack store on this bench".into())
     }
+    // ---- Slice 18, wave 2: rail, workers, base and gear ----
+    /// A right click with rail item `item` on the rail at `pos`: the old tier's item it gives
+    /// back, or why nothing changed (rustcraft_monorail::swap_rail_in_place).
+    fn swap_rail(&mut self, pos: Pos, item: &str) -> Result<String, String> {
+        let _ = (pos, item);
+        Err("no rails on this bench".into())
+    }
 }
 
 /// A mob as the self-test reads it.

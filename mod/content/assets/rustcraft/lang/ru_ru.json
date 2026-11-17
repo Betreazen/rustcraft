@@ -6746,5 +6746,6 @@
   "rustcraft.gear.window.does.magnet": "притягивает предметы",
   "rustcraft.gear.window.does.damper": "после удара 5 с урон −20%",
   "rustcraft.gear.window.does.jetpack": "полёт за заряд",
-  "rustcraft.worker.unreadable": "Работник не читается: он остаётся у тебя"
+  "rustcraft.worker.unreadable": "Работник не читается: он остаётся у тебя",
+  "rustcraft.monorail.tier_swapped": "Монорельс: ступень %s встала на место ступени %s"
 }

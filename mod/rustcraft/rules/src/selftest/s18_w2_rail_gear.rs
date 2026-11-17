@@ -6,7 +6,7 @@ use crate::geom::Pos;
 use crate::modules::Module;
 use crate::tuning::Tuning;
 
-pub const ALL: &[Build] = &[turret_window_spells_the_shot, turret_kill_drops_the_owners_loot];
+pub const ALL: &[Build] = &[turret_window_spells_the_shot, turret_kill_drops_the_owners_loot, rail_takes_another_tier_in_place];
 
 const OWNER: u128 = 0x5e1f_7e57_0000_0000_0000_0000_0000_00c1;
 
@@ -97,5 +97,35 @@ fn turret_kill_drops_the_owners_loot(o: Pos, t: &Tuning) -> Scenario {
         .until("a spider eye lies on the plot", 60, move |b, _| {
             let lying = b.lying(at(o, [-1, 0, -5]).map(f64::from), at(o, [25, 5, 5]).map(f64::from));
             Ok(lying.iter().any(|(item, _)| item == "minecraft:spider_eye"))
+        })
+}
+
+/// Task 7 (guide `monorail`): a tier-1 rail clicked with a tier-3 rail takes tier 3 in place, its
+/// mount kept, and gives the tier-1 rail back; a click with the same tier changes nothing.
+fn rail_takes_another_tier_in_place(o: Pos, _: &Tuning) -> Scenario {
+    use crate::monorail::shape;
+    let p = at(o, [3, 1, 0]);
+    Scenario::new("w2_rail_takes_another_tier_in_place", plot_area(o))
+        .then("a tier-1 rail on the floor", move |b, _| {
+            b.place(at(o, [3, 0, 0]), "minecraft:stone", &[])?;
+            b.place(p, "rustcraft:monorail", &[(shape::MOUNT, shape::mount_value(crate::geom::Face::YNeg))])
+        })
+        .check("a tier-3 rail swaps in, the tier-1 one comes back", move |b, _| {
+            let old = b.swap_rail(p, "rustcraft:monorail_3")?;
+            if old != "rustcraft:monorail" {
+                return Err(format!("gave back {old}"));
+            }
+            let tier = b.property(p, "tier");
+            if tier.as_deref() != Some("3") {
+                return Err(format!("tier {tier:?}"));
+            }
+            let mount = b.property(p, shape::MOUNT);
+            if mount.as_deref() != Some(shape::mount_value(crate::geom::Face::YNeg)) {
+                return Err(format!("mount {mount:?}"));
+            }
+            if b.swap_rail(p, "rustcraft:monorail_3").is_ok() {
+                return Err("the same tier swapped".into());
+            }
+            Ok(())
         })
 }

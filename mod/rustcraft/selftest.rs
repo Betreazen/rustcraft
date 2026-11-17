@@ -1021,6 +1021,13 @@ impl Bench for GameBench<'_, '_> {
             })
             .collect()
     }
+
+    // ---- Slice 18, wave 2: rail, workers, base and gear ----
+    fn swap_rail(&mut self, pos: Pos, item: &str) -> Result<String, String> {
+        crate::game::rustcraft_monorail::swap_rail_in_place(self.game, DIMENSION, pos, item)
+            .map(|(old, _, _)| old.to_owned())
+            .map_err(str::to_owned)
+    }
 }
 
 /// The slice-7 half of the bench.
