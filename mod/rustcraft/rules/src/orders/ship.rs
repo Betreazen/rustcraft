@@ -105,6 +105,10 @@ pub struct Shipment {
     pub ride: u32,
     /// The whole ride, for the way back.
     pub full_ride: u32,
+    /// Slice 18 (O11): the machine a job's items set off from when not the storage: a product
+    /// one step made riding straight to the next step's machine (`held`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub from: Option<Pos>,
 }
 
 impl Shipment {
@@ -129,6 +133,7 @@ impl Shipment {
             load_rate: route.load_per_tick(ticks_per_second),
             ride,
             full_ride: ride,
+            from: None,
         }
     }
 
@@ -162,6 +167,7 @@ impl Shipment {
             leg: Leg::Back { from },
             to_load: self.count() * MILLI,
             ride: self.full_ride,
+            from: None,
             ..self
         }
     }

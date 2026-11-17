@@ -404,6 +404,8 @@ fn snapshot(
             .collect();
         read.insert(joint.block, slots);
     }
+    // Slice 18 (O11): a product an order takes straight to its next step's machine stays put.
+    let kept = crate::game::rustcraft_orders::kept_outputs(dimension);
     for (pos, slots) in read {
         let machine = machines.get(&pos).copied();
         let entity = machine.and_then(|_| crate::game::rustcraft_machines::entity(game, pos));
@@ -411,6 +413,9 @@ fn snapshot(
             .into_iter()
             .map(|(slot, held, can_take)| {
                 let input = machine.is_none_or(|m| m.inputs().contains(&slot));
+                let ordered = !input
+                    && held.as_ref().is_some_and(|(i, _)| kept.get(&pos) == Some(i));
+                let can_take = can_take && !ordered;
                 let only = entity.as_ref().filter(|_| input).map(|entity| {
                     seen.iter()
                         .filter(|item| slot_takes(entity, slot, keys::item_of(item), tuning))

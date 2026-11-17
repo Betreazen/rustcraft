@@ -49,6 +49,7 @@ pub mod workers;
 pub mod s18_rail;
 // Slice 18, base and gear (stream 7).
 pub mod gear18;
+pub mod s18_last_orders;
 
 use std::collections::BTreeMap;
 
@@ -614,6 +615,7 @@ pub fn catalog() -> Vec<Build> {
     all.extend(pipe18::ALL);
     // Slice 18, cross-stream agent.
     all.extend(s18_cross::ALL);
+    all.extend(s18_last_orders::ALL);
     all
 }
 
