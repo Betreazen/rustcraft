@@ -1938,7 +1938,11 @@ pub(super) fn sheet(game: &Game<'_>, dimension: &str, level: &LevelNet, pos: Pos
     let e = energy(game, pos);
     s.bars.push(Bar {
         label: base::v(&line("rustcraft.util.energy", "Energy", &[])),
-        value: base::v(&Text::literal(format!("{e:.0} / {:.0} E", spec.buffer))),
+        value: base::v(&Text::literal(format!(
+            "{} / {} E",
+            rustcraft_rules::machines::panel::energy_text(e.floor()),
+            rustcraft_rules::machines::panel::energy_text(spec.buffer)
+        ))),
         share: (e / spec.buffer).clamp(0.0, 1.0),
         energy: true,
         colour: None,
@@ -2501,14 +2505,16 @@ fn trash_sheet(game: &Game<'_>, dimension: &str, pos: Pos, s: &mut Sheet) {
     s.rows = vec![
         base::v(&filter),
         base::v(&line("rustcraft.util.trash.priority", "Priority: %s", &[priority])),
+        // In-game check w3: the guide's key-value rows (the lang puts a tab between them), the
+        // buckets only when some burnt, so the value is not cut.
         base::v(&line(
-            "rustcraft.util.trash.burnt_minute",
-            "Burnt in a minute: %s items · %s buckets",
-            &[lit(items_minute.to_string()), lit(buckets.to_string())],
+            "rustcraft.util.trash.burnt_row",
+            "Burnt in a minute\t%s",
+            &[burnt_value(u64::from(items_minute), buckets)],
         )),
         base::v(&line(
-            "rustcraft.util.trash.throughput",
-            "Throughput: %s of %s items a second",
+            "rustcraft.util.trash.throughput_row",
+            "Throughput\t%s of %s",
             &[lit(format!("{now:.0}")), lit(format!("{rate:.0}"))],
         )),
     ];
@@ -2550,6 +2556,20 @@ fn trash_sheet(game: &Game<'_>, dimension: &str, pos: Pos, s: &mut Sheet) {
     );
     s.work = Some(step_share(dimension, pos, paced(game, pos, Util::Trash).0));
     s.label = Some(base::v(&line("rustcraft.util.trash.burning", "Burning now", &[])));
+}
+
+/// «412 предметов · 6 вёдер», each count in its plural form; no buckets when none burnt.
+fn burnt_value(items: u64, buckets: u64) -> Text {
+    let counted = |key: &str, fallback: &str, n: u64| {
+        let form = rustcraft_rules::machines::panel::plural_form(n);
+        line(&format!("{key}.{form}"), fallback, &[Text::literal(n.to_string())])
+    };
+    let mut v = counted("rustcraft.window.items", "%s items", items);
+    if buckets > 0 {
+        v.push(Text::literal(" · "));
+        v.push(counted("rustcraft.window.buckets", "%s buckets", buckets));
+    }
+    v
 }
 
 /// Slice 18, wave 2 (`ui.js` disintegrator): its input, the arrow and «Разборка» (what comes

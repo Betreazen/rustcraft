@@ -843,7 +843,11 @@ fn write_fluids(game: &mut Game<'_>, before: &[Sink], after: &BTreeMap<Pos, Sink
 // ---- What they show ----
 
 fn e(n: f64) -> Text {
-    // + 0.0 turns a rounded −0 into 0: a battery giving nothing showed «Отдаёт −0 Е/с».
+    // In-game check w3: thousands apart, as the guide writes them (energy_text; a rounded −0
+    // reads 0, so a battery giving nothing no longer shows «Отдаёт −0 Е/с»).
+    if n.is_finite() {
+        return Text::literal(rustcraft_rules::machines::panel::energy_text(n));
+    }
     let r = (n * 10.0).round() / 10.0 + 0.0;
     Text::literal(if (r - r.round()).abs() < 1e-9 {
         format!("{r:.0}")
@@ -956,8 +960,8 @@ pub(super) fn diagnosis(
         text.push(Text::literal(" · "));
         text.push(line(
             "rustcraft.power.lava",
-            "lava %s of %s mB",
-            &[e(v.fluid.floor()), e(rules::lava_capacity(t))],
+            "lava %s of %s buckets",
+            &[buckets(v.fluid), buckets(rules::lava_capacity(t))],
         ));
     }
     Some(text)
@@ -1072,10 +1076,11 @@ pub(super) fn sheet(
             let capacity = rules::lava_capacity(t);
             s.bars.push(SheetBar {
                 label: base::v(&Text::translate("block.minecraft.lava", &[])),
+                // ui.js `gen_lava`: «8,8 из 16 вёдер» under the «Лава» label.
                 value: base::v(&line(
-                    "rustcraft.power.lava",
-                    "lava %s of %s mB",
-                    &[e(v.fluid.floor()), e(capacity)],
+                    "rustcraft.power.lava_bar",
+                    "%s of %s buckets",
+                    &[buckets(v.fluid), buckets(capacity)],
                 )),
                 share: if capacity > 0.0 {
                     v.fluid / capacity
@@ -1196,6 +1201,11 @@ fn gives_bar(now: f64, most: f64) -> SheetBar {
         energy: true,
         colour: None,
     }
+}
+
+/// Millibuckets as buckets, whole or with one decimal (ui.js `gen_lava`: «8,8 из 16 вёдер»).
+fn buckets(mb: f64) -> Text {
+    e((mb / 100.0).floor() / 10.0)
 }
 
 /// ui.js `balance`: the circuit's production and demand, its batteries and whether it is enough.

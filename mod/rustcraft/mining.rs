@@ -803,8 +803,17 @@ pub(super) fn sheet(
             &[Text::literal(found.to_string()), left_text],
         )));
         // «Куда складывает»: the guide's three places, the one it uses now marked.
+        // In-game check w3: the three chips do not fit the window's width in the game's font, so
+        // the row says the place it uses now (ui.js rows' «ключ — значение») and its tooltip
+        // lists all three in the guide's order, the one in use in brackets.
         let now = outlet_at(dimension, pos);
-        let mut places = line("rustcraft.miner.outlet", "Puts it: ", &[]);
+        let place_name = |o: Outlet| line(&format!("rustcraft.miner.outlet.{}", o.key()), o.key(), &[]);
+        let mut row = line("rustcraft.miner.outlet_row", "Puts it\t", &[]);
+        row.push(match now {
+            Some(o) if o != Outlet::Nowhere => place_name(o),
+            _ => Text::literal("—"),
+        });
+        let mut places = Text::literal("");
         for (i, o) in Outlet::ORDER.into_iter().enumerate() {
             if i > 0 {
                 places.push(Text::literal(" · "));
@@ -818,7 +827,7 @@ pub(super) fn sheet(
                 places.push(name);
             }
         }
-        s.rows.push(base::v(&places));
+        s.rows.push(base::v(&row));
         s.hints = vec![
             vec![
                 base::v(&line(
@@ -841,11 +850,14 @@ pub(super) fn sheet(
                     &[],
                 )),
             ],
-            vec![base::v(&line(
-                "rustcraft.miner.outlet_hint",
-                "A chest beside it first, else the magistral, else a load dock",
-                &[],
-            ))],
+            vec![
+                base::v(&places),
+                base::v(&line(
+                    "rustcraft.miner.outlet_hint",
+                    "A chest beside it first, else the magistral, else a load dock",
+                    &[],
+                )),
+            ],
         ];
         s.toggles = Ore::LISTED
             .iter()
@@ -1020,10 +1032,13 @@ pub(super) fn vein_sheet(game: &Game<'_>, pos: Pos, now: u64, every: u64, s: &mu
         "Free cells around: %s",
         &[Text::literal(free.to_string())],
     )));
+    // In-game check w3: «1 блок», not «1 блоков».
+    let grown = read_long(&entity.nbt, GROWN_KEY).max(0) as u64;
+    let form = rustcraft_rules::machines::panel::plural_form(grown);
     s.rows.push(base::v(&line(
-        "rustcraft.vein.grown",
-        "Grown in all: %s blocks",
-        &[Text::literal(read_long(&entity.nbt, GROWN_KEY).to_string())],
+        "rustcraft.vein.grown_row",
+        "Grown in all: %s",
+        &[line(&format!("rustcraft.window.blocks.{form}"), "%s blocks", &[Text::literal(grown.to_string())])],
     )));
     s.hints = vec![old_rows.clone(), old_rows];
     s.bars.push(SheetBar {

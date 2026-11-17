@@ -105,12 +105,40 @@ pub fn decode(data: &[i32]) -> Panel {
 
 /// An energy number as the window writes it: whole when it is, else one decimal after a comma
 /// (Russian style): «8», «2,8».
+/// In-game check w3: thousands apart, as the guide writes them («3 200 из 40 000 Е»).
 pub fn energy_text(value: f64) -> String {
     let tenths = (value * 10.0).round() as i64;
+    let sign = if tenths < 0 { "-" } else { "" };
+    let whole = grouped((tenths / 10).unsigned_abs());
     if tenths % 10 == 0 {
-        (tenths / 10).to_string()
+        format!("{sign}{whole}")
     } else {
-        format!("{},{}", tenths / 10, (tenths % 10).abs())
+        format!("{sign}{whole},{}", (tenths % 10).abs())
+    }
+}
+
+/// A whole number with its thousands apart by a no-break space: «40 000».
+pub fn grouped(n: u64) -> String {
+    let digits = n.to_string();
+    let mut out = String::new();
+    for (i, c) in digits.chars().enumerate() {
+        if i > 0 && (digits.len() - i).is_multiple_of(3) {
+            out.push('\u{a0}');
+        }
+        out.push(c);
+    }
+    out
+}
+
+/// The Russian plural form of a count, as the lang keys end: `one` (1, 21 «блок»), `few` (2–4,
+/// 22 «блока») or `many` (5–20, 11–14 «блоков»). English keys give `few` and `many` one text.
+pub fn plural_form(n: u64) -> &'static str {
+    if n % 10 == 1 && n % 100 != 11 {
+        "one"
+    } else if (2..=4).contains(&(n % 10)) && !(12..=14).contains(&(n % 100)) {
+        "few"
+    } else {
+        "many"
     }
 }
 
@@ -272,6 +300,22 @@ mod tests {
         assert_eq!(energy_text(24.0), "24");
         assert_eq!(energy_text(0.0), "0");
         assert_eq!(energy_text(1.04), "1");
+        // In-game check w3: the guide groups thousands («3 200 из 40 000 Е»).
+        assert_eq!(energy_text(3200.0), "3\u{a0}200");
+        assert_eq!(energy_text(40_000.0), "40\u{a0}000");
+        assert_eq!(energy_text(1_234_567.5), "1\u{a0}234\u{a0}567,5");
+        assert_eq!(energy_text(-2.8), "-2,8");
+        assert_eq!(energy_text(-0.01), "0");
+    }
+
+    #[test]
+    fn counts_take_the_russian_plural_forms() {
+        // In-game check w3: «Выращено всего: 1 блоков».
+        let forms: Vec<&str> = [1, 2, 4, 5, 11, 12, 14, 21, 22, 25, 101, 111].map(plural_form).to_vec();
+        assert_eq!(
+            forms,
+            ["one", "few", "few", "many", "many", "many", "many", "one", "few", "many", "one", "many"]
+        );
     }
 
     #[test]

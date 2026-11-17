@@ -211,8 +211,9 @@ pub const HEAD_Y: f32 = 36.0;
 pub const ROWS_Y: f32 = 47.0;
 pub const ROW_H: f32 = 20.0;
 /// The columns' left edges: «Гнездо», «Канал», «Направление», «Фильтр», «Приоритет».
-pub const COLUMNS: [f32; 5] = [LEFT, 42.0, 100.0, 182.0, 292.0];
-const MODE_W: f32 = 78.0;
+/// In-game check w3: «ГНЕЗДО» ran into «КАНАЛ» at 42; the channel column starts at 50.
+pub const COLUMNS: [f32; 5] = [LEFT, 50.0, 104.0, 184.0, 292.0];
+const MODE_W: f32 = 76.0;
 const LIST_W: f32 = 36.0;
 const BUTTON_H: f32 = 14.0;
 /// The filter's item cells after the list button, then «+».
