@@ -918,6 +918,13 @@ pub fn declare_items(items: &mut Vec<Item>) {
             ..Item::default()
         });
     }
+    // Slice 18, w2-craft: the terminal's filter module (TM1), the «своя» tab's; only the terminal's
+    // socket takes it (rustcraft_rules::storage::modules), so it is no machine module.
+    items.push(Item {
+        id: rustcraft_rules::storage::modules::FILTER.into(),
+        template: "minecraft:iron_ingot".into(),
+        ..Item::default()
+    });
     // The alloys: plain items, as an iron ingot is (the capacity module is one of the modules' ITEMS since slice 18).
     for id in [
         COPPERSTEEL,

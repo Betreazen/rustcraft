@@ -6721,5 +6721,21 @@
   "rustcraft.handbook.page.tool_map.part.4.w.4": "Построек",
   "rustcraft.handbook.page.tool_map.part.4.w.5": "деревня, руины портала",
   "rustcraft.handbook.page.tool_map.part.5.w.0": "Работает: наносит чанки",
-  "rustcraft.handbook.page.tool_map.window": "Картограф · шасси из кристаллита"
+  "rustcraft.handbook.page.tool_map.window": "Картограф · шасси из кристаллита",
+  "item.rustcraft.module_filter": "Модуль фильтра",
+  "rustcraft.util.fish_shared": "Участок воды занят другой станцией",
+  "item.rustcraft.repair_3": "Ремонтный стенд · ступень 3",
+  "item.rustcraft.repair_4": "Ремонтный стенд · ступень 4",
+  "item.rustcraft.kitchen_3": "Кухонный комбайн · ступень 3",
+  "item.rustcraft.kitchen_4": "Кухонный комбайн · ступень 4",
+  "item.rustcraft.fishery_3": "Рыболовная станция · ступень 3",
+  "item.rustcraft.fishery_4": "Рыболовная станция · ступень 4",
+  "item.rustcraft.feeder_3": "Кормушка · ступень 3",
+  "item.rustcraft.feeder_4": "Кормушка · ступень 4",
+  "item.rustcraft.butcher_3": "Забойщик · ступень 3",
+  "item.rustcraft.butcher_4": "Забойщик · ступень 4",
+  "item.rustcraft.shearer_3": "Стригаль-доильщик · ступень 3",
+  "item.rustcraft.shearer_4": "Стригаль-доильщик · ступень 4",
+  "item.rustcraft.apiary_3": "Пасечный сборщик · ступень 3",
+  "item.rustcraft.apiary_4": "Пасечный сборщик · ступень 4"
 }

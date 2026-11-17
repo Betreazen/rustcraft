@@ -1,0 +1,19 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    "bgb",
+    "bsb",
+    "bhb"
+  ],
+  "key": {
+    "b": "rustcraft:starsteel",
+    "g": "minecraft:glass",
+    "s": "minecraft:shears",
+    "h": "minecraft:hopper"
+  },
+  "result": {
+    "id": "rustcraft:apiary_4",
+    "count": 1
+  }
+}

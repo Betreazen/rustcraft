@@ -1346,5 +1346,21 @@
   "rustcraft.handbook.page.dusts.name": "Ore dust",
   "rustcraft.handbook.page.dusts.sum": "Iron, copper and gold dust from the crusher. Smelts into an ingot.",
   "rustcraft.handbook.page.fluids.name": "Solution and catalysts",
-  "rustcraft.handbook.page.fluids.sum": "Fluids from the mixer. Nutrient solution feeds crystal structures; catalysts boost machines."
+  "rustcraft.handbook.page.fluids.sum": "Fluids from the mixer. Nutrient solution feeds crystal structures; catalysts boost machines.",
+  "item.rustcraft.module_filter": "Filter Module",
+  "rustcraft.util.fish_shared": "Another station fishes this water",
+  "item.rustcraft.repair_3": "Repair Stand · tier 3",
+  "item.rustcraft.repair_4": "Repair Stand · tier 4",
+  "item.rustcraft.kitchen_3": "Kitchen · tier 3",
+  "item.rustcraft.kitchen_4": "Kitchen · tier 4",
+  "item.rustcraft.fishery_3": "Fishing Station · tier 3",
+  "item.rustcraft.fishery_4": "Fishing Station · tier 4",
+  "item.rustcraft.feeder_3": "Feeder · tier 3",
+  "item.rustcraft.feeder_4": "Feeder · tier 4",
+  "item.rustcraft.butcher_3": "Butcher · tier 3",
+  "item.rustcraft.butcher_4": "Butcher · tier 4",
+  "item.rustcraft.shearer_3": "Shearer-Milker · tier 3",
+  "item.rustcraft.shearer_4": "Shearer-Milker · tier 4",
+  "item.rustcraft.apiary_3": "Apiary Collector · tier 3",
+  "item.rustcraft.apiary_4": "Apiary Collector · tier 4"
 }

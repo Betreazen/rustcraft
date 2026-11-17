@@ -7,8 +7,35 @@
       },
       "entries": [
         {
-          "type": "minecraft:item",
-          "name": "rustcraft:butcher"
+          "type": "minecraft:alternatives",
+          "children": [
+            {
+              "type": "minecraft:item",
+              "name": "rustcraft:butcher_3",
+              "condition": {
+                "type": "minecraft:match_block",
+                "blocks": "rustcraft:butcher",
+                "state": {
+                  "tier": "3"
+                }
+              }
+            },
+            {
+              "type": "minecraft:item",
+              "name": "rustcraft:butcher_4",
+              "condition": {
+                "type": "minecraft:match_block",
+                "blocks": "rustcraft:butcher",
+                "state": {
+                  "tier": "4"
+                }
+              }
+            },
+            {
+              "type": "minecraft:item",
+              "name": "rustcraft:butcher"
+            }
+          ]
         }
       ],
       "rolls": 1

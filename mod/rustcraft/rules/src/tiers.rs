@@ -93,6 +93,14 @@ pub const FAMILIES: &[Family] = &[
     Family::new("rustcraft:mixer", 2),
     Family::new("rustcraft:disintegrator", 3),
     Family::new("rustcraft:charger", 3),
+    // Wave 2 (w2-craft): the craft machines that open on tier 2 go up to 4 (guide SLOTS_FROM(2)).
+    Family::new("rustcraft:repair", 2),
+    Family::new("rustcraft:kitchen", 2),
+    Family::new("rustcraft:fishery", 2),
+    Family::new("rustcraft:feeder", 2),
+    Family::new("rustcraft:butcher", 2),
+    Family::new("rustcraft:shearer", 2),
+    Family::new("rustcraft:apiary", 2),
 ];
 
 /// The worker's chassis (guide `chassis`, U4): no block, so not in [`FAMILIES`]; its tiers 1–3

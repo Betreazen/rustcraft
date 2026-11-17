@@ -60,7 +60,19 @@ fn near(pos: Pos, r: f64, at: [f64; 3]) -> bool {
 
 pub(super) fn step(game: &mut Game<'_>, dimension: &str, level: &LevelNet, pos: Pos, u: Util, cost: f64, now: u64, t: &Tuning) -> Shown {
     match u {
-        Util::Fishery => fish(game, dimension, pos, cost, now),
+        Util::Fishery => {
+            // Wave 2: a patch of water a station.
+            let others: Vec<Pos> = level
+                .machines
+                .iter()
+                .filter(|(_, m)| **m == crate::game::rustcraft_content::Machine::Util(Util::Fishery))
+                .map(|(p, _)| *p)
+                .collect();
+            if rules::water_taken(pos, &others) {
+                return Shown::Blocked("fish_shared");
+            }
+            fish(game, dimension, pos, cost, now)
+        }
         Util::Feeder => feed(game, pos, cost),
         Util::Shearer => shear(game, level, pos, cost, now, t),
         _ => honey(game, pos, cost),
@@ -128,16 +140,17 @@ fn fish(game: &mut Game<'_>, dimension: &str, pos: Pos, cost: f64, now: u64) -> 
     }
     let lure = rod.enchantment_level("minecraft:lure");
     let key = (dimension.to_owned(), pos);
-    let due = *state().fish_due.entry(key.clone()).or_insert_with(|| now + rules::fish_wait(util::random(), lure));
-    if now < due {
-        return Shown::Working;
-    }
     let slots = catch_slots(game, pos);
     if !fits(game, pos, slots.clone(), &[ItemStack::new("minecraft:cod", 1)]) {
         return Shown::Blocked("output_full");
     }
+    // Wave 2 (guide: «Расход 4 Е/с»): it pays each step it fishes, the wait as the catch.
     if !spend(game, pos, cost) {
         return Shown::NoEnergy;
+    }
+    let due = *state().fish_due.entry(key.clone()).or_insert_with(|| now + rules::fish_wait(util::random(), lure));
+    if now < due {
+        return Shown::Working;
     }
     state().fish_due.insert(key, now + rules::fish_wait(util::random(), lure));
     let catch = game.sequence_loot("minecraft:gameplay/fishing", "minecraft:gameplay/fishing", Some(&rod));

@@ -52,7 +52,7 @@ const SETTLE: u64 = 100;
 
 /// A chest «из блока» at housing 1, an item net of tier 2 and a storage of two cells with a
 /// terminal touching housings 3 and 4.
-fn storage_on_a_net(b: &mut dyn Bench, o: Pos) -> Result<(), String> {
+pub(super) fn storage_on_a_net(b: &mut dyn Bench, o: Pos) -> Result<(), String> {
     item_line(b, o, 2, 4, &[1])?;
     joint(b, o, 1, Mode::From, 0)?;
     b.place(at(o, [3, 0, 1]), CELL, &[])?;
@@ -88,7 +88,7 @@ fn storage_keeps_component_stacks(o: Pos, _: &Tuning) -> Scenario {
 }
 
 /// The press id of terminal socket `k`.
-fn socket(k: usize) -> Result<i32, String> {
+pub(super) fn socket(k: usize) -> Result<i32, String> {
     terminal::encode(Press::Socket(k as u8)).ok_or_else(|| format!("socket {k} has no press"))
 }
 
@@ -274,10 +274,18 @@ fn kitchen_cake_with_milk_from_a_tank(o: Pos, _: &Tuning) -> Scenario {
             same("milk", b.tank(tank).map(|g| g.amount), Some(0))?;
             same("buckets", super::count_of(&b.items(p), "minecraft:bucket"), 0)
         })
+        // w2: the dry parts went into the cake (they were once left in the slots).
+        .check("the sugar, the egg and the wheat went into it", move |b, _| {
+            let inputs: Vec<_> = b.items(p).into_iter().take(9).collect();
+            for item in ["minecraft:sugar", "minecraft:egg", "minecraft:wheat"] {
+                same(item, super::count_of(&inputs, item), 0)?;
+            }
+            Ok(())
+        })
 }
 
 /// The translation key of the status line of the machine window at `pos`.
-fn status_key(b: &dyn Bench, pos: Pos) -> String {
+pub(super) fn status_key(b: &dyn Bench, pos: Pos) -> String {
     b.sheet(pos)
         .and_then(|s| s.status)
         .and_then(|s| s.text.get("translate").and_then(|t| t.as_str()).map(str::to_owned))
@@ -285,7 +293,7 @@ fn status_key(b: &dyn Bench, pos: Pos) -> String {
 }
 
 /// A stone basin of water 5 × 5, 2 deep, round x 4, z 0 from `o`, its surface at y 3.
-fn basin(b: &mut dyn Bench, o: Pos) -> Result<(), String> {
+pub(super) fn basin(b: &mut dyn Bench, o: Pos) -> Result<(), String> {
     for x in 1..=7 {
         for z in -3..=3 {
             b.place(at(o, [x, 0, z]), "minecraft:stone", &[])?;

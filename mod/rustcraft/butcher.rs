@@ -6,14 +6,17 @@
 // tick (rustcraft_base::deaths), never `kill`.
 //
 // - The sword: the last slot takes a sword (rustcraft_machines::slot_takes); a plain sword loses
-//   a point of durability a strike and breaks at its end (K5). Its enchantments do not act yet:
-//   the strike has no attacker for looting or fire aspect to come from.
+//   a point of durability a strike and breaks at its end (K5), an energy blade spends its charge.
+//   Slice 18: its enchantments act: Fire Aspect sets the animal alight before the blow, Looting
+//   adds drops by the animal's table (rustcraft_rules::butcher::looting_bonus).
 // - The drops: once a second the butcher picks up what lies in its pen into its nine slots
 //   (K4), which the net and hoppers take from; what does not fit stays on the ground.
 // - The number to keep, one an animal of rustcraft_rules::butcher::ANIMALS: JSON in its saved
 //   compound (`keep`); a press on an animal's toggle in its window steps it (2 to 16, K3).
-// - The radius module doubles its pen (4 → 8 blocks, K1). Experience orbs are lost (K6: the
-//   experience condenser is not made yet).
+// - The radius module doubles its pen (4 → 8 blocks, K1). Slice 18: the kill's experience goes
+//   into an experience condenser it touches, and is lost without one (K6).
+// - Wave 2: tiers 2–4 (rustcraft_rules::tiers): a strike every 10 s on tier 2, faster a tier
+//   above, ×0.85 slower an economy module; 4 E/s from its buffer.
 use crate::game::{
     Game, rustcraft_base as base, rustcraft_content::Machine, rustcraft_machines as machines,
     rustcraft_mining as mining, rustcraft_server::{LevelNet, line},
@@ -44,6 +47,8 @@ const GATHER_EVERY: u64 = 20;
 #[derive(Default)]
 struct State {
     ticks: HashMap<String, u64>,
+    /// Wave 2: the tick of each butcher's next strike (its pace is its tier's and its modules').
+    due: HashMap<(String, Pos), u64>,
     shown: HashMap<(String, Pos), Shown>,
 }
 
@@ -140,12 +145,38 @@ pub(super) fn tick(game: &mut Game<'_>, dimension: &str, level: &LevelNet, t: &T
         if now.is_multiple_of(GATHER_EVERY) {
             gather(game, dimension, pos, t);
         }
-        if now.is_multiple_of(t.butcher_ticks.max(1)) {
+        // Wave 2: its block entity keeps its tier for the socket presses (A5), and it strikes at
+        // its own pace.
+        keep_tier(game, pos);
+        let key = (dimension.to_owned(), pos);
+        let due = *state().due.entry(key.clone()).or_insert(now + strike_every(game, pos, t));
+        if now >= due {
+            state().due.insert(key, now + strike_every(game, pos, t));
             let shown = strike(game, dimension, pos, t);
             // Slice 12: its arm chops while it works.
             crate::game::rustcraft_anim::show_on(game, pos, matches!(shown, Shown::Working(_)));
             state().shown.insert((dimension.to_owned(), pos), shown);
         }
+    }
+}
+
+/// Wave 2: ticks between its strikes on its tier with its modules.
+fn strike_every(game: &Game<'_>, pos: Pos, t: &Tuning) -> u64 {
+    let tier = crate::game::rustcraft_tiers::tier_at(game, pos);
+    let speed = rustcraft_rules::tiers::family_of_block(rules::BLOCK)
+        .map_or(1.0, |f| rustcraft_rules::tiers::speed(f, tier, t.tier_speed_step));
+    let work = modules::factors(&base::modules_at(game, pos), t).0;
+    rules::strike_ticks(t.butcher_ticks, work, speed)
+}
+
+/// Wave 2: the block entity's copy of its tier (rustcraft_rules::machines::sockets::TIER_KEY),
+/// which the socket presses read.
+fn keep_tier(game: &mut Game<'_>, pos: Pos) {
+    let tier = i32::from(crate::game::rustcraft_tiers::tier_at(game, pos));
+    let key = rustcraft_rules::machines::sockets::TIER_KEY;
+    let saved = game.native_mod_block_entity(pos).map(|e| machines::read_int(&e.nbt, key));
+    if saved.is_some_and(|s| s != Some(tier)) {
+        game.native_with_mod_block_entity(pos, |e| machines::write_int(&mut e.nbt, key, tier));
     }
 }
 
@@ -328,8 +359,8 @@ pub(super) fn sheet(game: &Game<'_>, dimension: &str, pos: Pos, t: &Tuning, s: &
         &[
             Text::literal(format!("{r:.0}")),
             Text::literal(format!(
-                "{:.0}",
-                t.butcher_ticks as f64 / t.ticks_per_second
+                "{:.1}",
+                strike_every(game, pos, t) as f64 / t.ticks_per_second
             )),
         ],
     )));

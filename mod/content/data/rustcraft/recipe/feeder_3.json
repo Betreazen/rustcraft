@@ -1,0 +1,18 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    "bwb",
+    "bhb",
+    "bbb"
+  ],
+  "key": {
+    "b": "rustcraft:crystallite",
+    "w": "minecraft:wheat",
+    "h": "minecraft:hopper"
+  },
+  "result": {
+    "id": "rustcraft:feeder_3",
+    "count": 1
+  }
+}

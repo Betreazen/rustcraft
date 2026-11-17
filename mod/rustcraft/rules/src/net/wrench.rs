@@ -14,8 +14,9 @@ pub fn rotate(facing: &str) -> Option<&'static str> {
 pub const LIFTED: &str = "rustcraft:lifted";
 
 /// Machines the wrench neither turns nor lifts: the station (the monorail's network keeps it by
-/// place) and the portal dock (a click pairs it).
-pub const KEPT: [&str; 2] = ["rustcraft:station", "rustcraft:portal_dock"];
+/// place), the portal dock (a click pairs it) and the holo-projector (w2: a click arms it for the
+/// two corners of its area, a sneaking click lifts it with its plan, rustcraft_projector).
+pub const KEPT: [&str; 3] = ["rustcraft:station", "rustcraft:portal_dock", "rustcraft:projector"];
 
 /// Whether the wrench turns and lifts `block`, given it is a machine.
 pub fn handles(block: &str) -> bool {
@@ -38,5 +39,10 @@ mod tests {
         assert!(!handles("rustcraft:station"));
         assert!(!handles("rustcraft:portal_dock"));
         assert!(handles("rustcraft:furnace"));
+    }
+
+    #[test]
+    fn the_projector_is_kept_so_its_wrench_sets_corners() {
+        assert!(!handles("rustcraft:projector"));
     }
 }

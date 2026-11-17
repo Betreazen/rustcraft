@@ -7,8 +7,35 @@
       },
       "entries": [
         {
-          "type": "minecraft:item",
-          "name": "rustcraft:repair"
+          "type": "minecraft:alternatives",
+          "children": [
+            {
+              "type": "minecraft:item",
+              "name": "rustcraft:repair_3",
+              "condition": {
+                "type": "minecraft:match_block",
+                "blocks": "rustcraft:repair",
+                "state": {
+                  "tier": "3"
+                }
+              }
+            },
+            {
+              "type": "minecraft:item",
+              "name": "rustcraft:repair_4",
+              "condition": {
+                "type": "minecraft:match_block",
+                "blocks": "rustcraft:repair",
+                "state": {
+                  "tier": "4"
+                }
+              }
+            },
+            {
+              "type": "minecraft:item",
+              "name": "rustcraft:repair"
+            }
+          ]
         }
       ],
       "rolls": 1

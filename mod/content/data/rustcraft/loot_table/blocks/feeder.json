@@ -7,8 +7,35 @@
       },
       "entries": [
         {
-          "type": "minecraft:item",
-          "name": "rustcraft:feeder"
+          "type": "minecraft:alternatives",
+          "children": [
+            {
+              "type": "minecraft:item",
+              "name": "rustcraft:feeder_3",
+              "condition": {
+                "type": "minecraft:match_block",
+                "blocks": "rustcraft:feeder",
+                "state": {
+                  "tier": "3"
+                }
+              }
+            },
+            {
+              "type": "minecraft:item",
+              "name": "rustcraft:feeder_4",
+              "condition": {
+                "type": "minecraft:match_block",
+                "blocks": "rustcraft:feeder",
+                "state": {
+                  "tier": "4"
+                }
+              }
+            },
+            {
+              "type": "minecraft:item",
+              "name": "rustcraft:feeder"
+            }
+          ]
         }
       ],
       "rolls": 1

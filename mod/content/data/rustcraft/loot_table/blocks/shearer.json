@@ -7,8 +7,35 @@
       },
       "entries": [
         {
-          "type": "minecraft:item",
-          "name": "rustcraft:shearer"
+          "type": "minecraft:alternatives",
+          "children": [
+            {
+              "type": "minecraft:item",
+              "name": "rustcraft:shearer_3",
+              "condition": {
+                "type": "minecraft:match_block",
+                "blocks": "rustcraft:shearer",
+                "state": {
+                  "tier": "3"
+                }
+              }
+            },
+            {
+              "type": "minecraft:item",
+              "name": "rustcraft:shearer_4",
+              "condition": {
+                "type": "minecraft:match_block",
+                "blocks": "rustcraft:shearer",
+                "state": {
+                  "tier": "4"
+                }
+              }
+            },
+            {
+              "type": "minecraft:item",
+              "name": "rustcraft:shearer"
+            }
+          ]
         }
       ],
       "rolls": 1

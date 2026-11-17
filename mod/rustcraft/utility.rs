@@ -291,7 +291,9 @@ pub(super) fn paced(game: &Game<'_>, pos: Pos, u: Util) -> (u64, f64) {
     let t = crate::game::rustcraft_server::tuning();
     // Slice 18: its tier's step (the disintegrator's 5 / 3 s) and its work mode (UT7).
     let tier = crate::game::rustcraft_tiers::tier_at(game, pos);
-    let ticks = modules::paced_ticks(tiered::step_ticks(u, tier), &slots, t);
+    // Wave 2: the repair stand and the kitchen work faster a tier above their first.
+    let base_ticks = rules::tier_ticks(u, tiered::step_ticks(u, tier), tier, t.tier_speed_step);
+    let ticks = modules::paced_ticks(base_ticks, &slots, t);
     let cost = rules::step_energy(u) * modules::factors(&slots, t).1;
     // Slice 18: the living vein keeps its own work mode (rustcraft_mining).
     if u == Util::Vein {
@@ -407,6 +409,10 @@ pub(super) fn tick(game: &mut Game<'_>, dimension: &str, level: &LevelNet, t: &T
         *n
     };
     for (pos, u) in mine {
+        // Wave 2: a tiered craft machine's block entity keeps its tier for the socket presses.
+        if now.is_multiple_of(KITCHEN_STASH_EVERY) {
+            keep_tier(game, pos);
+        }
         // Slice 18 (cross): the kitchen's inputs go into its hidden cells between its steps too,
         // so its slots keep taking while it waits.
         if u == Util::Kitchen && now.is_multiple_of(KITCHEN_STASH_EVERY) {
@@ -442,6 +448,21 @@ pub(super) fn tick(game: &mut Game<'_>, dimension: &str, level: &LevelNet, t: &T
         show(game, dimension, pos, shown);
     }
     builder::save_transit(game);
+}
+
+/// Wave 2: the block entity's copy of a tiered machine's tier
+/// (rustcraft_rules::machines::sockets::TIER_KEY), which the socket presses read.
+fn keep_tier(game: &mut Game<'_>, pos: Pos) {
+    let block = game.native_block(pos);
+    if rustcraft_rules::tiers::family_of_block(&block).is_none() {
+        return;
+    }
+    let tier = i32::from(crate::game::rustcraft_tiers::tier_of(game, pos, &block));
+    let key = rustcraft_rules::machines::sockets::TIER_KEY;
+    let saved = game.native_mod_block_entity(pos).map(|e| machines::read_int(&e.nbt, key));
+    if saved.is_some_and(|s| s != Some(tier)) {
+        game.native_with_mod_block_entity(pos, |e| machines::write_int(&mut e.nbt, key, tier));
+    }
 }
 
 /// Slice 18: the module items in a machine's sockets (`modules` in its compound), the ones the
@@ -930,8 +951,10 @@ fn kitchen_stash(game: &mut Game<'_>, pos: Pos) -> Vec<rustcraft_rules::machines
     };
     let modules = base::modules_at(game, pos);
     let stacked = rustcraft_rules::modules::stack_tier(&modules) > 0;
+    // Wave 2: and two hidden cells a capacity module.
+    let capacity = capacity_of(&entity);
     let cells_before: Vec<Slot> = read_json(&entity.nbt, KITCHEN_CELLS_KEY);
-    if !stacked && cells_before.iter().all(Option::is_none) {
+    if !stacked && capacity == 0 && cells_before.iter().all(Option::is_none) {
         return cells_before;
     }
     let plain = |s: &ItemStack| s.damage == 0 && s.extra.is_none();
@@ -943,7 +966,7 @@ fn kitchen_stash(game: &mut Game<'_>, pos: Pos) -> Vec<rustcraft_rules::machines
     let mut visible = visible_before.clone();
     let mut cells = cells_before.clone();
     let max = |i: &str| machines::max_stack(game, i);
-    kitchen::stash(&mut visible, &mut cells, stacked, |i| rustcraft_rules::modules::machine_stack(&modules, max(i)), &max);
+    kitchen::stash(&mut visible, &mut cells, stacked, capacity, |i| rustcraft_rules::modules::machine_stack(&modules, max(i)), &max);
     if visible == visible_before && cells == cells_before {
         return cells;
     }
@@ -1016,14 +1039,12 @@ fn cook(game: &mut Game<'_>, dimension: &str, level: &LevelNet, pos: Pos, cost: 
         }
         // The hidden cells first, then the slots.
         let cells_was = cells.clone();
-        let from_cells: Vec<u32> = items_need
-            .iter()
-            .map(|(item, n)| rustcraft_rules::machines::slots::take_from(&mut cells, item, *n))
-            .collect();
+        // w2: what the slots still give after the cells (take_from returns what is left to take).
+        let from_slots = kitchen::take_ingredients(&mut cells, &items_need);
         let cells_now = cells.clone();
         game.native_with_mod_block_entity(pos, |e| {
-            for ((item, n), got) in items_need.iter().zip(&from_cells) {
-                take(&mut e.items, 0..9, item, n - got);
+            for ((item, _), n) in items_need.iter().zip(&from_slots) {
+                take(&mut e.items, 0..9, item, *n);
             }
             if cells_now != cells_was {
                 write_json(&mut e.nbt, KITCHEN_CELLS_KEY, &cells_now);
@@ -1092,7 +1113,7 @@ pub(super) const BREW_POWDER_CELLS_KEY: &str = "brew_powder_cells";
 /// cells as its stack module says (rustcraft_rules::machines::queue::stash, a group each),
 /// written back; the reagents' cells and the powder's after it. Only plain stacks go in.
 fn brew_stash(game: &mut Game<'_>, pos: Pos) -> [Vec<rustcraft_rules::machines::slots::Slot>; 2] {
-    use rustcraft_rules::machines::{queue, slots::Slot};
+    use rustcraft_rules::machines::slots::Slot;
     use rustcraft_rules::utility::brew::STASH_GROUPS;
     let keys = [BREW_CELLS_KEY, BREW_POWDER_CELLS_KEY];
     let Some(entity) = game.native_mod_block_entity(pos) else {
@@ -1100,8 +1121,10 @@ fn brew_stash(game: &mut Game<'_>, pos: Pos) -> [Vec<rustcraft_rules::machines::
     };
     let modules = base::modules_at(game, pos);
     let stacked = rustcraft_rules::modules::stack_tier(&modules) > 0;
+    // Wave 2: and two hidden reagent cells a capacity module.
+    let capacity = capacity_of(&entity);
     let before: [Vec<Slot>; 2] = keys.map(|k| read_json(&entity.nbt, k));
-    if !stacked && before.iter().all(|c| c.iter().all(Option::is_none)) {
+    if !stacked && capacity == 0 && before.iter().all(|c| c.iter().all(Option::is_none)) {
         return before;
     }
     let plain = |s: &ItemStack| s.damage == 0 && s.extra.is_none();
@@ -1116,8 +1139,9 @@ fn brew_stash(game: &mut Game<'_>, pos: Pos) -> [Vec<rustcraft_rules::machines::
     let mut visible = visible_before.clone();
     let mut cells = before.clone();
     let max = |i: &str| machines::max_stack(game, i);
-    for (v, c) in visible.iter_mut().zip(cells.iter_mut()) {
-        queue::stash(v, c, stacked, |i| rustcraft_rules::modules::machine_stack(&modules, max(i)), &max);
+    for (g, (v, c)) in visible.iter_mut().zip(cells.iter_mut()).enumerate() {
+        let open = rustcraft_rules::utility::brew::group_open(g, stacked, capacity);
+        rustcraft_rules::utility::kitchen::stash_open(v, c, open, |i| rustcraft_rules::modules::machine_stack(&modules, max(i)), &max);
     }
     if visible == visible_before && cells == before {
         return cells;

@@ -12,8 +12,8 @@
 /// The stack modules by id, and the tier each gives (`STACK_BY_MODULE`'s place).
 pub const STACK_MODULES: [(&str, u8); 3] = [
     ("rustcraft:module_stack", 1),
-    ("rustcraft:module_stack_1024", 2),
-    ("rustcraft:module_stack_4096", 3),
+    ("rustcraft:module_stack_2", 2),
+    ("rustcraft:module_stack_3", 3),
 ];
 pub const RECIPES: &str = "rustcraft:module_recipes";
 pub const FILTER: &str = "rustcraft:module_filter";
@@ -81,15 +81,23 @@ mod tests {
     fn each_stack_module_gives_its_tier_and_the_storage_its_stack() {
         // S3: 256 / 1024 / 4096.
         assert_eq!(stack_tier("rustcraft:module_stack"), 1);
-        assert_eq!(stack_tier("rustcraft:module_stack_1024"), 2);
+        assert_eq!(stack_tier("rustcraft:module_stack_2"), 2);
         assert_eq!(stack_tier("minecraft:stone"), 0);
         let s = Store {
-            stack_module: stack_tier("rustcraft:module_stack_4096"),
+            stack_module: stack_tier("rustcraft:module_stack_3"),
             ..Store::default()
         };
         assert_eq!(s.stack_of(64), 4096);
         assert_eq!(s.stack_of(16), 1024);
         assert_eq!(s.stack_of(1), 1);
+    }
+
+    #[test]
+    fn stack_modules_are_the_items_of_the_mod() {
+        // w2: the crystallite and starsteel modules are `module_stack_2` / `_3` (rules::modules).
+        for (id, _) in STACK_MODULES {
+            assert!(crate::modules::Module::of(id).is_some(), "{id} is no module item");
+        }
     }
 
     #[test]
@@ -102,11 +110,11 @@ mod tests {
         assert_eq!(socket_move(SOCKET_STACK, None, Some(("minecraft:stone", 2))), None);
         assert_eq!(socket_move(SOCKET_STACK, Some("rustcraft:module_stack"), None), Some(SocketMove::Out));
         assert_eq!(
-            socket_move(SOCKET_STACK, Some("rustcraft:module_stack"), Some(("rustcraft:module_stack_1024", 1))),
+            socket_move(SOCKET_STACK, Some("rustcraft:module_stack"), Some(("rustcraft:module_stack_2", 1))),
             Some(SocketMove::Swap)
         );
         assert_eq!(
-            socket_move(SOCKET_STACK, Some("rustcraft:module_stack"), Some(("rustcraft:module_stack_1024", 2))),
+            socket_move(SOCKET_STACK, Some("rustcraft:module_stack"), Some(("rustcraft:module_stack_2", 2))),
             None
         );
     }

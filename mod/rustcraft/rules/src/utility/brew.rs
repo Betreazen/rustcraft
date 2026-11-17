@@ -74,6 +74,14 @@ pub const PAGES_MAX: usize = 4;
 /// the powder's slot). The bottles stack to one and stay as they are.
 pub const STASH_GROUPS: [std::ops::Range<usize>; 2] = [super::BREW_INGREDIENTS, super::BREW_FUEL..super::BREW_FUEL + 1];
 
+/// Wave 2 (guide `mod_cap`): the hidden cells each of [`STASH_GROUPS`] has open: one a slot
+/// with a stack module, and two a capacity module for the reagents (not for the powder).
+pub fn group_open(group: usize, stacked: bool, capacity: u32) -> usize {
+    let slots = STASH_GROUPS.get(group).map_or(0, |g| g.len());
+    let capacity = if group == 0 { capacity } else { 0 };
+    super::kitchen::open_cells(slots, stacked, capacity)
+}
+
 pub fn pages(capacity: u32) -> usize {
     (1 + capacity as usize).min(PAGES_MAX)
 }
@@ -157,6 +165,14 @@ mod tests {
         assert_eq!(count_in(&fuel, sugar), 0);
         assert_eq!(count_in(&fuel_cells, powder) + count_in(&fuel, powder), 256, "nothing lost");
         assert_eq!(count_in(&reagents, sugar), 256, "four slots of 64");
+    }
+
+    #[test]
+    fn a_capacity_module_gives_the_reagents_two_cells() {
+        assert_eq!(group_open(0, false, 1), 2);
+        assert_eq!(group_open(0, true, 1), STASH_GROUPS[0].len() + 2);
+        assert_eq!(group_open(1, false, 3), 0, "the powder's slot only grows with the stack");
+        assert_eq!(group_open(1, true, 3), 1);
     }
 
     #[test]

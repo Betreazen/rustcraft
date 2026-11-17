@@ -7,8 +7,35 @@
       },
       "entries": [
         {
-          "type": "minecraft:item",
-          "name": "rustcraft:fishery"
+          "type": "minecraft:alternatives",
+          "children": [
+            {
+              "type": "minecraft:item",
+              "name": "rustcraft:fishery_3",
+              "condition": {
+                "type": "minecraft:match_block",
+                "blocks": "rustcraft:fishery",
+                "state": {
+                  "tier": "3"
+                }
+              }
+            },
+            {
+              "type": "minecraft:item",
+              "name": "rustcraft:fishery_4",
+              "condition": {
+                "type": "minecraft:match_block",
+                "blocks": "rustcraft:fishery",
+                "state": {
+                  "tier": "4"
+                }
+              }
+            },
+            {
+              "type": "minecraft:item",
+              "name": "rustcraft:fishery"
+            }
+          ]
         }
       ],
       "rolls": 1

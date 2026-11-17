@@ -1,0 +1,19 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    "aha",
+    "psp",
+    "aha"
+  ],
+  "key": {
+    "a": "rustcraft:sparksteel",
+    "h": "minecraft:hopper",
+    "p": "minecraft:paper",
+    "s": "rustcraft:crystal_shard"
+  },
+  "result": {
+    "id": "rustcraft:module_filter",
+    "count": 1
+  }
+}

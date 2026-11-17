@@ -13,6 +13,7 @@
 
 pub mod anchor;
 pub mod craft18;
+pub mod craft18_w2;
 pub mod energy;
 pub mod expect;
 pub mod fluids;
@@ -621,6 +622,7 @@ pub fn catalog() -> Vec<Build> {
     // Slice 18, the module stream.
     all.extend(modules18::ALL);
     all.extend(craft18::ALL);
+    all.extend(craft18_w2::ALL);
     // s18/pipe
     all.extend(pipe18::ALL);
     // Slice 18, cross-stream agent.
