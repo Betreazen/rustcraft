@@ -242,9 +242,11 @@ pub fn plan_trip(
     let goal = station_rail(net, to).ok_or(TripError::NoRail(to))?;
     let path =
         shortest_path(net, start_rail, goal).map_err(|ends_at| TripError::Broken { ends_at })?;
-    for &cell in &path {
+    for (i, &cell) in path.iter().enumerate() {
         let mount = net.rails[&cell].mount;
-        if let Some(at) = capsule::room_cells(cell, mount)
+        let before = i.checked_sub(1).map(|j| path[j]);
+        let ways = capsule::ways_at(cell, mount, before, path.get(i + 1).copied());
+        if let Some(at) = capsule::room_cells(cell, mount, &ways)
             .into_iter()
             .find(|&p| !net.rails.contains_key(&p) && !free(p))
         {

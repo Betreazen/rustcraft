@@ -8,8 +8,9 @@ use crate::monorail::shape;
 use crate::tuning::Tuning;
 use crate::worker::{Errand, Tool, Worker};
 
-pub const ALL: [Build; 14] = [
+pub const ALL: [Build; 15] = [
     rails_fork_on_a_climb_and_rise_to_a_wall,
+    lift_needs_room_for_the_cabin,
 
     bore_follows_the_ground_with_its_best_rail,
 
@@ -497,6 +498,51 @@ fn rails_fork_on_a_climb_and_rise_to_a_wall(o: Pos, _: &Tuning) -> Scenario {
                 "the wall rail over it",
                 b.property(wall_rails[0], shape::PROPERTY),
                 Some(shape::Shape::Halves(0b1010).value()),
+            )
+        })
+}
+
+fn lift_needs_room_for_the_cabin(o: Pos, _: &Tuning) -> Scenario {
+    // T8.b over every block the cabin touches: a floor track x 0..2 at y 1, a lift up a stone
+    // wall at x 3 (wall rails x 2, y 2..5), a top floor rail x 1 at y 5 on a stone deck. The
+    // cabin turns along the wall going up and is one block wide: the lift needs only the block
+    // over its top wall rail; a stone there refuses the trip at that block.
+    use crate::monorail::TripError;
+    let from = at(o, [0, 1, -1]);
+    let to = at(o, [1, 5, -1]);
+    let over_the_lift = at(o, [2, 6, 0]);
+    Scenario::new("monorail_lift_needs_room_for_the_cabin", plot_area(o))
+        .then("a track up a lift between two stations", move |b, _| {
+            floor(b, o, -1..=4, -2..=2)?;
+            for x in 0..=2 {
+                rail(b, at(o, [x, 1, 0]), Face::YNeg)?;
+            }
+            for y in 1..=5 {
+                b.place(at(o, [3, y, 0]), STONE, &[])?;
+            }
+            for y in 2..=5 {
+                rail(b, at(o, [2, y, 0]), Face::XPos)?;
+            }
+            b.place(at(o, [1, 4, 0]), STONE, &[])?;
+            rail(b, at(o, [1, 5, 0]), Face::YNeg)?;
+            b.place(at(o, [1, 4, -1]), STONE, &[])?;
+            b.place(from, "rustcraft:station", &[])?;
+            b.place(to, "rustcraft:station", &[])?;
+            b.set_station_energy(from, 100.0)
+        })
+        .check("the trip goes up the lift", move |b, _| {
+            b.plan_trip(from, to, false)
+                .map(|_| ())
+                .map_err(|e| format!("refused: {e:?}"))
+        })
+        .then("a stone over the lift's top rail", move |b, _| {
+            b.place(over_the_lift, STONE, &[])
+        })
+        .check("the trip is refused at that block", move |b, _| {
+            same(
+                "answer",
+                b.plan_trip(from, to, false).map(|t| t.length),
+                Err(TripError::NoRoom { at: over_the_lift }),
             )
         })
 }
