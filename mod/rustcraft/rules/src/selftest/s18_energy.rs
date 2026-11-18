@@ -5,7 +5,7 @@ use super::{Build, Scenario, at, plot_area, same};
 use crate::grow::{self, DRUSE, SEED, SHARD, STAGE};
 use crate::tuning::Tuning;
 
-pub const ALL: [Build; 12] = [
+pub const ALL: [Build; 13] = [
     shard_recipes,
     druse_breaks_into_shards,
     seed_grows_on_solution,
@@ -18,6 +18,7 @@ pub const ALL: [Build; 12] = [
     structure_cube,
     generator_windows,
     seed_drinks_only_what_it_needs,
+    druses_reach_old_chunks,
 ];
 
 const TANK: &str = "rustcraft:tank";
@@ -379,6 +380,49 @@ fn seed_drinks_only_what_it_needs(o: crate::geom::Pos, t: &Tuning) -> Scenario {
             let s = b.seed(seed).ok_or("no seed")?;
             if s.solution > 2.0 {
                 return Err(format!("the grown seed still holds {:.0} mB", s.solution));
+            }
+            Ok(())
+        })
+}
+
+/// 0.18.1 (guide `crystal`, E5): a chunk generated before the mod had druses gets them once, on
+/// natural floors (rustcraft_rules::druses). The bench's flat world is air at y 20..31; a stone
+/// floor at y 19 across the plot's chunk stands for an old cave floor.
+fn druses_reach_old_chunks(o: crate::geom::Pos, _t: &Tuning) -> Scenario {
+    let chunk = [o[0].div_euclid(16), o[2].div_euclid(16)];
+    let (x0, z0) = (chunk[0] * 16, chunk[1] * 16);
+    let cells = move || (0..16).flat_map(move |dx| (0..16).map(move |dz| [x0 + dx, z0 + dz]));
+    let druses = move |b: &dyn super::Bench| cells().filter(|c| b.block([c[0], 20, c[1]]) == DRUSE).count();
+    Scenario::new("s18_druses_reach_old_chunks", plot_area(o))
+        .then("a stone floor across the chunk at y 19, air above it", move |b, _| {
+            for c in cells() {
+                b.place([c[0], 19, c[1]], "minecraft:stone", &[])?;
+            }
+            same("air above", b.block([x0 + 8, 20, z0 + 8]), "minecraft:air".to_owned())
+        })
+        .check("the chunk's pass puts druses on the floor, none elsewhere", move |b, m| {
+            let placed = b.retro_druses(chunk, 60)?;
+            let seen = druses(b);
+            m.mark("seen", seen as f64);
+            if placed > 0 && seen == placed as usize {
+                Ok(())
+            } else {
+                Err(format!("the pass placed {placed}, {seen} druses stand on the floor"))
+            }
+        })
+        .check("a second pass of the same chunk puts none", move |b, m| {
+            let again = b.retro_druses(chunk, 60)?;
+            let seen = druses(b);
+            if again == 0 && seen as f64 == m.get("seen") {
+                Ok(())
+            } else {
+                Err(format!("the second pass placed {again}, {seen} druses now"))
+            }
+        })
+        .then("the floor and the druses taken away", move |b, _| {
+            for c in cells() {
+                b.place([c[0], 20, c[1]], "minecraft:air", &[])?;
+                b.place([c[0], 19, c[1]], "minecraft:air", &[])?;
             }
             Ok(())
         })

@@ -153,3 +153,143 @@ pub(super) fn set_stage(game: &mut Game<'_>, pos: Pos, stage: u8) {
         game.native_set_block_property(pos, STAGE, want);
     }
 }
+
+// ---- Druses in chunks older than 0.18 (rustcraft_rules::druses) ----
+//
+// Worldgen places druses only in chunks generated with the mod's content. `native_chunk_load`
+// (API 57) says whether a loaded chunk is new: a new one had worldgen and is only noted; an old
+// overworld chunk that never had the pass gets it a few ticks later, from the level's tick (the
+// hook says to change the world from a later tick: its light and entities may not be ready). The
+// chunks done are kept in the world's `data/rustcraft_druse_chunks.json`.
+
+const DONE_FILE: &str = "rustcraft_druse_chunks.json";
+/// Only the overworld has druses (the biome modifier's `#minecraft:is_overworld`).
+const OVERWORLD: &str = "minecraft:overworld";
+/// The overworld's bottom (vanilla 26.3).
+const OVERWORLD_MIN_Y: i32 = -64;
+/// Old chunks given their pass in one tick, so a player flying over old land costs little.
+const PER_TICK: usize = 2;
+/// How often the done chunks are written when they changed, ticks.
+const SAVE_EVERY: u64 = 200;
+
+#[derive(Default)]
+struct Retro {
+    /// Chunks loaded and not yet looked at: the level, the chunk, whether it is new.
+    queue: std::collections::VecDeque<(String, [i32; 2], bool)>,
+    done: Option<rustcraft_rules::druses::Done>,
+    dirty: bool,
+    ticks: u64,
+}
+
+fn retro() -> std::sync::MutexGuard<'static, Retro> {
+    static R: std::sync::LazyLock<std::sync::Mutex<Retro>> = std::sync::LazyLock::new(Default::default);
+    R.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+/// `native_chunk_load`: an overworld chunk came; looked at from the level's next ticks.
+pub(super) fn on_chunk_load(dimension: &str, chunk: [i32; 2], new: bool) {
+    if dimension == OVERWORLD {
+        retro().queue.push_back((dimension.to_owned(), chunk, new));
+    }
+}
+
+fn done_path(game: &Game<'_>) -> Option<std::path::PathBuf> {
+    game.native_world_dir().map(|w| w.join("data").join(DONE_FILE))
+}
+
+fn load_done(game: &Game<'_>) -> rustcraft_rules::druses::Done {
+    done_path(game)
+        .and_then(|p| std::fs::read_to_string(p).ok())
+        .and_then(|text| serde_json::from_str(&text).ok())
+        .unwrap_or_default()
+}
+
+fn save_done(game: &Game<'_>, done: &rustcraft_rules::druses::Done) {
+    let Some(path) = done_path(game) else { return };
+    let written = serde_json::to_string(done)
+        .map_err(std::io::Error::other)
+        .and_then(|json| {
+            let fresh = path.with_extension("json.tmp");
+            path.parent().map_or(Ok(()), std::fs::create_dir_all)?;
+            std::fs::write(&fresh, json)?;
+            std::fs::rename(&fresh, &path)
+        });
+    if let Err(e) = written {
+        log::warn!("rustcraft: the druse chunks' file was not saved: {e}");
+    }
+}
+
+/// The level's tick: notes new chunks, gives old ones their pass, a few a tick, and saves.
+pub(super) fn retro_tick(game: &mut Game<'_>, dimension: &str) {
+    if dimension != OVERWORLD {
+        return;
+    }
+    let mut r = retro();
+    if r.done.is_none() {
+        r.done = Some(load_done(game));
+    }
+    r.ticks += 1;
+    let mut work = Vec::new();
+    while work.len() < PER_TICK {
+        let Some((level, chunk, new)) = r.queue.pop_front() else { break };
+        let done = r.done.get_or_insert_with(Default::default);
+        if done.has(&level, chunk) {
+            continue;
+        }
+        if new {
+            done.mark(&level, chunk);
+            r.dirty = true;
+        } else {
+            work.push(chunk);
+        }
+    }
+    let save = r.dirty && r.ticks.is_multiple_of(SAVE_EVERY);
+    drop(r);
+    for chunk in work {
+        // A chunk that left again before its turn is looked at when it next loads.
+        if !game.world.chunks.contains_key(&(chunk[0], chunk[1])) {
+            continue;
+        }
+        let placed = retro_chunk(game, dimension, chunk, rustcraft_rules::druses::TRIES);
+        if placed > 0 {
+            log::debug!("rustcraft: {placed} druses in old chunk {chunk:?}");
+        }
+        let mut r = retro();
+        r.done.get_or_insert_with(Default::default).mark(dimension, chunk);
+        r.dirty = true;
+    }
+    if save {
+        let done = retro().done.clone().unwrap_or_default();
+        save_done(game, &done);
+        retro().dirty = false;
+    }
+}
+
+/// Gives chunk `chunk` its druses: `tries` tries as worldgen makes them, on natural floors only.
+/// How many it placed.
+pub(super) fn retro_chunk(game: &mut Game<'_>, dimension: &str, chunk: [i32; 2], tries: u32) -> u32 {
+    use rustcraft_rules::druses::{cell_of, place_from, starts};
+    let Some(state) = game.native_default_state(DRUSE) else {
+        return 0;
+    };
+    let mut placed = 0;
+    for start in starts(chunk, OVERWORLD_MIN_Y, tries) {
+        let at = place_from(start, |p| cell_of(&game.native_block(p)));
+        if let Some(at) = at {
+            game.native_set_block(dimension, at, state, 2);
+            placed += u32::from(game.native_block(at) == DRUSE);
+        }
+    }
+    placed
+}
+
+/// The self-test: chunk `chunk` given its pass now with `tries` tries, unless it had one; how
+/// many druses it placed.
+pub(super) fn retro_for_selftest(game: &mut Game<'_>, dimension: &str, chunk: [i32; 2], tries: u32) -> u32 {
+    if retro().done.get_or_insert_with(Default::default).has(dimension, chunk) {
+        return 0;
+    }
+    let placed = retro_chunk(game, dimension, chunk, tries);
+    retro().done.get_or_insert_with(Default::default).mark(dimension, chunk);
+    placed
+}
