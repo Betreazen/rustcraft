@@ -263,6 +263,10 @@ pub struct Worker {
     /// the chassis window; none keeps the way on its level.
     #[serde(default)]
     pub height: Option<i32>,
+    /// 0.18.5: the rail cell where it last stopped at a dock it was passing (not saved), so it
+    /// stops there once a pass and rides on.
+    #[serde(skip)]
+    pub passed: Option<Pos>,
 }
 
 fn first_tier() -> u8 {
@@ -382,6 +386,7 @@ impl Worker {
             carry: 0.0,
             aim: None,
             height: None,
+            passed: None,
         }
     }
 
@@ -560,6 +565,9 @@ impl Worker {
         if self.to.is_none() {
             match self.errand {
                 Errand::Work => {
+                    if let Some(dock) = self.stops_in_passing(track, t) {
+                        return Step::AtDock(dock);
+                    }
                     self.to = self.next_on_work(track.net);
                     if self.to.is_none() {
                         self.note = Note::NoWay;
@@ -618,6 +626,44 @@ impl Worker {
             Step::Arrived(to)
         } else {
             Step::Moved
+        }
+    }
+
+    /// 0.18.5 (the owner: «работники не замечают доков»): riding its way past an unload dock with
+    /// something to give, it stops and unloads; past a charge dock with its battery under
+    /// `worker_top_up_below`, it tops up. Once a pass at each cell; the dock it stops at, and the
+    /// errand it took. Riding out of its way to a dock is still for a full hold or a low battery.
+    fn stops_in_passing(&mut self, track: &Track<'_>, t: &Tuning) -> Option<Pos> {
+        if self.passed == Some(self.cell) || self.tool == Some(Tool::Hold) {
+            return None;
+        }
+        let at = |docks: &BTreeSet<Pos>| dock_cells(track.net, docks).get(&self.cell).copied();
+        if !self.unloaded() {
+            if let Some(dock) = at(track.unload) {
+                self.passed = Some(self.cell);
+                self.errand = Errand::Unload;
+                self.note = Note::Unloading;
+                return Some(dock);
+            }
+        }
+        if self.charge < t.worker_top_up_below * self.capacity(t) {
+            if let Some(dock) = at(track.charge) {
+                self.passed = Some(self.cell);
+                self.errand = Errand::Charge;
+                self.note = Note::Charging;
+                return Some(dock);
+            }
+        }
+        None
+    }
+
+    /// At a dock it stopped at in passing (`stops_in_passing`), not sent there: it rides on when
+    /// the dock cannot serve it (full, or with no energy) instead of waiting.
+    pub fn only_passing(&self, t: &Tuning) -> bool {
+        match self.errand {
+            Errand::Unload => !self.hold.is_full() && self.tool != Some(Tool::Hold),
+            Errand::Charge => self.charge >= t.worker_charge_below * self.capacity(t),
+            Errand::Work | Errand::Load => false,
         }
     }
 
@@ -1073,6 +1119,88 @@ pub(crate) mod tests {
         assert_eq!(w.note, Note::NothingToDig);
         w.found(2, 4);
         assert_eq!((w.note, w.idle), (Note::Working, 0));
+    }
+
+    #[test]
+    fn a_worker_unloads_at_a_dock_it_passes() {
+        // 0.18.5, the owner: «работники не замечают доков». A hold far from full is given to an
+        // unload dock on the way; once a pass, and it rides on when the dock cannot take it.
+        let t = Tuning::default();
+        let net = line(6);
+        let unload = BTreeSet::from([[3, 0, 1]]);
+        let none = BTreeSet::new();
+        let track = Track {
+            net: &net,
+            unload: &unload,
+            charge: &none,
+            load: &none,
+        };
+        let mut w = worker(&t);
+        w.hold.add("minecraft:oak_log", 5, 64);
+        let steps = ride(&mut w, &track, &t, 40);
+        assert_eq!(steps.iter().find(|s| matches!(s, Step::AtDock(_))), Some(&Step::AtDock([3, 0, 1])));
+        assert_eq!((w.cell, w.errand), ([3, 0, 0], Errand::Unload));
+        assert!(w.only_passing(&t), "sent by nothing but the dock on its way");
+        // The dock was full: it rides on, and does not stop at the same cell again.
+        w.back_to_work();
+        let steps = ride(&mut w, &track, &t, 10);
+        assert!(!steps.iter().any(|s| matches!(s, Step::AtDock(_))));
+        assert_ne!(w.cell, [3, 0, 0]);
+        // A hold of only what its tool keeps rides past.
+        let mut w = worker(&t);
+        w.hold.add("minecraft:oak_sapling", 5, 64);
+        assert!(!ride(&mut w, &track, &t, 40).iter().any(|s| matches!(s, Step::AtDock(_))));
+    }
+
+    #[test]
+    fn a_worker_tops_up_at_a_charge_dock_it_passes() {
+        let t = Tuning::default();
+        let net = line(6);
+        let charge = BTreeSet::from([[3, 0, -1]]);
+        let none = BTreeSet::new();
+        let track = Track {
+            net: &net,
+            unload: &none,
+            charge: &charge,
+            load: &none,
+        };
+        let mut w = worker(&t);
+        w.charge = 0.5 * t.worker_battery;
+        let steps = ride(&mut w, &track, &t, 40);
+        assert!(steps.contains(&Step::AtDock([3, 0, -1])));
+        assert_eq!(w.errand, Errand::Charge);
+        assert!(w.only_passing(&t));
+        let mut w = worker(&t);
+        w.charge = 0.95 * t.worker_battery;
+        assert!(!ride(&mut w, &track, &t, 40).iter().any(|s| matches!(s, Step::AtDock(_))), "charged enough");
+        // Sent there low it is no passer: it waits for the dock's energy.
+        let mut w = worker(&t);
+        w.charge = 0.1 * t.worker_battery;
+        ride(&mut w, &track, &t, 40);
+        assert_eq!(w.errand, Errand::Charge);
+        assert!(!w.only_passing(&t));
+    }
+
+    #[test]
+    fn a_cargo_worker_keeps_to_its_load_and_unload_docks() {
+        let t = Tuning::default();
+        let net = line(6);
+        let unload = BTreeSet::from([[1, 0, 1]]);
+        let load = BTreeSet::from([[5, 0, 1]]);
+        let none = BTreeSet::new();
+        let track = Track {
+            net: &net,
+            unload: &unload,
+            charge: &none,
+            load: &load,
+        };
+        let mut w = Worker::new(1, 7, [0, 0, 0], &t);
+        w.tool = Some(Tool::Hold);
+        w.refit(&t);
+        w.hold.add("minecraft:cobblestone", 5, 64);
+        let steps = ride(&mut w, &track, &t, 80);
+        assert_eq!(steps.last(), Some(&Step::AtDock([5, 0, 1])), "past the unload dock to load");
+        assert_eq!(w.errand, Errand::Load);
     }
 
     #[test]

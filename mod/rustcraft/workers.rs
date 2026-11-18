@@ -1307,7 +1307,8 @@ fn unload_into(game: &mut Game<'_>, w: &mut Worker, dock: Pos, t: &Tuning) {
     if moved > 0 {
         dock_log().received.push((dock, std::time::Instant::now(), moved));
     }
-    if w.unloaded() {
+    if w.unloaded() || (moved == 0 && w.only_passing(t)) {
+        // 0.18.5: a worker that stopped here in passing rides on past a full dock.
         w.back_to_work();
     } else if moved == 0 {
         w.note = Note::DockFull;
@@ -1370,6 +1371,10 @@ fn charge_from(game: &mut Game<'_>, w: &mut Worker, dock: Pos, t: &Tuning) {
             .charging
             .insert(dock, (w.tool, share, std::time::Instant::now()));
         w.note = Note::Charging;
+    } else if w.only_passing(t) {
+        // 0.18.5: a worker topping up in passing rides on from a dock with no energy.
+        w.back_to_work();
+        return;
     } else if w.charge < cap {
         w.note = Note::DockEmpty;
     }
@@ -1994,6 +1999,7 @@ pub(super) fn round_trip(dimension: &str) -> Result<(), String> {
     let mut live = level.fleet.clone();
     for w in &mut live.workers {
         w.aim = None;
+        w.passed = None;
     }
     match Fleet::decode(&back) {
         Some(f) if f == live => Ok(()),

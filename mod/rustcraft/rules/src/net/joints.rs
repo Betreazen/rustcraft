@@ -68,6 +68,8 @@ pub fn item_joints(
                 priority: s.priority,
                 auto: false,
                 refiner: false,
+                store: false,
+                loader: false,
             })
         })
         .collect()

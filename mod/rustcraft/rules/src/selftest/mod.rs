@@ -49,6 +49,7 @@ pub mod transport;
 pub mod turret;
 pub mod windows;
 pub mod workers;
+pub mod worker_docks;
 // Slice 18, stream 6 (rail and workers).
 pub mod s18_rail;
 // Slice 18, base and gear (stream 7).
@@ -649,6 +650,7 @@ pub fn catalog() -> Vec<Build> {
     all.extend(fluids::ALL);
     all.extend(monorail::ALL);
     all.extend(workers::ALL);
+    all.extend(worker_docks::ALL);
     all.extend(turret::ALL);
     all.extend(anchor::ALL);
     all.extend(sources::ALL);

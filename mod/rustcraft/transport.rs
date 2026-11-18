@@ -265,9 +265,18 @@ pub(super) fn rebuild(game: &mut Game<'_>, dimension: &str, level: &mut LevelNet
             let joints: Vec<Joint> = joints::mark_refiners(marked, net, &level.joints, &refiners)
                     .into_iter()
                     .filter_map(|mut j| {
+                        // 0.18.5 (guide `dock_load`): on their default joints a storage gives
+                        // to the load docks of its net, which load the cargo workers.
+                        let set = level
+                            .joints
+                            .get(&j.housing)
+                            .is_some_and(|h| h.get(j.face, net.slot).is_some());
+                        let block = game.native_block(j.block);
+                        j.loader = !set && Machine::of(&block) == Some(Machine::DockLoad);
                         // A storage's cells and terminals are one joint, at its first cell; a
                         // terminal that touches no cell is none.
-                        if storage::is_storage_block(&game.native_block(j.block)) {
+                        if storage::is_storage_block(&block) {
+                            j.store = !set;
                             j.block = storage::anchor_of(dimension, j.block)?;
                         }
                         Some(j)
