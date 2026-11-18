@@ -27,13 +27,14 @@ use crate::storage::modules::{FILTER, SOCKET_FILTER, SOCKET_STACK, STACK_MODULES
 use crate::storage::terminal::{self, Press};
 use crate::tuning::Tuning;
 
-pub const ALL: [Build; 18] = [
+pub const ALL: [Build; 19] = [
     crafter_asks_the_storage,
     builder_builds_the_turned_plan_from_storage,
     brewer_brews_through_the_chain,
     butcher_energy_and_kill_xp,
     fishery_keeps_the_rods_last_point,
     fishery_fishes_beside_its_line,
+    fishery_hands_its_catch_to_a_chest,
     kitchen_cake_with_milk_from_a_tank,
     kitchen_takes_only_its_dishes,
     repair_mends_a_rod_with_string,
@@ -382,6 +383,33 @@ fn fishery_fishes_beside_its_line(o: Pos, _: &Tuning) -> Scenario {
         .then("a stone block beside it, off the line", move |b, _| b.place(at(o, [5, 3, 1]), "minecraft:stone", &[]))
         .until("it says there is not enough open water", 100, move |b, _| {
             Ok(status_key(b, p) == "rustcraft.util.fish_no_water")
+        })
+}
+
+fn fishery_hands_its_catch_to_a_chest(o: Pos, _: &Tuning) -> Scenario {
+    // 0.19.2 (guide `fishery`: «Улов уходит в магистраль или в сундук вплотную»; the owner: «чтобы
+    // предметы забирались сами и доставлялись»): a chest touching the station takes its catch, the
+    // rod stays in its own cell, and the chest takes no water from the station.
+    let p = at(o, [4, 3, 0]);
+    let chest = at(o, [5, 3, 0]);
+    Scenario::new("fishery192_hands_its_catch_to_a_chest", plot_area(o))
+        .then("a station on open water with a rod, a chest beside it, cod in its catch", move |b, _| {
+            basin(b, o)?;
+            b.place(p, "rustcraft:fishery", &[])?;
+            b.place(chest, "minecraft:chest", &[])?;
+            b.set_buffer(p, 200.0)?;
+            same("rod in", b.insert(p, "minecraft:fishing_rod", 1)?, 1)?;
+            b.put(p, 1, "minecraft:cod", 5)
+        })
+        .until("the cod is in the chest", 100, move |b, _| {
+            Ok(super::count_of(&b.items(chest), "minecraft:cod") == 5)
+        })
+        .check("the rod stays in the station", move |b, _| {
+            same("rod", super::count_of(&b.items(p), "minecraft:fishing_rod"), 1)?;
+            same("rod in the chest", super::count_of(&b.items(chest), "minecraft:fishing_rod"), 0)
+        })
+        .until("it fishes with the chest beside it", 100, move |b, _| {
+            Ok(status_key(b, p) == "rustcraft.util.working")
         })
 }
 

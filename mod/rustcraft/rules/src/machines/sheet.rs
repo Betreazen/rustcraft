@@ -68,6 +68,10 @@ fn guide_shape(u: crate::utility::Util, s: Shape) -> Shape {
         // «Броня»: four cells (the output, which the net takes, hidden); the charge and energy
         // bars; no work mode in the guide's window.
         Util::Charger => Shape { rows: 0, bars: 2, mode: false, shown: Some((0, 4)), lead: 4, label: true, ..s },
+        // 0.19.2 (guide `fishery`, the owner: «вынеси в отдельную ячейку удочку»): the rod on a row
+        // of its own over the catch, its wear and the wait beside it; the rows the water and where
+        // the catch goes.
+        Util::Fishery => Shape { rows: 2, lead: 1, aside: true, ..s },
         _ => s,
     }
 }
@@ -97,6 +101,9 @@ pub struct Shape {
     pub preview: usize,
     /// A label line over the lead row.
     pub label: bool,
+    /// 0.19.2: the sheet's label on the lead row itself, right of its cells, in plain text (the
+    /// fishery's rod: its wear and the wait to the next catch beside the rod's own cell).
+    pub aside: bool,
 }
 
 impl Shape {
@@ -443,6 +450,8 @@ pub struct Layout {
     pub work: Option<Rect>,
     pub preview: Vec<[f32; 2]>,
     pub label_y: Option<f32>,
+    /// 0.19.2 (`Shape::aside`): where the label's text starts on the lead row.
+    pub label_at: Option<[f32; 2]>,
     pub status: Rect,
     pub inventory: [f32; 2],
     pub inventory_label_y: f32,
@@ -463,6 +472,7 @@ pub fn layout(shape: Shape) -> Layout {
         work: None,
         preview: Vec::new(),
         label_y: None,
+        label_at: None,
         status: [0.0; 4],
         inventory: [0.0; 2],
         inventory_label_y: 0.0,
@@ -508,6 +518,9 @@ pub fn layout(shape: Shape) -> Layout {
     if lead > 0 || shape.work {
         out.slots = (0..lead).map(|k| [LEFT + 1.0 + 18.0 * k as f32, y + 1.0]).collect();
         let mut x = LEFT + 18.0 * lead as f32 + 4.0;
+        if shape.aside {
+            out.label_at = Some([x, y + 5.0]);
+        }
         if shape.work {
             out.work = Some([x, y + 3.0, WORK_W, 12.0]);
             x += WORK_W + 4.0;
@@ -703,6 +716,7 @@ mod tests {
         out.extend(l.work);
         out.extend(l.preview.iter().map(|p| slot_frame(*p)));
         out.extend(l.label_y.map(|y| [LEFT, y, RIGHT - LEFT, ROW - 1.0]));
+        out.extend(l.label_at.map(|[x, y]| [x, y, RIGHT - x, ROW - 1.0]));
         out.push(l.status);
         out
     }
@@ -925,6 +939,17 @@ mod tests {
         let l = layout(charger);
         assert_eq!(l.slots.len(), 4);
         assert!(l.menu_slots[4..].iter().all(Option::is_none));
+        // 0.19.2: the fishing station's rod alone on its row with its line beside it; the catch in
+        // rows of nine under it.
+        let fishery = Kind::Util(Util::Fishery).shape();
+        assert!(fishery.aside && !fishery.label && fishery.lead == 1 && fishery.rows == 2);
+        let l = layout(fishery);
+        let catch = &l.slots[1..];
+        assert_eq!(l.slots.len(), Util::Fishery.slots().count);
+        let [x, y] = l.label_at.expect("the rod's line");
+        assert!(x > l.slots[0][0] + 16.0 && (l.slots[0][1]..l.slots[0][1] + 16.0).contains(&y));
+        assert!(catch.iter().all(|c| c[1] > l.slots[0][1] + 16.0), "the rod has its row");
+        assert_eq!(catch[0][0], catch[9][0], "nine to a row");
     }
 
     #[test]

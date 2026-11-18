@@ -270,6 +270,11 @@ fn lead_row(game: &Game<'_>, batch: &mut HudBatch, o: [f32; 2], l: &Layout, s: &
     if let (Some(y), Some(t)) = (l.label_y, &s.label) {
         label(game, batch, &read(t), o, [8.0, y]);
     }
+    // 0.19.2: a label beside the lead row's cells (the fishery's rod line), in plain text.
+    if let (Some(at), Some(t)) = (l.label_at, &s.label) {
+        let line = kit::fit(game, &read(t), WIDTH - 8.0 - at[0]);
+        text(game, batch, &line, o, at, TEXT);
+    }
     if let Some(r) = l.work {
         let shaft = [r[0], r[1] + 2.0, r[2] - style::ARROW_HEAD[0], 8.0];
         kit::arrow(game, batch, o, shaft, s.work.unwrap_or(0.0).clamp(0.0, 1.0));

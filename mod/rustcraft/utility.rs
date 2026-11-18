@@ -2140,7 +2140,10 @@ fn craft_sheet(game: &Game<'_>, dimension: &str, level: &LevelNet, pos: Pos, u: 
         }
         Util::Fishery => {
             let now = state().ticks.get(dimension).copied().unwrap_or(0);
-            s.rows = farm::fishery_rows(game, dimension, pos, now).iter().map(base::v).collect();
+            // 0.19.2 (guide `fishery`): the rod's cell under its own label.
+            let (rows, label) = farm::fishery_sheet(game, dimension, level, pos, now);
+            s.rows = rows.iter().map(base::v).collect();
+            s.label = Some(base::v(&label));
         }
         // Wave 2 (ui.js `portal_dock`): «Пара · док в Незере · связан», «Тот мир · выгружен» and
         // its fluid buffer; its 27 slots are one buffer of what goes and what came.

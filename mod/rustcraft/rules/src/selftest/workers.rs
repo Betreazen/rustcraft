@@ -12,7 +12,7 @@ use crate::net::topology::ChannelKind;
 use crate::tuning::Tuning;
 use crate::worker::{Errand, Note, Tool};
 
-pub const ALL: [Build; 20] = [
+pub const ALL: [Build; 21] = [
     saw_fells_a_tree,
     reaper_tills_grass_and_sows_it,
     saw_plants_saplings_with_room,
@@ -24,6 +24,7 @@ pub const ALL: [Build; 20] = [
     reaper_on_a_wall,
     reaper_nothing_to_sow,
     reaper_sows_empty_farmland,
+    reaper_sows_pumpkins_with_room,
     reaper_filtered_sows_only_its_crop,
     reaper_without_seeds_says_so,
     reaper_says_nothing_to_reap,
@@ -425,6 +426,53 @@ fn reaper_sows_empty_farmland(o: Pos, _: &Tuning) -> Scenario {
         same("nether wart left", count_of(&w.hold.slots, "minecraft:nether_wart"), 7)?;
         if w.note == Note::NothingToSow {
             return Err("it says «Нечем засеять» with seeds in its hold".into());
+        }
+        Ok(())
+    })
+}
+
+/// 0.19.2, the owner: «жнец почему-то не садит тыкву». Pumpkin seeds in the hold: the stems go
+/// every other cell of a bare row, and the cells between them stay empty for the fruit.
+fn reaper_sows_pumpkins_with_room(o: Pos, _: &Tuning) -> Scenario {
+    const STEM: &str = "minecraft:pumpkin_stem";
+    let row: Vec<Pos> = (1..=5).map(|x| at(o, [x, 1, 1])).collect();
+    let beds = row.clone();
+    let watched = row.clone();
+    // Every cell is a stem or beside one: nothing is left to sow.
+    let settled = move |b: &dyn Bench, row: &[Pos]| {
+        let stem = |i: usize| row.get(i).is_some_and(|&p| b.block(p) == STEM);
+        (0..row.len()).all(|i| stem(i) || (i > 0 && stem(i - 1)) || stem(i + 1))
+    };
+    reaper(
+        "worker_reaper_sows_pumpkins_with_room",
+        o,
+        move |b, _| {
+            for &p in &beds {
+                b.place(at(p, [0, -1, 0]), FARMLAND, &[("moisture", "7")])?;
+            }
+            Ok(())
+        },
+        vec![("minecraft:pumpkin_seeds", 8)],
+        move |b, _| Ok(settled(&*b, &watched)),
+    )
+    .check("stems every other cell, the cells between them empty", move |b, m| {
+        let stems: Vec<bool> = row.iter().map(|&p| b.block(p) == STEM).collect();
+        if stems.windows(2).any(|w| w[0] && w[1]) {
+            return Err(format!("two stems side by side: {stems:?}"));
+        }
+        for (i, &p) in row.iter().enumerate() {
+            if !stems[i] {
+                same("a fruit's cell", b.block(p), "minecraft:air".to_owned())?;
+            }
+        }
+        let sown = stems.iter().filter(|s| **s).count() as u32;
+        if sown < 2 {
+            return Err(format!("{sown} stems: {stems:?}"));
+        }
+        let w = worker_of(b, m)?;
+        same("seeds left in the hold", count_of(&w.hold.slots, "minecraft:pumpkin_seeds"), 8 - sown)?;
+        if w.note == Note::NothingToSow {
+            return Err("it says «Нечем засеять» with pumpkin seeds in its hold".into());
         }
         Ok(())
     })

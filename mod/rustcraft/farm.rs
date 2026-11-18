@@ -15,14 +15,16 @@
 //   bottle for a glass bottle, else its combs: `honey`.
 use crate::game::{
     Game, rustcraft_base as base,
-    rustcraft_server::{LevelNet, line},
+    rustcraft_server::{self as server, LevelNet, line},
+    rustcraft_transport as transport,
     rustcraft_utility::{self as util, fits, items, put, spend, take_one, with_items},
 };
 use horizon_client::{items::ItemStack, text::Text};
 use rustcraft_rules::{
     butcher::Animal,
-    geom::Pos,
+    geom::{Face, Pos, step as step_to},
     modules::{self, Module},
+    net::items::Mode,
     reports::Report,
     tuning::Tuning,
     utility::{Shown, Util, farm as rules},
@@ -61,6 +63,8 @@ fn near(pos: Pos, r: f64, at: [f64; 3]) -> bool {
 pub(super) fn step(game: &mut Game<'_>, dimension: &str, level: &LevelNet, pos: Pos, u: Util, cost: f64, now: u64, t: &Tuning) -> Shown {
     match u {
         Util::Fishery => {
+            // 0.19.2 (guide `fishery`: «Улов уходит в магистраль или в сундук вплотную»).
+            push_catch(game, dimension, pos);
             // Wave 2: a patch of water a station.
             let others: Vec<Pos> = level
                 .machines
@@ -115,10 +119,24 @@ fn line_cells(game: &Game<'_>, pos: Pos) -> Vec<bool> {
     let mut out = Vec::new();
     for dx in -half..=half {
         for dz in -half..=half {
-            out.push((0..=1).any(|dy| is_line(&game.native_block([pos[0] + dx, pos[1] + dy, pos[2] + dz]))));
+            let block = |dy: i32| game.native_block([pos[0] + dx, pos[1] + dy, pos[2] + dz]);
+            out.push((0..=1).any(|dy| is_line(&block(dy))) || (touches(dx, 0, dz) && holds_items(&block(0))));
         }
     }
     out
+}
+
+/// 0.19.2 (guide `fishery`: «в сундук вплотную»): a cell that touches the station, beside it or
+/// over it, where a chest for its catch may stand.
+fn touches(dx: i32, dy: i32, dz: i32) -> bool {
+    dx.abs() + dy.abs() + dz.abs() == 1 && dy >= 0
+}
+
+/// 0.19.2: a container of the game the catch can go into: a chest touching the station takes no
+/// water from it, as the magistral does not.
+fn holds_items(block: &str) -> bool {
+    let id = block.trim_start_matches("minecraft:");
+    id.ends_with("chest") || id.ends_with("shulker_box") || matches!(id, "barrel" | "hopper" | "dropper" | "dispenser")
 }
 
 /// Whether the station has its open water: the 5 × 5 under it, the sky over it, the magistral that
@@ -128,7 +146,8 @@ fn water_open(game: &Game<'_>, pos: Pos) -> bool {
 }
 
 /// Slice 18: whether any cell over the 5 × 5 water is filled: the row beside the station and the
-/// row over it. The magistral's body does not count (0.18.4).
+/// row over it. The magistral's body does not count (0.18.4), nor a chest touching the station
+/// for its catch (0.19.2).
 fn sky_closed(game: &Game<'_>, pos: Pos) -> bool {
     let half = rules::WATER_SIDE / 2;
     let mut filled = Vec::new();
@@ -140,7 +159,9 @@ fn sky_closed(game: &Game<'_>, pos: Pos) -> bool {
                 }
                 let b = game.native_block([pos[0] + dx, pos[1] + dy, pos[2] + dz]);
                 filled.push(
-                    !matches!(b.as_str(), "minecraft:air" | "minecraft:cave_air" | "minecraft:void_air") && !is_line(&b),
+                    !matches!(b.as_str(), "minecraft:air" | "minecraft:cave_air" | "minecraft:void_air")
+                        && !is_line(&b)
+                        && !(touches(dx, dy, dz) && holds_items(&b)),
                 );
             }
         }
@@ -266,6 +287,68 @@ pub(super) fn reserve_count(game: &Game<'_>, pos: Pos) -> u32 {
     read_reserve(game, pos).iter().flatten().map(|s| s.count).sum()
 }
 
+/// 0.19.2: how many items of its catch a station hands a container beside it each step.
+const CHEST_PUSH: u32 = 16;
+
+/// The faces of a station with a container of the game beside them (a chest, a barrel, a
+/// hopper): not one of the mod's blocks, whose items the net moves.
+fn chest_faces(game: &Game<'_>, dimension: &str, pos: Pos) -> Vec<Face> {
+    Face::ALL
+        .into_iter()
+        .filter(|f| {
+            let n = step_to(pos, *f);
+            let block = game.native_block(n);
+            block != "minecraft:air"
+                && !server::is_ours(&block)
+                && game
+                    .native_container_slots(dimension, n, transport::direction(f.opposite()))
+                    .is_some()
+        })
+        .collect()
+}
+
+/// 0.19.2 (guide `fishery`: «Улов уходит в магистраль или в сундук вплотную»; the owner: «чтобы
+/// предметы забирались сами и доставлялись»): the catch goes into a container beside the station,
+/// its window's catch slots first and then what waits past them. The rod stays: the mover takes
+/// only a block's output slots.
+fn push_catch(game: &mut Game<'_>, dimension: &str, pos: Pos) {
+    let mut moved = 0;
+    for f in chest_faces(game, dimension, pos) {
+        moved += game.native_move_items(
+            dimension,
+            pos,
+            transport::direction(f),
+            step_to(pos, f),
+            transport::direction(f.opposite()),
+            None,
+            CHEST_PUSH,
+        );
+    }
+    if moved > 0 {
+        reserve_refill(game, pos);
+    }
+}
+
+/// 0.19.2: where the catch goes, for the window: a container beside the station, the magistral
+/// when its item channel has somewhere to put it (a storage, a chest or a joint set «в блок»), or
+/// nowhere, which the window says so the gap in the channel is found.
+fn route_row(game: &Game<'_>, dimension: &str, level: &LevelNet, pos: Pos) -> Text {
+    if !chest_faces(game, dimension, pos).is_empty() {
+        return line("rustcraft.util.fishery.to_chest", "The catch goes to the chest beside it", &[]);
+    }
+    let Some(peers) = level.transport.peers(pos) else {
+        return line("rustcraft.util.fishery.to_hand", "No item channel near: take it by hand", &[]);
+    };
+    let kept = peers.iter().any(|(p, mode, keeps)| {
+        *keeps || *mode == Mode::Into || (*mode == Mode::Both && !server::is_ours(&game.native_block(*p)))
+    });
+    if kept {
+        line("rustcraft.util.fishery.to_net", "The catch goes into the magistral", &[])
+    } else {
+        line("rustcraft.util.fishery.no_receiver", "Nowhere to go: no storage on its channel", &[])
+    }
+}
+
 fn fish(game: &mut Game<'_>, dimension: &str, pos: Pos, cost: f64, now: u64) -> Shown {
     let Some(rod) = items(game, pos).first().cloned().flatten() else {
         return Shown::Blocked("fish_no_rod");
@@ -315,8 +398,10 @@ fn fish(game: &mut Game<'_>, dimension: &str, pos: Pos, cost: f64, now: u64) -> 
 }
 
 /// Slice 18 (guide `ui.js`, window `fishery`): the station's rows: the water, the rod (its
-/// enchantments and durability), the wait to the next catch.
-pub(super) fn fishery_rows(game: &Game<'_>, dimension: &str, pos: Pos, now: u64) -> Vec<Text> {
+/// enchantments and durability), the wait to the next catch. 0.19.2 (the owner: «вынеси в
+/// отдельную ячейку удочку»): the rod and the wait are the label over the rod's own cell, and the
+/// rows are the water and where the catch goes: (rows, label).
+pub(super) fn fishery_sheet(game: &Game<'_>, dimension: &str, level: &LevelNet, pos: Pos, now: u64) -> (Vec<Text>, Text) {
     let open = water_open(game, pos);
     let water = if open {
         line("rustcraft.util.fishery.water_ok", "Open water 5×5, deeper than 2", &[])
@@ -360,7 +445,9 @@ pub(super) fn fishery_rows(game: &Game<'_>, dimension: &str, pos: Pos, now: u64)
         water.push(Text::literal(" · "));
         water.push(line("rustcraft.util.fishery.reserve", "%s more past the window", &[Text::literal(reserve.to_string())]));
     }
-    vec![water, rod_and_wait]
+    // 0.19.2: the rod and the wait over the rod's own cell, the rows the water and the catch's way
+    // (the window keeps to 240 pixels).
+    (vec![water, route_row(game, dimension, level, pos)], rod_and_wait)
 }
 
 // ---- The feeder ----

@@ -135,6 +135,25 @@ impl Transport {
         (!blocks.is_empty()).then_some((blocks, housings))
     }
 
+    /// 0.19.2 (the owner: «предметы при подключенном корпусе забирались сами и доставлялись»): the
+    /// other joints of the item nets that reach `block` through a joint not switched off: each
+    /// one's block, its direction and whether it keeps what comes (a storage, or a vanilla
+    /// container on its default). None when no item net reaches `block`.
+    pub fn peers(&self, block: Pos) -> Option<Vec<(Pos, Mode, bool)>> {
+        let mut nets = self
+            .nets
+            .iter()
+            .filter(|n| n.joints.iter().any(|j| j.block == block && j.mode != Mode::Off))
+            .peekable();
+        nets.peek()?;
+        Some(
+            nets.flat_map(|n| n.joints.iter())
+                .filter(|j| j.block != block)
+                .map(|j| (j.block, j.mode, j.store || j.auto))
+                .collect(),
+        )
+    }
+
     /// Slice 17: the shortest way an order's items ride from the block `from` to the block `to`
     /// (a storage's anchor and a machine, either way round) on an item net that has a joint on
     /// both that is not switched off; none when no net joins them so.

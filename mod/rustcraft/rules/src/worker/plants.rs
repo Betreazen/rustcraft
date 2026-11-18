@@ -136,7 +136,7 @@ const COCOA: &str = "minecraft:cocoa";
 /// The items the reaper keeps in its hold to sow again, which the unload dock leaves.
 pub fn is_seed(item: &str) -> bool {
     AGED.iter().any(|a| a.seed == item)
-        || item == TORCHFLOWER_SEED
+        || SOWN.iter().any(|(seed, _, _)| *seed == item)
         || item == "minecraft:cocoa_beans"
 }
 
@@ -165,7 +165,8 @@ pub fn wanted(block: &str, filter: &[String]) -> bool {
 }
 
 /// What the reaper sows (0.18.5): the seed item, the crop block it becomes and the soil it needs.
-const SOWN: [(&str, &str, &str); 7] = [
+/// 0.19.2 (the owner: «жнец почему-то не садит тыкву»): pumpkin and melon stems too.
+const SOWN: [(&str, &str, &str); 9] = [
     ("minecraft:wheat_seeds", "minecraft:wheat", FARMLAND),
     ("minecraft:carrot", "minecraft:carrots", FARMLAND),
     ("minecraft:potato", "minecraft:potatoes", FARMLAND),
@@ -173,13 +174,73 @@ const SOWN: [(&str, &str, &str); 7] = [
     (TORCHFLOWER_SEED, TORCHFLOWER_CROP, FARMLAND),
     ("minecraft:pitcher_pod", "minecraft:pitcher_crop", FARMLAND),
     ("minecraft:nether_wart", "minecraft:nether_wart", SOUL_SAND),
+    (PUMPKIN_SEEDS, PUMPKIN_STEM, FARMLAND),
+    (MELON_SEEDS, MELON_STEM, FARMLAND),
 ];
 const SOUL_SAND: &str = "minecraft:soul_sand";
+const PUMPKIN_SEEDS: &str = "minecraft:pumpkin_seeds";
+const PUMPKIN_STEM: &str = "minecraft:pumpkin_stem";
+const MELON_SEEDS: &str = "minecraft:melon_seeds";
+const MELON_STEM: &str = "minecraft:melon_stem";
+
+/// 0.19.2: the stems the reaper sows: the seed, the growing stem, the stem once its fruit grew,
+/// and the fruit.
+const STEM_CROPS: [(&str, &str, &str, &str); 2] = [
+    (PUMPKIN_SEEDS, PUMPKIN_STEM, "minecraft:attached_pumpkin_stem", "minecraft:pumpkin"),
+    (MELON_SEEDS, MELON_STEM, "minecraft:attached_melon_stem", "minecraft:melon"),
+];
+
+/// The ground a pumpkin or a melon grows on beside its stem (the game's `StemBlock`: farmland and
+/// the dirt-like blocks).
+const FRUIT_SOIL: [&str; 9] = [
+    FARMLAND,
+    "minecraft:grass_block",
+    "minecraft:dirt",
+    "minecraft:coarse_dirt",
+    "minecraft:podzol",
+    "minecraft:rooted_dirt",
+    "minecraft:mud",
+    "minecraft:moss_block",
+    "minecraft:mycelium",
+];
+
+/// Whether `block` is a pumpkin or melon stem, growing or with its fruit.
+fn is_stem(block: &str) -> bool {
+    STEM_CROPS
+        .iter()
+        .any(|(_, stem, attached, _)| *stem == block || *attached == block)
+}
+
+/// Whether `seed` grows a stem.
+fn is_stem_seed(seed: &str) -> bool {
+    STEM_CROPS.iter().any(|(s, ..)| *s == seed)
+}
+
+/// The four cells beside `pos` on its level.
+fn beside(pos: Pos) -> [Pos; 4] {
+    [Face::XNeg, Face::XPos, Face::ZNeg, Face::ZPos].map(|f| step(pos, f))
+}
+
+/// 0.19.2: whether a stem at `pos` has room for its fruit: an empty cell beside it over ground a
+/// fruit grows on.
+fn fruit_room(view: &dyn BlockView, pos: Pos) -> bool {
+    beside(pos).into_iter().any(|p| {
+        let here = view.block(p);
+        (here == "minecraft:air" || here == "minecraft:cave_air")
+            && FRUIT_SOIL.contains(&view.block(step(p, Face::YNeg)).as_str())
+    })
+}
 
 /// The seed a growing plant `block` comes from, if the reaper sows it.
 fn seed_of_plant(block: &str) -> Option<&'static str> {
     if block == TORCHFLOWER {
         return Some(TORCHFLOWER_SEED);
+    }
+    if let Some((seed, ..)) = STEM_CROPS
+        .iter()
+        .find(|(_, stem, attached, _)| *stem == block || *attached == block)
+    {
+        return Some(seed);
     }
     SOWN.iter()
         .find(|(_, crop, _)| *crop == block)
@@ -187,12 +248,15 @@ fn seed_of_plant(block: &str) -> Option<&'static str> {
 }
 
 /// Whether the filter lets the reaper sow `seed` of `crop`: an empty filter sows all; otherwise
-/// the seed, the plant it grows into or its crop is named (`wanted`).
+/// the seed, the plant it grows into or its crop is named (`wanted`), or, for a stem, its fruit.
 fn sows(seed: &str, crop: &str, filter: &[String]) -> bool {
     filter.is_empty()
         || filter.iter().any(|f| f == seed)
         || wanted(crop, filter)
         || (crop == TORCHFLOWER_CROP && wanted(TORCHFLOWER, filter))
+        || STEM_CROPS
+            .iter()
+            .any(|(s, _, _, fruit)| *s == seed && filter.iter().any(|f| f == fruit))
 }
 
 /// What the reaper finds at a cell when it sows.
@@ -231,9 +295,16 @@ pub fn hydrated(view: &dyn BlockView, soil: Pos) -> bool {
 /// `seeds` are the seed items of its hold in slot order. The seed is the one of the
 /// crop growing next to `pos` (one or two cells along a row), else the first of `seeds` that grows
 /// on this soil; a filter (H6) sows only what it lets through.
+///
+/// 0.19.2: pumpkins and melons need room. A cell beside a stem stays empty for its fruit, and a
+/// stem goes only where an empty cell over ground is left beside it, so a field of stems comes
+/// out every other cell.
 pub fn sow(view: &dyn BlockView, pos: Pos, seeds: &[String], filter: &[String]) -> Sowing {
     let here = view.block(pos);
     if here != "minecraft:air" && here != "minecraft:cave_air" {
+        return Sowing::Nothing;
+    }
+    if beside(pos).into_iter().any(|p| is_stem(&view.block(p))) {
         return Sowing::Nothing;
     }
     let found = view.block(step(pos, Face::YNeg));
@@ -247,7 +318,12 @@ pub fn sow(view: &dyn BlockView, pos: Pos, seeds: &[String], filter: &[String]) 
     if fits.is_empty() {
         return Sowing::Nothing;
     }
-    let usable = |seed: &str| seeds.iter().any(|s| s == seed) && fits.iter().any(|f| f.0 == seed);
+    let room = fruit_room(view, pos);
+    let usable = |seed: &str| {
+        seeds.iter().any(|s| s == seed)
+            && fits.iter().any(|f| f.0 == seed)
+            && (room || !is_stem_seed(seed))
+    };
     let neighbour: Option<&str> = (1..=2)
         .flat_map(|d| {
             [Face::XNeg, Face::XPos, Face::ZNeg, Face::ZPos]
@@ -258,7 +334,12 @@ pub fn sow(view: &dyn BlockView, pos: Pos, seeds: &[String], filter: &[String]) 
         .find(|seed| usable(seed));
     let first = || seeds.iter().map(String::as_str).find(|s| usable(s));
     let Some(seed) = neighbour.or_else(first) else {
-        return Sowing::NoSeed;
+        // Stem seeds with no room for a fruit here are no lack of seed: the cell stays empty.
+        let crowded = !room
+            && seeds
+                .iter()
+                .any(|s| is_stem_seed(s) && fits.iter().any(|f| f.0 == s.as_str()));
+        return if crowded { Sowing::Nothing } else { Sowing::NoSeed };
     };
     let Some(&(seed, crop)) = fits.iter().find(|f| f.0 == seed) else {
         return Sowing::NoSeed;
@@ -712,8 +793,8 @@ mod tests {
         let pumpkins = vec!["minecraft:pumpkin".to_owned()];
         assert_eq!(
             sow(&w, [0, 1, 0], &hold, &pumpkins),
-            Sowing::Nothing,
-            "a pumpkin reaper sows no wheat and lacks nothing"
+            Sowing::NoSeed,
+            "0.19.2: a pumpkin reaper sows no wheat and lacks pumpkin seeds"
         );
         let wheat = vec!["minecraft:wheat".to_owned()];
         assert_eq!(
@@ -748,8 +829,75 @@ mod tests {
         // No seed for it: it says so and leaves the grass; nether wart grows on no farmland.
         assert_eq!(sow(&w, [0, 1, 0], &[], &[]), Sowing::NoSeed);
         assert_eq!(sow(&w, [0, 1, 0], &seeds(&["minecraft:nether_wart"]), &[]), Sowing::NoSeed);
-        // A filter to pumpkins tills nothing.
-        assert_eq!(sow(&w, [0, 1, 0], &hold, &["minecraft:pumpkin".to_owned()]), Sowing::Nothing);
+        // A filter to pumpkins tills nothing without pumpkin seeds.
+        assert_eq!(sow(&w, [0, 1, 0], &hold, &["minecraft:pumpkin".to_owned()]), Sowing::NoSeed);
+    }
+
+    #[test]
+    fn pumpkins_are_sown_every_other_cell() {
+        // 0.19.2, the owner: «жнец почему-то не садит тыкву».
+        let mut w = World::default();
+        for x in 0..5 {
+            w.set([x, 0, 0], FARMLAND, &[]);
+        }
+        let hold = seeds(&["minecraft:wheat_seeds", PUMPKIN_SEEDS]);
+        let only = seeds(&[PUMPKIN_SEEDS]);
+        assert_eq!(
+            sown(sow(&w, [0, 1, 0], &only, &[])),
+            Some((PUMPKIN_STEM.to_owned(), PUMPKIN_SEEDS.to_owned()))
+        );
+        w.set([0, 1, 0], PUMPKIN_STEM, &[("age", "0")]);
+        assert_eq!(sow(&w, [1, 1, 0], &only, &[]), Sowing::Nothing, "the fruit's cell stays empty");
+        assert_eq!(sow(&w, [1, 1, 0], &hold, &[]), Sowing::Nothing, "no wheat on it either");
+        assert_eq!(
+            sown(sow(&w, [2, 1, 0], &hold, &[])).unwrap().0,
+            PUMPKIN_STEM,
+            "two cells away the stem's seed goes first, ahead of the hold's wheat"
+        );
+        // A pumpkin grew: the stem that bears it keeps the cells beside it free too.
+        w.set([0, 1, 0], "minecraft:attached_pumpkin_stem", &[("facing", "east")]);
+        w.set([1, 1, 0], "minecraft:pumpkin", &[]);
+        w.set([0, 0, 1], FARMLAND, &[]);
+        assert_eq!(sow(&w, [0, 1, 1], &hold, &[]), Sowing::Nothing);
+        assert!(is_seed(PUMPKIN_SEEDS) && is_seed(MELON_SEEDS), "the unload dock leaves them in the hold");
+    }
+
+    #[test]
+    fn a_stem_needs_an_empty_cell_over_ground_beside_it() {
+        let mut w = World::default();
+        w.set([0, 0, 0], FARMLAND, &[]);
+        for p in [[1, 1, 0], [-1, 1, 0], [0, 1, 1], [0, 1, -1]] {
+            w.set(p, "minecraft:stone", &[]);
+        }
+        let melons = seeds(&[MELON_SEEDS]);
+        assert_eq!(sow(&w, [0, 1, 0], &melons, &[]), Sowing::Nothing, "no room is no lack of seed");
+        let mixed = seeds(&[MELON_SEEDS, "minecraft:wheat_seeds"]);
+        assert_eq!(
+            sown(sow(&w, [0, 1, 0], &mixed, &[])).unwrap().0,
+            "minecraft:wheat",
+            "wheat goes where a melon has no room"
+        );
+        w.set([1, 1, 0], "minecraft:air", &[]);
+        assert_eq!(sow(&w, [0, 1, 0], &melons, &[]), Sowing::Nothing, "air over air is no room");
+        w.set([1, 0, 0], "minecraft:dirt", &[]);
+        assert_eq!(sown(sow(&w, [0, 1, 0], &melons, &[])).unwrap().0, MELON_STEM);
+    }
+
+    #[test]
+    fn a_pumpkin_filter_sows_pumpkin_seeds() {
+        let mut w = World::default();
+        w.set([0, 0, 0], "minecraft:grass_block", &[]);
+        w.set([1, 0, 0], "minecraft:grass_block", &[]);
+        let hold = seeds(&["minecraft:wheat_seeds", PUMPKIN_SEEDS]);
+        match sow(&w, [0, 1, 0], &hold, &["minecraft:pumpkin".to_owned()]) {
+            Sowing::Till(r) => assert_eq!((r.block.as_str(), r.seed.as_str()), (PUMPKIN_STEM, PUMPKIN_SEEDS)),
+            other => panic!("{other:?}"),
+        }
+        assert_eq!(
+            sow(&w, [0, 1, 0], &hold, &["minecraft:melon".to_owned()]),
+            Sowing::NoSeed,
+            "a melon reaper lacks melon seeds"
+        );
     }
 
     #[test]
