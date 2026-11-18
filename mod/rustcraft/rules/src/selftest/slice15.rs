@@ -165,9 +165,14 @@ fn orders_pistons(o: Pos, _: &Tuning) -> Scenario {
 }
 
 fn order_runs_through_a_furnace(o: Pos, _: &Tuning) -> Scenario {
+    // 0.19.2 (the owner: «со склада электропечь не забирала сама руду, только пыль»): the raw
+    // iron goes through the crusher, two dust for it; one is smelted, the other comes back.
+    const CRUSHER: &str = "rustcraft:crusher";
+    const DUST_IRON: &str = "rustcraft:dust_iron";
+    let crusher = at(o, [2, 1, 0]);
     let parts = parts_for(1, RAW_IRON);
     let p2 = parts.clone();
-    Scenario::new("order_runs_through_a_furnace_and_a_crafter", plot_area(o))
+    Scenario::new("order_runs_through_a_crusher_a_furnace_and_a_crafter", plot_area(o))
         .then(
             "a storage on a tier 3 line, piston parts with raw iron",
             move |b, _| build(b, o, &parts),
@@ -176,10 +181,13 @@ fn order_runs_through_a_furnace(o: Pos, _: &Tuning) -> Scenario {
             holds(b, o, &p2)
         })
         .then(
-            "an electric furnace and an autocrafter on the line, the book",
+            "a crusher on housing 2, an electric furnace and an autocrafter on the line, the book",
             move |b, _| {
                 machine(b, crafter_at(o), CRAFTER, true)?;
                 machine(b, furnace_at(o), FURNACE, true)?;
+                b.place(crusher, CRUSHER, &[])?;
+                b.place(at(crusher, [0, 1, 0]), CRYSTAL, &[])?;
+                b.place(at(crusher, [0, 0, -1]), CRYSTAL, &[])?;
                 put_book(b, o)
             },
         )
@@ -191,9 +199,13 @@ fn order_runs_through_a_furnace(o: Pos, _: &Tuning) -> Scenario {
         .until("a piston is back in the storage", 2400, move |b, _| {
             Ok(held(b, o, PISTON)? == 1)
         })
-        .check("the raw iron went through the furnace", move |b, _| {
+        .until("the second dust is back in the storage", 400, move |b, _| {
+            Ok(held(b, o, DUST_IRON)? == 1)
+        })
+        .check("the raw iron went through the crusher, not whole into the furnace", move |b, _| {
             same("raw iron", held(b, o, RAW_IRON)?, 0)?;
             same("iron", held(b, o, IRON)?, 0)?;
+            same("raw iron in the furnace", count_of(&b.items(furnace_at(o)), RAW_IRON), 0)?;
             same("orders", b.orders(terminal_at(o)).len(), 0)
         })
 }

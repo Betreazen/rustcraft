@@ -48,6 +48,16 @@ pub fn page_shortfall(pattern: &[Option<String>], buffer: &BTreeMap<String, u32>
         .collect()
 }
 
+/// 0.19.2 (the owner: «сделай так чтобы со склада электропечь не забирала сама руду, только
+/// пыль»): what an order may put in the furnace for a smelting recipe that takes any of
+/// `alternatives`: none of what the crusher grinds (`crushed`, ore and raw metal), which goes
+/// crusher → two dust → furnace instead of one ingot for one. None when nothing is left: the
+/// recipe is no way for an order.
+pub fn furnace_inputs(alternatives: Vec<ItemKey>, crushed: &std::collections::BTreeSet<ItemKey>) -> Option<Vec<ItemKey>> {
+    let left: Vec<ItemKey> = alternatives.into_iter().filter(|i| !crushed.contains(i)).collect();
+    (!left.is_empty()).then_some(left)
+}
+
 /// Slice 18: the kitchen's copy of a crafting recipe whose result it cooks (the autocrafter keeps
 /// its own): an order runs on whichever of the two the line has.
 pub fn kitchen_copy(r: &PlanRecipe, kitchen_dishes: &[&str]) -> Option<PlanRecipe> {
@@ -668,6 +678,32 @@ mod tests {
         let p = plan("rustcraft:item_channel", 24, &rich, &book, ALL);
         assert!(p.ready(), "{p:?}");
         assert_eq!(p.reserved["minecraft:iron_ingot"], 21);
+    }
+
+    #[test]
+    fn ore_goes_through_the_crusher_never_whole_into_the_furnace() {
+        // 0.19.2, the owner: «со склада электропечь не забирала сама руду, только пыль»: orders
+        // shipped raw iron from the storage into the furnace, one ingot for one.
+        let crushed: std::collections::BTreeSet<ItemKey> =
+            ["minecraft:raw_iron", "minecraft:iron_ore", "minecraft:deepslate_iron_ore"].map(String::from).into();
+        let ores: Vec<ItemKey> =
+            ["minecraft:deepslate_iron_ore", "minecraft:iron_ore", "minecraft:raw_iron"].map(String::from).to_vec();
+        assert_eq!(furnace_inputs(ores, &crushed), None, "smelting ore is no way for an order");
+        let dust = vec!["rustcraft:dust_iron".to_owned()];
+        assert_eq!(furnace_inputs(dust.clone(), &crushed), Some(dust));
+        assert_eq!(
+            furnace_inputs(vec!["minecraft:raw_iron".into(), "minecraft:sand".into()], &crushed),
+            Some(vec!["minecraft:sand".to_owned()])
+        );
+        // The book without the ore's smelting: 10 raw iron make 20 ingots, two dust each.
+        let book = vec![
+            r("crusher", &[("minecraft:raw_iron", 1)], ("rustcraft:dust_iron", 2)),
+            r("furnace", &[("rustcraft:dust_iron", 1)], ("minecraft:iron_ingot", 1)),
+        ];
+        let p = plan("minecraft:iron_ingot", 20, &stock(&[("minecraft:raw_iron", 10)]), &book, ALL);
+        assert!(p.ready(), "{p:?}");
+        assert_eq!(p.reserved["minecraft:raw_iron"], 10);
+        assert!(p.steps.iter().any(|st| st.output.0 == "rustcraft:dust_iron"), "{:?}", p.steps);
     }
 
     fn planks() -> Vec<ItemKey> {

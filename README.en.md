@@ -106,7 +106,7 @@ Both parts are needed in the game and on the server, at the same version. Withou
 ### Client
 
 ```powershell
-git clone --branch v0.19.2 https://github.com/Betreazen/rustcraft
+git clone --branch v0.19.3 https://github.com/Betreazen/rustcraft
 horizon-launcher native-build rustcraft/mod/rustcraft --instance <instance> --trust-native-code
 ```
 
@@ -116,7 +116,7 @@ Then copy the contents of `mod/content` into the instance's `horizon-mods/rustcr
 
 ```powershell
 horizon-launcher native-build rustcraft/mod/rustcraft `
-    --server-output C:\horizon-engines\rustcraft-0.19.2 --trust-native-code
+    --server-output C:\horizon-engines\rustcraft-0.19.3 --trust-native-code
 horizon-server --dir <server folder> config set engine.path=C:\horizon-engines\rustcraft-0.12.0\horizon-engine.exe
 ```
 

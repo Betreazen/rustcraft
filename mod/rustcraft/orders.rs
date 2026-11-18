@@ -377,6 +377,9 @@ fn build_book(game: &Game<'_>, recipes: &machines::MachineRecipes) -> Book {
             book.push(r);
         }
     }
+    // 0.19.2: what the crusher grinds (ore and raw metal) goes to the furnace only as dust.
+    let crushed: std::collections::BTreeSet<ItemKey> =
+        recipes.crushing.iter().flat_map(|r| r.inputs.iter().cloned()).collect();
     for c in game
         .recipes()
         .cooking
@@ -392,9 +395,12 @@ fn build_book(game: &Game<'_>, recipes: &machines::MachineRecipes) -> Book {
         if !c.ingredient.items.is_empty() && c.ingredient.items.iter().all(|i| worn(i)) {
             continue;
         }
+        let Some(inputs) = rustcraft_rules::orders::furnace_inputs(alternatives(&c.ingredient), &crushed) else {
+            continue;
+        };
         book.push(PlanRecipe {
             machine: KINDS[1].into(),
-            inputs: vec![(alternatives(&c.ingredient), 1)],
+            inputs: vec![(inputs, 1)],
             output: (c.result.item.to_string(), c.result.count),
             cells: Vec::new(),
         });
