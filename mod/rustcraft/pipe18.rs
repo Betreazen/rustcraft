@@ -413,7 +413,7 @@ fn lift_to_player(game: &mut Game<'_>, player: &NativeServerPlayer, pos: Pos) ->
         let nbt = Compound::from([(JavaString::from("Item"), save::item_to_nbt(&rest))]);
         let at = pos.map(|c| f64::from(c) + 0.5);
         if game.native_summon(&player.dimension, "minecraft:item", at, nbt).is_none() {
-            log::warn!("rustcraft: the lifted {} at {pos:?} was lost", rest.item);
+            crate::game::rustcraft_debug::journal_warn!("rustcraft: the lifted {} at {pos:?} was lost", rest.item);
         }
     }
     let text = server::line("rustcraft.wrench.lifted", "Lifted with its contents", &[]);

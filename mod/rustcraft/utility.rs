@@ -115,7 +115,7 @@ fn grown_cells(game: &Game<'_>) -> MutexGuard<'static, GrownFile> {
         if let Ok(text) = std::fs::read_to_string(&path) {
             match serde_json::from_str(&text) {
                 Ok(cells) => g.cells = cells,
-                Err(e) => log::warn!("rustcraft: {} does not read: {e}", path.display()),
+                Err(e) => crate::game::rustcraft_debug::journal_warn!("rustcraft: {} does not read: {e}", path.display()),
             }
         }
         g.path = Some(path);
@@ -142,7 +142,7 @@ pub(super) fn save_grown(game: &Game<'_>) {
         .and_then(|()| std::fs::write(&fresh, json))
         .and_then(|()| std::fs::rename(&fresh, &path));
     if let Err(e) = done {
-        log::warn!("rustcraft: the grown cells were not saved: {e}");
+        crate::game::rustcraft_debug::journal_warn!("rustcraft: the grown cells were not saved: {e}");
     }
 }
 
@@ -1747,7 +1747,7 @@ pub(super) fn lift_with_wrench(game: &mut Game<'_>, uuid: u128, dimension: &str,
         .native_summon(dimension, "minecraft:item", at, nbt)
         .is_none()
     {
-        log::warn!("rustcraft: the lifted {} at {pos:?} was lost", rest.item);
+        crate::game::rustcraft_debug::journal_warn!("rustcraft: the lifted {} at {pos:?} was lost", rest.item);
     }
 }
 

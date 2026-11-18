@@ -878,7 +878,7 @@ fn take_source(game: &mut Game<'_>, pos: Pos, source: Source) {
     };
     // Flags 3: neighbours hear it and the players see it, as `Level.setBlock` with UPDATE_ALL.
     if !game.native_set_block(dimension, below, air, 3) {
-        log::warn!(
+        crate::game::rustcraft_debug::journal_warn!(
             "rustcraft: the {} source under the pump at {pos:?} stayed",
             source.fluid()
         );
@@ -1263,7 +1263,7 @@ pub(super) fn on_right_click_block(game: &mut Game<'_>, pos: Pos, canceled: &mut
             if player.game_mode != 1 {
                 game.native_take_items(&held, 1);
                 if game.native_give_items(result, 1) == 0 {
-                    log::warn!("rustcraft: no room for {result} from the tank at {pos:?}");
+                    crate::game::rustcraft_debug::journal_warn!("rustcraft: no room for {result} from the tank at {pos:?}");
                 }
             }
         }

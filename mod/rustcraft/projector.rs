@@ -401,7 +401,7 @@ fn lift(game: &mut Game<'_>, player: u128, dimension: &str, pos: Pos) {
         let nbt = Compound::from([(JavaString::from("Item"), horizon_client::save::item_to_nbt(&rest))]);
         let at = pos.map(|c| f64::from(c) + 0.5);
         if game.native_summon(dimension, "minecraft:item", at, nbt).is_none() {
-            log::warn!("rustcraft: the lifted projector at {pos:?} was lost");
+            crate::game::rustcraft_debug::journal_warn!("rustcraft: the lifted projector at {pos:?} was lost");
         }
     }
 }
@@ -540,6 +540,11 @@ pub(super) fn build(game: &mut Game<'_>, dimension: &str, level: &LevelNet, pos:
             storage::restore_into(dimension, id, cell.id(), 1);
         }
         return Shown::Blocked("builder_no_blocks");
+    }
+    if from_storage && let Some(id) = id {
+        // rustcraft_debug: the building machine's block out of the storage.
+        let route = format!("storage#{id} -> rustcraft:builder({})", rustcraft_rules::debug::pos_text(pos));
+        crate::game::rustcraft_debug::flow(dimension, &route, cell.id(), 1);
     }
     let pays = game
         .native_with_mod_block_entity(pos, |e| {

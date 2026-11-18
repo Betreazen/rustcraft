@@ -621,7 +621,7 @@ fn drop_stack(game: &mut Game<'_>, dimension: &str, pos: Pos, stack: &ItemStack)
         .native_summon(dimension, "minecraft:item", at, nbt)
         .is_none()
     {
-        log::warn!("rustcraft: {} {} lost at {pos:?}", stack.count, stack.item);
+        crate::game::rustcraft_debug::journal_warn!("rustcraft: {} {} lost at {pos:?}", stack.count, stack.item);
     }
 }
 

@@ -173,7 +173,7 @@ fn warn_once(id: &str) {
         .unwrap_or_else(PoisonError::into_inner)
         .insert(id.to_owned())
     {
-        log::warn!("rustcraft: recipe {id} left out: no ingredient or result the game knows");
+        crate::game::rustcraft_debug::journal_warn!("rustcraft: recipe {id} left out: no ingredient or result the game knows");
     }
 }
 
@@ -1587,6 +1587,6 @@ fn drop_stack(game: &mut Game<'_>, dimension: &str, pos: Pos, item: &str, count:
         .native_summon(dimension, "minecraft:item", at, nbt)
         .is_none()
     {
-        log::warn!("rustcraft: {count} {item} from the machine at {pos:?} were lost");
+        crate::game::rustcraft_debug::journal_warn!("rustcraft: {count} {item} from the machine at {pos:?} were lost");
     }
 }

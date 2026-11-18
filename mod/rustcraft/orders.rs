@@ -264,7 +264,7 @@ pub(super) fn restore(dimension: &str, saved: &BTreeMap<u32, Vec<String>>) {
     let mut held = Vec::new();
     for (&id, strings) in saved {
         let Some(record) = saved::decode(strings) else {
-            log::warn!("rustcraft: the orders of storage {id} were not read");
+            crate::game::rustcraft_debug::journal_warn!("rustcraft: the orders of storage {id} were not read");
             continue;
         };
         if !record.queue.orders.is_empty() {
@@ -512,9 +512,10 @@ pub(super) fn cancel(dimension: &str, storage: u32, id: u16) {
         return;
     };
     if let Some(q) = level.queues.get_mut(&storage)
-        && q.cancel(id).is_some()
+        && let Some(gone) = q.cancel(id)
     {
         level.revision += 1;
+        crate::game::rustcraft_debug::order_ended(dimension, storage, &gone, "order_cancelled");
     }
 }
 
@@ -526,6 +527,55 @@ pub(super) fn queue_of(dimension: &str, storage: u32) -> Vec<Order> {
         .and_then(|l| l.queues.get(&storage))
         .map(|q| q.orders.clone())
         .unwrap_or_default()
+}
+
+/// rustcraft_debug: every storage's orders of the level and the jobs on its machines (with the
+/// storage each works for).
+pub(super) fn debug_orders(dimension: &str) -> (Vec<(u32, Vec<Order>)>, Vec<(u32, Job)>) {
+    let o = orders();
+    let queues = o
+        .levels
+        .get(dimension)
+        .map(|l| {
+            l.queues
+                .iter()
+                .map(|(id, q)| (*id, q.orders.clone()))
+                .collect()
+        })
+        .unwrap_or_default();
+    let jobs = o
+        .jobs
+        .get(dimension)
+        .map(|j| j.iter().map(|r| (r.storage, r.job.clone())).collect())
+        .unwrap_or_default();
+    (queues, jobs)
+}
+
+/// rustcraft_debug: what the level's orders hold at machines (O11) and what rides the item
+/// channel for them.
+pub(super) fn debug_riding(dimension: &str) -> (Vec<Held>, Vec<Shipment>) {
+    let o = orders();
+    (
+        o.held.get(dimension).cloned().unwrap_or_default(),
+        o.ships.get(dimension).cloned().unwrap_or_default(),
+    )
+}
+
+/// rustcraft_debug: whether the storage at `anchor` takes orders, and every machine behind a
+/// joint of an item net the storage is a joint of (not only the kinds orders use).
+pub(super) fn debug_line(level: &LevelNet, anchor: Pos) -> (Smart, Vec<(Pos, Machine)>) {
+    let (smart, _) = line_state(level, anchor);
+    let machines = level
+        .transport
+        .around(anchor)
+        .map(|(blocks, _)| {
+            blocks
+                .iter()
+                .filter_map(|p| level.machines.get(p).map(|m| (*p, *m)))
+                .collect()
+        })
+        .unwrap_or_default();
+    (smart, machines)
 }
 
 // ---- What the terminal shows ----
@@ -968,6 +1018,16 @@ fn deliver(
         taken.undo(dimension, storage_id, job.order, held);
         return (Sent::No, BTreeMap::new());
     }
+    // rustcraft_debug: what left the storage for this job, summed a second by item.
+    let to = format!(
+        "storage#{storage_id} -> {}({}) order#{}",
+        machine.block(),
+        rustcraft_rules::debug::pos_text(job.machine),
+        job.order
+    );
+    for (item, n) in taken.storage.iter().filter(|(_, n)| *n > 0) {
+        crate::game::rustcraft_debug::flow(dimension, &to, item, *n);
+    }
     let tps = server::tuning().ticks_per_second;
     let sent = if rides.is_empty() {
         Sent::Placed
@@ -1241,6 +1301,11 @@ fn land(
     own: Option<bool>,
 ) {
     if !live.contains(&s.storage) {
+        // rustcraft_debug: a job's items dropped where they came from, their storage gone.
+        let to = format!("({}) -> ground, storage#{} gone", rustcraft_rules::debug::pos_text(from), s.storage);
+        for (item, n) in &s.items {
+            crate::game::rustcraft_debug::flow(dimension, &to, item, u64::from(*n));
+        }
         for (item, n) in &s.items {
             let mut left = *n;
             while left > 0 {
@@ -1250,6 +1315,11 @@ fn land(
             }
         }
         return;
+    }
+    // rustcraft_debug: what lands back in the storage from a job.
+    let to = format!("({}) -> storage#{} order#{}", rustcraft_rules::debug::pos_text(from), s.storage, s.order);
+    for (item, n) in &s.items {
+        crate::game::rustcraft_debug::flow(dimension, &to, item, u64::from(*n));
     }
     for (item, n) in &s.items {
         let n = u64::from(*n);
@@ -1717,6 +1787,15 @@ fn feed_crafters(game: &mut Game<'_>, dimension: &str, level: &LevelNet, jobs: &
             for (item, got) in taken {
                 storage::restore_into(dimension, id, &item, got);
             }
+        } else {
+            // rustcraft_debug: the storage feeding an autocrafter outside any order.
+            let to = format!(
+                "storage#{id} -> rustcraft:crafter({}) feed",
+                rustcraft_rules::debug::pos_text(pos)
+            );
+            for (item, got) in &taken {
+                crate::game::rustcraft_debug::flow(dimension, &to, item, *got);
+            }
         }
     }
 }
@@ -1905,6 +1984,8 @@ fn storage_round(
     queue.wait_for_energy(&own_jobs, &|pos| {
         with_energy.get(&pos).copied().unwrap_or(true)
     });
-    queue.remove_done();
+    for done in queue.remove_done() {
+        crate::game::rustcraft_debug::order_ended(dimension, id, &done, "order_finished");
+    }
     started
 }

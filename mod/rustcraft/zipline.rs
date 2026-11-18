@@ -110,7 +110,7 @@ fn loaded(game: &Game<'_>) -> MutexGuard<'static, State> {
                     r.stamp(now_ms());
                     s.ropes = r;
                 }
-                Err(e) => log::warn!("rustcraft: {} does not read: {e}", path.display()),
+                Err(e) => crate::game::rustcraft_debug::journal_warn!("rustcraft: {} does not read: {e}", path.display()),
             }
         }
         s.path = Some(path);
@@ -130,7 +130,7 @@ fn save(s: &State) {
         .and_then(|()| std::fs::write(&fresh, json))
         .and_then(|()| std::fs::rename(&fresh, &path));
     if let Err(e) = done {
-        log::warn!("rustcraft: the ropes were not saved: {e}");
+        crate::game::rustcraft_debug::journal_warn!("rustcraft: the ropes were not saved: {e}");
     }
 }
 

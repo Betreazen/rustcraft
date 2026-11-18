@@ -152,6 +152,6 @@ fn drop_one(game: &mut Game<'_>, dimension: &str, pos: Pos, item: &str) {
     let nbt = Compound::from([(JavaString::from("Item"), stack)]);
     let at = pos.map(|c| f64::from(c) + 0.5);
     if game.native_summon(dimension, "minecraft:item", at, nbt).is_none() {
-        log::warn!("rustcraft: {item} from the swap at {pos:?} was lost");
+        crate::game::rustcraft_debug::journal_warn!("rustcraft: {item} from the swap at {pos:?} was lost");
     }
 }

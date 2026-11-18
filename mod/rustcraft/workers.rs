@@ -162,7 +162,7 @@ fn load(game: &mut Game<'_>, level: &mut LevelFleet) {
         Fleet::default()
     } else {
         Fleet::decode(&text).unwrap_or_else(|| {
-            log::warn!("rustcraft: the workers do not read; starting with none");
+            crate::game::rustcraft_debug::journal_warn!("rustcraft: the workers do not read; starting with none");
             Fleet::default()
         })
     };
@@ -175,7 +175,7 @@ fn save(game: &mut Game<'_>, level: &mut LevelFleet) {
     }
     let host: &mut dyn Host = game;
     if let Err(e) = SAVED.set(host, Holder::Level, level.fleet.encode()) {
-        log::warn!("rustcraft: the workers not saved: {e:?}");
+        crate::game::rustcraft_debug::journal_warn!("rustcraft: the workers not saved: {e:?}");
     }
 }
 
@@ -281,7 +281,7 @@ pub(super) fn on_use_item_on(
     let packed = packed_of(stack);
     // Wave 2 (W3): a packed worker that does not read back stays in the hand with all it carries.
     if packed.as_deref().is_some_and(|k| !Worker::reads_back(k)) {
-        log::warn!("rustcraft: a packed worker that does not read: left with the player");
+        crate::game::rustcraft_debug::journal_warn!("rustcraft: a packed worker that does not read: left with the player");
         tell(
             game,
             player.uuid,
@@ -331,7 +331,7 @@ pub(super) fn config_read(file: &crate::game::NativeConfigFile) {
     }
     let (read, bad) = config::parse(&file.text);
     for key in bad {
-        log::warn!(
+        crate::game::rustcraft_debug::journal_warn!(
             "rustcraft: {} does not read its `{key}`; it stays as it was by default",
             file.path.display()
         );
@@ -387,7 +387,7 @@ fn take_exact(game: &mut Game<'_>, uuid: u128, stack: &ItemStack) {
         .chain(0..stacks.len())
         .find(|&i| stacks.get(i).cloned().flatten().is_some_and(|s| s == *stack));
     let Some(slot) = slot else {
-        log::warn!("rustcraft: the placed chassis was not found in the inventory");
+        crate::game::rustcraft_debug::journal_warn!("rustcraft: the placed chassis was not found in the inventory");
         return;
     };
     let rest = (stack.count > 1).then(|| {
@@ -399,7 +399,7 @@ fn take_exact(game: &mut Game<'_>, uuid: u128, stack: &ItemStack) {
         .native_set_inventory_slot(uuid, NativeInventoryKind::Player, slot, Some(stack), rest)
         .is_err()
     {
-        log::warn!("rustcraft: the placed chassis could not be taken");
+        crate::game::rustcraft_debug::journal_warn!("rustcraft: the placed chassis could not be taken");
     }
 }
 
@@ -535,7 +535,7 @@ fn drop_item(game: &mut Game<'_>, dimension: &str, at: [f64; 3], stack: &ItemSta
         .native_summon(dimension, "minecraft:item", [at[0], at[1] + 0.5, at[2]], nbt)
         .is_none()
     {
-        log::warn!("rustcraft: a picked-up worker could not be dropped and was lost");
+        crate::game::rustcraft_debug::journal_warn!("rustcraft: a picked-up worker could not be dropped and was lost");
     }
 }
 
@@ -566,7 +566,7 @@ fn drop_stack(game: &mut Game<'_>, dimension: &str, at: [f64; 3], item: &str, co
         )
         .is_none()
     {
-        log::warn!("rustcraft: {count} {item} from a worker were lost");
+        crate::game::rustcraft_debug::journal_warn!("rustcraft: {count} {item} from a worker were lost");
     }
 }
 
@@ -1708,7 +1708,7 @@ pub(super) fn on_client_message(player: u128, channel: &str, data: &[u8]) {
     }
     match screen::decode_press(data) {
         Some(p) => press(player, p),
-        None => log::warn!("rustcraft: a chassis window press that does not read"),
+        None => crate::game::rustcraft_debug::journal_warn!("rustcraft: a chassis window press that does not read"),
     }
 }
 
@@ -1835,7 +1835,7 @@ fn click(
         rest,
     );
     if taken.is_err() {
-        log::warn!("rustcraft: the worker took an item the player no longer had");
+        crate::game::rustcraft_debug::journal_warn!("rustcraft: the worker took an item the player no longer had");
     }
     if let Some(old) = back {
         give(game, uuid, &old, 1);
@@ -1952,6 +1952,17 @@ pub(super) fn worker_for_selftest(dimension: &str, id: u64) -> Option<Worker> {
         .iter()
         .find(|w| w.id == id)
         .cloned()
+}
+
+/// rustcraft_debug: each level's fleet as the server holds it now, the levels whose fleet is not
+/// read yet left out (so a restart does not look like every worker placed at once).
+pub(super) fn fleets() -> Vec<(String, Vec<Worker>)> {
+    state()
+        .levels
+        .iter()
+        .filter(|(_, l)| l.loaded)
+        .map(|(d, l)| (d.clone(), l.fleet.workers.clone()))
+        .collect()
 }
 
 /// Takes the worker away, its seat with it.

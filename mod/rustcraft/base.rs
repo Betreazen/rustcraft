@@ -1343,7 +1343,7 @@ fn save_anchors(game: &mut Game<'_>, dimension: &str) {
     let list = state().anchors.get(dimension).cloned().unwrap_or_default();
     let host: &mut dyn Host = game;
     if let Err(e) = ANCHORS.set(host, Holder::Level, list.clone()) {
-        log::warn!("rustcraft: the anchors not saved: {e:?}");
+        crate::game::rustcraft_debug::journal_warn!("rustcraft: the anchors not saved: {e:?}");
     }
     index_level(game, dimension, &list);
 }
@@ -1388,7 +1388,7 @@ fn index_level(game: &Game<'_>, dimension: &str, list: &[Anchor]) {
             std::fs::rename(&fresh, &path)
         });
     if let Err(e) = written {
-        log::warn!("rustcraft: the anchors' index was not saved: {e}");
+        crate::game::rustcraft_debug::journal_warn!("rustcraft: the anchors' index was not saved: {e}");
     }
 }
 
@@ -1540,7 +1540,7 @@ fn anchors(game: &mut Game<'_>, dimension: &str, level: &LevelNet, t: &Tuning) {
     }
     for c in want.difference(&held) {
         if !game.native_force_chunk(TICKET, *c, true) {
-            log::warn!("rustcraft: anchor chunk {c:?} not held");
+            crate::game::rustcraft_debug::journal_warn!("rustcraft: anchor chunk {c:?} not held");
         }
     }
     state().held.insert(dimension.to_owned(), want);
@@ -2409,7 +2409,7 @@ fn testkit(game: &mut Game<'_>, dimension: &str) {
         };
         game.native_set_block(dimension, pos, st, 3);
         if game.native_block(pos) != content::TURRET {
-            log::warn!("rustcraft: {TESTKIT}: no turret at {pos:?}");
+            crate::game::rustcraft_debug::journal_warn!("rustcraft: {TESTKIT}: no turret at {pos:?}");
             continue;
         }
         if let Some(o) = owner {
