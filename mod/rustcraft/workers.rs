@@ -1130,8 +1130,8 @@ fn fell(game: &mut Game<'_>, dimension: &str, w: &mut Worker, tree: &trees::Tree
 }
 
 /// 0.18.5 (the owner: «работники всё делают сами»): the saw plants the saplings of its hold on the
-/// free ground of `zone`, on the lattice that lets each tree grow (rustcraft_rules::worker::trees::
-/// spot), a dark or pale oak four together inside the zone: how many spots it planted, and whether
+/// free ground of `zone`, with room for each tree to grow (rustcraft_rules::worker::trees::spot), a
+/// dark or pale oak four together inside the zone: how many spots it planted, and whether
 /// free ground found no sapling in the hold.
 fn plant_zone(game: &mut Game<'_>, dimension: &str, w: &mut Worker, zone: &[Pos]) -> (usize, bool) {
     let mut planted = 0;

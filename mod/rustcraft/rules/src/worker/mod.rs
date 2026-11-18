@@ -559,8 +559,10 @@ impl Worker {
             }
             if self.hold.is_full() {
                 self.errand = Errand::Unload;
+                self.passed = None;
             } else if self.charge < t.worker_charge_below * self.capacity(t) {
                 self.errand = Errand::Charge;
+                self.passed = None;
             } else if self.tool == Some(Tool::Hold) {
                 // W6: a cargo worker's work is the ride from the load dock to the unload dock.
                 self.errand = Errand::Load;
@@ -661,14 +663,11 @@ impl Worker {
         None
     }
 
-    /// At a dock it stopped at in passing (`stops_in_passing`), not sent there: it rides on when
-    /// the dock cannot serve it (full, or with no energy) instead of waiting.
-    pub fn only_passing(&self, t: &Tuning) -> bool {
-        match self.errand {
-            Errand::Unload => !self.hold.is_full() && self.tool != Some(Tool::Hold),
-            Errand::Charge => self.charge >= t.worker_charge_below * self.capacity(t),
-            Errand::Work | Errand::Load => false,
-        }
+    /// At a dock it stopped at in passing (`stops_in_passing`), not sent there by a full hold or
+    /// a low battery: it rides on when the dock cannot serve it (full, or with no energy) instead
+    /// of waiting. One sent there waits, as before (the bench's «every shovel reached the chest»).
+    pub fn only_passing(&self, _t: &Tuning) -> bool {
+        matches!(self.errand, Errand::Unload | Errand::Charge) && self.passed == Some(self.cell)
     }
 
     /// Blocks a second on the rail at `to`: its tier's speed (T4).
@@ -1150,6 +1149,15 @@ pub(crate) mod tests {
         let steps = ride(&mut w, &track, &t, 10);
         assert!(!steps.iter().any(|s| matches!(s, Step::AtDock(_))));
         assert_ne!(w.cell, [3, 0, 0]);
+        // Sent there full, it waits at a full dock even once the hold has room (the bench).
+        let mut w = worker(&t);
+        for _ in 0..t.worker_hold {
+            w.hold.add("x", 1, 1);
+        }
+        ride(&mut w, &track, &t, 40);
+        assert_eq!(w.errand, Errand::Unload);
+        w.hold.take("x", 3);
+        assert!(!w.only_passing(&t), "sent by its full hold");
         // A hold of only what its tool keeps rides past.
         let mut w = worker(&t);
         w.hold.add("minecraft:oak_sapling", 5, 64);
