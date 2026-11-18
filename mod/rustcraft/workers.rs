@@ -2102,6 +2102,7 @@ pub(super) fn round_trip(dimension: &str) -> Result<(), String> {
     for w in &mut live.workers {
         w.aim = None;
         w.passed = None;
+        w.bore_to = None;
     }
     match Fleet::decode(&back) {
         Some(f) if f == live => Ok(()),
