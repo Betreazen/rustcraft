@@ -667,7 +667,7 @@ fn declare_storage_and_tanks(blocks: &mut Vec<Block>) {
                 hardness: Some(3.0),
                 explosion_resistance: Some(6.0),
                 sounds: Some("minecraft:copper_block".into()),
-                occludes: (id == TANK).then_some(false),
+                occludes: rustcraft_rules::cull::see_through(id).then_some(false),
                 ..BlockProperties::default()
             },
             item: true,
@@ -690,10 +690,13 @@ fn declare_slice7(blocks: &mut Vec<Block>) {
         // E19: the solar panel is a thin plate that lets the light through, so there is no
         // shadow under it; the turret's head and the windmill's mast reach past their cells.
         // Slice 18, stream 3: the charge plate is thin, as a pressure plate (guide `charge_plate`).
+        // 0.18.3: so is every machine whose model leaves part of its cell open
+        // (rustcraft_rules::cull), or the walls next to it show holes.
         let open = matches!(
             machine,
             Machine::Turret | Machine::Windmill | Machine::Solar
-        ) || machine == Machine::Util(Util::ChargePlate);
+        ) || machine == Machine::Util(Util::ChargePlate)
+            || rustcraft_rules::cull::see_through(machine.block());
         let thin = match machine {
             Machine::Solar => Some(SOLAR_BOX),
             Machine::Util(Util::ChargePlate) => Some(PLATE_BOX),
@@ -782,6 +785,8 @@ fn declare_machines(blocks: &mut Vec<Block>) {
                 hardness: Some(3.5),
                 explosion_resistance: Some(6.0),
                 sounds: Some("minecraft:copper_block".into()),
+                // 0.18.3: an open model must not hide the walls next to it.
+                occludes: rustcraft_rules::cull::see_through(machine.block()).then_some(false),
                 ..BlockProperties::default()
             },
             item: true,
