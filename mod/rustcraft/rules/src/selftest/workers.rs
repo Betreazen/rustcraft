@@ -272,7 +272,7 @@ fn reaper_columns(o: Pos, _: &Tuning) -> Scenario {
         move |b, _| {
             b.place(at(base, [0, -1, 0]), "minecraft:dirt", &[])?;
             for y in 0..3 {
-                b.place(at(base, [0, y, 0]), "minecraft:bamboo", &[])?;
+                b.place(at(base, [0, y, 0]), "minecraft:bamboo", &[("stage", "1")])?;
             }
             Ok(())
         },

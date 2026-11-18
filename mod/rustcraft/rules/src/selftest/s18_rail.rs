@@ -150,8 +150,10 @@ fn reaper_rides_up_bamboo(o: Pos, _: &Tuning) -> Scenario {
                 b.place(at(o, [3, y, -1]), STONE, &[])?;
                 rail(b, at(o, [3, y, 0]), Face::ZNeg)?;
             }
+            // Stage 1: a bamboo that grows no more, so no new shoot stands over the cut by chance
+            // (a random tick grew one on the bench, 0.19.1).
             for y in 1..=6 {
-                b.place(bamboo(y), "minecraft:bamboo", &[])?;
+                b.place(bamboo(y), "minecraft:bamboo", &[("stage", "1")])?;
             }
             // 0.19.1: its base, under the bottom rail and in the wall beside it.
             base_at(b, Some(at(o, [3, 0, 0])), Some(at(o, [3, 1, -1])))
