@@ -305,6 +305,13 @@ impl Planner<'_> {
             let mut trial = self.copy();
             let hopeless = trial.run(item, rest, index);
             self.budget = trial.budget;
+            // 0.19.1: a way that comes back to the item itself (iron from nuggets, nuggets from
+            // smelted iron pickaxes, pickaxes from iron) is no way to make it, however much else
+            // it gathers: the owner's 24 item channels waited for 264 iron instead of 21.
+            let own = |p: &Self| p.plan.missing.get(item).copied().unwrap_or(0);
+            if own(&trial) > own(self) {
+                continue;
+            }
             if trial.plan.missing != self.plan.missing {
                 if !hopeless && lacks_items.is_none() {
                     lacks_items = Some(trial);
@@ -635,22 +642,32 @@ mod tests {
     }
 
     #[test]
-    fn probe_item_channels() {
+    fn a_recipe_that_needs_its_own_item_is_no_way_to_make_it() {
+        // The owner: 24 item channels waited for 264 iron ingots. The planner made iron from
+        // nuggets, the nuggets by smelting iron pickaxes, the pickaxes from iron: a loop, taken
+        // because it gathered something (the sticks). 24 channels need 6 + 15 = 21 iron.
         let book = vec![
             r("crafter", &[("rustcraft:coppersteel", 4), ("minecraft:hopper", 1)], ("rustcraft:item_channel", 8)),
             r("crafter", &[("minecraft:copper_ingot", 1), ("minecraft:iron_ingot", 1)], ("rustcraft:coppersteel", 2)),
             r("crafter", &[("minecraft:iron_ingot", 5), ("minecraft:chest", 1)], ("minecraft:hopper", 1)),
             r("crafter", &[("minecraft:oak_planks", 8)], ("minecraft:chest", 1)),
+            r("crafter", &[("minecraft:oak_planks", 2)], ("minecraft:stick", 4)),
+            r("crafter", &[("minecraft:iron_nugget", 9)], ("minecraft:iron_ingot", 1)),
+            r("crafter", &[("minecraft:iron_ingot", 3), ("minecraft:stick", 2)], ("minecraft:iron_pickaxe", 1)),
+            r("furnace", &[("minecraft:iron_pickaxe", 1)], ("minecraft:iron_nugget", 1)),
             r("crafter", &[("minecraft:iron_block", 1)], ("minecraft:iron_ingot", 9)),
             r("crafter", &[("minecraft:iron_ingot", 9)], ("minecraft:iron_block", 1)),
-            r("crafter", &[("minecraft:iron_nugget", 9)], ("minecraft:iron_ingot", 1)),
-            r("crafter", &[("minecraft:iron_ingot", 1)], ("minecraft:iron_nugget", 9)),
             r("furnace", &[("minecraft:raw_iron", 1)], ("minecraft:iron_ingot", 1)),
-            r("furnace", &[("rustcraft:dust_iron", 1)], ("minecraft:iron_ingot", 1)),
         ];
-        let p = plan("rustcraft:item_channel", 24, &stock(&[("minecraft:copper_ingot", 64), ("minecraft:oak_planks", 64)]), &book, ALL);
-        for st in &p.steps { eprintln!("step {} {:?} -> {:?} x{}", st.machine, st.inputs, st.output, st.times); }
-        eprintln!("missing {:?} reserved {:?}", p.missing, p.reserved);
+        let s = stock(&[("minecraft:copper_ingot", 64), ("minecraft:oak_planks", 64)]);
+        let p = plan("rustcraft:item_channel", 24, &s, &book, ALL);
+        assert_eq!(p.missing, stock(&[("minecraft:iron_ingot", 21)]), "{p:?}");
+        assert!(!p.steps.iter().any(|st| st.output.0 == "minecraft:iron_pickaxe"), "{:?}", p.steps);
+        // With the iron in stock the order runs, and still without a pickaxe.
+        let rich = stock(&[("minecraft:copper_ingot", 64), ("minecraft:oak_planks", 64), ("minecraft:iron_ingot", 21)]);
+        let p = plan("rustcraft:item_channel", 24, &rich, &book, ALL);
+        assert!(p.ready(), "{p:?}");
+        assert_eq!(p.reserved["minecraft:iron_ingot"], 21);
     }
 
     fn planks() -> Vec<ItemKey> {

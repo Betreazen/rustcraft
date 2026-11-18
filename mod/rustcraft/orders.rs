@@ -386,6 +386,12 @@ fn build_book(game: &Game<'_>, recipes: &machines::MachineRecipes) -> Book {
         if c.result.extra.is_some() || c.result.count == 0 {
             continue;
         }
+        // 0.19.1: smelting tools and armour into nuggets is recycling, no way to make nuggets:
+        // an order never crafts a pickaxe to melt it.
+        let worn = |item: &str| game.items().get(item).is_some_and(|i| i.max_damage > 0);
+        if !c.ingredient.items.is_empty() && c.ingredient.items.iter().all(|i| worn(i)) {
+            continue;
+        }
         book.push(PlanRecipe {
             machine: KINDS[1].into(),
             inputs: vec![(alternatives(&c.ingredient), 1)],
