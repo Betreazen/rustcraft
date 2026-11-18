@@ -478,8 +478,9 @@ pub trait Bench {
         Err("no player clicks on this bench".into())
     }
     /// 0.18.1: chunk `chunk` of the bench's level given its druse pass now with `tries` tries
-    /// (rustcraft_crystals::retro_chunk); none when it had one already. How many it placed.
-    fn retro_druses(&mut self, _chunk: [i32; 2], _tries: u32) -> Result<u32, String> {
+    /// (rustcraft_crystals::retro_chunk); none when it had one already. `fresh` first forgets that
+    /// it had one: the bench's chunks are new, so the game notes them done. How many it placed.
+    fn retro_druses(&mut self, _chunk: [i32; 2], _tries: u32, _fresh: bool) -> Result<u32, String> {
         Err("not on this bench".to_owned())
     }
 }

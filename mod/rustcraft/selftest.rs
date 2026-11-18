@@ -852,8 +852,8 @@ impl Bench for GameBench<'_, '_> {
         self.change_entity(pos, |e| machines::write_f64(&mut e.nbt, "grow", progress))
     }
 
-    fn retro_druses(&mut self, chunk: [i32; 2], tries: u32) -> Result<u32, String> {
-        Ok(crate::game::rustcraft_crystals::retro_for_selftest(self.game, DIMENSION, chunk, tries))
+    fn retro_druses(&mut self, chunk: [i32; 2], tries: u32, fresh: bool) -> Result<u32, String> {
+        Ok(crate::game::rustcraft_crystals::retro_for_selftest(self.game, DIMENSION, chunk, tries, fresh))
     }
 
     fn crystal_drawn(&self, pos: Pos) -> Option<(Option<[i32; 3]>, bool, bool)> {

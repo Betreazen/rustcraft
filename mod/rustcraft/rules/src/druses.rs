@@ -104,6 +104,13 @@ impl Done {
             .is_some_and(|s| s.contains(&(chunk[0], chunk[1])))
     }
 
+    /// Forgets chunk `chunk` of `level` (the self-test, whose chunks come new).
+    pub fn forget(&mut self, level: &str, chunk: [i32; 2]) {
+        if let Some(s) = self.levels.get_mut(level) {
+            s.remove(&(chunk[0], chunk[1]));
+        }
+    }
+
     /// Notes chunk `chunk` of `level` done; true when it was not yet.
     pub fn mark(&mut self, level: &str, chunk: [i32; 2]) -> bool {
         self.levels
@@ -181,6 +188,9 @@ mod tests {
         assert!(!d.mark("minecraft:overworld", [1, 2]));
         assert!(d.has("minecraft:overworld", [1, 2]));
         assert!(!d.has("minecraft:the_nether", [1, 2]));
+        d.forget("minecraft:overworld", [1, 2]);
+        assert!(!d.has("minecraft:overworld", [1, 2]));
+        d.mark("minecraft:overworld", [1, 2]);
         let back: Done = serde_json::from_str(&serde_json::to_string(&d).unwrap()).unwrap();
         assert_eq!(back, d);
     }

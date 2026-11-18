@@ -401,7 +401,7 @@ fn druses_reach_old_chunks(o: crate::geom::Pos, _t: &Tuning) -> Scenario {
             same("air above", b.block([x0 + 8, 20, z0 + 8]), "minecraft:air".to_owned())
         })
         .check("the chunk's pass puts druses on the floor, none elsewhere", move |b, m| {
-            let placed = b.retro_druses(chunk, 60)?;
+            let placed = b.retro_druses(chunk, 60, true)?;
             let seen = druses(b);
             m.mark("seen", seen as f64);
             if placed > 0 && seen == placed as usize {
@@ -411,7 +411,7 @@ fn druses_reach_old_chunks(o: crate::geom::Pos, _t: &Tuning) -> Scenario {
             }
         })
         .check("a second pass of the same chunk puts none", move |b, m| {
-            let again = b.retro_druses(chunk, 60)?;
+            let again = b.retro_druses(chunk, 60, false)?;
             let seen = druses(b);
             if again == 0 && seen as f64 == m.get("seen") {
                 Ok(())

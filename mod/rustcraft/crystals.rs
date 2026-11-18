@@ -285,11 +285,25 @@ pub(super) fn retro_chunk(game: &mut Game<'_>, dimension: &str, chunk: [i32; 2],
 
 /// The self-test: chunk `chunk` given its pass now with `tries` tries, unless it had one; how
 /// many druses it placed.
-pub(super) fn retro_for_selftest(game: &mut Game<'_>, dimension: &str, chunk: [i32; 2], tries: u32) -> u32 {
-    if retro().done.get_or_insert_with(Default::default).has(dimension, chunk) {
+pub(super) fn retro_for_selftest(game: &mut Game<'_>, dimension: &str, chunk: [i32; 2], tries: u32, fresh: bool) -> u32 {
+    if retro_done(game, |d| {
+        if fresh {
+            d.forget(dimension, chunk);
+        }
+        d.has(dimension, chunk)
+    }) {
         return 0;
     }
     let placed = retro_chunk(game, dimension, chunk, tries);
-    retro().done.get_or_insert_with(Default::default).mark(dimension, chunk);
+    retro_done(game, |d| d.mark(dimension, chunk));
     placed
+}
+
+/// Runs `f` on the done chunks, read from the world's file the first time.
+fn retro_done<R>(game: &Game<'_>, f: impl FnOnce(&mut rustcraft_rules::druses::Done) -> R) -> R {
+    let mut r = retro();
+    if r.done.is_none() {
+        r.done = Some(load_done(game));
+    }
+    f(r.done.get_or_insert_with(Default::default))
 }
