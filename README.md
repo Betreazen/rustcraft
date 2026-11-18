@@ -106,7 +106,7 @@ RustCraft — мод про аккуратную автоматизацию. В�
 ### Клиент
 
 ```powershell
-git clone --branch v0.19.0 https://github.com/Betreazen/rustcraft
+git clone --branch v0.19.1 https://github.com/Betreazen/rustcraft
 horizon-launcher native-build rustcraft/mod/rustcraft --instance <экземпляр> --trust-native-code
 ```
 
@@ -116,7 +116,7 @@ horizon-launcher native-build rustcraft/mod/rustcraft --instance <экземпл
 
 ```powershell
 horizon-launcher native-build rustcraft/mod/rustcraft `
-    --server-output C:\horizon-engines\rustcraft-0.19.0 --trust-native-code
+    --server-output C:\horizon-engines\rustcraft-0.19.1 --trust-native-code
 horizon-server --dir <папка сервера> config set engine.path=C:\horizon-engines\rustcraft-0.12.0\horizon-engine.exe
 ```
 
