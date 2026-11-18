@@ -33,6 +33,18 @@ $HorizonVersion = 'nightly-2026-11-08-fdc87ae'
 $ModId = 'rustcraft'
 $Instance = 'rustcraft-dev'
 $Launcher = "$env:LOCALAPPDATA\HorizonLauncher\horizon-launcher.exe"
+# The launcher's --profile: launcher 0.2.72 (2026-11-18) takes only "optimized"; older ones took
+# dev, performance and release. Asked once from the launcher's own help.
+function Get-LauncherProfile([string]$Wanted) {
+    if (-not $script:LauncherProfiles) {
+        $help = (& $Launcher native-build --help 2>&1) -join "`n"
+        $m = [regex]::Match($help, 'possible values: ([^\]]+)\]')
+        $script:LauncherProfiles = if ($m.Success) { @($m.Groups[1].Value -split ',\s*') } else { @($Wanted) }
+    }
+    if ($script:LauncherProfiles -contains $Wanted) { return $Wanted }
+    return $script:LauncherProfiles[0]
+}
+
 $ServerTool = "$env:LOCALAPPDATA\Horizon\current\horizon-server.exe"
 # Apart from path_of_craft_tree's dev server ($env:LOCALAPPDATA\Horizon\dev) and the prototype's.
 $DevRoot = "$env:LOCALAPPDATA\Horizon\rustcraft-dev"
@@ -96,7 +108,7 @@ function Build-Server {
     $output = Join-Path $Engines (Get-Date -Format 'yyyyMMdd-HHmmss')
     New-Item -ItemType Directory -Force $Engines | Out-Null
     Invoke-Build @('native-build', "`"$Bundle`"", '--server-output', "`"$output`"", '--version', $HorizonVersion,
-        '--profile', $BuildProfile, '--trust-native-code') 'Server'
+        '--profile', (Get-LauncherProfile $BuildProfile), '--trust-native-code') 'Server'
     & $ServerTool --dir $Server config set "engine.path=$output\horizon-engine.exe"
     if ($LASTEXITCODE -ne 0) { throw 'engine.path not set' }
     Get-ChildItem $Engines -Directory | Sort-Object Name -Descending | Select-Object -Skip $EnginesKept |
@@ -107,7 +119,7 @@ function Build-Server {
 
 function Build-Client {
     Invoke-Build @('native-build', "`"$Bundle`"", '--instance', $Instance, '--version', $HorizonVersion,
-        '--profile', $BuildProfile, '--trust-native-code') 'Client'
+        '--profile', (Get-LauncherProfile $BuildProfile), '--trust-native-code') 'Client'
     # A client build leaves out a mod whose helpers don't compile and still succeeds
     # (docs/native-mods.md, "Pinned to a Nightly"): say so instead of starting a game without it.
     if ((Test-Path $BuildLog) -and (Select-String -Path $BuildLog -Pattern "$ModId was left out" -Quiet)) {
