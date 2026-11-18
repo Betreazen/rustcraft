@@ -177,10 +177,12 @@ pub enum Note {
     NothingToReap,
     NoTrees,
     NoOre,
+    /// 0.18.5: the saw has free ground or a felled tree's root to plant and no sapling.
+    NoSaplings,
 }
 
 impl Note {
-    pub const ALL: [Note; 24] = [
+    pub const ALL: [Note; 25] = [
         Note::Working,
         Note::Unloading,
         Note::Charging,
@@ -205,6 +207,7 @@ impl Note {
         Note::NothingToReap,
         Note::NoTrees,
         Note::NoOre,
+        Note::NoSaplings,
     ];
 
     /// What a tool says about its work (nothing beside the way, nothing to sow, out of rails):
@@ -222,6 +225,7 @@ impl Note {
                 | Note::NothingToReap
                 | Note::NoTrees
                 | Note::NoOre
+                | Note::NoSaplings
         )
     }
 }
@@ -1232,7 +1236,7 @@ pub(crate) mod tests {
         w.note = Note::NoWay;
         ride(&mut w, &track, &t, 40);
         assert_eq!(w.note, Note::Working);
-        assert!(Note::ALL.iter().filter(|n| n.is_tools()).count() == 8);
+        assert!(Note::ALL.iter().filter(|n| n.is_tools()).count() == 9);
     }
 
     #[test]

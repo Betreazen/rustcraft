@@ -7,6 +7,9 @@
 //! - Empty soil (0.18.5, the owner's field test): farmland, or soul sand for nether wart, with air
 //!   over it in the zone is sown from the hold (`sow`): the seed of the crop growing next to it,
 //!   else the first seed of the hold that grows there and the filter lets through.
+//! - Ground to till (0.18.5, the owner: «работники сами готовят землю»): grass, dirt or a dirt
+//!   path with air over it in the zone becomes farmland and is sown in the same pass, when the
+//!   hold has a seed for it; ground near water first (`hydrated`).
 //! - Columns (sugar cane, cactus, bamboo, kelp): everything over the lowest block, top down.
 //! - Fruits on a stem (pumpkin, melon): the fruit an attached stem points at; the stem stays.
 //! - Berries (sweet berries, glow berries): picked, the bush or vine stays.
@@ -201,10 +204,31 @@ pub enum Sowing {
     NoSeed,
     /// The crop to set there, paid with one of its seed.
     Sow(Replant),
+    /// The ground under it tilled to farmland first, then the crop set.
+    Till(Replant),
+}
+
+/// What the reaper tills to farmland: the ground a hoe tills in the base game, but coarse dirt.
+const TILLED: [&str; 3] = ["minecraft:grass_block", "minecraft:dirt", "minecraft:dirt_path"];
+
+/// Whether the reaper tills `block` to farmland when it has a seed for it.
+pub fn tills(block: &str) -> bool {
+    TILLED.contains(&block)
+}
+
+/// Whether farmland at `soil` is wet: water within 4 blocks across, on its level or one up
+/// (the base game's `FarmBlock.isNearWater`). The reaper tills such ground first.
+pub fn hydrated(view: &dyn BlockView, soil: Pos) -> bool {
+    (-4..=4).any(|dx| {
+        (-4..=4).any(|dz| {
+            (0..=1).any(|dy| view.block([soil[0] + dx, soil[1] + dy, soil[2] + dz]) == "minecraft:water")
+        })
+    })
 }
 
 /// 0.18.5: what the reaper sows at `pos` of its zone, an air cell over farmland (or soul sand for
-/// nether wart). `seeds` are the seed items of its hold in slot order. The seed is the one of the
+/// nether wart), or over grass, dirt or a dirt path, which it tills first (`Sowing::Till`).
+/// `seeds` are the seed items of its hold in slot order. The seed is the one of the
 /// crop growing next to `pos` (one or two cells along a row), else the first of `seeds` that grows
 /// on this soil; a filter (H6) sows only what it lets through.
 pub fn sow(view: &dyn BlockView, pos: Pos, seeds: &[String], filter: &[String]) -> Sowing {
@@ -212,7 +236,9 @@ pub fn sow(view: &dyn BlockView, pos: Pos, seeds: &[String], filter: &[String]) 
     if here != "minecraft:air" && here != "minecraft:cave_air" {
         return Sowing::Nothing;
     }
-    let soil = view.block(step(pos, Face::YNeg));
+    let found = view.block(step(pos, Face::YNeg));
+    let till = tills(&found);
+    let soil = if till { FARMLAND } else { found.as_str() };
     let fits: Vec<(&str, &str)> = SOWN
         .iter()
         .filter(|(seed, crop, on)| *on == soil && sows(seed, crop, filter))
@@ -237,12 +263,13 @@ pub fn sow(view: &dyn BlockView, pos: Pos, seeds: &[String], filter: &[String]) 
     let Some(&(seed, crop)) = fits.iter().find(|f| f.0 == seed) else {
         return Sowing::NoSeed;
     };
-    Sowing::Sow(Replant {
+    let r = Replant {
         pos,
         block: crop.to_owned(),
         props: vec![("age".into(), "0".into())],
         seed: seed.to_owned(),
-    })
+    };
+    if till { Sowing::Till(r) } else { Sowing::Sow(r) }
 }
 
 /// Whether two cells of a column are the same plant (kelp's two blocks are one plant).
@@ -666,7 +693,8 @@ mod tests {
         w.set([2, 1, 0], "minecraft:wheat", &[("age", "1")]);
         assert_eq!(sow(&w, [0, 1, 0], &[], &[]), Sowing::NoSeed);
         let hold = seeds(&["minecraft:wheat_seeds"]);
-        assert_eq!(sow(&w, [1, 1, 0], &hold, &[]), Sowing::Nothing, "grass is no field");
+        w.set([1, 1, 0], "minecraft:short_grass", &[]);
+        assert_eq!(sow(&w, [1, 1, 0], &hold, &[]), Sowing::Nothing, "grass grows over the ground");
         assert_eq!(sow(&w, [2, 1, 0], &hold, &[]), Sowing::Nothing, "it grows already");
         assert_eq!(sow(&w, [0, 2, 0], &hold, &[]), Sowing::Nothing, "air over air");
     }
@@ -697,5 +725,40 @@ mod tests {
             sown(sow(&w, [0, 1, 0], &seeds(&[TORCHFLOWER_SEED]), &flowers)).unwrap().0,
             TORCHFLOWER_CROP
         );
+    }
+
+    #[test]
+    fn grass_beside_the_way_is_tilled_and_sown_with_a_seed_for_it() {
+        // 0.18.5, the owner: «работники сами готовят землю».
+        let mut w = World::default();
+        for (x, ground) in [(0, "minecraft:grass_block"), (1, "minecraft:dirt"), (2, "minecraft:dirt_path")] {
+            w.set([x, 0, 0], ground, &[]);
+        }
+        w.set([3, 0, 0], "minecraft:coarse_dirt", &[]);
+        w.set([4, 0, 0], "minecraft:stone", &[]);
+        let hold = seeds(&["minecraft:carrot"]);
+        for x in 0..3 {
+            match sow(&w, [x, 1, 0], &hold, &[]) {
+                Sowing::Till(r) => assert_eq!((r.block.as_str(), r.seed.as_str()), ("minecraft:carrots", "minecraft:carrot")),
+                other => panic!("x {x}: {other:?}"),
+            }
+        }
+        assert_eq!(sow(&w, [3, 1, 0], &hold, &[]), Sowing::Nothing, "coarse dirt stays");
+        assert_eq!(sow(&w, [4, 1, 0], &hold, &[]), Sowing::Nothing);
+        // No seed for it: it says so and leaves the grass; nether wart grows on no farmland.
+        assert_eq!(sow(&w, [0, 1, 0], &[], &[]), Sowing::NoSeed);
+        assert_eq!(sow(&w, [0, 1, 0], &seeds(&["minecraft:nether_wart"]), &[]), Sowing::NoSeed);
+        // A filter to pumpkins tills nothing.
+        assert_eq!(sow(&w, [0, 1, 0], &hold, &["minecraft:pumpkin".to_owned()]), Sowing::Nothing);
+    }
+
+    #[test]
+    fn ground_near_water_is_wet() {
+        let mut w = World::default();
+        w.set([4, 0, 4], "minecraft:water", &[]);
+        assert!(hydrated(&w, [0, 0, 0]));
+        assert!(hydrated(&w, [0, -1, 0]), "water one up");
+        assert!(!hydrated(&w, [0, 1, 0]), "water below");
+        assert!(!hydrated(&w, [-1, 0, 0]), "five away");
     }
 }

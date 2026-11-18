@@ -78,6 +78,8 @@ const NOTE_CELL: usize = 8;
 const HOLD_FIRST: usize = 9;
 /// What the saw's loot is rolled for: an axe, as a player's would be.
 const SAW_TOOL: &str = "minecraft:iron_axe";
+/// What the reaper tills grass, dirt and dirt paths to (0.18.5).
+const FARMLAND: &str = "minecraft:farmland";
 /// Rail cells in a row with nothing to do before a tool says so: the scoop's «нечего копать»,
 /// 0.18.5 the reaper's, the saw's and the grab's.
 const IDLE_CELLS: u32 = 16;
@@ -1067,7 +1069,8 @@ fn set_block(
     game.native_block(pos) == block
 }
 
-/// The saw: the first tree with a log in the zone, felled top down, planted again.
+/// The saw: the first tree with a log in the zone, felled top down, planted again; then, 0.18.5,
+/// saplings of its hold planted on the free ground of its zone (`plant_zone`).
 fn saw(game: &mut Game<'_>, dimension: &str, w: &mut Worker, cell: Pos, mount: Face, t: &Tuning) {
     let zone = w.zone_cells(cell, mount, t);
     let tree = {
@@ -1075,11 +1078,29 @@ fn saw(game: &mut Game<'_>, dimension: &str, w: &mut Worker, cell: Pos, mount: F
         zone.iter()
             .find_map(|&p| trees::find(&view, p, t.saw_max_logs, t.saw_leaf_reach))
     };
-    let Some(tree) = tree else {
-        // 0.18.5: a whole stretch with no tree beside the way, it says so.
-        w.found_as(0, IDLE_CELLS, Note::NoTrees);
-        return;
+    let (felled, unplanted) = match tree {
+        Some(tree) => fell(game, dimension, w, &tree),
+        None => (0, false),
     };
+    let (planted, lacking) = plant_zone(game, dimension, w, &zone);
+    let done = felled as usize + planted;
+    // A whole stretch with no tree beside the way, it says so; no sapling for a felled tree's
+    // root, or for free ground when it did nothing else here, «Нет саженцев».
+    w.found_as(done, IDLE_CELLS, Note::NoTrees);
+    if unplanted || (done == 0 && lacking) {
+        w.note = Note::NoSaplings;
+        w.idle = 0;
+    }
+    w.spend(
+        t.saw_ticks_per_log * done as f64,
+        t.saw_energy_per_log * done as f64,
+        t,
+    );
+}
+
+/// Fells `tree` top down, its leaves after, and plants its roots again from the hold: the logs
+/// felled, and whether a root stayed bare for want of a sapling.
+fn fell(game: &mut Game<'_>, dimension: &str, w: &mut Worker, tree: &trees::Tree) -> (u32, bool) {
     w.aim = tree.logs.last().copied();
     let mut felled = 0;
     for &log in &tree.logs {
@@ -1099,18 +1120,59 @@ fn saw(game: &mut Game<'_>, dimension: &str, w: &mut Worker, cell: Pos, mount: F
             .filter(|s| w.hold.count(s) > 0)
             .or_else(|| w.hold.find(trees::is_sapling));
         let Some(sapling) = sapling else {
-            break;
+            return (felled, true);
         };
         if set_block(game, dimension, root, &sapling, &[]) {
             w.hold.take(&sapling, 1);
         }
     }
-    w.found_as(felled as usize, IDLE_CELLS, Note::NoTrees);
-    w.spend(
-        t.saw_ticks_per_log * f64::from(felled),
-        t.saw_energy_per_log * f64::from(felled),
-        t,
-    );
+    (felled, false)
+}
+
+/// 0.18.5 (the owner: «работники всё делают сами»): the saw plants the saplings of its hold on the
+/// free ground of `zone`, on the lattice that lets each tree grow (rustcraft_rules::worker::trees::
+/// spot), a dark or pale oak four together inside the zone: how many spots it planted, and whether
+/// free ground found no sapling in the hold.
+fn plant_zone(game: &mut Game<'_>, dimension: &str, w: &mut Worker, zone: &[Pos]) -> (usize, bool) {
+    let mut planted = 0;
+    let mut lacking = false;
+    // The saplings of its hold it plants, in slot order, each once.
+    let mut saplings: Vec<String> = Vec::new();
+    for (item, _) in w.hold.slots.iter().flatten() {
+        if trees::plants(item) && !saplings.contains(item) {
+            saplings.push(item.clone());
+        }
+    }
+    for &p in zone {
+        let found = {
+            let view = View { game };
+            saplings.iter().find_map(|s| {
+                let cells = trees::spot(&view, p, s)?;
+                let enough = w.hold.count(s) >= trees::per_spot(s);
+                (enough && cells.iter().all(|c| zone.contains(c))).then(|| (s.clone(), cells))
+            })
+        };
+        let Some((sapling, cells)) = found else {
+            // Free ground and nothing to plant on it.
+            lacking |= trees::spot(&View { game }, p, "minecraft:oak_sapling").is_some();
+            continue;
+        };
+        let mut put = 0;
+        for c in cells {
+            if set_block(game, dimension, c, &sapling, &[]) {
+                w.hold.take(&sapling, 1);
+                put += 1;
+            }
+        }
+        if put > 0 {
+            planted += 1;
+            w.aim = w.aim.or(Some(p));
+        }
+        if w.hold.count(&sapling) == 0 {
+            saplings.retain(|s| *s != sapling);
+        }
+    }
+    (planted, lacking)
 }
 
 /// The reaper: every ripe plant of the zone by its group's rule (spec 17).
@@ -1184,8 +1246,9 @@ fn reap(game: &mut Game<'_>, dimension: &str, w: &mut Worker, cell: Pos, mount: 
 }
 
 /// The reaper sows each air cell of `zone` over farmland, or soul sand for nether wart, with a
-/// seed of its hold (rustcraft_rules::worker::plants::sow): the cells it sowed, and whether some
-/// empty soil found no seed in the hold.
+/// seed of its hold, and tills grass, dirt and dirt paths to farmland to sow them in the same pass
+/// (rustcraft_rules::worker::plants::sow), ground near water first: the cells it sowed, and
+/// whether some ground found no seed in the hold.
 fn sow_zone(game: &mut Game<'_>, dimension: &str, w: &mut Worker, zone: &[Pos]) -> (Vec<Pos>, bool) {
     let mut sown = Vec::new();
     let mut lacking = false;
@@ -1196,18 +1259,36 @@ fn sow_zone(game: &mut Game<'_>, dimension: &str, w: &mut Worker, zone: &[Pos]) 
             seeds.push(item.clone());
         }
     }
-    for &p in zone {
-        match plants::sow(&View { game }, p, &seeds, &w.filter) {
-            plants::Sowing::Nothing => {}
-            plants::Sowing::NoSeed => lacking = true,
-            plants::Sowing::Sow(r) => {
-                if set_block(game, dimension, r.pos, &r.block, &r.props) {
-                    w.hold.take(&r.seed, 1);
-                    sown.push(r.pos);
-                    if w.hold.count(&r.seed) == 0 {
-                        seeds.retain(|s| *s != r.seed);
-                    }
-                }
+    // 0.18.5: ground to till near water first, so the seeds go where crops grow best.
+    let mut cells: Vec<(bool, Pos)> = zone
+        .iter()
+        .map(|&p| {
+            let view = View { game };
+            let under = step(p, Face::YNeg);
+            let dry = plants::tills(&view.block(under)) && !plants::hydrated(&view, under);
+            (dry, p)
+        })
+        .collect();
+    cells.sort_by_key(|(dry, _)| *dry);
+    for (_, p) in cells {
+        let sowing = plants::sow(&View { game }, p, &seeds, &w.filter);
+        let (r, till) = match sowing {
+            plants::Sowing::Nothing => continue,
+            plants::Sowing::NoSeed => {
+                lacking = true;
+                continue;
+            }
+            plants::Sowing::Sow(r) => (r, false),
+            plants::Sowing::Till(r) => (r, true),
+        };
+        if till && !set_block(game, dimension, step(r.pos, Face::YNeg), FARMLAND, &[]) {
+            continue;
+        }
+        if set_block(game, dimension, r.pos, &r.block, &r.props) {
+            w.hold.take(&r.seed, 1);
+            sown.push(r.pos);
+            if w.hold.count(&r.seed) == 0 {
+                seeds.retain(|s| *s != r.seed);
             }
         }
     }

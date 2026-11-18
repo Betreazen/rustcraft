@@ -237,6 +237,7 @@ pub fn note_key(note: super::Note) -> (&'static str, &'static str, Mood) {
         N::NothingToReap => ("rustcraft.worker.nothing_to_reap", "Nothing to reap beside the way", Waiting),
         N::NoTrees => ("rustcraft.worker.no_trees", "No trees beside the way", Waiting),
         N::NoOre => ("rustcraft.worker.no_ore", "No ore beside the way", Waiting),
+        N::NoSaplings => ("rustcraft.worker.no_saplings", "No saplings", Waiting),
         N::NothingToDig => (
 
             "rustcraft.worker.nothing_to_dig",

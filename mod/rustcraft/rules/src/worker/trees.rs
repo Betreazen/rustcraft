@@ -8,6 +8,11 @@
 //! was ridden past): a bare trunk is a tree too (`bare_trunk`). Logs of one wood standing on
 //! natural ground and touching nothing a player builds with: no planks, glass, doors, stone or
 //! placed leaves next to any of them. A log wall of a house touches those and stays.
+//!
+//! 0.18.5 (the owner: «работники всё делают сами»): with saplings in its hold the saw plants free
+//! ground of its zone (`spot`) so that each tree has room to grow: nothing but air and wild plants
+//! in the eight cells round the spot (a free cell between trees), open sky six blocks up; dark and
+//! pale oak as a 2×2.
 
 use super::BlockView;
 use crate::geom::{Face, Pos, step};
@@ -215,6 +220,83 @@ pub fn bare_trunk(view: &dyn BlockView, start: Pos, max_logs: usize) -> Option<T
     })
 }
 
+/// The ground the saw plants a sapling on.
+const PLANT_GROUND: [&str; 6] = [
+    "minecraft:grass_block",
+    "minecraft:dirt",
+    "minecraft:podzol",
+    "minecraft:coarse_dirt",
+    "minecraft:rooted_dirt",
+    "minecraft:moss_block",
+];
+/// Saplings that grow a tree alone.
+const SINGLE: [&str; 6] = [
+    "minecraft:oak_sapling",
+    "minecraft:birch_sapling",
+    "minecraft:spruce_sapling",
+    "minecraft:acacia_sapling",
+    "minecraft:cherry_sapling",
+    "minecraft:jungle_sapling",
+];
+/// Saplings that grow a tree only four together.
+const SQUARE: [&str; 2] = ["minecraft:dark_oak_sapling", "minecraft:pale_oak_sapling"];
+/// Open sky over a sapling the saw plants: the young tree's room.
+pub const SKY: i32 = 6;
+
+fn open(block: &str) -> bool {
+    block == "minecraft:air" || block == "minecraft:cave_air"
+}
+
+/// 0.18.5: where the saw plants `sapling` at `pos` of its zone, if there: one cell, or four for a
+/// dark or pale oak (`pos` its north-west one). Each cell is air over plant ground
+/// (`PLANT_GROUND`, never farmland or a path) with open sky `SKY` blocks up, and nothing but
+/// air, wild plants and the monorail stands round the spot on its level: no sapling, log or other
+/// block, so trees planted one after another stand a free cell apart.
+pub fn spot(view: &dyn BlockView, pos: Pos, sapling: &str) -> Option<Vec<Pos>> {
+    let cells: Vec<Pos> = if SINGLE.contains(&sapling) {
+        vec![pos]
+    } else if SQUARE.contains(&sapling) {
+        [[0, 0], [1, 0], [0, 1], [1, 1]]
+            .iter()
+            .map(|[dx, dz]| [pos[0] + dx, pos[1], pos[2] + dz])
+            .collect()
+    } else {
+        return None;
+    };
+    for &c in &cells {
+        if !PLANT_GROUND.contains(&view.block(step(c, Face::YNeg)).as_str()) {
+            return None;
+        }
+        if !(0..=SKY).all(|dy| open(&view.block([c[0], c[1] + dy, c[2]]))) {
+            return None;
+        }
+        for dx in -1..=1 {
+            for dz in -1..=1 {
+                let n = [c[0] + dx, c[1], c[2] + dz];
+                if cells.contains(&n) {
+                    continue;
+                }
+                let b = view.block(n);
+                let wild = WILD.contains(&b.as_str()) && b != "minecraft:bee_nest" && b != "minecraft:cocoa";
+                if !(wild || b.starts_with("rustcraft:monorail")) {
+                    return None;
+                }
+            }
+        }
+    }
+    Some(cells)
+}
+
+/// Whether the saw plants `item` (`spot`).
+pub fn plants(item: &str) -> bool {
+    SINGLE.contains(&item) || SQUARE.contains(&item)
+}
+
+/// How many saplings a spot of `item` takes.
+pub fn per_spot(item: &str) -> u32 {
+    if SQUARE.contains(&item) { 4 } else { 1 }
+}
+
 /// The sapling that grows a tree of `log`: its wood's own, the mangrove's propagule.
 pub fn sapling_for(log: &str) -> Option<String> {
     let (ns, path) = log.split_once(':')?;
@@ -382,5 +464,55 @@ mod tests {
         );
         assert_eq!(sapling_for("minecraft:stone"), None);
         assert!(is_sapling("minecraft:birch_sapling"));
+    }
+
+    #[test]
+    fn the_saw_plants_with_room_round_each_tree() {
+        // 0.18.5, the owner: «сажает саженцы в порядке, чтобы деревья хорошо росли».
+        let mut w = World::default();
+        for x in -3..=5 {
+            for z in -3..=3 {
+                w.set([x, 0, z], "minecraft:grass_block", &[]);
+            }
+        }
+        let oak = "minecraft:oak_sapling";
+        assert_eq!(spot(&w, [2, 1, 2], oak), Some(vec![[2, 1, 2]]));
+        assert!(spot(&w, [1, 1, 1], oak).is_some(), "anywhere with room");
+        // The monorail beside it and grass round it are no hindrance; a sapling or a log is.
+        w.set([2, 1, 1], "rustcraft:monorail", &[]);
+        w.set([3, 1, 3], "minecraft:short_grass", &[]);
+        assert!(spot(&w, [2, 1, 2], oak).is_some());
+        w.set([1, 1, 3], "minecraft:birch_sapling", &[]);
+        assert_eq!(spot(&w, [2, 1, 2], oak), None, "a tree next to it");
+        w.set([4, 1, -1], "minecraft:oak_log", &[]);
+        assert_eq!(spot(&w, [4, 1, 0], oak), None, "a log beside it");
+        assert_eq!(spot(&w, [4, 1, -2], oak), None, "a log beside it");
+        w.set([0, 1, 2], "minecraft:oak_log", &[]);
+        assert_eq!(spot(&w, [0, 1, 2], oak), None, "taken");
+        // Farmland and stone are no ground for it; a roof over it is no sky.
+        w.set([0, 0, 0], "minecraft:farmland", &[]);
+        assert_eq!(spot(&w, [0, 1, 0], oak), None);
+        w.set([0, 0, -2], "minecraft:stone", &[]);
+        assert_eq!(spot(&w, [0, 1, -2], oak), None);
+        w.set([-2, 6, -2], "minecraft:oak_planks", &[]);
+        assert_eq!(spot(&w, [-2, 1, -2], oak), None, "a ceiling 5 up");
+        assert!(spot(&w, [-2, 1, 0], oak).is_some());
+        assert_eq!(spot(&w, [-2, 1, 0], "minecraft:mangrove_propagule"), None, "kinds it knows");
+    }
+
+    #[test]
+    fn a_dark_oak_is_planted_four_together_or_not_at_all() {
+        let mut w = World::default();
+        for x in 0..=3 {
+            for z in 0..=3 {
+                w.set([x, 0, z], "minecraft:grass_block", &[]);
+            }
+        }
+        let dark = "minecraft:dark_oak_sapling";
+        assert_eq!(spot(&w, [0, 1, 0], dark).map(|c| c.len()), Some(4));
+        assert_eq!(per_spot(dark), 4);
+        w.set([1, 0, 1], "minecraft:stone", &[]);
+        assert_eq!(spot(&w, [0, 1, 0], dark), None, "one of the four on stone");
+        assert!(plants("minecraft:cherry_sapling") && !plants("minecraft:stick"));
     }
 }

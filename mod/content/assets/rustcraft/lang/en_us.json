@@ -471,6 +471,7 @@
   "rustcraft.worker.nothing_to_reap": "Nothing to reap beside the way",
   "rustcraft.worker.no_trees": "No trees beside the way",
   "rustcraft.worker.no_ore": "No ore beside the way",
+  "rustcraft.worker.no_saplings": "No saplings",
   "rustcraft.housing.channel_swapped": "%s took the place of tier %s in slot %s",
   "rustcraft.backpack.title": "Backpack · %s slots",
   "rustcraft.backpack.not_ready": "The backpack is getting ready, try again",

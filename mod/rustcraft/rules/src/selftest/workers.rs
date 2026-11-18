@@ -12,8 +12,10 @@ use crate::net::topology::ChannelKind;
 use crate::tuning::Tuning;
 use crate::worker::{Errand, Note, Tool};
 
-pub const ALL: [Build; 18] = [
+pub const ALL: [Build; 20] = [
     saw_fells_a_tree,
+    reaper_tills_grass_and_sows_it,
+    saw_plants_saplings_with_room,
     saw_fells_a_bare_trunk_and_leaves_a_house_wall,
     reaper_aged_crops,
     reaper_columns,
@@ -40,6 +42,7 @@ const HOUSING: &str = "rustcraft:housing";
 const CRYSTAL: &str = "rustcraft:crystal";
 const STONE: &str = "minecraft:stone";
 const FARMLAND: &str = "minecraft:farmland";
+const GRASS: &str = "minecraft:grass_block";
 /// The owner the scenarios' workers report for: nobody on the server, so Path-of-craft-tree
 /// refuses the report in its log, but it is sent.
 pub const OWNER: u128 = 0x5e1f_7e57_0000_0000_0000_0000_0000_0007;
@@ -500,6 +503,93 @@ fn saw_says_no_trees(o: Pos, _: &Tuning) -> Scenario {
 
 fn grab_says_no_ore(o: Pos, _: &Tuning) -> Scenario {
     says_when_idle("worker_grab_says_no_ore", o, Tool::Grab, Note::NoOre)
+}
+
+/// The track on a floor of grass (0.18.5's own work: tilling, planting).
+fn grass_track(b: &mut dyn Bench, o: Pos) -> Result<(), String> {
+    for x in -1..=TRACK + 1 {
+        for z in -2..=2 {
+            b.place(at(o, [x, 0, z]), GRASS, &[])?;
+        }
+    }
+    for x in 0..=TRACK {
+        b.place(
+            rail(o, x),
+            MONORAIL,
+            &[(shape::MOUNT, shape::mount_value(Face::YNeg))],
+        )?;
+    }
+    Ok(())
+}
+
+/// 0.18.5, the owner: «работники сами готовят землю». A reaper with wheat seeds rides along a lawn:
+/// the grass beside its way becomes farmland sown with wheat in the same pass; the grass under
+/// the rail and outside its zone stays.
+fn reaper_tills_grass_and_sows_it(o: Pos, _: &Tuning) -> Scenario {
+    let beds: Vec<Pos> = (1..TRACK)
+        .flat_map(|x| [at(o, [x, 1, 1]), at(o, [x, 1, -1])])
+        .collect();
+    let checked = beds.clone();
+    Scenario::new("worker_reaper_tills_grass_and_sows_it", plot_area(o))
+        .then("a track on a lawn", move |b, _| grass_track(b, o))
+        .then("a reaper with wheat seeds", move |b, m| {
+            let id = b.spawn_worker(rail(o, 0), OWNER, Some(Tool::Reaper), &[("minecraft:wheat_seeds", 64)], None)?;
+            m.mark("worker", id as f64);
+            Ok(())
+        })
+        .until("the grass beside its way is sown", RIDE, move |b, _| {
+            Ok(beds.iter().all(|&p| b.block(p) == "minecraft:wheat"))
+        })
+        .check("farmland under the wheat; the grass under the rail and outside the zone stays", move |b, _| {
+            for &p in &checked {
+                same("under the wheat", b.block(at(p, [0, -1, 0])), FARMLAND.to_owned())?;
+            }
+            for x in 1..TRACK {
+                same("under the rail", b.block(at(o, [x, 0, 0])), GRASS.to_owned())?;
+                same("outside the zone", b.block(at(o, [x, 0, 2])), GRASS.to_owned())?;
+                same("over the rail", b.block(at(o, [x, 2, 0])), "minecraft:air".to_owned())?;
+            }
+            Ok(())
+        })
+}
+
+/// 0.18.5, the owner: «сажает саженцы так, чтобы деревья хорошо росли». A saw with oak saplings
+/// rides along a lawn and plants them beside its way, a free cell between any two, none on the
+/// rail's cells nor outside its zone.
+fn saw_plants_saplings_with_room(o: Pos, _: &Tuning) -> Scenario {
+    const SAPLING: &str = "minecraft:oak_sapling";
+    Scenario::new("worker_saw_plants_saplings_with_room", plot_area(o))
+        .then("a track on a lawn", move |b, _| grass_track(b, o))
+        .then("a saw with oak saplings", move |b, m| {
+            let id = b.spawn_worker(rail(o, 0), OWNER, Some(Tool::Saw), &[(SAPLING, 32)], None)?;
+            m.mark("worker", id as f64);
+            Ok(())
+        })
+        .until("saplings stand on both sides of its way", RIDE, move |b, _| {
+            let side = |z: i32| (1..TRACK).filter(|&x| b.block(at(o, [x, 1, z])) == SAPLING).count();
+            Ok(side(1) >= 2 && side(-1) >= 2)
+        })
+        .wait(40)
+        .check("a free cell round each, none outside the zone, the hold paid", move |b, m| {
+            let mut planted = Vec::new();
+            for x in -2..=TRACK + 2 {
+                for z in -3..=3 {
+                    if b.block(at(o, [x, 1, z])) == SAPLING {
+                        planted.push((x, z));
+                    }
+                }
+            }
+            for &(x, z) in &planted {
+                if z.abs() != 1 {
+                    return Err(format!("a sapling at x {x}, z {z}: off the zone's ground"));
+                }
+                if planted.iter().any(|&(a, c)| (a, c) != (x, z) && (a - x).abs() <= 1 && (c - z).abs() <= 1) {
+                    return Err(format!("the sapling at x {x}, z {z} has a neighbour: {planted:?}"));
+                }
+            }
+            let left = count_of(&worker_of(b, m)?.hold.slots, SAPLING);
+            same("saplings paid from the hold", left as usize, 32 - planted.len())
+        })
 }
 
 /// A hold of `n` shovels: one a slot, so 27 fill it.
