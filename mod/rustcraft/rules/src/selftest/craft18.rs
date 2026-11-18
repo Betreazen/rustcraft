@@ -354,6 +354,7 @@ fn fishery_fishes_beside_its_line(o: Pos, _: &Tuning) -> Scenario {
 
 fn kitchen_takes_only_its_dishes(o: Pos, _: &Tuning) -> Scenario {
     // 0.18.5: the kitchen took anything, and the net filled it with the owner's ore and blocks.
+    use crate::machines::sheet::Press as SheetPress;
     let p = at(o, [3, 1, 0]);
     Scenario::new("kitchen185_takes_only_its_dishes", plot_area(o))
         .then("a kitchen with no dish chosen", move |b, _| {
