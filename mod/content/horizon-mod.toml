@@ -3,7 +3,7 @@
 # mod's files (docs/native-mods.md, API 145). No code here.
 id = "rustcraft"
 name = "RustCraft"
-version = "0.18.5"
+version = "0.19.0"
 description = "Resources of the RustCraft native mod: the magistral's housing and node, channels, the wrench, the energy crystal, the electric furnace, the crusher and its dusts, the fuel generator, the alloy smelter, the alloys, the autocrafter, the capacity module, the storage cell and terminal, the tank, the pump, the monorail, the station and the capsule, the worker with its saw, reaper and docks, the turret with its modules, the base anchor, the solar panel, the windmill, the lava generator, the battery with its modules, the miner, the block placer and the block breaker, the mixer and its nutrient solution, the channels of tiers 2 and 3, the cargo hold, grab and scoop tools with the load dock, the hydro turbine, the backpacks, the catalysts (accelerator, economizer, enricher), the butcher and the guard's shooter tool, and (slice 12) the moving parts of the blocks, the trash, the disintegrator, the charger and charge plate, the repair stand, the kitchen, the fishing station, the feeder, the shearer-milker, the apiary collector, the brewing vat, the experience condenser, the enchanting machine, the archaeology table, the holo-projector, the building machine, the portal dock and the facade."
 authors = ["RustCraft"]
 api = "0.2"
