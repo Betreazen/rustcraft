@@ -225,7 +225,7 @@ fn order_item_channels_needs_21_iron(o: Pos, _: &Tuning) -> Scenario {
             Ok(b.order(terminal_at(o), "rustcraft:item_channel", 24).is_ok())
         })
         .until("the order waits for something", 100, move |b, _| {
-            Ok(b.orders(terminal_at(o)).first().is_some_and(|x| x.wait != Wait::Running))
+            Ok(b.orders(terminal_at(o)).first().is_some_and(|x| !matches!(x.wait, Wait::New | Wait::Running)))
         })
         .check("it waits for 21 iron ingots", move |b, _| {
             let orders = b.orders(terminal_at(o));
