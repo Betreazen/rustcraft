@@ -42,7 +42,7 @@ function Get-LauncherProfile([string]$Wanted) {
         $script:LauncherProfiles = if ($m.Success) { @($m.Groups[1].Value -split ',\s*') } else { @($Wanted) }
     }
     if ($script:LauncherProfiles -contains $Wanted) { return $Wanted }
-    return $script:LauncherProfiles[0]
+    return @($script:LauncherProfiles)[0]
 }
 
 $ServerTool = "$env:LOCALAPPDATA\Horizon\current\horizon-server.exe"
