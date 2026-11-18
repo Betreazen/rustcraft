@@ -11,7 +11,7 @@
 //! - A guard (a worker with the shooter) shoots a hostile mob by its rails; the kill goes to
 //!   Path-of-craft-tree as `kill` and to SoulsCraft as `guard` (spec 27.1).
 
-use super::{Bench, Build, Scenario, at, count_of, plot_area, same};
+use super::{Bench, Build, Scenario, at, base, count_of, plot_area, same};
 use crate::butcher::{self as butcher, ANIMALS, Shown as ButcherShown};
 use crate::geom::{Face, Pos};
 use crate::machines::catalyst::{ACCELERATOR, ECONOMIZER};
@@ -320,6 +320,7 @@ fn guard_shoots_a_mob(o: Pos, _: &Tuning) -> Scenario {
                     &[(shape::MOUNT, shape::mount_value(Face::YNeg))],
                 )?;
             }
+            base(b, Some(at(o, [0, 1, 0])), Some(at(o, [6, 1, 0])))?;
             let id = b.spawn_mob(SPIDER, spider_at, Some(2.0))?;
             m.mark("mob", f64::from(id));
             Ok(())

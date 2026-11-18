@@ -661,6 +661,8 @@ pub(super) fn tick(game: &mut Game<'_>, dimension: &str, net_level: &LevelNet, t
     unload.extend(portal.iter().copied());
     if !level.fleet.workers.is_empty() {
         let net = monorail::network(dimension);
+        // 0.19.1: every stretch of rail and the docks it has, once a tick for all its workers.
+        let bases = rustcraft_rules::worker::base::Bases::of(&net, &unload, &charge, &load);
         let mut workers = std::mem::take(&mut level.fleet.workers);
         for w in &mut workers {
             if !chunk_loaded(game, w.cell) {
@@ -673,6 +675,7 @@ pub(super) fn tick(game: &mut Game<'_>, dimension: &str, net_level: &LevelNet, t
                 unload: &unload,
                 charge: &charge,
                 load: &load,
+                bases: &bases,
             };
             ride(game, dimension, &net, &docks, w, tuning);
             if before != (w.cell, w.errand, w.hold.used(), w.note) {
@@ -695,11 +698,12 @@ pub(super) fn tick(game: &mut Game<'_>, dimension: &str, net_level: &LevelNet, t
     put_level(dimension, level);
 }
 
-/// The level's docks of each kind.
+/// The level's docks of each kind, and the stretches of rail that have them (0.19.1).
 struct Docks<'a> {
     unload: &'a BTreeSet<Pos>,
     charge: &'a BTreeSet<Pos>,
     load: &'a BTreeSet<Pos>,
+    bases: &'a rustcraft_rules::worker::base::Bases,
 }
 
 fn ride(
@@ -715,6 +719,7 @@ fn ride(
         unload: docks.unload,
         charge: docks.charge,
         load: docks.load,
+        bases: Some(docks.bases),
     };
     // T4: a fast rail takes it past more than a cell a tick; it rides on, each cell worked.
     let mut step = w.tick(&track, t);
@@ -909,6 +914,11 @@ fn scoop(
 fn bore(game: &mut Game<'_>, dimension: &str, net: &Network, w: &mut Worker, cell: Pos, t: &Tuning) {
     use rustcraft_rules::worker::bore;
     let Some(level_ahead) = w.from.and_then(|f| bore::ahead(f, cell)) else { return };
+    // 0.19.1 (the owner): only at the end of its rails away from its docks (worker::base).
+    let heading = [level_ahead[0] - cell[0], level_ahead[2] - cell[2]];
+    if w.bore_to != Some((cell, heading)) {
+        return;
+    }
     if net.rails.contains_key(&level_ahead) || net.rails.contains_key(&[level_ahead[0], level_ahead[1] - 1, level_ahead[2]]) {
         return;
     }

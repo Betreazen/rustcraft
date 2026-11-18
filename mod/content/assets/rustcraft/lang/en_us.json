@@ -472,6 +472,7 @@
   "rustcraft.worker.no_trees": "No trees beside the way",
   "rustcraft.worker.no_ore": "No ore beside the way",
   "rustcraft.worker.no_saplings": "No saplings",
+  "rustcraft.worker.no_end": "The bore needs rails with an end",
   "rustcraft.housing.channel_swapped": "%s took the place of tier %s in slot %s",
   "rustcraft.backpack.title": "Backpack · %s slots",
   "rustcraft.backpack.not_ready": "The backpack is getting ready, try again",

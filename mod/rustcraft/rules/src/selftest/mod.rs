@@ -647,6 +647,32 @@ pub fn at(origin: Pos, d: [i32; 3]) -> Pos {
     [origin[0] + d[0], origin[1] + d[1], origin[2] + d[2]]
 }
 
+/// 0.19.1 (the owner: «работнику всегда нужны его доки»): the base a worker needs on its rails
+/// before it moves, set in the floor under rail cells (the rails stand on the docks): an unload
+/// dock under `unload_under`'s rail and a charge dock under `charge_under`'s, either left out
+/// where the scenario has its own. The unload dock is filled with stone, so a worker riding past
+/// keeps what it carries and the scenario sees its hold as before; batteries start full, so
+/// nobody stops at the charge dock in passing.
+pub fn base(b: &mut dyn Bench, unload_under: Option<Pos>, charge_under: Option<Pos>) -> Result<(), String> {
+    let under = |rail: Pos| [rail[0], rail[1] - 1, rail[2]];
+    base_at(b, unload_under.map(under), charge_under.map(under))
+}
+
+/// `base` with its docks at `unload` and `charge` themselves, each beside a rail (on a wall
+/// rail's wall, under a ceiling rail's roof, beside a rail on the floor).
+pub fn base_at(b: &mut dyn Bench, unload: Option<Pos>, charge: Option<Pos>) -> Result<(), String> {
+    if let Some(dock) = unload {
+        b.place(dock, "rustcraft:dock_unload", &[])?;
+        for slot in 0..9 {
+            b.put(dock, slot, "minecraft:stone", 64)?;
+        }
+    }
+    if let Some(dock) = charge {
+        b.place(dock, "rustcraft:dock_charge", &[])?;
+    }
+    Ok(())
+}
+
 /// A builder of one scenario from its plot's origin.
 pub type Build = fn(Pos, &Tuning) -> Scenario;
 

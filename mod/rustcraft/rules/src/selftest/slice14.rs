@@ -5,7 +5,7 @@
 //! - A bore at the end of its rails bores through the rock ahead and lays the next rail.
 //! - W6: a blade and a shield made from the previous tier's keep its charge (and so its number).
 
-use super::{Bench, Build, Scenario, at, plot_area};
+use super::{Bench, Build, Scenario, at, base, plot_area};
 use crate::geom::{Face, Pos};
 use crate::machines::sheet::Press;
 use crate::monorail::shape;
@@ -74,8 +74,8 @@ fn bore_lays_its_way(o: Pos, _: &Tuning) -> Scenario {
                     b.place(at(o, [x, y, 0]), STONE, &[])?;
                 }
             }
-            // From the west end its only way is east, so its first dead end is the stone wall
-            // (the bore extends any dead end it reaches).
+            // 0.19.1: its docks under the west end's rails; it bores east, away from them.
+            base(b, Some(at(o, [0, 1, 0])), Some(at(o, [1, 1, 0])))?;
             let id = b.spawn_worker(at(o, [0, 1, 0]), OWNER, Some(Tool::Bore), &[(MONORAIL, 4), ("minecraft:cobblestone", 8)], None)?;
             m.mark("worker", id as f64);
             Ok(())

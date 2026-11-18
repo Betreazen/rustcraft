@@ -13,7 +13,7 @@
 //! - Turbines in a current give by their place in it (E12); a turbine out of water says so.
 
 use super::magistral::{channel, line};
-use super::{Bench, Build, Memo, Scenario, at, count_of, near, plot_area, same};
+use super::{Bench, Build, Memo, Scenario, at, base, count_of, near, plot_area, same};
 use crate::geom::{Face, Pos};
 use crate::machines::mixer::MixerView;
 use crate::machines::processor::WorkMode;
@@ -262,7 +262,8 @@ fn rail(o: Pos, x: i32) -> Pos {
     at(o, [x, 1, 0])
 }
 
-/// A floor of stone and a straight track of floor rails on it, x 0..=TRACK.
+/// A floor of stone and a straight track of floor rails on it, x 0..=TRACK, a charge dock under its
+/// far end (0.19.1: every worker's base; the scenarios add the unload dock their own way).
 fn track(b: &mut dyn Bench, o: Pos) -> Result<(), String> {
     for x in -1..=TRACK + 1 {
         for z in -2..=2 {
@@ -276,7 +277,7 @@ fn track(b: &mut dyn Bench, o: Pos) -> Result<(), String> {
             &[(shape::MOUNT, shape::mount_value(Face::YNeg))],
         )?;
     }
-    Ok(())
+    base(b, None, Some(rail(o, TRACK)))
 }
 
 fn worker_hold(b: &dyn Bench, m: &Memo) -> Result<Vec<super::Slot>, String> {
@@ -337,6 +338,7 @@ fn grab_takes_ore_and_items(o: Pos, _: &Tuning) -> Scenario {
             "a track, iron ore beside it, cobblestone lying on the other side",
             move |b, _| {
                 track(b, o)?;
+                base(b, Some(rail(o, 0)), None)?;
                 b.place(ore, "minecraft:iron_ore", &[])
             },
         )
@@ -373,6 +375,7 @@ fn scoop_digs_beside_the_way(o: Pos, _: &Tuning) -> Scenario {
             "a track, dirt and sand beside and under it, dirt under the rail",
             move |b, _| {
                 track(b, o)?;
+                base(b, Some(rail(o, 0)), None)?;
                 b.place(dirt, "minecraft:dirt", &[])?;
                 // Sand falls: stone holds it up.
                 b.place(at(sand, [0, -1, 0]), STONE, &[])?;
