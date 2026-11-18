@@ -221,9 +221,14 @@ fn alive(b: &dyn Bench, m: &super::Memo, n: usize) -> Vec<u32> {
 fn butcher_culls_over_the_keep(o: Pos, _: &Tuning) -> Scenario {
     let p = at(o, [3, 1, 0]);
     Scenario::new("butcher_culls_over_the_keep", plot_area(o))
-        .then("a butcher with a sword and four cows by it", move |b, m| {
+        .then("a butcher with a sword and four cows by it, someone's things on its floor", move |b, m| {
             floor(b, o)?;
             butcher_at(b, p, true)?;
+            // 0.19.3 (the owner: «забойщик тоже забирает чужие предметы»): in its pen, away
+            // from the cows.
+            let things = [f64::from(p[0]) + 0.5, f64::from(p[1]) + 0.2, f64::from(p[2]) - 2.5];
+            b.drop_item(things, "minecraft:diamond", 1)?;
+            b.drop_item(things, "minecraft:cobblestone", 5)?;
             cows(b, m, p, 4)
         })
         .until("two cows are left (it keeps 2)", 700, move |b, m| {
@@ -235,6 +240,10 @@ fn butcher_culls_over_the_keep(o: Pos, _: &Tuning) -> Scenario {
         })
         .until("the drops are in its slots", 60, move |b, _| {
             Ok(count_of(&b.items(p), "minecraft:beef") > 0)
+        })
+        .check("it took only its kills' drops, not the things on its floor", move |b, _| {
+            same("diamond", count_of(&b.items(p), "minecraft:diamond"), 0)?;
+            same("cobblestone", count_of(&b.items(p), "minecraft:cobblestone"), 0)
         })
         .check("each kill went as slaughter, none as kill", move |b, m| {
             let living = alive(b, m, 4);

@@ -24,7 +24,7 @@ use crate::game::{
 use horizon_client::text::Text;
 use horizon_world::nbt::{Compound, JavaString, Tag};
 use rustcraft_rules::{
-    butcher::{self as rules, ANIMALS, Animal, Keep, LOOT_SLOTS, SWORD_SLOT, Shown},
+    butcher::{self as rules, ANIMALS, Animal, Keep, Kill, LOOT_SLOTS, SWORD_SLOT, Shown},
     geom::Pos,
     machines::{
         sheet::{Sheet, Status as SheetStatus, Toggle, severity_code},
@@ -50,6 +50,8 @@ struct State {
     /// Wave 2: the tick of each butcher's next strike (its pace is its tier's and its modules').
     due: HashMap<(String, Pos), u64>,
     shown: HashMap<(String, Pos), Shown>,
+    /// 0.19.3: each butcher's recent kills, whose drops alone it picks up.
+    kills: HashMap<(String, Pos), Vec<Kill>>,
 }
 
 static STATE: LazyLock<Mutex<State>> = LazyLock::new(Mutex::default);
@@ -143,7 +145,7 @@ pub(super) fn tick(game: &mut Game<'_>, dimension: &str, level: &LevelNet, t: &T
     };
     for pos in butchers {
         if now.is_multiple_of(GATHER_EVERY) {
-            gather(game, dimension, pos, t);
+            gather(game, dimension, pos, t, now);
         }
         // Wave 2: its block entity keeps its tier for the socket presses (A5), and it strikes at
         // its own pace.
@@ -152,7 +154,7 @@ pub(super) fn tick(game: &mut Game<'_>, dimension: &str, level: &LevelNet, t: &T
         let due = *state().due.entry(key.clone()).or_insert(now + strike_every(game, pos, t));
         if now >= due {
             state().due.insert(key, now + strike_every(game, pos, t));
-            let shown = strike(game, dimension, pos, t);
+            let shown = strike(game, dimension, pos, t, now);
             // Slice 12: its arm chops while it works.
             crate::game::rustcraft_anim::show_on(game, pos, matches!(shown, Shown::Working(_)));
             state().shown.insert((dimension.to_owned(), pos), shown);
@@ -180,13 +182,28 @@ fn keep_tier(game: &mut Game<'_>, pos: Pos) {
     }
 }
 
-/// Picks up what lies in its pen into its drop slots.
-fn gather(game: &mut Game<'_>, dimension: &str, pos: Pos, t: &Tuning) {
+/// Picks up the drops of its recent kills in its pen into its drop slots. 0.19.3 (the owner:
+/// «забойщик тоже забирает чужие предметы»): before, it took everything that lay in its pen.
+fn gather(game: &mut Game<'_>, dimension: &str, pos: Pos, t: &Tuning, now: u64) {
+    let kills = {
+        let mut s = state();
+        let Some(kills) = s.kills.get_mut(&(dimension.to_owned(), pos)) else {
+            return;
+        };
+        kills.retain(|k| now.saturating_sub(k.tick) <= rules::KILL_TICKS);
+        kills.clone()
+    };
+    if kills.is_empty() {
+        return;
+    }
     let r = radius(game, pos, t);
     let c = centre(pos);
     let lo = [c[0] - r, c[1] - 3.0, c[2] - r];
     let hi = [c[0] + r, c[1] + 3.0, c[2] + r];
     for e in game.native_item_entities(dimension, lo, hi) {
+        if !rules::is_its_drop(&kills, now, e.position, &e.stack.item) {
+            continue;
+        }
         let max = machines::max_stack(game, &e.stack.item);
         let stack = e.stack.clone();
         let left = game
@@ -208,7 +225,7 @@ fn gather(game: &mut Game<'_>, dimension: &str, pos: Pos, t: &Tuning) {
 }
 
 /// One strike, if it has a sword, room for the drops and an animal over its number.
-fn strike(game: &mut Game<'_>, dimension: &str, pos: Pos, t: &Tuning) -> Shown {
+fn strike(game: &mut Game<'_>, dimension: &str, pos: Pos, t: &Tuning, now: u64) -> Shown {
     let Some(entity) = game.native_mod_block_entity(pos) else {
         return Shown::NoSword;
     };
@@ -252,11 +269,24 @@ fn strike(game: &mut Game<'_>, dimension: &str, pos: Pos, t: &Tuning) -> Shown {
             m.fire_ticks = m.fire_ticks.max(80);
         }
     }
+    // 0.19.3: where the animal stands, so the drops round it are known for the kill's.
+    let stood = game
+        .mobs
+        .iter()
+        .find(|m| m.id == id)
+        .map(|m| [m.position.x, m.position.y, m.position.z]);
     let owner = base::owner_at(game, pos);
     let struck = match owner {
         Some(owner) => base::strike(game, dimension, id, BLOW, owner, base::Striker::Butcher),
         None => game.native_hurt_entity(dimension, id, BLOW, "minecraft:generic", None),
     };
+    if struck && let Some(at) = stood {
+        state()
+            .kills
+            .entry((dimension.to_owned(), pos))
+            .or_default()
+            .push(Kill { at, kind: kind.clone(), tick: now });
+    }
     if struck {
         let mut random = crate::game::rustcraft_utility::random;
         for (item, n) in rules::looting_bonus(&kind, looting, fire > 0, &mut random) {
@@ -439,9 +469,9 @@ pub(super) fn sheet(game: &Game<'_>, dimension: &str, pos: Pos, t: &Tuning, s: &
 /// The self-test's plot cleared: what its butchers showed goes.
 pub(super) fn forget_area(dimension: &str, min: Pos, max: Pos) {
     let inside = |p: Pos| (0..3).all(|k| p[k] >= min[k] && p[k] <= max[k]);
-    state()
-        .shown
-        .retain(|(d, p), _| d != dimension || !inside(*p));
+    let mut s = state();
+    s.shown.retain(|(d, p), _| d != dimension || !inside(*p));
+    s.kills.retain(|(d, p), _| d != dimension || !inside(*p));
 }
 
 /// What the self-test reads of a butcher: what it showed last.

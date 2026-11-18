@@ -219,9 +219,77 @@ pub fn tier_strike_ticks(ticks: u64, tier_speed: f64) -> u64 {
     ((ticks as f64 / tier_speed.max(1e-6)).round() as u64).max(1)
 }
 
+/// 0.19.3 (the owner: «забойщик тоже забирает чужие предметы»): a kill the butcher remembers, so
+/// it picks up its drops and nothing else that lies in its pen (the owner's things, eggs, wool).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Kill {
+    /// Where the animal stood when it was struck.
+    pub at: [f64; 3],
+    pub kind: String,
+    /// The butcher's tick of the strike.
+    pub tick: u64,
+}
+
+/// How long a kill's drops are its own, ticks: the animal falls for a second and its drops
+/// scatter, and the butcher gathers once a second.
+pub const KILL_TICKS: u64 = 200;
+/// How far from where the animal stood its drops may lie, blocks.
+pub const KILL_REACH: f64 = 3.0;
+
+/// Whether `item` drops from a farm animal of `kind` (the game's tables; meat cooked with Fire
+/// Aspect).
+pub fn is_drop_of(kind: &str, item: &str) -> bool {
+    let drops: &[&str] = match kind {
+        "minecraft:cow" | "minecraft:mooshroom" => &["minecraft:beef", "minecraft:cooked_beef", "minecraft:leather"],
+        "minecraft:sheep" => {
+            if item.starts_with("minecraft:") && item.ends_with("_wool") {
+                return true;
+            }
+            &["minecraft:mutton", "minecraft:cooked_mutton"]
+        }
+        "minecraft:pig" => &["minecraft:porkchop", "minecraft:cooked_porkchop"],
+        "minecraft:chicken" => &["minecraft:chicken", "minecraft:cooked_chicken", "minecraft:feather"],
+        "minecraft:rabbit" => &[
+            "minecraft:rabbit",
+            "minecraft:cooked_rabbit",
+            "minecraft:rabbit_hide",
+            "minecraft:rabbit_foot",
+        ],
+        _ => &[],
+    };
+    drops.contains(&item)
+}
+
+/// Whether `item` lying at `at` is the drop of one of `kills` made in the last [`KILL_TICKS`]:
+/// near where its animal stood and one of that animal's drops.
+pub fn is_its_drop(kills: &[Kill], now: u64, at: [f64; 3], item: &str) -> bool {
+    kills.iter().any(|k| {
+        now.saturating_sub(k.tick) <= KILL_TICKS
+            && (0..3).map(|i| (at[i] - k.at[i]).powi(2)).sum::<f64>() <= KILL_REACH * KILL_REACH
+            && is_drop_of(&k.kind, item)
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn it_picks_up_only_its_kills_drops() {
+        let kills = [Kill { at: [10.0, 64.0, 10.0], kind: "minecraft:cow".into(), tick: 1000 }];
+        assert!(is_its_drop(&kills, 1020, [10.5, 64.2, 11.0], "minecraft:beef"));
+        assert!(is_its_drop(&kills, 1020, [9.0, 64.0, 10.0], "minecraft:leather"));
+        // The owner's things, a chicken's egg, another animal's drop: none is its.
+        for item in ["minecraft:diamond", "minecraft:cobblestone", "minecraft:egg", "minecraft:feather"] {
+            assert!(!is_its_drop(&kills, 1020, [10.0, 64.0, 10.0], item), "{item}");
+        }
+        assert!(!is_its_drop(&kills, 1020, [14.0, 64.0, 10.0], "minecraft:beef"), "beef far from the kill");
+        assert!(!is_its_drop(&kills, 1000 + KILL_TICKS + 1, [10.0, 64.0, 10.0], "minecraft:beef"), "an old kill");
+        assert!(!is_its_drop(&[], 10, [0.0, 0.0, 0.0], "minecraft:beef"), "no kill, nothing");
+        assert!(is_drop_of("minecraft:sheep", "minecraft:light_blue_wool"));
+        assert!(!is_drop_of("minecraft:sheep", "minecraft:beef"));
+        assert!(is_drop_of("minecraft:chicken", "minecraft:cooked_chicken"));
+    }
 
     #[test]
     fn economy_slows_the_strike() {
