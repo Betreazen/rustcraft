@@ -634,6 +634,25 @@ mod tests {
         assert_eq!(p.reserved["minecraft:sugar_cane"], 6);
     }
 
+    #[test]
+    fn probe_item_channels() {
+        let book = vec![
+            r("crafter", &[("rustcraft:coppersteel", 4), ("minecraft:hopper", 1)], ("rustcraft:item_channel", 8)),
+            r("crafter", &[("minecraft:copper_ingot", 1), ("minecraft:iron_ingot", 1)], ("rustcraft:coppersteel", 2)),
+            r("crafter", &[("minecraft:iron_ingot", 5), ("minecraft:chest", 1)], ("minecraft:hopper", 1)),
+            r("crafter", &[("minecraft:oak_planks", 8)], ("minecraft:chest", 1)),
+            r("crafter", &[("minecraft:iron_block", 1)], ("minecraft:iron_ingot", 9)),
+            r("crafter", &[("minecraft:iron_ingot", 9)], ("minecraft:iron_block", 1)),
+            r("crafter", &[("minecraft:iron_nugget", 9)], ("minecraft:iron_ingot", 1)),
+            r("crafter", &[("minecraft:iron_ingot", 1)], ("minecraft:iron_nugget", 9)),
+            r("furnace", &[("minecraft:raw_iron", 1)], ("minecraft:iron_ingot", 1)),
+            r("furnace", &[("rustcraft:dust_iron", 1)], ("minecraft:iron_ingot", 1)),
+        ];
+        let p = plan("rustcraft:item_channel", 24, &stock(&[("minecraft:copper_ingot", 64), ("minecraft:oak_planks", 64)]), &book, ALL);
+        for st in &p.steps { eprintln!("step {} {:?} -> {:?} x{}", st.machine, st.inputs, st.output, st.times); }
+        eprintln!("missing {:?} reserved {:?}", p.missing, p.reserved);
+    }
+
     fn planks() -> Vec<ItemKey> {
         ["minecraft:oak_planks", "minecraft:spruce_planks"]
             .map(String::from)
