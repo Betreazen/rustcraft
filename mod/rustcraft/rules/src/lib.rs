@@ -6,6 +6,8 @@ pub mod anim;
 pub mod backpack;
 pub mod butcher;
 pub mod cull;
+// The diagnostics console command and the event journal.
+pub mod debug;
 pub mod druses;
 pub mod explore;
 pub mod gear;

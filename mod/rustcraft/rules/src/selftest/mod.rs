@@ -14,6 +14,8 @@
 pub mod anchor;
 pub mod craft18;
 pub mod craft18_w2;
+// The diagnostics command and the event journal.
+pub mod debug;
 pub mod energy;
 pub mod expect;
 pub mod fluids;
@@ -483,6 +485,14 @@ pub trait Bench {
     fn retro_druses(&mut self, _chunk: [i32; 2], _tries: u32, _fresh: bool) -> Result<u32, String> {
         Err("not on this bench".to_owned())
     }
+
+    // ---- The diagnostics command ----
+    /// The console's `rustcraft_debug` with these words after it (crate::debug), in the bench's
+    /// level: its answer's lines.
+    fn debug(&mut self, args: &str) -> Result<Vec<String>, String> {
+        let _ = args;
+        Err("no diagnostics command on this bench".into())
+    }
 }
 
 /// A mob as the self-test reads it.
@@ -690,6 +700,8 @@ pub fn catalog() -> Vec<Build> {
     all.extend(w2_pipe_energy::ALL);
     // Slice 18, wave 2: machines and modules.
     all.extend(w2_machine::ALL);
+    // The diagnostics command and the event journal.
+    all.extend(debug::ALL);
     all
 }
 

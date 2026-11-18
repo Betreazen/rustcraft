@@ -215,7 +215,7 @@ fn save_done(game: &Game<'_>, done: &rustcraft_rules::druses::Done) {
             std::fs::rename(&fresh, &path)
         });
     if let Err(e) = written {
-        log::warn!("rustcraft: the druse chunks' file was not saved: {e}");
+        crate::game::rustcraft_debug::journal_warn!("rustcraft: the druse chunks' file was not saved: {e}");
     }
 }
 

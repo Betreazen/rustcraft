@@ -242,7 +242,7 @@ pub(super) fn as_bench_actor<R>(uuid: u128, dimension: &str, f: impl FnOnce() ->
 
 fn show(game: &mut Game<'_>, player: u128, text: Text) {
     if !game.native_action_bar(player, text) {
-        log::warn!("rustcraft: no action bar line for {player:032x}: not on the server");
+        crate::game::rustcraft_debug::journal_warn!("rustcraft: no action bar line for {player:032x}: not on the server");
     }
 }
 
@@ -333,6 +333,8 @@ pub(super) fn on_level_tick(game: &mut Game<'_>, dimension: &str) {
         show_diagnoses(game, dimension);
         // s18/pipe: the node windows' presses and views.
         crate::game::rustcraft_node_window::tick(game, dimension);
+        // The diagnostics journal: status changes of a batch of machines and of the workers.
+        crate::game::rustcraft_debug::tick(game, dimension);
         // H2: the first alloy a player carries brings them the engineer's handbook.
         handbook::tick(game, dimension);
     }
@@ -514,6 +516,15 @@ pub(super) fn on_place_block(game: &mut Game<'_>, stack: &ItemStack, pos: [i32; 
         mark_all_stale();
         return;
     };
+    // rustcraft_debug: the journal notes a RustCraft block placed by a player.
+    if stack.item.starts_with("rustcraft:") {
+        crate::game::rustcraft_debug::record(
+            Some(&player.dimension),
+            Some(pos),
+            "placed",
+            &format!("{} by {}", stack.item, player.name),
+        );
+    }
     // ST5: a block placed where the vein grew one is no grown block, unless it is a grown one
     // placed again; a lifted suspicious block gets its loot back (spec 26).
     crate::game::rustcraft_utility::forget_grown(game, &player.dimension, pos);
@@ -537,6 +548,15 @@ pub(super) fn on_destroy_block(game: &mut Game<'_>, pos: [i32; 3]) {
     let Some(player) = acting(game) else {
         return;
     };
+    // rustcraft_debug: the journal notes a RustCraft block broken by a player.
+    if block.starts_with("rustcraft:") {
+        crate::game::rustcraft_debug::record(
+            Some(&player.dimension),
+            Some(pos),
+            "broken",
+            &format!("{block} by {}", player.name),
+        );
+    }
     base::on_destroy_block(game, pos, &player.dimension, player.game_mode == CREATIVE);
     // Slice 18, stream 3: a drawn-window machine's modules, queue and reserve fall out.
     machines::on_destroyed(game, &player.dimension, pos, player.game_mode == CREATIVE);
@@ -751,7 +771,7 @@ fn put_channel(game: &mut Game<'_>, player: &NativeServerPlayer, pos: Pos, chann
         Some((slot, old))
     });
     match placed {
-        None => log::warn!("rustcraft: the housing at {pos:?} has no block entity"),
+        None => crate::game::rustcraft_debug::journal_warn!("rustcraft: the housing at {pos:?} has no block entity"),
         Some(None) => tell(
             game,
             player.uuid,
@@ -802,7 +822,7 @@ fn drop_item(game: &mut Game<'_>, dimension: &str, pos: Pos, item: &str) {
         .native_summon(dimension, "minecraft:item", at, nbt)
         .is_none()
     {
-        log::warn!("rustcraft: {item} from the housing at {pos:?} was lost");
+        crate::game::rustcraft_debug::journal_warn!("rustcraft: {item} from the housing at {pos:?} was lost");
     }
 }
 
@@ -837,7 +857,7 @@ fn show_diagnoses(game: &mut Game<'_>, dimension: &str) {
 /// What the block at `pos` shows: a housing its line and slots, a machine its state (and its
 /// joints' directions when it is behind a joint), a cell or a terminal its storage, a tank its
 /// fluid, a vanilla block behind a joint its joints' directions and «Приёмник полон».
-fn diagnosis_of(
+pub(super) fn diagnosis_of(
     game: &Game<'_>,
     dimension: &str,
     level: &LevelNet,

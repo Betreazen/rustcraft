@@ -260,7 +260,7 @@ fn decode_saved(data: &Compound) -> Result<Saved, AttachmentError> {
     };
     for entry in compounds(field(data, "stores")) {
         let Some(id) = as_u64(field(entry, "id")) else {
-            log::warn!("rustcraft: a storage record without an id was left out");
+            crate::game::rustcraft_debug::journal_warn!("rustcraft: a storage record without an id was left out");
             continue;
         };
         let mut store = Store::default();
@@ -310,7 +310,7 @@ fn load(game: &mut Game<'_>, dimension: &str, level: &mut LevelStorage) {
     }
     let host: &mut dyn Host = game;
     let saved = SAVED.get(host, Holder::Level).unwrap_or_else(|e| {
-        log::warn!("rustcraft: storages not read: {e:?}");
+        crate::game::rustcraft_debug::journal_warn!("rustcraft: storages not read: {e:?}");
         Saved::default()
     });
     level.stores = saved.stores;
@@ -349,7 +349,7 @@ fn save(game: &mut Game<'_>, dimension: &str) {
     };
     let host: &mut dyn Host = game;
     if let Err(e) = SAVED.set(host, Holder::Level, saved) {
-        log::warn!("rustcraft: storages not saved: {e:?}");
+        crate::game::rustcraft_debug::journal_warn!("rustcraft: storages not saved: {e:?}");
     }
 }
 
@@ -601,7 +601,7 @@ fn write_id(game: &mut Game<'_>, cell: Pos, id: u32) {
         write_int(&mut entity.nbt, ID_KEY, id as i32);
     });
     if written.is_none() {
-        log::warn!("rustcraft: the cell at {cell:?} has no block entity");
+        crate::game::rustcraft_debug::journal_warn!("rustcraft: the cell at {cell:?} has no block entity");
     }
 }
 
@@ -824,6 +824,15 @@ pub(super) fn into_storage(
         left -= u64::from(got.count).min(left);
         moved += got.count;
     }
+    if moved > 0 {
+        // rustcraft_debug: items into the storage from a block on the net, summed a second.
+        let route = format!(
+            "{}({}) -> storage#{id} net",
+            game.native_block(from),
+            rustcraft_rules::debug::pos_text(from)
+        );
+        crate::game::rustcraft_debug::flow(dimension, &route, key, u64::from(moved));
+    }
     moved
 }
 
@@ -851,6 +860,15 @@ pub(super) fn out_of_storage(
         .native_insert_item(to, side, stack_of(key, took))
         .map_or(0, |r| r.count);
     restore_into(dimension, id, key, u64::from(rest));
+    if took > rest {
+        // rustcraft_debug: the net's own routing out of the storage (no order), summed a second.
+        let route = format!(
+            "storage#{id} -> {}({}) net",
+            game.native_block(to),
+            rustcraft_rules::debug::pos_text(to)
+        );
+        crate::game::rustcraft_debug::flow(dimension, &route, key, u64::from(took - rest));
+    }
     took - rest
 }
 
@@ -870,6 +888,10 @@ pub(super) fn between_storages(
     let took = take_from(dimension, a, key, room);
     let put = put_into(game, dimension, b, key, took);
     restore_into(dimension, a, key, took - put);
+    if put > 0 {
+        let route = format!("storage#{a} -> storage#{b} net");
+        crate::game::rustcraft_debug::flow(dimension, &route, key, put);
+    }
     put as u32
 }
 
@@ -1255,7 +1277,7 @@ pub(super) fn give_back_sockets(game: &mut Game<'_>, dimension: &str, pos: Pos, 
             let nbt = Compound::from([(JavaString::from("Item"), save::item_to_nbt(&rest))]);
             let at = pos.map(|c| f64::from(c) + 0.5);
             if game.native_summon(dimension, "minecraft:item", at, nbt).is_none() {
-                log::warn!("rustcraft: the terminal's {} at {pos:?} was lost", rest.item);
+                crate::game::rustcraft_debug::journal_warn!("rustcraft: the terminal's {} at {pos:?} was lost", rest.item);
             }
         }
     }
@@ -1333,6 +1355,20 @@ pub(super) fn view(dimension: &str, pos: Pos) -> Option<(usize, Shape, Store)> {
         Some((
             found.cells.len(),
             found.shape.clone(),
+            level.stores.get(&id)?.clone(),
+        ))
+    })
+    .flatten()
+}
+
+/// rustcraft_debug: the storage `id`: its anchor, cells, whether it works (S8) and its record.
+pub(super) fn debug_info(dimension: &str, id: u32) -> Option<(Pos, usize, bool, Store)> {
+    with_level(dimension, |level| {
+        let found = level.found.get(&id)?;
+        Some((
+            found.anchor,
+            found.cells.len(),
+            level.works(id),
             level.stores.get(&id)?.clone(),
         ))
     })
@@ -1463,12 +1499,14 @@ fn take_out(
         return;
     }
     let stack = stack_of(&key, took);
+    let player = game.native_acting_id();
     if take != Take::ToInventory {
         *carried = Some(stack);
+        crate::game::rustcraft_debug::flow_to_player(dimension, storage, &key, player, u64::from(took));
         return;
     }
-    let player = game.native_acting_id();
     let rest = game.native_give_stack(player, stack).map_or(0, |r| r.count);
+    crate::game::rustcraft_debug::flow_to_player(dimension, storage, &key, player, u64::from(took.saturating_sub(rest)));
     restore_into(dimension, storage, &key, u64::from(rest));
 }
 
@@ -1592,7 +1630,7 @@ pub(super) fn drop_stack(game: &mut Game<'_>, dimension: &str, pos: Pos, key: &s
         .native_summon(dimension, "minecraft:item", at, nbt)
         .is_none()
     {
-        log::warn!("rustcraft: {count} {key} from the cell at {pos:?} were lost");
+        crate::game::rustcraft_debug::journal_warn!("rustcraft: {count} {key} from the cell at {pos:?} were lost");
     }
 }
 
@@ -1761,6 +1799,7 @@ pub(super) fn give_from(game: &mut Game<'_>, dimension: &str, id: u32, key: &str
         .native_give_stack(player, stack_of(key, took))
         .map_or(0, |r| r.count.min(took));
     restore_into(dimension, id, key, u64::from(rest));
+    crate::game::rustcraft_debug::flow_to_player(dimension, id, key, player, u64::from(took - rest));
     took - rest
 }
 
@@ -1809,6 +1848,7 @@ pub(super) fn tablet_take(
         .native_give_stack(player, stack_of(&key, took))
         .map_or(0, |r| r.count.min(took));
     restore_into(dimension, id, &key, u64::from(rest));
+    crate::game::rustcraft_debug::flow_to_player(dimension, id, &key, player, u64::from(took - rest));
     took - rest
 }
 
@@ -1901,5 +1941,6 @@ pub(super) fn take_to_player(
         .native_give_stack(player, stack_of(key, took))
         .map_or(0, |r| r.count.min(took));
     restore_into(dimension, id, key, u64::from(rest));
+    crate::game::rustcraft_debug::flow_to_player(dimension, id, key, player, u64::from(took - rest));
     took - rest
 }

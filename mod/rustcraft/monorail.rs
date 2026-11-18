@@ -230,7 +230,7 @@ fn load(game: &mut Game<'_>, level: &mut LevelRail) {
     }
     let host: &mut dyn Host = game;
     let saved = SAVED.get(host, Holder::Level).unwrap_or_else(|e| {
-        log::warn!("rustcraft: the monorail not read: {e:?}");
+        crate::game::rustcraft_debug::journal_warn!("rustcraft: the monorail not read: {e:?}");
         Saved::default()
     });
     level.net.rails = saved.rails.into_iter().collect();
@@ -259,7 +259,7 @@ fn save(game: &mut Game<'_>, level: &mut LevelRail) {
     };
     let host: &mut dyn Host = game;
     if let Err(e) = SAVED.set(host, Holder::Level, saved) {
-        log::warn!("rustcraft: the monorail not saved: {e:?}");
+        crate::game::rustcraft_debug::journal_warn!("rustcraft: the monorail not saved: {e:?}");
     }
 }
 
@@ -1027,7 +1027,7 @@ fn drop_seat(game: &mut Game<'_>, ride: &Ride) {
         return;
     };
     if !game.native_remove_mob(&ride.dimension, seat) {
-        log::warn!("rustcraft: the capsule's seat {seat} not removed");
+        crate::game::rustcraft_debug::journal_warn!("rustcraft: the capsule's seat {seat} not removed");
     }
     send_all(
         game,
@@ -1168,7 +1168,7 @@ fn arrive(game: &mut Game<'_>, player: u128, ride: &Ride) {
         && guest_view(game, player).is_some_and(|g| g.vehicle == Some(seat))
         && !game.native_dismount(ride.entity)
     {
-        log::warn!("rustcraft: the rider did not get off the capsule");
+        crate::game::rustcraft_debug::journal_warn!("rustcraft: the rider did not get off the capsule");
     }
     drop_seat(game, ride);
     let ground = landing(game, ride.route.end(), ride.to);
@@ -1178,7 +1178,7 @@ fn arrive(game: &mut Game<'_>, player: u128, ride: &Ride) {
         .find(|p| p.uuid == player)
         .map_or((0.0, 0.0), |p| (p.yaw, p.pitch));
     if !game.native_teleport_player(player, &ride.dimension, ground, yaw, pitch) {
-        log::warn!("rustcraft: the rider was not set down at {ground:?}");
+        crate::game::rustcraft_debug::journal_warn!("rustcraft: the rider was not set down at {ground:?}");
     }
     horizon_client::rustcraft_falls::spare_falls(ride.entity, FALL_GRACE);
     if ride.zipline {
@@ -1473,7 +1473,7 @@ pub(super) fn on_right_click_block(game: &mut Game<'_>, pos: Pos, canceled: &mut
             let nbt = Compound::from([(JavaString::from("Item"), stack)]);
             let at = pos.map(|c| f64::from(c) + 0.5);
             if game.native_summon(&player.dimension, "minecraft:item", at, nbt).is_none() {
-                log::warn!("rustcraft: the rail {old} from the swap at {pos:?} was lost");
+                crate::game::rustcraft_debug::journal_warn!("rustcraft: the rail {old} from the swap at {pos:?} was lost");
             }
         }
     }

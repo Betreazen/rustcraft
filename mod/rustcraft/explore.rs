@@ -60,7 +60,7 @@ fn load(s: &mut State, game: &Game<'_>) {
     if let Ok(text) = std::fs::read_to_string(&path) {
         match serde_json::from_str(&text) {
             Ok(a) => s.atlas = a,
-            Err(e) => log::warn!("rustcraft: {} does not read: {e}", path.display()),
+            Err(e) => crate::game::rustcraft_debug::journal_warn!("rustcraft: {} does not read: {e}", path.display()),
         }
     }
     s.path = Some(path);
@@ -84,7 +84,7 @@ pub(super) fn save(game: &Game<'_>) {
         .and_then(|()| std::fs::write(&fresh, json))
         .and_then(|()| std::fs::rename(&fresh, &path));
     if let Err(e) = done {
-        log::warn!("rustcraft: the atlas was not saved: {e}");
+        crate::game::rustcraft_debug::journal_warn!("rustcraft: the atlas was not saved: {e}");
     }
 }
 

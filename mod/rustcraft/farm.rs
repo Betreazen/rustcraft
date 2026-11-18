@@ -148,6 +148,26 @@ fn sky_closed(game: &Game<'_>, pos: Pos) -> bool {
     !rules::open_sky(&filled)
 }
 
+/// `rustcraft_debug at` on a fishing station (rustcraft_debug): its water as it reads it, the
+/// cells the magistral passes over, the sky over it and when it fishes next.
+pub(super) fn fishery_debug(game: &Game<'_>, dimension: &str, pos: Pos) -> Vec<String> {
+    let depths = depths(game, pos);
+    let line = line_cells(game, pos);
+    let mut out = vec![format!(
+        "fishery: water open {} (5x5 beside the line {}, sky closed {}), next catch at tick {:?}",
+        water_open(game, pos),
+        rules::open_water_beside(&depths, &line),
+        sky_closed(game, pos),
+        state().fish_due.get(&(dimension.to_owned(), pos)),
+    )];
+    out.push(format!(
+        "water depths under it (need {} deep; L = line over the cell, @ = the station):",
+        rules::WATER_DEPTH
+    ));
+    out.extend(rustcraft_rules::debug::water_grid(&depths, &line, rules::WATER_SIDE));
+    out
+}
+
 /// Its storage modules, counted once (slice 18, wave 2: the sockets' list is the one record).
 fn storage_modules(game: &Game<'_>, pos: Pos) -> u32 {
     modules::count(&base::modules_at(game, pos), Module::Storage)
@@ -235,7 +255,7 @@ pub(super) fn drop_reserve(game: &mut Game<'_>, dimension: &str, pos: Pos) {
         use horizon_world::nbt::{Compound, JavaString};
         let nbt = Compound::from([(JavaString::from("Item"), horizon_client::save::item_to_nbt(&s))]);
         if game.native_summon(dimension, "minecraft:item", at, nbt).is_none() {
-            log::warn!("rustcraft: the fishing station's {} at {pos:?} was lost", s.item);
+            crate::game::rustcraft_debug::journal_warn!("rustcraft: the fishing station's {} at {pos:?} was lost", s.item);
         }
     }
     write_reserve(game, pos, &[]);

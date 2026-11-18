@@ -337,6 +337,14 @@ file = "crates/horizon-client/src/game.rs"
 name = "rustcraft_selftest"
 source = "selftest.rs"
 
+# The diagnostics console command `rustcraft_debug at|near|workers|log` and the event journal
+# rustcraft-debug.log in the world folder (rustcraft_rules::debug).
+[[module]]
+id = "debug"
+file = "crates/horizon-client/src/game.rs"
+name = "rustcraft_debug"
+source = "debug.rs"
+
 # s18/pipe: slice 18's magistral as the handbook says (node tiers, wrench, node window).
 [[module]]
 id = "pipe18"

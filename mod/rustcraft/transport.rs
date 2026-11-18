@@ -604,7 +604,7 @@ fn load_modes(game: &mut Game<'_>) -> BTreeMap<Pos, Mode> {
     // `Game` is not an `AttachmentHost`; `dyn Host` is (SRC/docs/native-mods.md:4842-4866).
     let host: &mut dyn Host = game;
     JOINT_MODES.get(host, Holder::Level).unwrap_or_else(|e| {
-        log::warn!("rustcraft: joint modes not read: {e:?}");
+        crate::game::rustcraft_debug::journal_warn!("rustcraft: joint modes not read: {e:?}");
         BTreeMap::new()
     })
 }
@@ -612,7 +612,7 @@ fn load_modes(game: &mut Game<'_>) -> BTreeMap<Pos, Mode> {
 fn save_modes(game: &mut Game<'_>, modes: BTreeMap<Pos, Mode>) {
     let host: &mut dyn Host = game;
     if let Err(e) = JOINT_MODES.set(host, Holder::Level, modes) {
-        log::warn!("rustcraft: joint modes not saved: {e:?}");
+        crate::game::rustcraft_debug::journal_warn!("rustcraft: joint modes not saved: {e:?}");
     }
 }
 

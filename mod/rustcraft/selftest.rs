@@ -187,11 +187,11 @@ pub(super) fn tick(game: &mut Game<'_>, dimension: &str) {
     };
     let line = format!("{COMMAND}: {}", report.summary());
     for (name, why) in &report.failed {
-        log::warn!("rustcraft: self-test {name} failed: {why}");
+        crate::game::rustcraft_debug::journal_warn!("rustcraft: self-test {name} failed: {why}");
     }
     match write(&p.out, &report.to_json(MOD_ID)) {
         Ok(()) => log::info!("rustcraft: {line}; {}", p.out.display()),
-        Err(e) => log::warn!("rustcraft: {line}; result not written: {e}"),
+        Err(e) => crate::game::rustcraft_debug::journal_warn!("rustcraft: {line}; result not written: {e}"),
     }
 }
 
@@ -234,7 +234,7 @@ impl Bench for GameBench<'_, '_> {
     fn hold(&mut self, area: &Area, hold: bool) {
         for chunk in area.chunks() {
             if !self.game.native_force_chunk(TICKET, chunk, hold) {
-                log::warn!("rustcraft: self-test chunk {chunk:?} not held");
+                crate::game::rustcraft_debug::journal_warn!("rustcraft: self-test chunk {chunk:?} not held");
             }
         }
     }
@@ -667,6 +667,20 @@ impl Bench for GameBench<'_, '_> {
         let mut ran = false;
         base::on_testkit_command(self.game, &format!("rustcraft_testkit {args}"), &mut ran);
         format!("ran {ran}")
+    }
+
+    fn debug(&mut self, args: &str) -> Result<Vec<String>, String> {
+        // `sample <args>`: the answer also goes to the server log, so a bench run shows what the
+        // console would read (the polled checks stay quiet).
+        let (sample, args) = match args.strip_prefix("sample ") {
+            Some(rest) => (true, rest),
+            None => (false, args),
+        };
+        let lines = crate::game::rustcraft_debug::answer(self.game, args);
+        if sample {
+            log::info!("rustcraft: self-test sample `rustcraft_debug {args}`:\n{}", lines.join("\n"));
+        }
+        Ok(lines)
     }
 
     fn set_ores_off(&mut self, pos: Pos, off: u16) -> Result<(), String> {
