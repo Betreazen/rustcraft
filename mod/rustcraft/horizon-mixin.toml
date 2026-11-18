@@ -45,7 +45,7 @@
 # prototype hooked it.
 [mod]
 id = "rustcraft"
-version = "0.18.0"
+version = "0.18.1"
 
 # The commit the traversal prototype and path_of_craft_tree build on; every function used here
 # was checked in its source.
@@ -715,6 +715,20 @@ hook_version = 1
 kind = "HEAD"
 helper = "hook_chunk_changed.rs"
 bindings = [{ name = "dimension", ty = "&str", value = "dimension" }]
+
+# 0.18.1: an old overworld chunk loading for the first time since 0.18 gets its druses
+# (rustcraft_crystals::on_chunk_load); `new` says whether worldgen made it just now (API 57).
+[[injection]]
+id = "chunk_load_druses"
+hook = "chunk_load"
+hook_version = 1
+kind = "HEAD"
+helper = "hook_chunk_load_druses.rs"
+bindings = [
+  { name = "dimension", ty = "&str", value = "dimension" },
+  { name = "chunk", ty = "[i32; 2]", value = "chunk" },
+  { name = "new", ty = "bool", value = "new" },
+]
 
 [[injection]]
 id = "chunk_unload"

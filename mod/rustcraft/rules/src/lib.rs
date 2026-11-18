@@ -5,6 +5,7 @@ pub mod anchor;
 pub mod anim;
 pub mod backpack;
 pub mod butcher;
+pub mod druses;
 pub mod explore;
 pub mod gear;
 pub mod geom;

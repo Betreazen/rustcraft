@@ -288,6 +288,8 @@ fn touches_magistral(dimension: &str, pos: Pos) -> bool {
 /// have changed, then show the players their diagnoses. The level's state leaves the shared map
 /// while the game is called, so a hook the game runs meanwhile never waits on the lock.
 pub(super) fn on_level_tick(game: &mut Game<'_>, dimension: &str) {
+    // 0.18.1: druses for old overworld chunks, a few a tick (rustcraft_crystals).
+    crate::game::rustcraft_crystals::retro_tick(game, dimension);
     let mut level = server()
         .levels
         .remove(dimension)
