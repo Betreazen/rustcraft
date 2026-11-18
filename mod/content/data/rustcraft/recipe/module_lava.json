@@ -8,7 +8,7 @@
   ],
   "key": {
     "a": "rustcraft:crystallite",
-    "x": "minecraft:obsidian",
+    "x": "minecraft:magma_block",
     "s": "rustcraft:crystal_shard"
   },
   "result": {

@@ -9,7 +9,7 @@
   "key": {
     "c": "rustcraft:crystallite",
     "s": "rustcraft:crystal_shard",
-    "x": "minecraft:iron_ingot"
+    "x": "minecraft:compass"
   },
   "result": {
     "id": "rustcraft:pm_magnet",

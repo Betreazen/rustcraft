@@ -585,6 +585,82 @@ mod tests {
         assert!(amethyst.is_empty(), "{amethyst:?}");
     }
 
+    /// A crafting recipe as the grid sees it: shaped rows of item ids (" " for empty), or the
+    /// sorted ingredients of a shapeless one.
+    fn grid_of(json: &serde_json::Value) -> Option<Vec<String>> {
+        fn item(v: &serde_json::Value) -> String {
+            match v {
+                serde_json::Value::String(s) => s.clone(),
+                serde_json::Value::Array(a) => {
+                    let mut all: Vec<String> = a.iter().map(item).collect();
+                    all.sort();
+                    all.join("|")
+                }
+                other => other["item"].as_str().map_or_else(|| format!("#{}", other["tag"]), str::to_owned),
+            }
+        }
+        let kind = json["type"].as_str()?;
+        if kind.ends_with("crafting_shapeless") {
+            let mut all: Vec<String> = json["ingredients"].as_array()?.iter().map(item).collect();
+            all.sort();
+            return Some(all);
+        }
+        if !kind.ends_with("crafting_shaped") {
+            return None;
+        }
+        let key = json["key"].as_object()?;
+        let rows = json["pattern"].as_array()?;
+        Some(
+            rows.iter()
+                .map(|row| {
+                    row.as_str()
+                        .unwrap_or_default()
+                        .chars()
+                        .map(|c| if c == ' ' { " ".to_owned() } else { item(&key[&c.to_string()]) })
+                        .collect::<Vec<_>>()
+                        .join(",")
+                })
+                .collect(),
+        )
+    }
+
+    #[test]
+    fn no_two_crafting_recipes_share_a_grid() {
+        // 0.18.2: the battery and its capacity module, the anchor and the economy module, the
+        // chassis and the chestplates, three turret modules and three suit modules had the same
+        // grid, so the table gave only one of each pair. A mirrored grid crafts too.
+        let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../../content/data/rustcraft/recipe");
+        let mut seen: std::collections::BTreeMap<Vec<String>, String> = Default::default();
+        let mut clashes = Vec::new();
+        for entry in std::fs::read_dir(dir).unwrap().filter_map(|e| e.ok()) {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            let text = std::fs::read_to_string(entry.path()).unwrap();
+            let json: serde_json::Value = serde_json::from_str(&text).unwrap_or_else(|e| panic!("{name}: {e}"));
+            let Some(grid) = grid_of(&json) else { continue };
+            let shaped = json["type"].as_str().is_some_and(|t| t.ends_with("crafting_shaped"));
+            let mirrored: Vec<String> = grid
+                .iter()
+                .map(|row| row.split(',').rev().collect::<Vec<_>>().join(","))
+                .collect();
+            let mut forms = vec![grid];
+            if shaped && mirrored != forms[0] {
+                forms.push(mirrored);
+            }
+            for form in forms {
+                if let Some(other) = seen.get(&form) {
+                    if *other != name {
+                        clashes.push(format!("{other} = {name}"));
+                    }
+                } else {
+                    seen.insert(form, name.clone());
+                }
+            }
+        }
+        clashes.sort();
+        clashes.dedup();
+        assert!(clashes.is_empty(), "recipes with the same grid: {clashes:?}");
+    }
+
     #[test]
     fn every_module_has_a_recipe_and_the_slice_18_ones_are_the_handbooks() {
         for (_, item) in ITEMS {
@@ -601,7 +677,7 @@ mod tests {
             (M::Stack3, (vec!["b b", " c ", "b b"], keyed(&[("b", a4), ("c", "minecraft:chest")]))),
             (M::Yield, modr(a3, "minecraft:gold_ingot")),
             (M::Line, modr(a2, "minecraft:hopper")),
-            (M::Lava, modr(a3, "minecraft:obsidian")),
+            (M::Lava, modr(a3, "minecraft:magma_block")),
             (M::Build, modr(a3, "minecraft:dropper")),
             (
                 M::Stratum,

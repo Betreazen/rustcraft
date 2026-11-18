@@ -644,7 +644,8 @@ fn declare_monorail(blocks: &mut Vec<Block>) {
 
 /// The cell, the terminal and the tank. The cell copies `minecraft:iron_block` (one state) and has
 /// a block entity only for the storage id it keeps; the terminal and the tank copy
-/// `minecraft:furnace`, as the machines do, for a menu on use and `facing`.
+/// `minecraft:furnace`, as the machines do, for a menu on use and `facing`. The tank is a glass
+/// frame, so it hides nothing behind it (0.18.2: an empty tank left holes in the walls it touched).
 fn declare_storage_and_tanks(blocks: &mut Vec<Block>) {
     blocks.push(Block {
         id: CELL.into(),
@@ -666,6 +667,7 @@ fn declare_storage_and_tanks(blocks: &mut Vec<Block>) {
                 hardness: Some(3.0),
                 explosion_resistance: Some(6.0),
                 sounds: Some("minecraft:copper_block".into()),
+                occludes: (id == TANK).then_some(false),
                 ..BlockProperties::default()
             },
             item: true,

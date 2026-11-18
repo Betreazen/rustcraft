@@ -8,7 +8,7 @@
   ],
   "key": {
     "a": "rustcraft:sparksteel",
-    "x": "minecraft:redstone",
+    "x": "minecraft:redstone_block",
     "s": "rustcraft:crystal_shard"
   },
   "result": {
