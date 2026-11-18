@@ -660,7 +660,7 @@ pub(super) fn on_placed(game: &mut Game<'_>, pos: Pos) {
 
 // ---- The disintegrator ----
 
-fn crafting_recipes(game: &Game<'_>) -> Vec<disassembly::Recipe> {
+pub(super) fn crafting_recipes(game: &Game<'_>) -> Vec<disassembly::Recipe> {
     use horizon_client::crafting::Recipe;
     let first = |i: &horizon_client::crafting::Ingredient| -> Option<String> {
         i.order.first().cloned().or_else(|| i.items.iter().min().cloned())
@@ -943,7 +943,7 @@ fn repair_one(game: &mut Game<'_>, pos: Pos, cost: f64) -> Shown {
 // ---- The kitchen ----
 
 /// The game's crafting recipe for `result`: (its id, the ingredients it needs, the stack made).
-fn food_recipe(game: &Game<'_>, result: &str) -> Option<(String, Vec<(String, u32)>, ItemStack)> {
+pub(super) fn food_recipe(game: &Game<'_>, result: &str) -> Option<(String, Vec<(String, u32)>, ItemStack)> {
     use horizon_client::crafting::Recipe;
     let first = |i: &horizon_client::crafting::Ingredient| -> Option<String> {
         i.order.first().cloned().or_else(|| i.items.iter().min().cloned())
@@ -1018,6 +1018,12 @@ fn kitchen_press(game: &Game<'_>, pos: Pos, entity: &mut ModBlockEntity, i: usiz
     let mut pages = kitchen_pages(&entity.nbt);
     pages[i] = kitchen::cycle(pages[i]);
     write_json(&mut entity.nbt, PAGES_KEY, &pages);
+}
+
+/// 0.18.5: the kitchen's pages and how many of them it uses, for its slot rule
+/// (rustcraft_rules::utility::kitchen::takes).
+pub(super) fn kitchen_page_rule(entity: &ModBlockEntity) -> (Vec<Option<usize>>, usize) {
+    (kitchen_pages(&entity.nbt), rustcraft_rules::utility::kitchen::pages(capacity_of(entity)))
 }
 
 fn capacity_of(entity: &ModBlockEntity) -> u32 {

@@ -649,6 +649,23 @@ pub(super) fn job_output_at(dimension: &str, pos: Pos) -> Option<ItemKey> {
         .map(|r| r.job.step.output.0.clone())
 }
 
+/// 0.18.5: the kitchen dishes (KITCHEN_RECIPES indices) some order makes now, in any level: a
+/// kitchen takes their ingredients besides its pages' (rustcraft_machines::slot_takes, which has
+/// no level at hand).
+pub(super) fn ordered_dishes() -> Vec<usize> {
+    use rustcraft_rules::utility::KITCHEN_RECIPES;
+    let o = orders();
+    let mut dishes: Vec<usize> = o
+        .jobs
+        .values()
+        .flatten()
+        .filter_map(|r| KITCHEN_RECIPES.iter().position(|d| *d == r.job.step.output.0.as_str()))
+        .collect();
+    dishes.sort_unstable();
+    dishes.dedup();
+    dishes
+}
+
 /// Slice 18 (O11): the machines of the level whose order job makes a product for a later step of
 /// its order, and that product: the item nets' own moves leave it in their output slots, for
 /// the order takes it straight to the next step's machine (rustcraft_transport's snapshot).

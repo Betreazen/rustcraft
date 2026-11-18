@@ -27,7 +27,7 @@ use crate::storage::modules::{FILTER, SOCKET_FILTER, SOCKET_STACK, STACK_MODULES
 use crate::storage::terminal::{self, Press};
 use crate::tuning::Tuning;
 
-pub const ALL: [Build; 16] = [
+pub const ALL: [Build; 17] = [
     crafter_asks_the_storage,
     builder_builds_the_turned_plan_from_storage,
     brewer_brews_through_the_chain,
@@ -35,6 +35,7 @@ pub const ALL: [Build; 16] = [
     fishery_keeps_the_rods_last_point,
     fishery_fishes_beside_its_line,
     kitchen_cake_with_milk_from_a_tank,
+    kitchen_takes_only_its_dishes,
     repair_mends_a_rod_with_string,
     util_work_mode_switch,
     order_bread_through_the_kitchen,
@@ -348,6 +349,27 @@ fn fishery_fishes_beside_its_line(o: Pos, _: &Tuning) -> Scenario {
         .then("a stone block beside it, off the line", move |b, _| b.place(at(o, [5, 3, 1]), "minecraft:stone", &[]))
         .until("it says there is not enough open water", 100, move |b, _| {
             Ok(status_key(b, p) == "rustcraft.util.fish_no_water")
+        })
+}
+
+fn kitchen_takes_only_its_dishes(o: Pos, _: &Tuning) -> Scenario {
+    // 0.18.5: the kitchen took anything, and the net filled it with the owner's ore and blocks.
+    let p = at(o, [3, 1, 0]);
+    Scenario::new("kitchen185_takes_only_its_dishes", plot_area(o))
+        .then("a kitchen with no dish chosen", move |b, _| {
+            b.place(at(o, [3, 0, 0]), "minecraft:stone", &[])?;
+            b.place(p, "rustcraft:kitchen", &[])
+        })
+        .check("a hopper puts in neither ore nor wheat", move |b, _| {
+            same("ore", b.insert(p, "minecraft:raw_iron", 4)?, 0)?;
+            same("wheat", b.insert(p, "minecraft:wheat", 3)?, 0)
+        })
+        .then("its first page set to bread", move |b, _| {
+            b.press_cursor(p, SheetPress::Toggle(0).id(), None).map(|_| ())
+        })
+        .check("now wheat goes in, ore still not", move |b, _| {
+            same("wheat", b.insert(p, "minecraft:wheat", 3)?, 3)?;
+            same("ore", b.insert(p, "minecraft:raw_iron", 4)?, 0)
         })
 }
 

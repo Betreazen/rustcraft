@@ -38,6 +38,25 @@ pub fn in_turn(pages: &[Option<usize>], usable: usize, next: usize) -> Vec<(usiz
         .collect()
 }
 
+/// 0.18.5: whether the kitchen takes `item` into its inputs (from the net, a hopper or a hand):
+/// only an ingredient of a dish it may cook — those of its `usable` pages, `ingredients` given a
+/// dish (KITCHEN_RECIPES order), and those of `ordered`, the dishes the storage's orders cook in
+/// a kitchen now. Before, it took anything, and the net filled it with ore, dust and blocks.
+pub fn takes(
+    pages: &[Option<usize>],
+    usable: usize,
+    ingredients: &[std::collections::BTreeSet<String>],
+    ordered: &[usize],
+    item: &str,
+) -> bool {
+    pages
+        .iter()
+        .take(usable)
+        .flatten()
+        .chain(ordered)
+        .any(|d| ingredients.get(*d).is_some_and(|set| set.contains(item)))
+}
+
 /// How many buckets of milk a recipe's ingredients ask for.
 pub fn milk_buckets(need: &[(String, u32)]) -> u32 {
     need.iter().filter(|(i, _)| i == MILK_BUCKET).map(|(_, n)| *n).sum()
@@ -105,6 +124,20 @@ pub fn take_ingredients(cells: &mut [crate::machines::slots::Slot], need: &[(Str
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn it_takes_only_the_ingredients_of_its_dishes() {
+        let set = |items: &[&str]| items.iter().map(|i| (*i).to_owned()).collect::<std::collections::BTreeSet<_>>();
+        // bread, cookie
+        let ingredients = vec![set(&["minecraft:wheat"]), set(&["minecraft:wheat", "minecraft:cocoa_beans"])];
+        let pages = [Some(0), Some(1), None, None];
+        assert!(takes(&pages, 1, &ingredients, &[], "minecraft:wheat"));
+        assert!(!takes(&pages, 1, &ingredients, &[], "minecraft:cocoa_beans"), "page 2 needs a capacity module");
+        assert!(takes(&pages, 2, &ingredients, &[], "minecraft:cocoa_beans"));
+        assert!(!takes(&pages, 4, &ingredients, &[], "minecraft:raw_iron"), "the owner's ore");
+        assert!(!takes(&[None; 4], 4, &ingredients, &[], "minecraft:wheat"), "no page, no order");
+        assert!(takes(&[None; 4], 1, &ingredients, &[1], "minecraft:cocoa_beans"), "an order's dish");
+    }
 
     #[test]
     fn ingredients_come_from_the_cells_first_then_the_slots() {

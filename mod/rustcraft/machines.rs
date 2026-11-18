@@ -1076,6 +1076,14 @@ struct Accepts {
     placeable: BTreeSet<String>,
     /// Slice 10: the mixer's ingredients.
     mixing: BTreeSet<String>,
+    /// 0.18.5: each kitchen dish's ingredients, in KITCHEN_RECIPES order.
+    cooking: Vec<BTreeSet<String>>,
+    /// 0.18.5: what the charger charges (an item with a battery).
+    chargeable: BTreeSet<String>,
+    /// 0.18.5: what the disintegrator takes apart.
+    reversible: BTreeSet<String>,
+    /// 0.18.5: what the enchanting machine enchants: what wears out, and books.
+    enchantable: BTreeSet<String>,
 }
 
 static ACCEPTS: LazyLock<Mutex<Accepts>> = LazyLock::new(Mutex::default);
@@ -1129,7 +1137,7 @@ pub(super) fn slot_takes(
                 return u.slots().inputs.contains(&slot)
                     && rustcraft_rules::machines::tiered::trash_passes(&filters, item);
             }
-            u.takes(slot, item, &filter)
+            u.takes(slot, item, &filter) && util_wants(u, entity, slot, item)
         }
         Machine::Mixer => {
             let inputs: Vec<Slot> = (0..content::MIXER_SLOTS)
@@ -1147,6 +1155,28 @@ pub(super) fn slot_takes(
             crafter::buffer_takes(entity, slot, item, tuning)
         }
         _ => false,
+    }
+}
+
+/// 0.18.5: what a slice-12 machine wants beyond its slot rule. Before, the kitchen, the charger,
+/// the disintegrator, the building machine and the enchanting machine took anything, so the
+/// net, which hands a machine whatever it takes, filled them with ore, dust and blocks (the
+/// owner's ore that «disappeared» sat in a kitchen). The portal dock still takes anything: it
+/// sends it on.
+fn util_wants(u: rustcraft_rules::utility::Util, entity: &ModBlockEntity, slot: usize, item: &str) -> bool {
+    use rustcraft_rules::utility::Util;
+    let a = accepts();
+    match u {
+        Util::Kitchen => {
+            let (pages, usable) = crate::game::rustcraft_utility::kitchen_page_rule(entity);
+            let ordered = crate::game::rustcraft_orders::ordered_dishes();
+            rustcraft_rules::utility::kitchen::takes(&pages, usable, &a.cooking, &ordered, item)
+        }
+        Util::Charger => a.chargeable.contains(item),
+        Util::Disintegrator => a.reversible.contains(item),
+        Util::Builder => a.placeable.contains(item),
+        Util::Enchanter if slot == 0 => a.enchantable.contains(item),
+        _ => true,
     }
 }
 
@@ -1218,6 +1248,45 @@ pub(super) fn teach_slot_rules(game: &Game<'_>, recipes: &MachineRecipes) {
     let mixing: BTreeSet<String> = rustcraft_rules::machines::mixer::ingredients(&recipes.mixing)
         .into_iter()
         .collect();
+    // 0.18.5: the slice-12 machines' lists (util_wants). The game's items and recipes stay as
+    // they are while the server runs, so they are worked out once, not on every rescan.
+    let kept = {
+        let a = accepts();
+        // Before the recipes are loaded every dish is empty: worked out again then.
+        a.cooking.iter().any(|d| !d.is_empty())
+            .then(|| (a.cooking.clone(), a.chargeable.clone(), a.reversible.clone(), a.enchantable.clone()))
+    };
+    let (cooking, chargeable, reversible, enchantable) = kept.unwrap_or_else(|| {
+        let cooking: Vec<BTreeSet<String>> = rustcraft_rules::utility::KITCHEN_RECIPES
+            .iter()
+            .map(|dish| {
+                crate::game::rustcraft_utility::food_recipe(game, dish)
+                    .map(|(_, need, _)| need.into_iter().map(|(i, _)| i).collect())
+                    .unwrap_or_default()
+            })
+            .collect();
+        let chargeable: BTreeSet<String> = game
+            .items()
+            .items
+            .keys()
+            .filter(|item| crate::game::rustcraft_gear::battery(game, &ItemStack::new(&item.to_string(), 1)).is_some())
+            .map(|item| item.to_string())
+            .collect();
+        let crafting = crate::game::rustcraft_utility::crafting_recipes(game);
+        let reversible: BTreeSet<String> = crafting
+            .iter()
+            .filter(|r| rustcraft_rules::utility::disassembly::recipe_for(&r.result, &crafting, false).is_ok())
+            .map(|r| r.result.clone())
+            .collect();
+        let enchantable: BTreeSet<String> = game
+            .items()
+            .items
+            .iter()
+            .filter(|(item, info)| info.max_damage > 0 || item.to_string() == "minecraft:book")
+            .map(|(item, _)| item.to_string())
+            .collect();
+        (cooking, chargeable, reversible, enchantable)
+    });
     let next = Accepts {
         smeltable,
         crushable,
@@ -1225,6 +1294,10 @@ pub(super) fn teach_slot_rules(game: &Game<'_>, recipes: &MachineRecipes) {
         fuels,
         placeable,
         mixing,
+        cooking,
+        chargeable,
+        reversible,
+        enchantable,
     };
     {
         let mut a = accepts();
