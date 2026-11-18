@@ -172,6 +172,62 @@ pub enum Note {
     /// Slice 18, the cartographer: nothing new along its whole way (guide «Вокруг пути всё
     /// нанесено»).
     AllMapped,
+    /// 0.18.5 (the owner's field test: a worker rode round doing nothing and said «Работает»): the
+    /// reaper, the saw and the grab found nothing along a whole stretch of their way.
+    NothingToReap,
+    NoTrees,
+    NoOre,
+    /// 0.18.5: the saw has free ground or a felled tree's root to plant and no sapling.
+    NoSaplings,
+}
+
+impl Note {
+    pub const ALL: [Note; 25] = [
+        Note::Working,
+        Note::Unloading,
+        Note::Charging,
+        Note::ToUnload,
+        Note::ToCharge,
+        Note::NoTool,
+        Note::NoUnloadDock,
+        Note::NoChargeDock,
+        Note::Flat,
+        Note::NothingToSow,
+        Note::DockFull,
+        Note::DockEmpty,
+        Note::NoWay,
+        Note::ToLoad,
+        Note::Loading,
+        Note::NoLoadDock,
+        Note::NoCargo,
+        Note::NothingToDig,
+        Note::NoRails,
+        Note::LavaAhead,
+        Note::AllMapped,
+        Note::NothingToReap,
+        Note::NoTrees,
+        Note::NoOre,
+        Note::NoSaplings,
+    ];
+
+    /// What a tool says about its work (nothing beside the way, nothing to sow, out of rails):
+    /// it stays while the worker rides on, until the tool works again (`found_as`, the tools).
+    /// Before 0.18.5 the next cell said «Работает» over it within a tick, so the board and the
+    /// window hardly ever showed it.
+    pub fn is_tools(self) -> bool {
+        matches!(
+            self,
+            Note::NothingToSow
+                | Note::NothingToDig
+                | Note::AllMapped
+                | Note::NoRails
+                | Note::LavaAhead
+                | Note::NothingToReap
+                | Note::NoTrees
+                | Note::NoOre
+                | Note::NoSaplings
+        )
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -211,6 +267,10 @@ pub struct Worker {
     /// the chassis window; none keeps the way on its level.
     #[serde(default)]
     pub height: Option<i32>,
+    /// 0.18.5: the rail cell where it last stopped at a dock it was passing (not saved), so it
+    /// stops there once a pass and rides on.
+    #[serde(skip)]
+    pub passed: Option<Pos>,
 }
 
 fn first_tier() -> u8 {
@@ -330,6 +390,7 @@ impl Worker {
             carry: 0.0,
             aim: None,
             height: None,
+            passed: None,
         }
     }
 
@@ -498,8 +559,10 @@ impl Worker {
             }
             if self.hold.is_full() {
                 self.errand = Errand::Unload;
+                self.passed = None;
             } else if self.charge < t.worker_charge_below * self.capacity(t) {
                 self.errand = Errand::Charge;
+                self.passed = None;
             } else if self.tool == Some(Tool::Hold) {
                 // W6: a cargo worker's work is the ride from the load dock to the unload dock.
                 self.errand = Errand::Load;
@@ -508,12 +571,17 @@ impl Worker {
         if self.to.is_none() {
             match self.errand {
                 Errand::Work => {
+                    if let Some(dock) = self.stops_in_passing(track, t) {
+                        return Step::AtDock(dock);
+                    }
                     self.to = self.next_on_work(track.net);
                     if self.to.is_none() {
                         self.note = Note::NoWay;
                         return Step::Stopped;
                     }
-                    self.note = Note::Working;
+                    if !self.note.is_tools() {
+                        self.note = Note::Working;
+                    }
                 }
                 Errand::Unload | Errand::Charge | Errand::Load => {
                     let (docks, none, going) = match self.errand {
@@ -565,6 +633,41 @@ impl Worker {
         } else {
             Step::Moved
         }
+    }
+
+    /// 0.18.5 (the owner: «работники не замечают доков»): riding its way past an unload dock with
+    /// something to give, it stops and unloads; past a charge dock with its battery under
+    /// `worker_top_up_below`, it tops up. Once a pass at each cell; the dock it stops at, and the
+    /// errand it took. Riding out of its way to a dock is still for a full hold or a low battery.
+    fn stops_in_passing(&mut self, track: &Track<'_>, t: &Tuning) -> Option<Pos> {
+        if self.passed == Some(self.cell) || self.tool == Some(Tool::Hold) {
+            return None;
+        }
+        let at = |docks: &BTreeSet<Pos>| dock_cells(track.net, docks).get(&self.cell).copied();
+        if !self.unloaded() {
+            if let Some(dock) = at(track.unload) {
+                self.passed = Some(self.cell);
+                self.errand = Errand::Unload;
+                self.note = Note::Unloading;
+                return Some(dock);
+            }
+        }
+        if self.charge < t.worker_top_up_below * self.capacity(t) {
+            if let Some(dock) = at(track.charge) {
+                self.passed = Some(self.cell);
+                self.errand = Errand::Charge;
+                self.note = Note::Charging;
+                return Some(dock);
+            }
+        }
+        None
+    }
+
+    /// At a dock it stopped at in passing (`stops_in_passing`), not sent there by a full hold or
+    /// a low battery: it rides on when the dock cannot serve it (full, or with no energy) instead
+    /// of waiting. One sent there waits, as before (the bench's «every shovel reached the chest»).
+    pub fn only_passing(&self, _t: &Tuning) -> bool {
+        matches!(self.errand, Errand::Unload | Errand::Charge) && self.passed == Some(self.cell)
     }
 
     /// Blocks a second on the rail at `to`: its tier's speed (T4).
@@ -629,7 +732,7 @@ impl Worker {
     pub fn found_as(&mut self, done: usize, idle_after: u32, idle_note: Note) {
         if done > 0 {
             self.idle = 0;
-            if self.note == idle_note {
+            if self.note.is_tools() {
                 self.note = Note::Working;
             }
             return;
@@ -1019,6 +1122,129 @@ pub(crate) mod tests {
         assert_eq!(w.note, Note::NothingToDig);
         w.found(2, 4);
         assert_eq!((w.note, w.idle), (Note::Working, 0));
+    }
+
+    #[test]
+    fn a_worker_unloads_at_a_dock_it_passes() {
+        // 0.18.5, the owner: «работники не замечают доков». A hold far from full is given to an
+        // unload dock on the way; once a pass, and it rides on when the dock cannot take it.
+        let t = Tuning::default();
+        let net = line(6);
+        let unload = BTreeSet::from([[3, 0, 1]]);
+        let none = BTreeSet::new();
+        let track = Track {
+            net: &net,
+            unload: &unload,
+            charge: &none,
+            load: &none,
+        };
+        let mut w = worker(&t);
+        w.hold.add("minecraft:oak_log", 5, 64);
+        let steps = ride(&mut w, &track, &t, 40);
+        assert_eq!(steps.iter().find(|s| matches!(s, Step::AtDock(_))), Some(&Step::AtDock([3, 0, 1])));
+        assert_eq!((w.cell, w.errand), ([3, 0, 0], Errand::Unload));
+        assert!(w.only_passing(&t), "sent by nothing but the dock on its way");
+        // The dock was full: it rides on, and does not stop at the same cell again.
+        w.back_to_work();
+        let steps = ride(&mut w, &track, &t, 10);
+        assert!(!steps.iter().any(|s| matches!(s, Step::AtDock(_))));
+        assert_ne!(w.cell, [3, 0, 0]);
+        // Sent there full, it waits at a full dock even once the hold has room (the bench).
+        let mut w = worker(&t);
+        for _ in 0..t.worker_hold {
+            w.hold.add("x", 1, 1);
+        }
+        ride(&mut w, &track, &t, 40);
+        assert_eq!(w.errand, Errand::Unload);
+        w.hold.take("x", 3);
+        assert!(!w.only_passing(&t), "sent by its full hold");
+        // A hold of only what its tool keeps rides past.
+        let mut w = worker(&t);
+        w.hold.add("minecraft:oak_sapling", 5, 64);
+        assert!(!ride(&mut w, &track, &t, 40).iter().any(|s| matches!(s, Step::AtDock(_))));
+    }
+
+    #[test]
+    fn a_worker_tops_up_at_a_charge_dock_it_passes() {
+        let t = Tuning::default();
+        let net = line(6);
+        let charge = BTreeSet::from([[3, 0, -1]]);
+        let none = BTreeSet::new();
+        let track = Track {
+            net: &net,
+            unload: &none,
+            charge: &charge,
+            load: &none,
+        };
+        let mut w = worker(&t);
+        w.charge = 0.5 * t.worker_battery;
+        let steps = ride(&mut w, &track, &t, 40);
+        assert!(steps.contains(&Step::AtDock([3, 0, -1])));
+        assert_eq!(w.errand, Errand::Charge);
+        assert!(w.only_passing(&t));
+        let mut w = worker(&t);
+        w.charge = 0.95 * t.worker_battery;
+        assert!(!ride(&mut w, &track, &t, 40).iter().any(|s| matches!(s, Step::AtDock(_))), "charged enough");
+        // Sent there low it is no passer: it waits for the dock's energy.
+        let mut w = worker(&t);
+        w.charge = 0.1 * t.worker_battery;
+        ride(&mut w, &track, &t, 40);
+        assert_eq!(w.errand, Errand::Charge);
+        assert!(!w.only_passing(&t));
+    }
+
+    #[test]
+    fn a_cargo_worker_keeps_to_its_load_and_unload_docks() {
+        let t = Tuning::default();
+        let net = line(6);
+        let unload = BTreeSet::from([[1, 0, 1]]);
+        let load = BTreeSet::from([[5, 0, 1]]);
+        let none = BTreeSet::new();
+        let track = Track {
+            net: &net,
+            unload: &unload,
+            charge: &none,
+            load: &load,
+        };
+        let mut w = Worker::new(1, 7, [0, 0, 0], &t);
+        w.tool = Some(Tool::Hold);
+        w.refit(&t);
+        w.hold.add("minecraft:cobblestone", 5, 64);
+        let steps = ride(&mut w, &track, &t, 80);
+        assert_eq!(steps.last(), Some(&Step::AtDock([5, 0, 1])), "past the unload dock to load");
+        assert_eq!(w.errand, Errand::Load);
+    }
+
+    #[test]
+    fn a_tools_note_stays_while_it_rides_on() {
+        // 0.18.5: «Рядом с путём нечего копать» said in one cell stayed for no tick: the next
+        // cell said «Работает» over it. Now it stays until the tool works again.
+        let t = Tuning::default();
+        let net = line(6);
+        let none = BTreeSet::new();
+        let track = Track {
+            net: &net,
+            unload: &none,
+            charge: &none,
+            load: &none,
+        };
+        let mut w = Worker::new(1, 7, [0, 0, 0], &t);
+        w.tool = Some(Tool::Reaper);
+        w.note = Note::Working;
+        for _ in 0..4 {
+            w.found_as(0, 4, Note::NothingToReap);
+        }
+        assert_eq!(w.note, Note::NothingToReap);
+        let steps = ride(&mut w, &track, &t, 40);
+        assert!(steps.iter().any(|s| matches!(s, Step::Arrived(_))));
+        assert_eq!(w.note, Note::NothingToReap, "it rode on and still says so");
+        w.found_as(1, 4, Note::NothingToReap);
+        assert_eq!(w.note, Note::Working);
+        // Another tool's note is no tool's: «Нет пути» goes once it can ride.
+        w.note = Note::NoWay;
+        ride(&mut w, &track, &t, 40);
+        assert_eq!(w.note, Note::Working);
+        assert!(Note::ALL.iter().filter(|n| n.is_tools()).count() == 9);
     }
 
     #[test]

@@ -65,6 +65,10 @@ pub struct Tuning {
     pub worker_battery: f64,
     pub worker_battery_upgrade: f64,
     pub worker_charge_below: f64,
+    /// 0.18.5 (the owner: «работники не замечают доков»): a worker passing a charge dock tops up
+    /// there while its battery is under this share; one passing an unload dock gives what it
+    /// carries.
+    pub worker_top_up_below: f64,
     pub worker_energy_per_block: f64,
     /// Its hold: slots without modules, slots a storage module adds, and the most it can have
     /// (the chassis window shows five rows).
@@ -281,6 +285,7 @@ impl Default for Tuning {
             worker_battery: 2000.0,
             worker_battery_upgrade: 1.5,
             worker_charge_below: 0.2,
+            worker_top_up_below: 0.9,
             worker_energy_per_block: 0.5,
             worker_hold: 27,
             worker_hold_per_storage: 9,

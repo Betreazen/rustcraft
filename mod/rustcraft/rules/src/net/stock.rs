@@ -294,6 +294,8 @@ mod tests {
             priority: 0,
             auto: false,
             refiner: false,
+            store: false,
+            loader: false,
         }
     }
 

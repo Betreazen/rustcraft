@@ -113,6 +113,12 @@ pub struct Joint {
     /// What it takes goes to it, not to another receiver of its priority that takes it too (the
     /// furnace smelts ore as well), and waits for it while it is full.
     pub refiner: bool,
+    /// 0.18.5 (guide `dock_load`: «Загружает грузовую вагонетку предметами из магистрали»): a
+    /// storage on its default joint. It takes as before (M16) and gives to load docks only.
+    pub store: bool,
+    /// 0.18.5: a load dock on its default joint, which the storages of its net fill for the
+    /// cargo workers.
+    pub loader: bool,
 }
 
 /// The inventories behind the joints, as the game sees them this tick.
@@ -188,8 +194,20 @@ pub fn tick(
     // burst later.
     state.budget = (state.budget + per_second / ticks_per_second).min(per_second.max(1.0));
     let mut available = (state.budget + 1e-9).floor() as u32;
-    let sources = first_per_block(joints, Mode::gives);
+    let mut sources = first_per_block(joints, Mode::gives);
     let receivers = first_per_block(joints, Mode::takes);
+    // 0.18.5: a storage on its default joint gives to the load docks of its net (`Joint::store`).
+    let loaders: BTreeSet<usize> = receivers.iter().copied().filter(|&r| joints[r].loader).collect();
+    if !loaders.is_empty() {
+        let given: BTreeSet<Pos> = sources.iter().map(|&j| joints[j].block).collect();
+        let mut stores = BTreeSet::new();
+        sources.extend((0..joints.len()).filter(|&j| {
+            joints[j].store
+                && joints[j].mode.takes()
+                && !given.contains(&joints[j].block)
+                && stores.insert(joints[j].block)
+        }));
+    }
     if sources.is_empty() || receivers.is_empty() {
         return result;
     }
@@ -209,13 +227,22 @@ pub fn tick(
     let start = state.first_source % sources.len();
     for k in 0..sources.len() {
         let src = &joints[sources[(start + k) % sources.len()]];
+        // A storage gives only to the load docks (`Joint::store`), what their room takes.
+        let pulled = src.store && !src.mode.gives();
         for (item, count) in inv.offered(src.block) {
+            if pulled && available == 0 {
+                break;
+            }
             if count == 0 || !src.filter.passes(&item) {
                 continue;
             }
             let mut left = count;
             // M17: never back into the block it came from.
-            let open = |r: usize| joints[r].block != src.block && joints[r].filter.passes(&item);
+            let open = |r: usize| {
+                joints[r].block != src.block
+                    && joints[r].filter.passes(&item)
+                    && (!pulled || loaders.contains(&r))
+            };
             // Slice 18: an item a machine on the line takes is no auto container's.
             let machine_needs = receivers
                 .iter()
@@ -467,6 +494,8 @@ mod tests {
             priority,
             auto: false,
             refiner: false,
+            store: false,
+            loader: false,
         }
     }
 
@@ -783,5 +812,36 @@ mod tests {
             1,
         );
         assert_eq!(world.got(CHEST, "rc:dust_iron"), 0);
+    }
+
+    #[test]
+    fn a_storage_fills_the_load_docks_of_its_net_only() {
+        // 0.18.5, guide `dock_load`: «Загружает грузовую вагонетку предметами из магистрали». A
+        // storage on its default joint gives to a load dock, never to a chest or a furnace.
+        const STORE: Pos = [9, 0, 0];
+        const DOCK: Pos = [7, 0, 0];
+        let mut world = World::default();
+        world.gives(STORE, "minecraft:cobblestone", 20);
+        world.takes(STORE, "minecraft:cobblestone", 1000);
+        world.takes(DOCK, "minecraft:cobblestone", 8);
+        world.takes(CHEST, "minecraft:cobblestone", 64);
+        world.takes(FURNACE, "minecraft:cobblestone", 64);
+        let store = Joint { store: true, ..joint(STORE, Mode::Into, 0) };
+        let dock = Joint { loader: true, ..joint(DOCK, Mode::Both, 0) };
+        let joints = [store.clone(), dock.clone(), joint(CHEST, Mode::Into, 0), joint(FURNACE, Mode::Both, 0)];
+        run(&joints, &mut world, 40);
+        assert_eq!(world.got(DOCK, "minecraft:cobblestone"), 8, "the dock's room");
+        assert_eq!(world.got(CHEST, "minecraft:cobblestone"), 0);
+        assert_eq!(world.got(FURNACE, "minecraft:cobblestone"), 0);
+        // A load dock the player set, or a storage the player set «в блок», trade nothing so.
+        let mut world = World::default();
+        world.gives(STORE, "minecraft:cobblestone", 20);
+        world.takes(DOCK, "minecraft:cobblestone", 8);
+        let set = [joint(STORE, Mode::Into, 0), dock.clone()];
+        run(&set, &mut world, 10);
+        assert_eq!(world.got(DOCK, "minecraft:cobblestone"), 0);
+        let set = [store, Joint { loader: false, ..dock }];
+        run(&set, &mut world, 10);
+        assert_eq!(world.got(DOCK, "minecraft:cobblestone"), 0);
     }
 }
