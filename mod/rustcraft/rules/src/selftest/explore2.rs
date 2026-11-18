@@ -9,7 +9,7 @@
 //! starts its world generator placed (structures.rs:9), which the bench's plots never hold, and
 //! `/place structure` builds the blocks without a start. The rules' unit tests cover them.
 
-use super::{Bench, Build, Scenario, at, count_of, plot_area};
+use super::{Bench, Build, Scenario, at, base, count_of, plot_area};
 use crate::geom::{Face, Pos};
 use crate::monorail::shape;
 use crate::tuning::Tuning;
@@ -57,6 +57,7 @@ fn grab_takes_a_grown_block(o: Pos, _: &Tuning) -> Scenario {
             for x in 0..=6 {
                 b.place(at(o, [x, 1, 0]), MONORAIL, &[(shape::MOUNT, shape::mount_value(Face::YNeg))])?;
             }
+            base(b, Some(at(o, [0, 1, 0])), Some(at(o, [6, 1, 0])))?;
             b.place(at(o, [2, 1, 2]), STONE, &[])?;
             b.place(at(o, [4, 1, 2]), STONE, &[])?;
             machine(b, vein, "rustcraft:vein", OWNER, 8000.0)?;

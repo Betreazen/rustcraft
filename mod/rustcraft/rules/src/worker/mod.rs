@@ -11,6 +11,7 @@
 //! ceiling and the vertical, so a reaper climbs a jungle trunk, hangs over kelp or rides a lift
 //! between floors. Its tool's zone grows away from the block its rail hangs on (`zone_cells`).
 
+pub mod base;
 pub mod chassis;
 pub mod config;
 pub mod digging;
@@ -179,10 +180,12 @@ pub enum Note {
     NoOre,
     /// 0.18.5: the saw has free ground or a felled tree's root to plant and no sapling.
     NoSaplings,
+    /// 0.19.1: the bore's rails have no end to bore from (a loop).
+    NoEnd,
 }
 
 impl Note {
-    pub const ALL: [Note; 25] = [
+    pub const ALL: [Note; 26] = [
         Note::Working,
         Note::Unloading,
         Note::Charging,
@@ -208,6 +211,7 @@ impl Note {
         Note::NoTrees,
         Note::NoOre,
         Note::NoSaplings,
+        Note::NoEnd,
     ];
 
     /// What a tool says about its work (nothing beside the way, nothing to sow, out of rails):
@@ -271,6 +275,9 @@ pub struct Worker {
     /// stops there once a pass and rides on.
     #[serde(skip)]
     pub passed: Option<Pos>,
+    /// 0.19.1: where a bore bores (`base::BoreWay::End`), as its rails stand this tick (not saved).
+    #[serde(skip)]
+    pub bore_to: Option<(Pos, [i32; 2])>,
 }
 
 fn first_tier() -> u8 {
@@ -297,6 +304,9 @@ pub struct Track<'a> {
     pub charge: &'a BTreeSet<Pos>,
     /// Slice 10: the load docks (W6).
     pub load: &'a BTreeSet<Pos>,
+    /// 0.19.1: the parts of the rails and their docks, worked out once a tick for all workers;
+    /// none works them out for this worker alone.
+    pub bases: Option<&'a base::Bases>,
 }
 
 /// Whether `p` is a rail: a worker rides every rail (slice 18), floor, wall or ceiling.
@@ -391,6 +401,7 @@ impl Worker {
             aim: None,
             height: None,
             passed: None,
+            bore_to: None,
         }
     }
 
@@ -552,6 +563,22 @@ impl Worker {
             self.busy = (self.busy - 1.0).max(0.0);
             return Step::Busy;
         }
+        // 0.19.1 (the owner): no unload dock, charge dock or, for a cargo worker, load dock on its
+        // rails, and it stands where it is placed, saying which it lacks.
+        let own;
+        let bases = match track.bases {
+            Some(b) => b,
+            None => {
+                own = base::Bases::of(track.net, track.unload, track.charge, track.load);
+                &own
+            }
+        };
+        if self.tool.is_some() {
+            if let Some(lack) = bases.lacks(self.cell, self.tool == Some(Tool::Hold)) {
+                self.note = lack;
+                return Step::Stopped;
+            }
+        }
         if self.errand == Errand::Work {
             if self.tool.is_none() {
                 self.note = Note::NoTool;
@@ -573,6 +600,11 @@ impl Worker {
                 Errand::Work => {
                     if let Some(dock) = self.stops_in_passing(track, t) {
                         return Step::AtDock(dock);
+                    }
+                    if self.tool == Some(Tool::Bore) {
+                        if let Some(step) = self.bore_way(bases, track.net) {
+                            return step;
+                        }
                     }
                     self.to = self.next_on_work(track.net);
                     if self.to.is_none() {
@@ -663,6 +695,31 @@ impl Worker {
         None
     }
 
+    /// 0.19.1: where a bore bores, from its base (`base::BoreWay`): it keeps it for its tool
+    /// (`bore_to`). With no end on its rails it stands and says so; alone on a single rail cell it
+    /// bores from where it stands, as if it had come from behind.
+    fn bore_way(&mut self, bases: &base::Bases, net: &Network) -> Option<Step> {
+        match bases.bore_way(self.cell) {
+            Some(base::BoreWay::End { cell, heading }) => {
+                self.bore_to = Some((cell, heading));
+                if cell == self.cell && ways(net, cell).is_empty() {
+                    self.from = Some([cell[0] - heading[0], cell[1], cell[2] - heading[1]]);
+                    if !self.note.is_tools() {
+                        self.note = Note::Working;
+                    }
+                    return Some(Step::Arrived(cell));
+                }
+                None
+            }
+            Some(base::BoreWay::NoEnd) => {
+                self.bore_to = None;
+                self.note = Note::NoEnd;
+                Some(Step::Stopped)
+            }
+            None => None,
+        }
+    }
+
     /// At a dock it stopped at in passing (`stops_in_passing`), not sent there by a full hold or
     /// a low battery: it rides on when the dock cannot serve it (full, or with no energy) instead
     /// of waiting. One sent there waits, as before (the bench's «every shovel reached the chest»).
@@ -689,6 +746,8 @@ impl Worker {
         self.tool == Some(Tool::Shooter)
             && self.busy <= 0.0
             && matches!(step, Step::AtDock(_) | Step::Stopped)
+            // 0.19.1: a guard without its base does nothing.
+            && !matches!(self.note, Note::NoUnloadDock | Note::NoChargeDock | Note::NoLoadDock)
     }
 
     /// Spends a tool job: `ticks` of work and `energy` E.
@@ -923,11 +982,13 @@ pub(crate) mod tests {
         let t = Tuning::default();
         let net = line(3);
         let none = BTreeSet::new();
+        let full = base::Bases::complete(&net);
         let track = Track {
             net: &net,
             unload: &none,
             charge: &none,
             load: &none,
+            bases: Some(&full),
         };
         let mut w = worker(&t);
         let per_cell = (t.ticks_per_second / t.rail_spec().speed_of(1)).ceil() as usize;
@@ -952,11 +1013,13 @@ pub(crate) mod tests {
             for r in net.rails.values_mut() {
                 r.tier = tier;
             }
+            let full = base::Bases::complete(&net);
             let track = Track {
                 net: &net,
                 unload: &none,
                 charge: &none,
                 load: &none,
+                bases: Some(&full),
             };
             let mut w = worker(&t);
             let mut arrived = 0;
@@ -987,11 +1050,13 @@ pub(crate) mod tests {
         let net = line(6);
         let unload = BTreeSet::from([[5, 0, 1]]);
         let none = BTreeSet::new();
+        let full = base::Bases::complete(&net);
         let track = Track {
             net: &net,
             unload: &unload,
             charge: &none,
             load: &none,
+            bases: Some(&full),
         };
         let mut w = worker(&t);
         for _ in 0..t.worker_hold {
@@ -1014,11 +1079,13 @@ pub(crate) mod tests {
         let t = Tuning::default();
         let net = line(4);
         let far = BTreeSet::from([[50, 0, 1]]);
+        let full = base::Bases::complete(&net);
         let track = Track {
             net: &net,
             unload: &far,
             charge: &far,
             load: &far,
+            bases: Some(&full),
         };
         let mut w = worker(&t);
         w.charge = 0.1 * t.worker_battery;
@@ -1069,11 +1136,13 @@ pub(crate) mod tests {
         let load = BTreeSet::from([[0, 0, 1]]);
         let unload = BTreeSet::from([[5, 0, 1]]);
         let none = BTreeSet::new();
+        let full = base::Bases::complete(&net);
         let track = Track {
             net: &net,
             unload: &unload,
             charge: &none,
             load: &load,
+            bases: Some(&full),
         };
         let mut w = Worker::new(1, 7, [2, 0, 0], &t);
         w.tool = Some(Tool::Hold);
@@ -1097,11 +1166,13 @@ pub(crate) mod tests {
         w.tick(&track, &t);
         assert_eq!(w.errand, Errand::Load);
         // No load dock on its rails: it says so.
+        let full = base::Bases::complete(&net);
         let track = Track {
             net: &net,
             unload: &unload,
             charge: &none,
             load: &none,
+            bases: Some(&full),
         };
         let mut w2 = Worker::new(2, 7, [2, 0, 0], &t);
         w2.tool = Some(Tool::Hold);
@@ -1125,6 +1196,71 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn without_its_docks_a_worker_stands_and_says_which() {
+        // 0.19.1, the owner: «если на монорельсе нет зарядки и разгрузки, работник стоит».
+        let t = Tuning::default();
+        let net = line(6);
+        let none = BTreeSet::new();
+        let unload = BTreeSet::from([[0, 0, 1]]);
+        let charge = BTreeSet::from([[0, 0, -1]]);
+        let track = |u, c| Track { net: &net, unload: u, charge: c, load: &none, bases: None };
+        let mut w = worker(&t);
+        w.cell = [2, 0, 0];
+        let steps = ride(&mut w, &track(&none, &charge), &t, 20);
+        assert!(steps.iter().all(|s| *s == Step::Stopped));
+        assert_eq!((w.cell, w.note), ([2, 0, 0], Note::NoUnloadDock));
+        assert_eq!(w.charge, t.worker_battery, "standing costs nothing");
+        ride(&mut w, &track(&unload, &none), &t, 5);
+        assert_eq!(w.note, Note::NoChargeDock);
+        // Both placed: it starts.
+        let steps = ride(&mut w, &track(&unload, &charge), &t, 20);
+        assert!(steps.iter().any(|s| matches!(s, Step::Arrived(_))));
+        // A cargo worker needs a load dock too; a guard without its base does not shoot.
+        let mut cargo = Worker::new(2, 7, [2, 0, 0], &t);
+        cargo.tool = Some(Tool::Hold);
+        ride(&mut cargo, &track(&unload, &charge), &t, 5);
+        assert_eq!(cargo.note, Note::NoLoadDock);
+        let mut guard = Worker::new(3, 7, [2, 0, 0], &t);
+        guard.tool = Some(Tool::Shooter);
+        let step = guard.tick(&track(&none, &none), &t);
+        assert!(!guard.guards_standing(step));
+    }
+
+    #[test]
+    fn a_bore_bores_away_from_its_docks_and_stands_on_a_loop() {
+        let t = Tuning::default();
+        let none = BTreeSet::new();
+        // A single rail with its docks on its north side: it bores south from where it stands.
+        let net = line(1);
+        let docks = BTreeSet::from([[0, 0, -1]]);
+        let track = Track { net: &net, unload: &docks, charge: &docks, load: &none, bases: None };
+        let mut w = Worker::new(1, 7, [0, 0, 0], &t);
+        w.tool = Some(Tool::Bore);
+        assert_eq!(w.tick(&track, &t), Step::Arrived([0, 0, 0]));
+        assert_eq!(w.from, Some([0, 0, -1]));
+        assert_eq!(w.bore_to, Some(([0, 0, 0], [0, 1])));
+        // A line with its docks at the west end: the bore's end is the east one.
+        let net = line(5);
+        let west = BTreeSet::from([[0, 0, 1]]);
+        let track = Track { net: &net, unload: &west, charge: &west, load: &none, bases: None };
+        let mut w = Worker::new(1, 7, [2, 0, 0], &t);
+        w.tool = Some(Tool::Bore);
+        w.tick(&track, &t);
+        assert_eq!(w.bore_to, Some(([4, 0, 0], [1, 0])));
+        // A loop: no end.
+        let mut net = Network::default();
+        for p in [[0, 0, 0], [1, 0, 0], [1, 0, 1], [0, 0, 1]] {
+            rail(&mut net, p, Face::YNeg);
+        }
+        let dock = BTreeSet::from([[2, 0, 0]]);
+        let track = Track { net: &net, unload: &dock, charge: &dock, load: &none, bases: None };
+        let mut w = Worker::new(1, 7, [0, 0, 0], &t);
+        w.tool = Some(Tool::Bore);
+        assert_eq!(w.tick(&track, &t), Step::Stopped);
+        assert_eq!(w.note, Note::NoEnd);
+    }
+
+    #[test]
     fn a_worker_unloads_at_a_dock_it_passes() {
         // 0.18.5, the owner: «работники не замечают доков». A hold far from full is given to an
         // unload dock on the way; once a pass, and it rides on when the dock cannot take it.
@@ -1132,11 +1268,13 @@ pub(crate) mod tests {
         let net = line(6);
         let unload = BTreeSet::from([[3, 0, 1]]);
         let none = BTreeSet::new();
+        let full = base::Bases::complete(&net);
         let track = Track {
             net: &net,
             unload: &unload,
             charge: &none,
             load: &none,
+            bases: Some(&full),
         };
         let mut w = worker(&t);
         w.hold.add("minecraft:oak_log", 5, 64);
@@ -1170,11 +1308,13 @@ pub(crate) mod tests {
         let net = line(6);
         let charge = BTreeSet::from([[3, 0, -1]]);
         let none = BTreeSet::new();
+        let full = base::Bases::complete(&net);
         let track = Track {
             net: &net,
             unload: &none,
             charge: &charge,
             load: &none,
+            bases: Some(&full),
         };
         let mut w = worker(&t);
         w.charge = 0.5 * t.worker_battery;
@@ -1200,11 +1340,13 @@ pub(crate) mod tests {
         let unload = BTreeSet::from([[1, 0, 1]]);
         let load = BTreeSet::from([[5, 0, 1]]);
         let none = BTreeSet::new();
+        let full = base::Bases::complete(&net);
         let track = Track {
             net: &net,
             unload: &unload,
             charge: &none,
             load: &load,
+            bases: Some(&full),
         };
         let mut w = Worker::new(1, 7, [0, 0, 0], &t);
         w.tool = Some(Tool::Hold);
@@ -1222,11 +1364,13 @@ pub(crate) mod tests {
         let t = Tuning::default();
         let net = line(6);
         let none = BTreeSet::new();
+        let full = base::Bases::complete(&net);
         let track = Track {
             net: &net,
             unload: &none,
             charge: &none,
             load: &none,
+            bases: Some(&full),
         };
         let mut w = Worker::new(1, 7, [0, 0, 0], &t);
         w.tool = Some(Tool::Reaper);
@@ -1296,11 +1440,13 @@ pub(crate) mod tests {
         }
         rail(&mut net, [1, 3, 0], Face::YPos);
         let none = BTreeSet::new();
+        let full = base::Bases::complete(&net);
         let track = Track {
             net: &net,
             unload: &none,
             charge: &none,
             load: &none,
+            bases: Some(&full),
         };
         let mut w = Worker::new(1, 7, [1, 0, 0], &t);
         w.tool = Some(Tool::Reaper);
@@ -1354,11 +1500,13 @@ pub(crate) mod tests {
         }
         let unload = BTreeSet::from([[1, 3, 0]]);
         let none = BTreeSet::new();
+        let full = base::Bases::complete(&net);
         let track = Track {
             net: &net,
             unload: &unload,
             charge: &none,
             load: &none,
+            bases: Some(&full),
         };
         let mut w = worker(&t);
         w.cell = [0, 0, 0];

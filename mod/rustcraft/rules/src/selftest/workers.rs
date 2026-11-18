@@ -5,7 +5,7 @@
 //! reaper's breaks are reported to Path-of-craft-tree (X1, the contract's `break`).
 
 use super::magistral::{channel, place_node};
-use super::{Bench, Build, Memo, Scenario, at, count_of, plot_area, same};
+use super::{Bench, Build, Memo, Scenario, at, base, count_of, plot_area, same};
 use crate::geom::{Face, Pos};
 use crate::monorail::shape;
 use crate::net::topology::ChannelKind;
@@ -56,7 +56,8 @@ fn rail(o: Pos, x: i32) -> Pos {
     at(o, [x, 1, 0])
 }
 
-/// A floor of stone and a straight track of floor rails on it.
+/// A floor of stone and a straight track of floor rails on it, with its base (0.19.1): an unload
+/// dock (full) under the first rail, a charge dock under the last.
 fn track(b: &mut dyn Bench, o: Pos) -> Result<(), String> {
     for x in -1..=TRACK + 1 {
         for z in -2..=2 {
@@ -70,7 +71,7 @@ fn track(b: &mut dyn Bench, o: Pos) -> Result<(), String> {
             &[(shape::MOUNT, shape::mount_value(Face::YNeg))],
         )?;
     }
-    Ok(())
+    base(b, Some(rail(o, 0)), Some(rail(o, TRACK)))
 }
 
 fn worker_of(b: &dyn Bench, m: &Memo) -> Result<crate::worker::Worker, String> {
@@ -271,7 +272,7 @@ fn reaper_columns(o: Pos, _: &Tuning) -> Scenario {
         move |b, _| {
             b.place(at(base, [0, -1, 0]), "minecraft:dirt", &[])?;
             for y in 0..3 {
-                b.place(at(base, [0, y, 0]), "minecraft:bamboo", &[])?;
+                b.place(at(base, [0, y, 0]), "minecraft:bamboo", &[("stage", "1")])?;
             }
             Ok(())
         },
@@ -519,7 +520,7 @@ fn grass_track(b: &mut dyn Bench, o: Pos) -> Result<(), String> {
             &[(shape::MOUNT, shape::mount_value(Face::YNeg))],
         )?;
     }
-    Ok(())
+    base(b, Some(rail(o, 0)), Some(rail(o, TRACK)))
 }
 
 /// 0.18.5, the owner: «работники сами готовят землю». A reaper with wheat seeds rides along a lawn:
@@ -607,6 +608,8 @@ fn unloads_into_a_chest_by_the_magistral(o: Pos, t: &Tuning) -> Scenario {
         "worker_unloads_into_a_chest_by_the_magistral",
         o,
         move |b, _| {
+            // Its own unload dock at the far end: the base's goes.
+            b.place(at(o, [0, 0, 0]), STONE, &[])?;
             b.place(dock, DOCK_UNLOAD, &[])?;
             place_node(b, node, 1)?;
             b.place(housing, HOUSING, &[])?;
@@ -636,6 +639,8 @@ fn charges_at_the_dock(o: Pos, t: &Tuning) -> Scenario {
     Scenario::new("worker_charges_at_the_dock", plot_area(o))
         .then("the track, a charge dock with a crystal", move |b, _| {
             track(b, o)?;
+            // Its own charge dock: the base's goes.
+            b.place(at(o, [TRACK, 0, 0]), STONE, &[])?;
             b.place(dock, DOCK_CHARGE, &[])?;
             b.place(at(dock, [0, 0, 1]), CRYSTAL, &[])
         })
@@ -656,7 +661,8 @@ fn stops_without_a_dock(o: Pos, t: &Tuning) -> Scenario {
     with_worker(
         "worker_stops_without_a_dock",
         o,
-        |_, _| Ok(()),
+        // The base's unload dock goes.
+        move |b, _| b.place(at(o, [0, 0, 0]), STONE, &[]),
         Some(Tool::Saw),
         shovels(n),
     )

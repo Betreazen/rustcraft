@@ -1,7 +1,7 @@
 //! Slice 18, wave 2, rail and gear (plan `s18-w2-rail-gear.md`): what the second audit left of the
 //! turret's windows and kills, the workers, the monorail and the gear.
 
-use super::{Build, Scenario, at, plot_area};
+use super::{Build, Scenario, at, base, plot_area};
 use crate::geom::Pos;
 use crate::modules::Module;
 use crate::tuning::Tuning;
@@ -149,6 +149,8 @@ fn chassis_window_sets_the_bores_height(o: Pos, _: &Tuning) -> Scenario {
             for x in 0..=3 {
                 b.place(at(o, [x, 1, 0]), MONORAIL, &[(shape::MOUNT, shape::mount_value(crate::geom::Face::YNeg))])?;
             }
+            // 0.19.1: its docks under the west end's rails.
+            base(b, Some(at(o, [0, 1, 0])), Some(at(o, [1, 1, 0])))?;
             let id = b.spawn_worker(at(o, [0, 1, 0]), OWNER, Some(Tool::Bore), &[(MONORAIL, 8), ("minecraft:cobblestone", 16)], None)?;
             m.mark("worker", id as f64);
             b.set_worker_modules(id, &[crate::modules::Module::Height.item()])?;

@@ -2,7 +2,7 @@
 //! a reaper climbs a jungle trunk for its cocoa, hangs from a ceiling rail over kelp, rides up a
 //! bamboo on a wall rail, and rides a lift from the upper floor to the unload dock below.
 
-use super::{Bench, Build, Memo, Scenario, at, count_of, plot_area, same};
+use super::{Bench, Build, Memo, Scenario, at, base, base_at, count_of, plot_area, same};
 use crate::geom::{Face, Pos};
 use crate::monorail::shape;
 use crate::tuning::Tuning;
@@ -88,6 +88,8 @@ fn reaper_climbs_a_trunk(o: Pos, _: &Tuning) -> Scenario {
             for y in 1..=5 {
                 rail(b, at(o, [3, y, 1]), Face::ZNeg)?;
             }
+            // 0.19.1: its base, under the bottom rail and beside it.
+            base_at(b, Some(at(o, [3, 0, 1])), Some(at(o, [2, 1, 1])))?;
             b.place(pod, "minecraft:cocoa", &[("age", "2"), ("facing", "west")])
         })
         .then("a reaper at the foot of the trunk", move |b, m| {
@@ -115,6 +117,8 @@ fn reaper_hangs_over_kelp(o: Pos, _: &Tuning) -> Scenario {
             for x in 0..=6 {
                 rail(b, at(o, [x, 4, 0]), Face::YPos)?;
             }
+            // 0.19.1: its base, in the roof the rails hang from.
+            base_at(b, Some(at(o, [0, 5, 0])), Some(at(o, [6, 5, 0])))?;
             b.place(kelp(1), "minecraft:kelp_plant", &[])?;
             b.place(kelp(2), "minecraft:kelp_plant", &[])?;
             b.place(kelp(3), "minecraft:kelp", &[])
@@ -146,10 +150,13 @@ fn reaper_rides_up_bamboo(o: Pos, _: &Tuning) -> Scenario {
                 b.place(at(o, [3, y, -1]), STONE, &[])?;
                 rail(b, at(o, [3, y, 0]), Face::ZNeg)?;
             }
+            // Stage 1: a bamboo that grows no more, so no new shoot stands over the cut by chance
+            // (a random tick grew one on the bench, 0.19.1).
             for y in 1..=6 {
-                b.place(bamboo(y), "minecraft:bamboo", &[])?;
+                b.place(bamboo(y), "minecraft:bamboo", &[("stage", "1")])?;
             }
-            Ok(())
+            // 0.19.1: its base, under the bottom rail and in the wall beside it.
+            base_at(b, Some(at(o, [3, 0, 0])), Some(at(o, [3, 1, -1])))
         })
         .then("a reaper at the foot of the wall", move |b, m| {
             spawn(b, m, at(o, [3, 1, 0]), Tool::Reaper, &[])
@@ -190,7 +197,8 @@ fn rides_a_lift_to_the_dock_below(o: Pos, t: &Tuning) -> Scenario {
                 b.place(at(o, [x, 4, 0]), STONE, &[])?;
                 rail(b, at(o, [x, 5, 0]), Face::YNeg)?;
             }
-            b.place(dock, DOCK_UNLOAD, &[])
+            b.place(dock, DOCK_UNLOAD, &[])?;
+            base(b, None, Some(at(o, [6, 1, 0])))
         })
         .then("a reaper upstairs with a full hold", move |b, m| {
             spawn(b, m, at(o, [0, 5, 0]), Tool::Reaper, &[("minecraft:wooden_shovel", n)])
@@ -311,7 +319,7 @@ fn filtered(
             for x in 0..=6 {
                 rail(b, at(o, [x, 1, 0]), Face::YNeg)?;
             }
-            Ok(())
+            base(b, Some(at(o, [0, 1, 0])), Some(at(o, [6, 1, 0])))
         })
         .then("what stands beside it", build)
         .then("a worker with a filter", move |b, m| {
@@ -373,6 +381,7 @@ fn map_says_all_mapped(o: Pos, _: &Tuning) -> Scenario {
             for x in 0..=6 {
                 rail(b, at(o, [x, 1, 0]), Face::YNeg)?;
             }
+            base(b, Some(at(o, [0, 1, 0])), Some(at(o, [6, 1, 0])))?;
             spawn(b, m, at(o, [0, 1, 0]), Tool::Map, &[])
         })
         .until("it says all round its way is mapped", 1200, |b, m| {
@@ -391,7 +400,10 @@ fn unloads_into_a_portal_dock(o: Pos, t: &Tuning) -> Scenario {
             for x in 0..=6 {
                 rail(b, at(o, [x, 1, 0]), Face::YNeg)?;
             }
-            b.place(dock, "rustcraft:portal_dock", &[])
+            b.place(dock, "rustcraft:portal_dock", &[])?;
+            // 0.19.1: the cargo worker's base: a charge dock and a load dock.
+            base(b, None, Some(at(o, [0, 1, 0])))?;
+            b.place(at(o, [0, 1, -1]), "rustcraft:dock_load", &[])
         })
         .then("a cargo worker with a full hold", move |b, m| {
             spawn(b, m, at(o, [0, 1, 0]), Tool::Hold, &[("minecraft:wooden_shovel", n)])
@@ -414,6 +426,7 @@ fn load_dock_takes_from_a_chest(o: Pos, _: &Tuning) -> Scenario {
             }
             b.place(dock, "rustcraft:dock_load", &[])?;
             b.place(chest, "minecraft:chest", &[])?;
+            base(b, Some(at(o, [6, 1, 0])), Some(at(o, [3, 1, 0])))?;
             let n = b.insert(chest, "minecraft:cobblestone", 32)?;
             if n == 32 { Ok(()) } else { Err(format!("{n} went into the chest")) }
         })
@@ -440,6 +453,9 @@ fn bore_follows_the_ground_with_its_best_rail(o: Pos, _: &Tuning) -> Scenario {
             for x in 0..=3 {
                 rail(b, at(o, [x, 1, 0]), Face::YNeg)?;
             }
+            // 0.19.1: its docks at the west end; it bores east, away from them.
+            b.place(at(o, [0, 1, 1]), DOCK_UNLOAD, &[])?;
+            b.place(at(o, [0, 1, -1]), "rustcraft:dock_charge", &[])?;
             spawn(
                 b,
                 m,
@@ -577,7 +593,8 @@ fn grown_block_reaches_the_archeology_table(o: Pos, t: &Tuning) -> Scenario {
             b.place(table, "rustcraft:archeo", &[])?;
             b.set_owner(table, owner, 1)?;
             b.set_buffer(table, 1000.0)?;
-            b.put(table, 1, "minecraft:brush", 1)
+            b.put(table, 1, "minecraft:brush", 1)?;
+            base(b, None, Some(at(o, [0, 1, 0])))
         })
         .then("a grab with a hold full of grown suspicious sand", move |b, m| {
             let grown_sand = grown::hold_name(SUSPICIOUS, true);
@@ -611,6 +628,7 @@ fn guard_kill_drops_where_the_mob_fell(o: Pos, _: &Tuning) -> Scenario {
             for x in 0..=6 {
                 rail(b, at(o, [x, 1, 0]), Face::YNeg)?;
             }
+            base(b, Some(at(o, [0, 1, 0])), Some(at(o, [6, 1, 0])))?;
             let id = b.spawn_mob(ZOGLIN, mob_at, Some(2.0))?;
             m.mark("mob", f64::from(id));
             Ok(())

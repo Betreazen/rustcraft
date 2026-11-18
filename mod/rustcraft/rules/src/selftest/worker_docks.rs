@@ -6,14 +6,17 @@
 //! carries it to the unload dock and the chest beside it (guide `dock_unload`, `dock_load`).
 
 use super::transport::{chest, item_line, joint};
-use super::{Bench, Build, Memo, Scenario, at, count_of, plot_area, same};
+use super::{Bench, Build, Memo, Scenario, at, base, count_of, plot_area, same};
 use crate::geom::{Face, Pos};
 use crate::monorail::shape;
 use crate::net::items::Mode;
 use crate::tuning::Tuning;
-use crate::worker::{Errand, Tool, Worker};
+use crate::worker::{Errand, Note, Tool, Worker};
 
-pub const ALL: [Build; 6] = [
+pub const ALL: [Build; 9] = [
+    worker_stands_without_its_docks,
+    bore_bores_away_from_its_docks,
+    bore_on_a_loop_says_so,
     worker_unloads_at_a_dock_it_passes,
     worker_unloads_at_a_dock_under_its_rail,
     worker_unloads_at_a_dock_placed_after_it,
@@ -78,6 +81,89 @@ fn spawn(
     Ok(())
 }
 
+/// 0.19.1, the owner: «если на монорельсе нет зарядки и разгрузки, работник ставится, но не
+/// едет». A saw on a bare track stands and says it lacks an unload dock, then a charge dock; with
+/// both it rides.
+fn worker_stands_without_its_docks(o: Pos, _: &Tuning) -> Scenario {
+    let start = rail_cell(o, 0);
+    let still = move |b: &dyn Bench, m: &Memo, note: Note| -> Result<(), String> {
+        let w = worker_of(b, m)?;
+        same("cell", w.cell, start)?;
+        same("note", w.note, note)
+    };
+    Scenario::new("worker_stands_without_its_docks", plot_area(o))
+        .then("a bare track and a saw on it", move |b, m| {
+            track(b, o)?;
+            spawn(b, m, o, Tool::Saw, &[], None)
+        })
+        .wait(40)
+        .check("it stands: no unload dock", move |b, m| still(b, m, Note::NoUnloadDock))
+        .then("an unload dock beside the far end", move |b, _| b.place(at(o, [LAST, 1, 2]), DOCK_UNLOAD, &[]))
+        .wait(40)
+        .check("it stands: no charge dock", move |b, m| still(b, m, Note::NoChargeDock))
+        .then("a charge dock beside the far end", move |b, _| b.place(at(o, [LAST, 1, 0]), DOCK_CHARGE, &[]))
+        .until("with both it rides", RIDE, move |b, m| Ok(worker_of(b, m)?.cell != start))
+}
+
+/// The bore's line: rails x 0..=3 at y 1, z 1, on a stone floor, stone two high past both ends
+/// (x -3..=-1 and 4..=6); its docks beside its west end.
+fn bore_line(b: &mut dyn Bench, o: Pos) -> Result<(), String> {
+    for x in -4..=7 {
+        for z in -1..=3 {
+            b.place(at(o, [x, 0, z]), STONE, &[])?;
+        }
+    }
+    for x in (-3..=-1).chain(4..=6) {
+        for y in 1..=2 {
+            b.place(at(o, [x, y, 1]), STONE, &[])?;
+        }
+    }
+    for x in 0..=3 {
+        b.place(rail_cell(o, x), MONORAIL, &[(shape::MOUNT, shape::mount_value(Face::YNeg))])?;
+    }
+    b.place(at(o, [0, 1, 2]), DOCK_UNLOAD, &[])?;
+    b.place(at(o, [0, 1, 0]), DOCK_CHARGE, &[])
+}
+
+/// 0.19.1, the owner: «бур всегда уходит от зарядки и разгрузчика». Its docks at the west end of
+/// its line, it bores east past the east end and never west past the docks.
+fn bore_bores_away_from_its_docks(o: Pos, _: &Tuning) -> Scenario {
+    Scenario::new("worker_bore_bores_away_from_its_docks", plot_area(o))
+        .then("a line in rock, its docks at the west end", move |b, m| {
+            bore_line(b, o)?;
+            let id = b.spawn_worker(rail_cell(o, 0), OWNER, Some(Tool::Bore), &[(MONORAIL, 4), (COBBLE, 8)], None)?;
+            m.mark("worker", id as f64);
+            Ok(())
+        })
+        .until("a rail lies east of the line", RIDE, move |b, _| Ok(b.block(rail_cell(o, 4)) == MONORAIL))
+        .wait(100)
+        .check("the rock west of the docks stands", move |b, _| {
+            same("west", b.block(rail_cell(o, -1)), STONE.to_owned())
+        })
+}
+
+/// A bore on a loop has no end to bore from: it stands and says so.
+fn bore_on_a_loop_says_so(o: Pos, _: &Tuning) -> Scenario {
+    Scenario::new("worker_bore_on_a_loop_says_so", plot_area(o))
+        .then("a loop with its docks", move |b, m| {
+            for x in -1..=4 {
+                for z in -1..=3 {
+                    b.place(at(o, [x, 0, z]), STONE, &[])?;
+                }
+            }
+            for (x, z) in [(0, 0), (1, 0), (2, 0), (2, 1), (2, 2), (1, 2), (0, 2), (0, 1)] {
+                b.place(at(o, [x, 1, z]), MONORAIL, &[(shape::MOUNT, shape::mount_value(Face::YNeg))])?;
+            }
+            b.place(at(o, [3, 1, 1]), DOCK_UNLOAD, &[])?;
+            b.place(at(o, [1, 1, 1]), DOCK_CHARGE, &[])?;
+            let id = b.spawn_worker(at(o, [0, 1, 0]), OWNER, Some(Tool::Bore), &[(MONORAIL, 4), (COBBLE, 8)], None)?;
+            m.mark("worker", id as f64);
+            Ok(())
+        })
+        .until("it says its rails have no end", RIDE, |b, m| Ok(worker_of(b, m)?.note == Note::NoEnd))
+        .check("and stands", move |b, m| same("cell", worker_of(b, m)?.cell, at(o, [0, 1, 0])))
+}
+
 /// A saw worker with a few shovels rides past `dock`; the chest beside the dock gets them all and
 /// the worker rides on, empty, at work.
 fn unloads_in_passing(
@@ -93,13 +179,21 @@ fn unloads_in_passing(
     };
     let mut s = Scenario::new(name, plot_area(o)).then("the track", move |b, _| {
         track(b, o)?;
+        base(b, None, Some(rail_cell(o, LAST)))?;
         if dock_after { Ok(()) } else { place_dock(b) }
     });
     s = s.then("a worker carrying a few shovels", move |b, m| {
         spawn(b, m, o, Tool::Saw, &[(SHOVEL, CARRIED)], None)
     });
     if dock_after {
-        s = s.wait(20).then("the dock, placed once the worker rides", move |b, _| place_dock(b));
+        s = s
+            .wait(20)
+            .check("0.19.1: without an unload dock it stands where it was placed", move |b, m| {
+                let w = worker_of(b, m)?;
+                same("cell", w.cell, rail_cell(o, 0))?;
+                same("note", w.note, Note::NoUnloadDock)
+            })
+            .then("the dock, placed after the worker", move |b, _| place_dock(b));
     }
     s.until("the shovels reach the chest beside the dock", RIDE, move |b, _| {
         Ok(count_of(&b.items(chest_at), SHOVEL) == CARRIED)
@@ -149,6 +243,7 @@ fn worker_tops_up_at_a_charge_dock_it_passes(o: Pos, t: &Tuning) -> Scenario {
     Scenario::new("worker_tops_up_at_a_charge_dock_it_passes", plot_area(o))
         .then("the track, a charge dock with a crystal and a full buffer", move |b, _| {
                 track(b, o)?;
+            base(b, Some(rail_cell(o, 0)), None)?;
             b.place(dock, DOCK_CHARGE, &[])?;
             b.place(at(dock, [0, 0, 1]), CRYSTAL, &[])
         })
@@ -196,6 +291,7 @@ fn unload_dock_fills_the_storage_over_the_magistral(o: Pos, _: &Tuning) -> Scena
     Scenario::new("worker_unload_dock_fills_the_storage_over_the_magistral", plot_area(o))
         .then("the track, the magistral with a storage, the unload dock between", move |b, _| {
                 track(b, o)?;
+            base(b, None, Some(rail_cell(o, 0)))?;
             magistral_and_storage(b, o)?;
             b.place(dock, DOCK_UNLOAD, &[])
         })
@@ -222,6 +318,7 @@ fn storage_loads_a_cargo_worker_over_the_magistral(o: Pos, _: &Tuning) -> Scenar
     Scenario::new("worker_storage_loads_a_cargo_worker_over_the_magistral", plot_area(o))
         .then("the magistral and its storage, a chest «из блока» of cobblestone", move |b, _| {
                 track(b, o)?;
+            base(b, None, Some(rail_cell(o, 0)))?;
             magistral_and_storage(b, o)?;
             b.place(source, CHEST, &[])?;
             joint(b, line_o, 1, Mode::From, 0)?;
