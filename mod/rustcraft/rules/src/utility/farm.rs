@@ -120,7 +120,19 @@ pub fn heads(animals: &[Fed]) -> Vec<(&'static str, usize)> {
 
 /// Whether a column of `depths` (water blocks under each of the 5 × 5 cells) is open water.
 pub fn open_water(depths: &[i32]) -> bool {
-    depths.len() == (WATER_SIDE * WATER_SIDE) as usize && depths.iter().all(|d| *d >= WATER_DEPTH)
+    open_water_beside(depths, &[])
+}
+
+/// 0.18.4: as `open_water`, but a cell `line` marks (the magistral comes to the station over it)
+/// may stand on a pier: the line can only reach the station from its side, so its cells and what
+/// holds them up do not count. The station's own cell, the middle one, never does.
+pub fn open_water_beside(depths: &[i32], line: &[bool]) -> bool {
+    let middle = depths.len() / 2;
+    depths.len() == (WATER_SIDE * WATER_SIDE) as usize
+        && depths
+            .iter()
+            .enumerate()
+            .all(|(i, d)| *d >= WATER_DEPTH || (i != middle && line.get(i).copied().unwrap_or(false)))
 }
 
 /// The fishing station's next wait, from a random number 0..1; slice 18 (guide `fishery`): Lure
@@ -289,6 +301,21 @@ mod tests {
         shallow[7] = 1;
         assert!(!open_water(&shallow));
         assert!(!open_water(&[3; 9]));
+        // 0.18.4: a pier under the line beside the station is no water, and does not matter.
+        let mut pier = [2; 25];
+        let mut line = [false; 25];
+        for i in [2, 7] {
+            pier[i] = 0;
+            line[i] = true;
+        }
+        assert!(!open_water(&pier));
+        assert!(open_water_beside(&pier, &line));
+        pier[17] = 0;
+        assert!(!open_water_beside(&pier, &line), "a pier off the line still counts");
+        let mut under = [2; 25];
+        under[12] = 0;
+        let all = [true; 25];
+        assert!(!open_water_beside(&under, &all), "the station itself stands over water");
         assert!((FISH_MIN_TICKS..=FISH_MAX_TICKS).contains(&fish_wait(0.5, 0)));
         assert_eq!(harvest(false), ("minecraft:honeycomb", 3));
         assert!(is_feed("minecraft:carrot") && !is_feed("minecraft:stone"));

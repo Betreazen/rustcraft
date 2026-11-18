@@ -101,8 +101,34 @@ fn depths(game: &Game<'_>, pos: Pos) -> Vec<i32> {
     out
 }
 
+/// 0.18.4: whether `block` is the magistral's body, which may come to the station over its water.
+fn is_line(block: &str) -> bool {
+    use crate::game::rustcraft_content::{HOUSING, NODE};
+    block == HOUSING || block == NODE
+}
+
+/// 0.18.4: the cells of the 5 × 5 (in `depths`' order) the magistral passes over, at the
+/// station's height or the one above: the line reaches the station only from its side, so these
+/// cells and the pier under them are not asked to be open water.
+fn line_cells(game: &Game<'_>, pos: Pos) -> Vec<bool> {
+    let half = rules::WATER_SIDE / 2;
+    let mut out = Vec::new();
+    for dx in -half..=half {
+        for dz in -half..=half {
+            out.push((0..=1).any(|dy| is_line(&game.native_block([pos[0] + dx, pos[1] + dy, pos[2] + dz]))));
+        }
+    }
+    out
+}
+
+/// Whether the station has its open water: the 5 × 5 under it, the sky over it, the magistral that
+/// feeds it aside (0.18.4).
+fn water_open(game: &Game<'_>, pos: Pos) -> bool {
+    rules::open_water_beside(&depths(game, pos), &line_cells(game, pos)) && !sky_closed(game, pos)
+}
+
 /// Slice 18: whether any cell over the 5 × 5 water is filled: the row beside the station and the
-/// row over it.
+/// row over it. The magistral's body does not count (0.18.4).
 fn sky_closed(game: &Game<'_>, pos: Pos) -> bool {
     let half = rules::WATER_SIDE / 2;
     let mut filled = Vec::new();
@@ -113,7 +139,9 @@ fn sky_closed(game: &Game<'_>, pos: Pos) -> bool {
                     continue;
                 }
                 let b = game.native_block([pos[0] + dx, pos[1] + dy, pos[2] + dz]);
-                filled.push(!matches!(b.as_str(), "minecraft:air" | "minecraft:cave_air" | "minecraft:void_air"));
+                filled.push(
+                    !matches!(b.as_str(), "minecraft:air" | "minecraft:cave_air" | "minecraft:void_air") && !is_line(&b),
+                );
             }
         }
     }
@@ -222,7 +250,7 @@ fn fish(game: &mut Game<'_>, dimension: &str, pos: Pos, cost: f64, now: u64) -> 
     let Some(rod) = items(game, pos).first().cloned().flatten() else {
         return Shown::Blocked("fish_no_rod");
     };
-    if !rules::open_water(&depths(game, pos)) || sky_closed(game, pos) {
+    if !water_open(game, pos) {
         return Shown::Blocked("fish_no_water");
     }
     let max = game.items().get(&rod.item).map_or(0, |i| i.max_damage);
@@ -269,7 +297,7 @@ fn fish(game: &mut Game<'_>, dimension: &str, pos: Pos, cost: f64, now: u64) -> 
 /// Slice 18 (guide `ui.js`, window `fishery`): the station's rows: the water, the rod (its
 /// enchantments and durability), the wait to the next catch.
 pub(super) fn fishery_rows(game: &Game<'_>, dimension: &str, pos: Pos, now: u64) -> Vec<Text> {
-    let open = rules::open_water(&depths(game, pos)) && !sky_closed(game, pos);
+    let open = water_open(game, pos);
     let water = if open {
         line("rustcraft.util.fishery.water_ok", "Open water 5×5, deeper than 2", &[])
     } else {

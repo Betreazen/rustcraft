@@ -27,12 +27,13 @@ use crate::storage::modules::{FILTER, SOCKET_FILTER, SOCKET_STACK, STACK_MODULES
 use crate::storage::terminal::{self, Press};
 use crate::tuning::Tuning;
 
-pub const ALL: [Build; 15] = [
+pub const ALL: [Build; 16] = [
     crafter_asks_the_storage,
     builder_builds_the_turned_plan_from_storage,
     brewer_brews_through_the_chain,
     butcher_energy_and_kill_xp,
     fishery_keeps_the_rods_last_point,
+    fishery_fishes_beside_its_line,
     kitchen_cake_with_milk_from_a_tank,
     repair_mends_a_rod_with_string,
     util_work_mode_switch,
@@ -323,6 +324,28 @@ fn fishery_keeps_the_rods_last_point(o: Pos, _: &Tuning) -> Scenario {
             same("rod", super::count_of(&b.items(p), "minecraft:fishing_rod"), 1)
         })
         .then("a block over the water", move |b, _| b.place(at(o, [2, 3, 2]), "minecraft:stone", &[]))
+        .until("it says there is not enough open water", 100, move |b, _| {
+            Ok(status_key(b, p) == "rustcraft.util.fish_no_water")
+        })
+}
+
+fn fishery_fishes_beside_its_line(o: Pos, _: &Tuning) -> Scenario {
+    // 0.18.4: the magistral reaches a station only from its side, over the water, often on a
+    // pier; neither may close the station's water (the owner's river station said «мало воды»).
+    let p = at(o, [4, 3, 0]);
+    Scenario::new("fishery184_fishes_beside_its_line", plot_area(o))
+        .then("a station on open water, its line coming over a stone pier from the side", move |b, _| {
+            basin(b, o)?;
+            for z in [-3, -2, -1] {
+                b.place(at(o, [4, 2, z]), "minecraft:stone", &[])?;
+                b.place(at(o, [4, 3, z]), "rustcraft:housing", &[])?;
+            }
+            b.place(p, "rustcraft:fishery", &[])?;
+            b.set_buffer(p, 200.0)?;
+            same("rod in", b.insert(p, "minecraft:fishing_rod", 1)?, 1)
+        })
+        .until("it fishes", 100, move |b, _| Ok(status_key(b, p) == "rustcraft.util.working"))
+        .then("a stone block beside it, off the line", move |b, _| b.place(at(o, [5, 3, 1]), "minecraft:stone", &[]))
         .until("it says there is not enough open water", 100, move |b, _| {
             Ok(status_key(b, p) == "rustcraft.util.fish_no_water")
         })

@@ -111,4 +111,25 @@ mod tests {
         }
         assert!(missing.is_empty(), "open models that still occlude: {missing:?}");
     }
+    #[test]
+    fn every_block_drops_when_mined_with_a_pickaxe() {
+        // 0.18.4: the blocks copy the furnace, the iron block or the amethyst block, which drop only
+        // to their right tool; a block left out of mineable/pickaxe had none and dropped nothing
+        // (the owner's miner broke into air).
+        let tag = std::fs::read_to_string(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../content/data/minecraft/tags/block/mineable/pickaxe.json"
+        ))
+        .unwrap();
+        let tag: Value = serde_json::from_str(&tag).unwrap();
+        let listed: Vec<&str> = tag["values"].as_array().unwrap().iter().filter_map(Value::as_str).collect();
+        let mut missing: Vec<String> = std::fs::read_dir(format!("{ASSETS}/blockstates"))
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .map(|e| format!("rustcraft:{}", e.file_name().to_string_lossy().trim_end_matches(".json")))
+            .filter(|id| !listed.contains(&id.as_str()))
+            .collect();
+        missing.sort();
+        assert!(missing.is_empty(), "blocks no tool mines: {missing:?}");
+    }
 }
