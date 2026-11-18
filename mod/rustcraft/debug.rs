@@ -231,7 +231,7 @@ pub(super) fn flow(dimension: &str, route: &str, item: &str, n: u64) {
         .unwrap_or_else(PoisonError::into_inner)
         .entry(dimension.to_owned())
         .or_default()
-        .add(route, item, n);
+        .add(route, &debug::short_key(item), n);
 }
 
 /// `flow` of items a player took out of the storage `storage`.
@@ -759,7 +759,7 @@ fn workers_list(game: &mut Game<'_>, owner: Option<&str>) -> Vec<String> {
 const PACK_WIDTH: usize = 180;
 
 fn counted(items: &[(String, u64)]) -> Vec<String> {
-    items.iter().map(|(k, n)| format!("{k} x{n}")).collect()
+    items.iter().map(|(k, n)| format!("{} x{n}", debug::short_key(k))).collect()
 }
 
 fn storage_view(game: &mut Game<'_>, pos: Pos, dimension: Option<String>) -> Vec<String> {
@@ -871,7 +871,7 @@ fn orders_lines(dim: &str, id: u32) -> Vec<String> {
     let held: Vec<String> = held
         .iter()
         .filter(|h| h.storage == id)
-        .map(|h| format!("{} x{} at {} order#{}", h.item, h.count, pos_text(h.machine), h.order))
+        .map(|h| format!("{} x{} at {} order#{}", debug::short_key(&h.item), h.count, pos_text(h.machine), h.order))
         .collect();
     out.extend(debug::pack("  held at machines: ", &held, PACK_WIDTH));
     let riding: Vec<String> = ships
@@ -880,7 +880,7 @@ fn orders_lines(dim: &str, id: u32) -> Vec<String> {
         .flat_map(|s| {
             s.items
                 .iter()
-                .map(move |(item, n)| format!("{item} x{n} order#{} {:?}", s.order, s.leg))
+                .map(move |(item, n)| format!("{} x{n} order#{} {:?}", debug::short_key(item), s.order, s.leg))
         })
         .collect();
     out.extend(debug::pack("  riding: ", &riding, PACK_WIDTH));

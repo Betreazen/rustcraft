@@ -121,6 +121,21 @@ pub fn within(centre: [f64; 3], p: Pos, radius: i32) -> bool {
     d2 <= f64::from(radius) * f64::from(radius)
 }
 
+/// A storage key as an answer or the journal writes it: a stack with components keeps its item id
+/// and a short hash of its saved form (`minecraft:stone#1a2b3c4d`) instead of the whole hex.
+pub fn short_key(key: &str) -> String {
+    match key.split_once('#') {
+        Some((item, payload)) if payload.len() > 8 => {
+            // FNV-1a: stable across runs, so one stack reads the same in every line.
+            let hash = payload
+                .bytes()
+                .fold(0x811c_9dc5_u32, |h, b| (h ^ u32::from(b)).wrapping_mul(0x0100_0193));
+            format!("{item}#{hash:08x}")
+        }
+        _ => key.to_owned(),
+    }
+}
+
 /// The `n` most numerous items, the most first (by name among equals).
 pub fn top_items(items: &std::collections::BTreeMap<String, u64>, n: usize) -> Vec<(String, u64)> {
     let mut all: Vec<(String, u64)> = items

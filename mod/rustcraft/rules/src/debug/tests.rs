@@ -323,3 +323,14 @@ fn orders_start_wait_finish_and_go() {
     let b: BTreeSet<u32> = [2, 3].into();
     assert_eq!(set_diff(&a, &b), (vec![3], vec![1]));
 }
+
+#[test]
+fn a_component_key_is_shortened_the_same_way_every_time() {
+    let long = format!("minecraft:stone#{}", "0a0b".repeat(40));
+    let short = short_key(&long);
+    assert!(short.starts_with("minecraft:stone#") && short.len() == "minecraft:stone#".len() + 8);
+    assert_eq!(short, short_key(&long));
+    assert_ne!(short, short_key(&format!("minecraft:stone#{}", "0a0c".repeat(40))));
+    assert_eq!(short_key("minecraft:iron_pickaxe@12"), "minecraft:iron_pickaxe@12");
+    assert_eq!(short_key("minecraft:book#"), "minecraft:book#");
+}
