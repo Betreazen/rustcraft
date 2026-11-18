@@ -27,7 +27,7 @@ use crate::storage::modules::{FILTER, SOCKET_FILTER, SOCKET_STACK, STACK_MODULES
 use crate::storage::terminal::{self, Press};
 use crate::tuning::Tuning;
 
-pub const ALL: [Build; 19] = [
+pub const ALL: [Build; 20] = [
     crafter_asks_the_storage,
     builder_builds_the_turned_plan_from_storage,
     brewer_brews_through_the_chain,
@@ -37,6 +37,7 @@ pub const ALL: [Build; 19] = [
     fishery_hands_its_catch_to_a_chest,
     kitchen_cake_with_milk_from_a_tank,
     kitchen_takes_only_its_dishes,
+    repair_takes_only_what_it_mends,
     repair_mends_a_rod_with_string,
     util_work_mode_switch,
     order_bread_through_the_kitchen,
@@ -432,6 +433,31 @@ fn kitchen_takes_only_its_dishes(o: Pos, _: &Tuning) -> Scenario {
         .check("now wheat goes in, ore still not", move |b, _| {
             same("wheat", b.insert(p, "minecraft:wheat", 3)?, 3)?;
             same("ore", b.insert(p, "minecraft:raw_iron", 4)?, 0)
+        })
+}
+
+fn repair_takes_only_what_it_mends(o: Pos, _: &Tuning) -> Scenario {
+    // 0.19.3 (the owner: «ремонтный стенд всё ещё забирает вещи, это останавливает выполнение
+    // заказов»): the net put an order's sticks and chests in its item slots and any material in
+    // the material slots.
+    let p = at(o, [3, 1, 0]);
+    const WORN: &str = r#"{id:"minecraft:iron_pickaxe",count:1,components:{"minecraft:damage":100}}"#;
+    Scenario::new("repair193_takes_only_what_it_mends", plot_area(o))
+        .then("an empty repair stand", move |b, _| {
+            b.place(at(o, [3, 0, 0]), "minecraft:stone", &[])?;
+            b.place(p, "rustcraft:repair", &[])
+        })
+        .check("a hopper puts in no sticks, chests, whole tools or material for nothing", move |b, _| {
+            same("sticks", b.insert(p, "minecraft:stick", 7)?, 0)?;
+            same("chest", b.insert(p, "minecraft:chest", 1)?, 0)?;
+            same("a whole pickaxe", b.insert(p, "minecraft:iron_pickaxe", 1)?, 0)?;
+            same("iron", b.insert(p, "minecraft:iron_ingot", 3)?, 0)?;
+            same("gold", b.insert(p, "minecraft:gold_ingot", 5)?, 0)
+        })
+        .check("a worn pickaxe goes in, then iron for it, still no gold", move |b, _| {
+            same("worn pickaxe", b.insert_snbt(p, WORN)?, 1)?;
+            same("iron", b.insert(p, "minecraft:iron_ingot", 3)?, 3)?;
+            same("gold", b.insert(p, "minecraft:gold_ingot", 5)?, 0)
         })
 }
 

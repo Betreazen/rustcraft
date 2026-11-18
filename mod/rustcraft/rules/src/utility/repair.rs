@@ -72,9 +72,39 @@ pub fn repaired(damage: u32, max_damage: u32) -> u32 {
     damage.saturating_sub((max_damage / 4).max(1))
 }
 
+/// 0.19.3 (the owner: «ремонтный стенд всё ещё забирает вещи, это останавливает выполнение
+/// заказов»): what the magistral or a hopper may put into the stand. Into a slot of what is
+/// repaired, only an item the stand repairs (its wear the caller checks); into a material slot,
+/// only the material of an item that lies there now (`tools`). Before, the net filled the item
+/// slots with anything that was no material (an order's chests, hoppers and sticks) and the
+/// material slots with any material, and the orders waited for them.
+pub fn net_takes(tool_slot: bool, tools: &[&str], item: &str) -> bool {
+    if tool_slot {
+        return material_of(item).is_some();
+    }
+    tools.iter().filter_map(|t| material_of(t)).any(|m| m.contains(&item))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_net_brings_only_what_the_stand_mends_and_its_material() {
+        // The owner's stand held sticks, gold and iron beside two rods.
+        for item in ["minecraft:stick", "minecraft:chest", "minecraft:hopper", "rustcraft:coppersteel"] {
+            assert!(!net_takes(true, &[], item), "{item} is nothing it repairs");
+        }
+        assert!(net_takes(true, &[], "minecraft:iron_pickaxe"));
+        assert!(net_takes(true, &[], "minecraft:fishing_rod"));
+        let rods = ["minecraft:fishing_rod", "minecraft:fishing_rod"];
+        assert!(net_takes(false, &rods, "minecraft:string"));
+        for item in ["minecraft:gold_ingot", "minecraft:iron_ingot", "minecraft:stick"] {
+            assert!(!net_takes(false, &rods, item), "{item} mends no rod");
+        }
+        assert!(!net_takes(false, &[], "minecraft:iron_ingot"), "nothing to mend, no material");
+        assert!(net_takes(false, &["minecraft:fishing_rod", "minecraft:iron_pickaxe"], "minecraft:iron_ingot"));
+    }
 
     #[test]
     fn tools_take_their_own_material() {

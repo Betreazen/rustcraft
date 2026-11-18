@@ -1176,6 +1176,16 @@ fn util_wants(u: rustcraft_rules::utility::Util, entity: &ModBlockEntity, slot: 
         Util::Disintegrator => a.reversible.contains(item),
         Util::Builder => a.placeable.contains(item),
         Util::Enchanter if slot == 0 => a.enchantable.contains(item),
+        // 0.19.3: only what it mends, and only the material of what lies on it now.
+        Util::Repair => {
+            use rustcraft_rules::utility::{REPAIR_TOOLS, repair};
+            let tools: Vec<&str> = REPAIR_TOOLS
+                .filter_map(|i| entity.items.get(i).and_then(Option::as_ref))
+                .filter(|s| s.count > 0)
+                .map(|s| &*s.item)
+                .collect();
+            repair::net_takes(REPAIR_TOOLS.contains(&slot), &tools, item)
+        }
         _ => true,
     }
 }
@@ -1193,6 +1203,16 @@ pub(super) fn on_container_accepts(
     if !*cancel
         && Machine::of(&entity.id).is_some()
         && !slot_takes(entity, slot, &stack.item, tuning)
+    {
+        *cancel = true;
+    }
+    // 0.19.3: the net and hoppers bring the repair stand only worn items to mend; a whole tool on
+    // its way to the storage rides on.
+    use rustcraft_rules::utility::{REPAIR_TOOLS, Util};
+    if !*cancel
+        && Machine::of(&entity.id) == Some(Machine::Util(Util::Repair))
+        && REPAIR_TOOLS.contains(&slot)
+        && stack.damage == 0
     {
         *cancel = true;
     }

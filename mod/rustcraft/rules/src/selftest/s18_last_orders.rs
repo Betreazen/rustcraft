@@ -1,16 +1,17 @@
 //! Slice 18, the last leftovers: orders as the handbook says them (docs/superpowers/plans/
 //! s18-last.md, tasks 4 and 5).
 //!
-//! - O11: an order for pistons from raw iron runs through the electric furnace and then the
-//!   autocrafter; the iron ingots go from the furnace straight to the autocrafter, so the
-//!   storage never holds one while the order runs, and the order is done.
+//! - O11: an order for pistons from raw iron runs through the crusher (0.19.3: ore is never
+//!   smelted whole), the electric furnace and then the autocrafter; the iron ingots go from the
+//!   furnace straight to the autocrafter, so the storage never holds one while the order runs,
+//!   and the order is done.
 //! - The parts of an order riding to the autocrafter are written into a housing on their way
 //!   (guide `orders`: the items seen moving in the housings), and the housings are cleared once
 //!   the order is done.
 
 use super::slice15::{
-    CRAFTER, FURNACE, IRON, PISTON, RAW_IRON, build, crafter_at, furnace_at, held, holds,
-    machine, parts_for, put_book, terminal_at,
+    CRAFTER, DUST_IRON, FURNACE, IRON, PISTON, RAW_IRON, build, crafter_at, crusher_on, furnace_at,
+    held, holds, machine, parts_for, put_book, terminal_at,
 };
 use super::{Bench, Build, Scenario, at, plot_area, same};
 use crate::geom::Pos;
@@ -35,10 +36,11 @@ fn o11_product_goes_straight_to_the_next_machine(o: Pos, _: &Tuning) -> Scenario
         )
         .until("the storage holds the parts", FILL, move |b, _| holds(b, o, &p2))
         .then(
-            "an electric furnace and an autocrafter on the line, the book",
+            "a crusher, an electric furnace and an autocrafter on the line, the book",
             move |b, _| {
                 machine(b, crafter_at(o), CRAFTER, true)?;
                 machine(b, furnace_at(o), FURNACE, true)?;
+                crusher_on(b, o)?;
                 put_book(b, o)
             },
         )
@@ -57,8 +59,9 @@ fn o11_product_goes_straight_to_the_next_machine(o: Pos, _: &Tuning) -> Scenario
             same("iron ingots in the storage", held(b, o, IRON)?, 0)?;
             Ok(b.orders(terminal_at(o)).is_empty())
         })
-        .check("the raw iron went through the furnace", move |b, _| {
-            same("raw iron", held(b, o, RAW_IRON)?, 0)?;
+        .check("the raw iron went through the crusher: one ore made both ingots", move |b, _| {
+            same("raw iron left", held(b, o, RAW_IRON)?, 1)?;
+            same("dust left", held(b, o, DUST_IRON)?, 0)?;
             same("pistons", held(b, o, PISTON)?, 2)
         })
 }

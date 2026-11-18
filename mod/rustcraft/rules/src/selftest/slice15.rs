@@ -92,6 +92,18 @@ pub(super) fn machine(
     Ok(())
 }
 
+/// 0.19.3: a crusher on housing 2 of the line built from `o`, powered by two crystals that touch
+/// only it: an order grinds ore there, never smelts it whole.
+pub(super) fn crusher_on(b: &mut dyn Bench, o: Pos) -> Result<(), String> {
+    let crusher = at(o, [2, 1, 0]);
+    b.place(crusher, CRUSHER, &[])?;
+    b.place(at(crusher, [0, 1, 0]), CRYSTAL, &[])?;
+    b.place(at(crusher, [0, 0, -1]), CRYSTAL, &[])
+}
+
+pub(super) const CRUSHER: &str = "rustcraft:crusher";
+pub(super) const DUST_IRON: &str = "rustcraft:dust_iron";
+
 pub(super) fn held(b: &dyn Bench, o: Pos, item: &str) -> Result<u64, String> {
     let v = b
         .storage(terminal_at(o))
@@ -165,11 +177,8 @@ fn orders_pistons(o: Pos, _: &Tuning) -> Scenario {
 }
 
 fn order_runs_through_a_furnace(o: Pos, _: &Tuning) -> Scenario {
-    // 0.19.2 (the owner: «со склада электропечь не забирала сама руду, только пыль»): the raw
+    // 0.19.3 (the owner: «со склада электропечь не забирала сама руду, только пыль»): the raw
     // iron goes through the crusher, two dust for it; one is smelted, the other comes back.
-    const CRUSHER: &str = "rustcraft:crusher";
-    const DUST_IRON: &str = "rustcraft:dust_iron";
-    let crusher = at(o, [2, 1, 0]);
     let parts = parts_for(1, RAW_IRON);
     let p2 = parts.clone();
     Scenario::new("order_runs_through_a_crusher_a_furnace_and_a_crafter", plot_area(o))
@@ -185,9 +194,7 @@ fn order_runs_through_a_furnace(o: Pos, _: &Tuning) -> Scenario {
             move |b, _| {
                 machine(b, crafter_at(o), CRAFTER, true)?;
                 machine(b, furnace_at(o), FURNACE, true)?;
-                b.place(crusher, CRUSHER, &[])?;
-                b.place(at(crusher, [0, 1, 0]), CRYSTAL, &[])?;
-                b.place(at(crusher, [0, 0, -1]), CRYSTAL, &[])?;
+                crusher_on(b, o)?;
                 put_book(b, o)
             },
         )
