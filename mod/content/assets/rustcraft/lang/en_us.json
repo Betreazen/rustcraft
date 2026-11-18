@@ -468,6 +468,9 @@
   "rustcraft.worker.no_load": "No load dock on the way",
   "rustcraft.worker.no_cargo": "Waiting for cargo",
   "rustcraft.worker.nothing_to_dig": "Nothing to dig beside the way",
+  "rustcraft.worker.nothing_to_reap": "Nothing to reap beside the way",
+  "rustcraft.worker.no_trees": "No trees beside the way",
+  "rustcraft.worker.no_ore": "No ore beside the way",
   "rustcraft.housing.channel_swapped": "%s took the place of tier %s in slot %s",
   "rustcraft.backpack.title": "Backpack · %s slots",
   "rustcraft.backpack.not_ready": "The backpack is getting ready, try again",
@@ -1265,6 +1268,8 @@
   "rustcraft.handbook.page.mod_haste.sum": "Players in a support turret's radius move faster.",
   "rustcraft.handbook.page.mod_recipes.name": "Recipe Book",
   "rustcraft.handbook.page.mod_recipes.sum": "A storage terminal module. Knows every recipe of the game and the mod and lets you order items.",
+  "rustcraft.handbook.page.mod_filter.name": "Filter Module",
+  "rustcraft.handbook.page.mod_filter.sum": "Sets the own tab of the storage terminal: only the items it marks.",
   "rustcraft.handbook.page.cell.name": "Storage Cell",
   "rustcraft.handbook.page.cell.sum": "A storage block. Cells make up a solid box of any size.",
   "rustcraft.handbook.page.terminal.name": "Storage Terminal",
@@ -1457,7 +1462,5 @@
   "rustcraft.util.portal_dock.fluid_short": " · %s of %s buckets",
   "rustcraft.compass.target_counted": "%s · %s %s",
   "rustcraft.turret.range_counted": "Range: %s",
-  "rustcraft.monorail.look_counted": "Monorail · tier %s · %s a second",
-  "rustcraft.handbook.page.mod_filter.name": "Filter Module",
-  "rustcraft.handbook.page.mod_filter.sum": "Sets the own tab of the storage terminal: only the items it marks."
+  "rustcraft.monorail.look_counted": "Monorail · tier %s · %s a second"
 }

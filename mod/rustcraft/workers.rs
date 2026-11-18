@@ -8,8 +8,9 @@
 // How it shows: as the capsule (rustcraft_monorail), a seat mob the server moves each tick — a pig
 // with no AI, no gravity and no sound (`native_spawn_mob`, `native_teleport_mob`), tagged
 // `rustcraft_worker` so a seat saved with its chunk is found and removed again — and every client
-// draws the guide's worker round it (rustcraft_station::draw_worker, `native_mob_submit`). Its name
-// tag is the board over it (W5): charge, hold and state.
+// draws the guide's worker round it (rustcraft_station::draw_worker, `native_mob_submit`) and, since
+// 0.18.5, the board over it (W5: charge, hold and state) from the same note, in its own language
+// (rustcraft_station::worker_boards; a translated name on the seat was read as no name at all).
 //
 // Hands: the chassis clicked on a floor rail places a worker (`native_use_item_on`); a click on the
 // worker opens its window, a server menu like the joint window (rustcraft_window), and the wrench
@@ -57,7 +58,8 @@ pub const NOTES: &str = "rustcraft:workers";
 const SEAT_KIND: &str = "minecraft:pig";
 const SEAT_TAG: &str = "rustcraft_worker";
 const AIR: &str = "minecraft:air";
-/// How often clients are told the seats again, the boards change, and lost seats are swept.
+/// How often clients are told the seats and their boards again, open windows follow, the fleet is
+/// saved, and lost seats are swept.
 const NOTES_EVERY: u64 = 10;
 const BOARD_EVERY: u64 = 20;
 const SWEEP_EVERY: u64 = 100;
@@ -76,8 +78,9 @@ const NOTE_CELL: usize = 8;
 const HOLD_FIRST: usize = 9;
 /// What the saw's loot is rolled for: an axe, as a player's would be.
 const SAW_TOOL: &str = "minecraft:iron_axe";
-/// Rail cells in a row with nothing to dig before the scoop says so.
-const SCOOP_IDLE_CELLS: u32 = 16;
+/// Rail cells in a row with nothing to do before a tool says so: the scoop's «нечего копать»,
+/// 0.18.5 the reaper's, the saw's and the grab's.
+const IDLE_CELLS: u32 = 16;
 
 // ---- State ----
 
@@ -88,7 +91,6 @@ struct LevelFleet {
     dirty: bool,
     /// Worker id → its seat mob.
     seats: HashMap<u64, u32>,
-    boards: HashMap<u64, String>,
     ticks: u64,
 }
 
@@ -678,11 +680,8 @@ pub(super) fn tick(game: &mut Game<'_>, dimension: &str, net_level: &LevelNet, t
         }
         level.fleet.workers = workers;
     }
-    if level.ticks.is_multiple_of(BOARD_EVERY) {
-        boards(game, &mut level, tuning);
-    }
     if level.ticks.is_multiple_of(NOTES_EVERY) {
-        notes(game, &level, &monorail::network(dimension));
+        notes(game, &level, &monorail::network(dimension), tuning);
     }
     if level.ticks.is_multiple_of(SWEEP_EVERY) {
         sweep(game, dimension, &level);
@@ -823,6 +822,8 @@ fn grab(game: &mut Game<'_>, dimension: &str, w: &mut Worker, cell: Pos, mount: 
         game.native_set_item_entity(dimension, e.id, rest);
         done += 1;
     }
+    // 0.18.5: a whole stretch with no ore and nothing lying beside the way, it says so.
+    w.found_as(done, IDLE_CELLS, Note::NoOre);
     if done > 0 {
         w.spend(t.grab_ticks * done as f64, t.grab_energy * done as f64, t);
     }
@@ -895,7 +896,7 @@ fn scoop(
         }
     }
     // After a whole stretch with nothing to dig, it says so («Рядом с путём нечего копать»).
-    w.found(done, SCOOP_IDLE_CELLS);
+    w.found(done, IDLE_CELLS);
     if done > 0 {
         w.spend(t.scoop_ticks * done as f64, t.scoop_energy * done as f64, t);
     }
@@ -997,6 +998,10 @@ fn bore(game: &mut Game<'_>, dimension: &str, net: &Network, w: &mut Worker, cel
         w.hold.take(rail, 1);
         crate::game::rustcraft_monorail::touched(dimension, ahead);
         done += 1;
+        // A rail laid: «Кончились рельсы» and «Впереди лава» are over.
+        if w.note.is_tools() {
+            w.note = Note::Working;
+        }
     }
 
     w.spend(t.grab_ticks * done as f64, t.grab_energy * done as f64, t);
@@ -1071,6 +1076,8 @@ fn saw(game: &mut Game<'_>, dimension: &str, w: &mut Worker, cell: Pos, mount: F
             .find_map(|&p| trees::find(&view, p, t.saw_max_logs, t.saw_leaf_reach))
     };
     let Some(tree) = tree else {
+        // 0.18.5: a whole stretch with no tree beside the way, it says so.
+        w.found_as(0, IDLE_CELLS, Note::NoTrees);
         return;
     };
     w.aim = tree.logs.last().copied();
@@ -1098,6 +1105,7 @@ fn saw(game: &mut Game<'_>, dimension: &str, w: &mut Worker, cell: Pos, mount: F
             w.hold.take(&sapling, 1);
         }
     }
+    w.found_as(felled as usize, IDLE_CELLS, Note::NoTrees);
     w.spend(
         t.saw_ticks_per_log * f64::from(felled),
         t.saw_energy_per_log * f64::from(felled),
@@ -1125,6 +1133,7 @@ fn reap(game: &mut Game<'_>, dimension: &str, w: &mut Worker, cell: Pos, mount: 
             .collect()
     };
     let mut done = 0usize;
+    let mut unsown: Vec<Pos> = Vec::new();
     w.aim = plans.first().and_then(|h| h.breaks.first().or(h.picks.first().map(|p| &p.pos)).copied());
     for h in plans {
         for &p in &h.breaks {
@@ -1151,15 +1160,58 @@ fn reap(game: &mut Game<'_>, dimension: &str, w: &mut Worker, cell: Pos, mount: 
             if w.hold.count(&r.seed) > 0 && set_block(game, dimension, r.pos, &r.block, &r.props) {
                 w.hold.take(&r.seed, 1);
             } else {
-                // H3: the cell stays empty.
-                w.note = Note::NothingToSow;
+                // H3: the cell stays empty, unless another seed of the hold sows it below.
+                unsown.push(r.pos);
             }
         }
         done += h.size();
     }
+    // 0.18.5: empty farmland of its zone (soul sand for nether wart) is sown from the hold.
+    let (sown, lacking) = sow_zone(game, dimension, w, &zone);
+    w.aim = w.aim.or(sown.first().copied());
+    done += sown.len();
+    // Nothing ripe for a whole stretch: it says so; nothing to sow with only when it has nothing
+    // else to do here, or when a cell it picked stays empty (H3).
+    w.found_as(done, IDLE_CELLS, Note::NothingToReap);
+    let replant_failed = unsown.iter().any(|p| !sown.contains(p));
+    if replant_failed || (done == 0 && lacking) {
+        w.note = Note::NothingToSow;
+        w.idle = 0;
+    }
     if done > 0 {
         w.spend(t.reap_ticks * done as f64, t.reap_energy * done as f64, t);
     }
+}
+
+/// The reaper sows each air cell of `zone` over farmland, or soul sand for nether wart, with a
+/// seed of its hold (rustcraft_rules::worker::plants::sow): the cells it sowed, and whether some
+/// empty soil found no seed in the hold.
+fn sow_zone(game: &mut Game<'_>, dimension: &str, w: &mut Worker, zone: &[Pos]) -> (Vec<Pos>, bool) {
+    let mut sown = Vec::new();
+    let mut lacking = false;
+    // The hold's seeds in slot order, each once.
+    let mut seeds: Vec<String> = Vec::new();
+    for (item, _) in w.hold.slots.iter().flatten() {
+        if plants::is_seed(item) && !seeds.contains(item) {
+            seeds.push(item.clone());
+        }
+    }
+    for &p in zone {
+        match plants::sow(&View { game }, p, &seeds, &w.filter) {
+            plants::Sowing::Nothing => {}
+            plants::Sowing::NoSeed => lacking = true,
+            plants::Sowing::Sow(r) => {
+                if set_block(game, dimension, r.pos, &r.block, &r.props) {
+                    w.hold.take(&r.seed, 1);
+                    sown.push(r.pos);
+                    if w.hold.count(&r.seed) == 0 {
+                        seeds.retain(|s| *s != r.seed);
+                    }
+                }
+            }
+        }
+    }
+    (sown, lacking)
 }
 
 /// A dock serves the worker standing at it: the unload dock takes its load, the charge dock
@@ -1474,46 +1526,6 @@ fn seat(game: &mut Game<'_>, dimension: &str, level: &mut LevelFleet, w: &Worker
         game.native_entity_add_tag(e, SEAT_TAG);
     }
     level.seats.insert(w.id, s);
-    level.boards.remove(&w.id);
-}
-
-/// The board over each worker (W5): its tool, charge, hold and state, as its seat's name.
-fn boards(game: &mut Game<'_>, level: &mut LevelFleet, t: &Tuning) {
-    for w in &level.fleet.workers {
-        let Some(&s) = level.seats.get(&w.id) else {
-            continue;
-        };
-        let board = board(w, t);
-        let text = board.component().to_string();
-        if level.boards.get(&w.id) == Some(&text) {
-            continue;
-        }
-        let Some(e) = game.native_entity(s) else {
-            continue;
-        };
-        let nbt = Compound::from([
-            (
-                JavaString::from("CustomName"),
-                horizon_client::lan::data::component_nbt(&board.component()),
-            ),
-            (JavaString::from("CustomNameVisible"), Tag::Byte(1)),
-        ]);
-        if game.native_entity_merge_nbt(e, nbt) {
-            level.boards.insert(w.id, text);
-        }
-    }
-}
-
-fn board(w: &Worker, t: &Tuning) -> Text {
-    let percent = (100.0 * w.charge / w.capacity(t).max(1.0)).round();
-    let mut text = tool_name(w.tool);
-    text.push(Text::literal(format!(
-        " · {percent}% · {}/{} · ",
-        w.hold.used(),
-        w.hold.slots.len()
-    )));
-    text.push(note_text(w.note));
-    text
 }
 
 fn tool_name(tool: Option<Tool>) -> Text {
@@ -1521,14 +1533,9 @@ fn tool_name(tool: Option<Tool>) -> Text {
     line(key, fallback, &[])
 }
 
-pub(super) fn note_text(note: Note) -> Text {
-    let (key, fallback, _) = rustcraft_rules::worker::wire::note_key(note);
-    line(key, fallback, &[])
-}
-
 /// Every client is told each seat, its heading, tool, the mount of its rail, whether its tool
-/// works and on what (rustcraft_rules::worker::wire, rustcraft_station::on_net).
-fn notes(game: &mut Game<'_>, level: &LevelFleet, net: &Network) {
+/// works and on what, and its board (rustcraft_rules::worker::wire, rustcraft_station::on_net).
+fn notes(game: &mut Game<'_>, level: &LevelFleet, net: &Network, t: &Tuning) {
     use rustcraft_rules::worker::{pose, wire};
     let seats: Vec<wire::Seat> = level
         .fleet
@@ -1546,6 +1553,7 @@ fn notes(game: &mut Game<'_>, level: &LevelFleet, net: &Network) {
                 // The cartographer's drum turns while it charts its way (poses.js `map`).
                 busy: w.busy > 0.0 || (w.tool == Some(Tool::Map) && w.note == Note::Working),
                 aim: w.aim.map(|p| p.map(|c| c as f32 + 0.5)),
+                board: wire::Board::of(w, t),
             })
         })
         .collect();
@@ -1840,8 +1848,10 @@ fn click(
     if let Some(old) = back {
         give(game, uuid, &old, 1);
     }
-    if w.errand == Errand::Work && w.tool.is_some() && w.note == Note::NoTool {
+    // A new tool, or seeds, saplings or rails for it: the old word goes until the tool works.
+    if w.errand == Errand::Work && w.tool.is_some() && (w.note == Note::NoTool || w.note.is_tools()) {
         w.note = Note::Working;
+        w.idle = 0;
     }
     true
 }

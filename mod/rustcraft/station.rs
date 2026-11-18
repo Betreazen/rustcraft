@@ -1049,6 +1049,61 @@ pub(super) fn draw_worker(
     draw.light = light;
 }
 
+/// How far off a worker's board shows, blocks (a name tag's 64 would crowd a farm of them).
+const BOARD_REACH: f64 = 32.0;
+/// The board over the seat's feet: over the worker's model, a block high; under one hanging from
+/// a ceiling rail, which fills the cell up to the ceiling.
+const BOARD_RISE: f64 = 1.35;
+const BOARD_DROP: f64 = -0.3;
+/// The board's text by the worker's mood: fine white, waiting yellow, stopped red (ARGB).
+const BOARD_FINE: u32 = 0xFFFF_FFFF;
+const BOARD_WAITING: u32 = 0xFFFF_D75A;
+const BOARD_STOPPED: u32 = 0xFFFF_6A5A;
+
+/// `native_world_primitives`, 0.18.5: the board over each worker in view (W5, guide `chassis`:
+/// «Над ним видна табличка: заряд, заполнение трюма, состояние»), «Жнец · 84% · 3/27 ·
+/// Работает» in this client's language, on a name tag's background. The server named the seat
+/// with a translated component before, which the game reads as no name at all: no board was ever
+/// drawn.
+pub(super) fn worker_boards(
+    game: &Game<'_>,
+    partial: f32,
+    camera: [f64; 3],
+    primitives: &mut horizon_client::world_primitives::WorldPrimitives,
+) {
+    let seats = WORKER_SEATS.lock().unwrap_or_else(PoisonError::into_inner);
+    if seats.is_empty() {
+        return;
+    }
+    let t = f64::from(partial);
+    for m in &game.mobs {
+        let Some(seat) = seats.get(&m.id) else {
+            continue;
+        };
+        let feet = [
+            m.previous.x + (m.position.x - m.previous.x) * t,
+            m.previous.y + (m.position.y - m.previous.y) * t,
+            m.previous.z + (m.position.z - m.previous.z) * t,
+        ];
+        let far = (0..3).map(|k| (feet[k] - camera[k]).powi(2)).sum::<f64>();
+        if far > BOARD_REACH * BOARD_REACH {
+            continue;
+        }
+        let rise = if seat.mount == Face::YPos { BOARD_DROP } else { BOARD_RISE };
+        let (tool_key, tool_fallback) = worker_wire::tool_key(seat.tool);
+        let (note_key, note_fallback, mood) = worker_wire::note_key(seat.board.note);
+        let line = seat.board.line(&tr(tool_key, tool_fallback), &tr(note_key, note_fallback));
+        let colour = match mood {
+            worker_wire::Mood::Fine => BOARD_FINE,
+            worker_wire::Mood::Waiting => BOARD_WAITING,
+            worker_wire::Mood::Stopped => BOARD_STOPPED,
+        };
+        primitives
+            .text([feet[0], feet[1] + rise, feet[2]], line, colour, 1.0)
+            .background();
+    }
+}
+
 /// ---- The chassis window (wave 2: the mod's own screen, ui.js `chassis`) ----
 
 /// The chassis window on this client: what the server showed last, and what waits for the tick.

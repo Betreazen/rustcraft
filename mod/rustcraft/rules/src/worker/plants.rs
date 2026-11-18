@@ -4,6 +4,9 @@
 //!
 //! - Aged crops (wheat, carrots, potatoes, beetroot, nether wart, torchflower, pitcher plant):
 //!   picked ripe, sown again from the hold (H3: nothing to sow leaves the cell empty).
+//! - Empty soil (0.18.5, the owner's field test): farmland, or soul sand for nether wart, with air
+//!   over it in the zone is sown from the hold (`sow`): the seed of the crop growing next to it,
+//!   else the first seed of the hold that grows there and the filter lets through.
 //! - Columns (sugar cane, cactus, bamboo, kelp): everything over the lowest block, top down.
 //! - Fruits on a stem (pumpkin, melon): the fruit an attached stem points at; the stem stays.
 //! - Berries (sweet berries, glow berries): picked, the bush or vine stays.
@@ -156,6 +159,90 @@ pub fn wanted(block: &str, filter: &[String]) -> bool {
     filter
         .iter()
         .any(|f| f == block || f == crop || Some(f.as_str()) == seed)
+}
+
+/// What the reaper sows (0.18.5): the seed item, the crop block it becomes and the soil it needs.
+const SOWN: [(&str, &str, &str); 7] = [
+    ("minecraft:wheat_seeds", "minecraft:wheat", FARMLAND),
+    ("minecraft:carrot", "minecraft:carrots", FARMLAND),
+    ("minecraft:potato", "minecraft:potatoes", FARMLAND),
+    ("minecraft:beetroot_seeds", "minecraft:beetroots", FARMLAND),
+    (TORCHFLOWER_SEED, TORCHFLOWER_CROP, FARMLAND),
+    ("minecraft:pitcher_pod", "minecraft:pitcher_crop", FARMLAND),
+    ("minecraft:nether_wart", "minecraft:nether_wart", SOUL_SAND),
+];
+const SOUL_SAND: &str = "minecraft:soul_sand";
+
+/// The seed a growing plant `block` comes from, if the reaper sows it.
+fn seed_of_plant(block: &str) -> Option<&'static str> {
+    if block == TORCHFLOWER {
+        return Some(TORCHFLOWER_SEED);
+    }
+    SOWN.iter()
+        .find(|(_, crop, _)| *crop == block)
+        .map(|(seed, _, _)| *seed)
+}
+
+/// Whether the filter lets the reaper sow `seed` of `crop`: an empty filter sows all; otherwise
+/// the seed, the plant it grows into or its crop is named (`wanted`).
+fn sows(seed: &str, crop: &str, filter: &[String]) -> bool {
+    filter.is_empty()
+        || filter.iter().any(|f| f == seed)
+        || wanted(crop, filter)
+        || (crop == TORCHFLOWER_CROP && wanted(TORCHFLOWER, filter))
+}
+
+/// What the reaper finds at a cell when it sows.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Sowing {
+    /// No empty soil there, or soil its filter sows nothing on.
+    Nothing,
+    /// Empty soil and no seed in the hold for it («Нечем засеять»).
+    NoSeed,
+    /// The crop to set there, paid with one of its seed.
+    Sow(Replant),
+}
+
+/// 0.18.5: what the reaper sows at `pos` of its zone, an air cell over farmland (or soul sand for
+/// nether wart). `seeds` are the seed items of its hold in slot order. The seed is the one of the
+/// crop growing next to `pos` (one or two cells along a row), else the first of `seeds` that grows
+/// on this soil; a filter (H6) sows only what it lets through.
+pub fn sow(view: &dyn BlockView, pos: Pos, seeds: &[String], filter: &[String]) -> Sowing {
+    let here = view.block(pos);
+    if here != "minecraft:air" && here != "minecraft:cave_air" {
+        return Sowing::Nothing;
+    }
+    let soil = view.block(step(pos, Face::YNeg));
+    let fits: Vec<(&str, &str)> = SOWN
+        .iter()
+        .filter(|(seed, crop, on)| *on == soil && sows(seed, crop, filter))
+        .map(|(seed, crop, _)| (*seed, *crop))
+        .collect();
+    if fits.is_empty() {
+        return Sowing::Nothing;
+    }
+    let usable = |seed: &str| seeds.iter().any(|s| s == seed) && fits.iter().any(|f| f.0 == seed);
+    let neighbour: Option<&str> = (1..=2)
+        .flat_map(|d| {
+            [Face::XNeg, Face::XPos, Face::ZNeg, Face::ZPos]
+                .into_iter()
+                .map(move |f| super::moved(pos, f.offset(), d))
+        })
+        .filter_map(|p| seed_of_plant(&view.block(p)))
+        .find(|seed| usable(seed));
+    let first = || seeds.iter().map(String::as_str).find(|s| usable(s));
+    let Some(seed) = neighbour.or_else(first) else {
+        return Sowing::NoSeed;
+    };
+    let Some(&(seed, crop)) = fits.iter().find(|f| f.0 == seed) else {
+        return Sowing::NoSeed;
+    };
+    Sowing::Sow(Replant {
+        pos,
+        block: crop.to_owned(),
+        props: vec![("age".into(), "0".into())],
+        seed: seed.to_owned(),
+    })
 }
 
 /// Whether two cells of a column are the same plant (kelp's two blocks are one plant).
@@ -475,5 +562,140 @@ mod tests {
         );
         assert_eq!(plan(&w, [2, 1, 0], 0, 3), None, "a wild one stays");
         assert!(is_seed(TORCHFLOWER_SEED) && is_seed("minecraft:wheat_seeds"));
+    }
+
+    fn seeds(items: &[&str]) -> Vec<String> {
+        items.iter().map(|s| (*s).to_owned()).collect()
+    }
+
+    fn sown(s: Sowing) -> Option<(String, String)> {
+        match s {
+            Sowing::Sow(r) => Some((r.block, r.seed)),
+            _ => None,
+        }
+    }
+
+    #[test]
+    fn empty_farmland_is_sown_from_the_hold() {
+        // The owner's field test: seeds in the hold, empty farmland beside the way.
+        let mut w = World::default();
+        w.set([0, 0, 0], FARMLAND, &[]);
+        let hold = seeds(&["minecraft:wheat", "minecraft:wheat_seeds"]);
+        assert_eq!(
+            sown(sow(&w, [0, 1, 0], &hold, &[])),
+            Some(("minecraft:wheat".into(), "minecraft:wheat_seeds".into()))
+        );
+        let Sowing::Sow(r) = sow(&w, [0, 1, 0], &hold, &[]) else { panic!() };
+        assert_eq!(r.props, vec![("age".to_owned(), "0".to_owned())]);
+    }
+
+    #[test]
+    fn the_seed_of_the_crop_next_to_it_goes_first() {
+        let mut w = World::default();
+        for x in 0..4 {
+            w.set([x, 0, 0], FARMLAND, &[]);
+        }
+        w.set([2, 1, 0], "minecraft:carrots", &[("age", "2")]);
+        w.set([3, 1, 0], "minecraft:carrots", &[("age", "2")]);
+        let hold = seeds(&["minecraft:wheat_seeds", "minecraft:carrot"]);
+        assert_eq!(
+            sown(sow(&w, [1, 1, 0], &hold, &[])).unwrap().0,
+            "minecraft:carrots",
+            "a carrot row grows on"
+        );
+        assert_eq!(
+            sown(sow(&w, [0, 1, 0], &hold, &[])).unwrap().0,
+            "minecraft:carrots",
+            "two cells away still counts"
+        );
+        // No carrot left: the first seed of the hold.
+        let wheat_only = seeds(&["minecraft:beetroot_seeds", "minecraft:wheat_seeds"]);
+        assert_eq!(
+            sown(sow(&w, [1, 1, 0], &wheat_only, &[])).unwrap().1,
+            "minecraft:beetroot_seeds"
+        );
+    }
+
+    #[test]
+    fn nether_wart_goes_on_soul_sand_only() {
+        let mut w = World::default();
+        w.set([0, 0, 0], SOUL_SAND, &[]);
+        w.set([1, 0, 0], FARMLAND, &[]);
+        let hold = seeds(&["minecraft:wheat_seeds", "minecraft:nether_wart"]);
+        assert_eq!(
+            sown(sow(&w, [0, 1, 0], &hold, &[])).unwrap().0,
+            "minecraft:nether_wart"
+        );
+        assert_eq!(
+            sown(sow(&w, [1, 1, 0], &hold, &[])).unwrap().0,
+            "minecraft:wheat"
+        );
+        assert_eq!(
+            sow(&w, [1, 1, 0], &seeds(&["minecraft:nether_wart"]), &[]),
+            Sowing::NoSeed,
+            "nether wart is no seed for farmland"
+        );
+    }
+
+    #[test]
+    fn every_seed_grows_its_crop() {
+        let mut w = World::default();
+        w.set([0, 0, 0], FARMLAND, &[]);
+        for (seed, crop) in [
+            ("minecraft:wheat_seeds", "minecraft:wheat"),
+            ("minecraft:carrot", "minecraft:carrots"),
+            ("minecraft:potato", "minecraft:potatoes"),
+            ("minecraft:beetroot_seeds", "minecraft:beetroots"),
+            (TORCHFLOWER_SEED, TORCHFLOWER_CROP),
+            ("minecraft:pitcher_pod", "minecraft:pitcher_crop"),
+        ] {
+            assert_eq!(
+                sown(sow(&w, [0, 1, 0], &seeds(&[seed]), &[])),
+                Some((crop.to_owned(), seed.to_owned()))
+            );
+            assert!(is_seed(seed), "the unload dock keeps {seed}");
+        }
+    }
+
+    #[test]
+    fn nothing_to_sow_and_nothing_there() {
+        let mut w = World::default();
+        w.set([0, 0, 0], FARMLAND, &[]);
+        w.set([1, 0, 0], "minecraft:grass_block", &[]);
+        w.set([2, 0, 0], FARMLAND, &[]);
+        w.set([2, 1, 0], "minecraft:wheat", &[("age", "1")]);
+        assert_eq!(sow(&w, [0, 1, 0], &[], &[]), Sowing::NoSeed);
+        let hold = seeds(&["minecraft:wheat_seeds"]);
+        assert_eq!(sow(&w, [1, 1, 0], &hold, &[]), Sowing::Nothing, "grass is no field");
+        assert_eq!(sow(&w, [2, 1, 0], &hold, &[]), Sowing::Nothing, "it grows already");
+        assert_eq!(sow(&w, [0, 2, 0], &hold, &[]), Sowing::Nothing, "air over air");
+    }
+
+    #[test]
+    fn a_filtered_reaper_sows_only_what_its_filter_takes() {
+        let mut w = World::default();
+        w.set([0, 0, 0], FARMLAND, &[]);
+        let hold = seeds(&["minecraft:wheat_seeds", "minecraft:carrot"]);
+        let carrots = vec!["minecraft:carrot".to_owned()];
+        assert_eq!(
+            sown(sow(&w, [0, 1, 0], &hold, &carrots)).unwrap().0,
+            "minecraft:carrots"
+        );
+        let pumpkins = vec!["minecraft:pumpkin".to_owned()];
+        assert_eq!(
+            sow(&w, [0, 1, 0], &hold, &pumpkins),
+            Sowing::Nothing,
+            "a pumpkin reaper sows no wheat and lacks nothing"
+        );
+        let wheat = vec!["minecraft:wheat".to_owned()];
+        assert_eq!(
+            sow(&w, [0, 1, 0], &seeds(&["minecraft:carrot"]), &wheat),
+            Sowing::NoSeed
+        );
+        let flowers = vec![TORCHFLOWER.to_owned()];
+        assert_eq!(
+            sown(sow(&w, [0, 1, 0], &seeds(&[TORCHFLOWER_SEED]), &flowers)).unwrap().0,
+            TORCHFLOWER_CROP
+        );
     }
 }

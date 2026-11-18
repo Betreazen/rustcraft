@@ -172,6 +172,58 @@ pub enum Note {
     /// Slice 18, the cartographer: nothing new along its whole way (guide «Вокруг пути всё
     /// нанесено»).
     AllMapped,
+    /// 0.18.5 (the owner's field test: a worker rode round doing nothing and said «Работает»): the
+    /// reaper, the saw and the grab found nothing along a whole stretch of their way.
+    NothingToReap,
+    NoTrees,
+    NoOre,
+}
+
+impl Note {
+    pub const ALL: [Note; 24] = [
+        Note::Working,
+        Note::Unloading,
+        Note::Charging,
+        Note::ToUnload,
+        Note::ToCharge,
+        Note::NoTool,
+        Note::NoUnloadDock,
+        Note::NoChargeDock,
+        Note::Flat,
+        Note::NothingToSow,
+        Note::DockFull,
+        Note::DockEmpty,
+        Note::NoWay,
+        Note::ToLoad,
+        Note::Loading,
+        Note::NoLoadDock,
+        Note::NoCargo,
+        Note::NothingToDig,
+        Note::NoRails,
+        Note::LavaAhead,
+        Note::AllMapped,
+        Note::NothingToReap,
+        Note::NoTrees,
+        Note::NoOre,
+    ];
+
+    /// What a tool says about its work (nothing beside the way, nothing to sow, out of rails):
+    /// it stays while the worker rides on, until the tool works again (`found_as`, the tools).
+    /// Before 0.18.5 the next cell said «Работает» over it within a tick, so the board and the
+    /// window hardly ever showed it.
+    pub fn is_tools(self) -> bool {
+        matches!(
+            self,
+            Note::NothingToSow
+                | Note::NothingToDig
+                | Note::AllMapped
+                | Note::NoRails
+                | Note::LavaAhead
+                | Note::NothingToReap
+                | Note::NoTrees
+                | Note::NoOre
+        )
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -513,7 +565,9 @@ impl Worker {
                         self.note = Note::NoWay;
                         return Step::Stopped;
                     }
-                    self.note = Note::Working;
+                    if !self.note.is_tools() {
+                        self.note = Note::Working;
+                    }
                 }
                 Errand::Unload | Errand::Charge | Errand::Load => {
                     let (docks, none, going) = match self.errand {
@@ -629,7 +683,7 @@ impl Worker {
     pub fn found_as(&mut self, done: usize, idle_after: u32, idle_note: Note) {
         if done > 0 {
             self.idle = 0;
-            if self.note == idle_note {
+            if self.note.is_tools() {
                 self.note = Note::Working;
             }
             return;
@@ -1019,6 +1073,38 @@ pub(crate) mod tests {
         assert_eq!(w.note, Note::NothingToDig);
         w.found(2, 4);
         assert_eq!((w.note, w.idle), (Note::Working, 0));
+    }
+
+    #[test]
+    fn a_tools_note_stays_while_it_rides_on() {
+        // 0.18.5: «Рядом с путём нечего копать» said in one cell stayed for no tick: the next
+        // cell said «Работает» over it. Now it stays until the tool works again.
+        let t = Tuning::default();
+        let net = line(6);
+        let none = BTreeSet::new();
+        let track = Track {
+            net: &net,
+            unload: &none,
+            charge: &none,
+            load: &none,
+        };
+        let mut w = Worker::new(1, 7, [0, 0, 0], &t);
+        w.tool = Some(Tool::Reaper);
+        w.note = Note::Working;
+        for _ in 0..4 {
+            w.found_as(0, 4, Note::NothingToReap);
+        }
+        assert_eq!(w.note, Note::NothingToReap);
+        let steps = ride(&mut w, &track, &t, 40);
+        assert!(steps.iter().any(|s| matches!(s, Step::Arrived(_))));
+        assert_eq!(w.note, Note::NothingToReap, "it rode on and still says so");
+        w.found_as(1, 4, Note::NothingToReap);
+        assert_eq!(w.note, Note::Working);
+        // Another tool's note is no tool's: «Нет пути» goes once it can ride.
+        w.note = Note::NoWay;
+        ride(&mut w, &track, &t, 40);
+        assert_eq!(w.note, Note::Working);
+        assert!(Note::ALL.iter().filter(|n| n.is_tools()).count() == 8);
     }
 
     #[test]

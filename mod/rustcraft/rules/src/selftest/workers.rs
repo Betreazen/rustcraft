@@ -12,14 +12,21 @@ use crate::net::topology::ChannelKind;
 use crate::tuning::Tuning;
 use crate::worker::{Errand, Note, Tool};
 
-pub const ALL: [Build; 11] = [
+pub const ALL: [Build; 18] = [
     saw_fells_a_tree,
+    saw_fells_a_bare_trunk_and_leaves_a_house_wall,
     reaper_aged_crops,
     reaper_columns,
     reaper_stem_fruits,
     reaper_berries,
     reaper_on_a_wall,
     reaper_nothing_to_sow,
+    reaper_sows_empty_farmland,
+    reaper_filtered_sows_only_its_crop,
+    reaper_without_seeds_says_so,
+    reaper_says_nothing_to_reap,
+    saw_says_no_trees,
+    grab_says_no_ore,
     unloads_into_a_chest_by_the_magistral,
     charges_at_the_dock,
     stops_without_a_dock,
@@ -161,6 +168,55 @@ fn saw_fells_a_tree(o: Pos, _: &Tuning) -> Scenario {
     )
     .until("each log is reported as an axe's break", 40, |b, _| {
         Ok(breaks(b, "minecraft:oak_log", "axe") >= 4)
+    })
+}
+
+/// 0.18.5, the owner's field test: a birch trunk right beside the rail, its leaves gone, stands
+/// on grass; the saw fells it and plants a sapling. A log wall of a house a block further on, with
+/// planks in it, stays.
+fn saw_fells_a_bare_trunk_and_leaves_a_house_wall(o: Pos, _: &Tuning) -> Scenario {
+    const BIRCH: &str = "minecraft:birch_log";
+    let root = at(o, [SPOT, 1, 1]);
+    let wall: Vec<Pos> = (SPOT + 2..=SPOT + 3)
+        .flat_map(|x| (1..=3).map(move |y| at(o, [x, y, 1])))
+        .collect();
+    let planks = at(o, [SPOT + 2, 2, 2]);
+    let wall_built = wall.clone();
+    let wall_left = wall.clone();
+    with_worker(
+        "worker_saw_fells_a_bare_trunk_and_leaves_a_house_wall",
+        o,
+        move |b, _| {
+            b.place(at(root, [0, -1, 0]), "minecraft:grass_block", &[])?;
+            for y in 0..6 {
+                b.place(at(root, [0, y, 0]), BIRCH, &[])?;
+            }
+            for &p in &wall_built {
+                b.place(at(p, [0, -1 - (p[1] - root[1]), 0]), "minecraft:dirt", &[])?;
+                b.place(p, BIRCH, &[])?;
+            }
+            b.place(planks, "minecraft:birch_planks", &[])
+        },
+        Some(Tool::Saw),
+        vec![("minecraft:birch_sapling", 2)],
+    )
+    .until("the trunk's logs are in the hold", RIDE, move |b, m| {
+        Ok(count_of(&worker_of(b, m)?.hold.slots, BIRCH) >= 6)
+    })
+    .wait(60)
+    .check("a sapling stands on its root, the wall and its planks stay", move |b, m| {
+        same("root", b.block(root), "minecraft:birch_sapling".to_owned())?;
+        for y in 1..6 {
+            same("over the root", b.block(at(root, [0, y, 0])), "minecraft:air".to_owned())?;
+        }
+        for &p in &wall_left {
+            same("the house wall", b.block(p), BIRCH.to_owned())?;
+        }
+        same("planks", b.block(planks), "minecraft:birch_planks".to_owned())?;
+        same("logs taken", count_of(&worker_of(b, m)?.hold.slots, BIRCH), 6)
+    })
+    .until("each log is reported as an axe's break", 40, |b, _| {
+        Ok(breaks(b, "minecraft:birch_log", "axe") >= 6)
     })
 }
 
@@ -320,6 +376,130 @@ fn reaper_nothing_to_sow(o: Pos, _: &Tuning) -> Scenario {
             same("note", worker_of(b, m)?.note, Note::NothingToSow)
         },
     )
+}
+
+/// 0.18.5, the owner's field test (a reaper with seeds in its hold rode round its field doing
+/// nothing): empty farmland beside the way is sown from the hold, the seed of the crop growing
+/// next to it first, else the first seed of the hold; nether wart goes on soul sand.
+fn reaper_sows_empty_farmland(o: Pos, _: &Tuning) -> Scenario {
+    let row = [at(o, [SPOT, 1, 1]), at(o, [SPOT + 1, 1, 1])];
+    let carrots = at(o, [SPOT + 2, 1, 1]);
+    let lone = at(o, [1, 1, -1]);
+    let wart = at(o, [5, 1, -1]);
+    reaper(
+        "worker_reaper_sows_empty_farmland",
+        o,
+        move |b, _| {
+            // Wet farmland: dry and bare, a random tick could turn it to dirt before the reaper
+            // comes.
+            for p in [row[0], row[1], carrots, lone] {
+                b.place(at(p, [0, -1, 0]), FARMLAND, &[("moisture", "7")])?;
+            }
+            b.place(carrots, "minecraft:carrots", &[("age", "2")])?;
+            b.place(at(wart, [0, -1, 0]), "minecraft:soul_sand", &[])
+        },
+        vec![
+            ("minecraft:wheat_seeds", 8),
+            ("minecraft:carrot", 8),
+            ("minecraft:nether_wart", 8),
+        ],
+        move |b, _| Ok([row[0], row[1], lone, wart].iter().all(|&p| b.block(p) != "minecraft:air")),
+    )
+    .check("each cell has its crop, sown young", move |b, _| {
+        for p in row {
+            same("the carrot row", b.block(p), "minecraft:carrots".to_owned())?;
+            same("its age", b.property(p, "age"), Some("0".to_owned()))?;
+        }
+        same("a lone bed: the hold's first seed", b.block(lone), "minecraft:wheat".to_owned())?;
+        same("soul sand", b.block(wart), "minecraft:nether_wart".to_owned())?;
+        same("the growing carrots", b.property(carrots, "age"), Some("2".to_owned()))
+    })
+    .check("the seeds came from the hold and it says it works", move |b, m| {
+        let w = worker_of(b, m)?;
+        same("carrots left", count_of(&w.hold.slots, "minecraft:carrot"), 6)?;
+        same("wheat seeds left", count_of(&w.hold.slots, "minecraft:wheat_seeds"), 7)?;
+        same("nether wart left", count_of(&w.hold.slots, "minecraft:nether_wart"), 7)?;
+        if w.note == Note::NothingToSow {
+            return Err("it says «Нечем засеять» with seeds in its hold".into());
+        }
+        Ok(())
+    })
+}
+
+/// H6 with sowing: a reaper filtered to carrots sows carrots only; the farmland with no carrot
+/// to sow stays bare beside wheat seeds it does not sow.
+fn reaper_filtered_sows_only_its_crop(o: Pos, _: &Tuning) -> Scenario {
+    let bed = at(o, [SPOT, 1, 1]);
+    let other = at(o, [SPOT, 1, -1]);
+    Scenario::new("worker_reaper_filtered_sows_only_its_crop", plot_area(o))
+        .then("the track and two bare beds", move |b, _| {
+            track(b, o)?;
+            b.place(at(bed, [0, -1, 0]), FARMLAND, &[("moisture", "7")])?;
+            b.place(at(other, [0, -1, 0]), FARMLAND, &[("moisture", "7")])
+        })
+        .then("a reaper filtered to carrots, one carrot and wheat seeds", move |b, m| {
+            let hold = [("minecraft:wheat_seeds", 8), ("minecraft:carrot", 1)];
+            let id = b.spawn_worker(rail(o, 0), OWNER, Some(Tool::Reaper), &hold, None)?;
+            m.mark("worker", id as f64);
+            b.set_worker_filter(id, &["minecraft:carrot"])
+        })
+        .until("one bed has carrots", RIDE, move |b, _| {
+            Ok(b.block(bed) == "minecraft:carrots" || b.block(other) == "minecraft:carrots")
+        })
+        .wait(100)
+        .check("the other bed stays bare and the wheat seeds stay in the hold", move |b, m| {
+            let bare = [bed, other].iter().filter(|&&p| b.block(p) == "minecraft:air").count();
+            same("bare beds", bare, 1)?;
+            let w = worker_of(b, m)?;
+            same("wheat seeds", count_of(&w.hold.slots, "minecraft:wheat_seeds"), 8)?;
+            same("carrots", count_of(&w.hold.slots, "minecraft:carrot"), 0)
+        })
+}
+
+/// With no seed for the bare farmland and nothing ripe it says «Нечем засеять», and the word
+/// stays while it rides on (it used to last a tick); seeds put in, it sows on the next pass.
+fn reaper_without_seeds_says_so(o: Pos, _: &Tuning) -> Scenario {
+    let bed = at(o, [SPOT, 1, 1]);
+    with_worker(
+        "worker_reaper_without_seeds_says_so",
+        o,
+        move |b, _| b.place(at(bed, [0, -1, 0]), FARMLAND, &[("moisture", "7")]),
+        Some(Tool::Reaper),
+        Vec::new(),
+    )
+    .until("it says it has nothing to sow", RIDE, |b, m| {
+        Ok(worker_of(b, m)?.note == Note::NothingToSow)
+    })
+    .wait(20)
+    .check("the word stays while it rides on, the bed stays bare", move |b, m| {
+        same("note", worker_of(b, m)?.note, Note::NothingToSow)?;
+        same("bed", b.block(bed), "minecraft:air".to_owned())
+    })
+}
+
+/// 0.18.5: a tool that finds nothing along a whole stretch of its way says so, and the word
+/// stays while it rides on: the reaper, the saw and the grab (the scoop always did).
+fn says_when_idle(name: &'static str, o: Pos, tool: Tool, note: Note) -> Scenario {
+    with_worker(name, o, |_, _| Ok(()), Some(tool), Vec::new())
+        .until("it says there is nothing beside its way", RIDE, move |b, m| {
+            Ok(worker_of(b, m)?.note == note)
+        })
+        .wait(20)
+        .check("the word stays while it rides on", move |b, m| {
+            same("note", worker_of(b, m)?.note, note)
+        })
+}
+
+fn reaper_says_nothing_to_reap(o: Pos, _: &Tuning) -> Scenario {
+    says_when_idle("worker_reaper_says_nothing_to_reap", o, Tool::Reaper, Note::NothingToReap)
+}
+
+fn saw_says_no_trees(o: Pos, _: &Tuning) -> Scenario {
+    says_when_idle("worker_saw_says_no_trees", o, Tool::Saw, Note::NoTrees)
+}
+
+fn grab_says_no_ore(o: Pos, _: &Tuning) -> Scenario {
+    says_when_idle("worker_grab_says_no_ore", o, Tool::Grab, Note::NoOre)
 }
 
 /// A hold of `n` shovels: one a slot, so 27 fill it.
