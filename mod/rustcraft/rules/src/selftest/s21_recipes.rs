@@ -133,6 +133,15 @@ fn kitchen_cooks_one_dish_then_the_next(o: Pos, _: &Tuning) -> Scenario {
             toggle(b, k, BREAD_TOGGLE)?;
             toggle(b, k, COOKIE_TOGGLE)
         })
+        .wait(240)
+        .check("it has begun: wheat taken or bread baked", move |b, _| {
+            let items = b.items(k);
+            if count_of(&items, WHEAT) > 0 || count_of(&items, BREAD) > 0 || held(b, o, BREAD)? > 0 {
+                return Ok(());
+            }
+            let on: Vec<bool> = b.sheet(k).map(|s| s.toggles.iter().map(|t| t.on).collect()).unwrap_or_default();
+            Err(format!("status {}, toggles {on:?}, items {items:?}, wheat in the storage {}", status_json(b, k), held(b, o, WHEAT)?))
+        })
         .until("2 loaves and 8 cookies in the storage", COOK_LIMIT, move |b, memo: &mut Memo| {
             // What its window says it cooks, step by step.
             let status = status_json(b, k);
@@ -223,7 +232,9 @@ fn order_runs_on_a_kitchen_busy_with_its_own(o: Pos, _: &Tuning) -> Scenario {
             put_book(b, o)
         })
         .then("bread on", move |b, _| toggle(b, k, BREAD_TOGGLE))
-        .until("it took wheat for its bread", 400, move |b, _| Ok(count_of(&b.items(k), WHEAT) > 0))
+        .until("it took wheat for its bread, or baked with it", 400, move |b, _| {
+            Ok(count_of(&b.items(k), WHEAT) > 0 || count_of(&b.items(k), BREAD) > 0 || held(b, o, BREAD)? > 0)
+        })
         .until("the storage takes an order for 8 cookies", FILL, move |b, _| {
             Ok(b.order(terminal_at(o), COOKIE, 8).is_ok())
         })

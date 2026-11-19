@@ -1296,7 +1296,9 @@ fn kitchen_fetch(game: &mut Game<'_>, dimension: &str, id: u32, pos: Pos, dish: 
                 .iter()
                 .take(INPUTS)
                 .map(|s| match s {
+                    // An empty slot can hold an empty stack (count 0, air), as `mining::store` reads it.
                     None => u64::from(max),
+                    Some(s) if s.count == 0 => u64::from(max),
                     Some(s) if *s.item == *item && s.damage == 0 && s.extra.is_none() => u64::from(max.saturating_sub(s.count)),
                     Some(_) => 0,
                 })
