@@ -89,6 +89,8 @@ pub mod s21_rods;
 pub mod s21_channels;
 // 0.21 (spec 42): one fluid a tank structure.
 pub mod s21_tanks;
+// 0.21 (spec 47): orders take any item of a tag.
+pub mod s21_tags;
 
 use std::collections::BTreeMap;
 
@@ -840,6 +842,8 @@ pub fn catalog() -> Vec<Build> {
     all.extend(s21_tanks::ALL);
     // 0.21 (spec 46): the butcher and the turret pick up loot for the magistral.
     all.extend(s21_loot::ALL);
+    // 0.21 (spec 47): orders take any item of a tag.
+    all.extend(s21_tags::ALL);
     all
 }
 

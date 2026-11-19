@@ -43,7 +43,7 @@ use rustcraft_rules::{
     geom::Pos,
     machines::style::{self, Severity, colour},
     modules::Module,
-    orders::{KINDS, fluid_of_number},
+    orders::{KINDS, fluid_of_number, groups::group_of_number},
     storage::{
         Limit,
         modules as sockets,
@@ -269,8 +269,13 @@ pub(super) fn item_name(id: &str) -> String {
     tr(&format!("item.{key}"), &tr(&format!("block.{key}"), id))
 }
 
-/// The name of an item the list names by number, or of a fluid (`rustcraft.fluid.<name>.name`).
+/// The name of an item the list names by number, of a fluid (`rustcraft.fluid.<name>.name`) or,
+/// 0.21 (OT5), of a group an order waits for (`rustcraft.group.<name>.name`: «доски любого
+/// дерева»).
 fn name_of(game: &Game<'_>, item: u16) -> String {
+    if let Some(group) = group_of_number(item) {
+        return tr(&format!("rustcraft.group.{group}.name"), group);
+    }
     if let Some(fluid) = fluid_of_number(item) {
         let name = fluid.rsplit(':').next().unwrap_or(fluid);
         return tr(&format!("rustcraft.fluid.{name}.name"), fluid);

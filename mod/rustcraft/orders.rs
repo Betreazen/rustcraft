@@ -598,8 +598,13 @@ pub(super) struct View {
     pub orderable: Vec<u16>,
 }
 
-/// The terminal's number of a key: a fluid's (O12) or the item's in the item table.
+/// The terminal's number of a key: a group's (OT5), a fluid's (O12) or the item's in the item
+/// table.
 fn number(game: &Game<'_>, key: &str) -> Option<u16> {
+    // 0.21 (OT5): a group an order waits for («доски любого дерева»).
+    if let Some(n) = rustcraft_rules::orders::groups::group_number(key) {
+        return Some(n);
+    }
     if let Some(fluid) = fluid_of(key) {
         return fluid_number(fluid);
     }
