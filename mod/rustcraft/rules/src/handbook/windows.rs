@@ -355,7 +355,7 @@ pub const WINDOWS: &[(&str, &[Widget])] = &[
         Widget::Slots { cols: 4, cells: &[Cell { rgb: 0xd8d8d8, count: "", ghost: false }, Cell { rgb: 0xd8d8d8, count: "", ghost: false }, Cell { rgb: 0x5fe6dd, count: "", ghost: false }, Cell { rgb: 0x000000, count: "", ghost: false }] },
         Widget::Craft { from: &[Cell { rgb: 0xd8d8d8, count: "1", ghost: false }], to: &[Cell { rgb: 0xd8d8d8, count: "1½", ghost: false }, Cell { rgb: 0x8a6a3a, count: "1", ghost: false }] },
         Widget::Bar { pct: 100, rgb: 0x59d38c },
-        Widget::Rows { n: 3 },
+        Widget::Rows { n: 4 },
         Widget::Work { pct: 40 },
         Widget::Slots { cols: 3, cells: &[Cell { rgb: 0xd8d8d8, count: "4", ghost: false }, Cell { rgb: 0x8a6a3a, count: "3", ghost: false }, Cell { rgb: 0x000000, count: "", ghost: false }] },
         Widget::Bar { pct: 100, rgb: 0xffe14a },

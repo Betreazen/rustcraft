@@ -10,6 +10,8 @@ pub mod joints;
 pub mod migrate;
 pub mod settings;
 pub mod stock;
+// 0.21 (round 32): a storage's surplus to the disintegrator and the trash.
+pub mod surplus;
 pub mod tanks;
 pub mod node_tier;
 pub mod node_window;

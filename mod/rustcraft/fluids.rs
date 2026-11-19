@@ -116,6 +116,9 @@ pub struct Fluids {
     rates: HashMap<Pos, (f64, f64)>,
     /// Round 31 (FL4): the anchors of the storages that are joints of a fluid net.
     pub stores: BTreeSet<Pos>,
+    /// 0.21 (round 32, SP8): the trashes on a fluid net where a storage limits a fluid: they take
+    /// its surplus with no filter.
+    pub surplus_sinks: BTreeSet<Pos>,
 }
 
 impl Fluids {
@@ -334,9 +337,20 @@ impl FluidInventories for Inventories<'_> {
             Endpoint::Store
         } else if self.mixers.contains_key(&block) || self.sinks.contains_key(&block) {
             Endpoint::Consumer
+        } else if self.trash.contains_key(&block) {
+            // 0.21 (round 32, SP8): it takes a storage's surplus with no filter.
+            Endpoint::Trash
         } else {
             Endpoint::Plain
         }
+    }
+
+    fn surplus(&self, block: Pos, fluid: &str) -> u64 {
+        self.storages.get(&block).map_or(0, |(_, s)| s.fluid_surplus(fluid))
+    }
+
+    fn at_limit(&self, block: Pos, fluid: &str) -> bool {
+        self.storages.get(&block).is_some_and(|(_, s)| s.fluid_at_limit(fluid))
     }
 
     fn offered(&self, block: Pos) -> Vec<(FluidKey, u64)> {
@@ -678,6 +692,7 @@ pub(super) fn tick(game: &mut Game<'_>, level: &mut LevelNet, tuning: &Tuning) {
         cell_mb: tuning.storage_cell_buckets * BUCKET,
     };
     f.no_lane.retain(|_, (_, until)| *until > now);
+    let mut surplus_sinks = BTreeSet::new();
     for net in &f.nets {
         // A joint on any block of a tank group is a joint on the whole group.
         let joints: Vec<Joint> = net
@@ -697,6 +712,10 @@ pub(super) fn tick(game: &mut Game<'_>, level: &mut LevelNet, tuning: &Tuning) {
         if joints.len() < 2 {
             continue;
         }
+        // 0.21 (SP8): a storage of the net limits a fluid: its trashes take the surplus.
+        if joints.iter().any(|j| inv.storages.get(&j.block).is_some_and(|(_, s)| !s.limits.is_empty())) {
+            surplus_sinks.extend(joints.iter().map(|j| j.block).filter(|b| inv.trash.contains_key(b)));
+        }
         let state = f.states.entry(net.key).or_default();
         let result = fluid_net::tick(
             &joints,
@@ -711,6 +730,7 @@ pub(super) fn tick(game: &mut Game<'_>, level: &mut LevelNet, tuning: &Tuning) {
                 .insert(joints[n.joint].block, (n.fluid, now + NOTE_HOLD));
         }
     }
+    f.surplus_sinks = surplus_sinks;
     // Slice 18: each trash pays 1 E a bucket it destroyed.
     let destroyed = std::mem::take(&mut inv.destroyed);
     for (pos, (mb, fluid)) in destroyed {

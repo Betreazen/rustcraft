@@ -101,6 +101,8 @@ struct Windows {
     clicks: Vec<Click>,
     /// Each player's «Скопировать»: one face's channels.
     clipboard: HashMap<u128, [Option<JointSetting>; SLOTS]>,
+    /// 0.21: the face the wrench last asked each housing's window for, for the self-test.
+    asked: HashMap<Pos, Option<Face>>,
 }
 
 static WINDOWS: LazyLock<Mutex<Windows>> = LazyLock::new(Mutex::default);
@@ -194,9 +196,22 @@ pub(super) fn write_records(nbt: &mut Compound, records: &[Record]) {
 
 // ---- Hooks ----
 
+/// 0.21: how many housings `asked` remembers before it starts again.
+const ASKED_KEPT: usize = 64;
+
+/// 0.21 (the self-test): whether a wrench click asked for the joint window of `housing` lately,
+/// and on which face.
+pub(super) fn asked(housing: Pos) -> Option<Option<Face>> {
+    windows().asked.get(&housing).copied()
+}
+
 /// The wrench asked for the window of `housing`, on `preferred` if that face is a joint.
 pub(super) fn request_open(uuid: u128, dimension: &str, housing: Pos, preferred: Option<Face>) {
     let mut w = windows();
+    if w.asked.len() >= ASKED_KEPT {
+        w.asked.clear();
+    }
+    w.asked.insert(housing, preferred);
     w.opening.retain(|o| o.uuid != uuid);
     w.opening.push(Opening {
         uuid,

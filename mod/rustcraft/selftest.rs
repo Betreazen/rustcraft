@@ -707,6 +707,11 @@ impl Bench for GameBench<'_, '_> {
         crate::game::rustcraft_perks::set_for_selftest(owner, summary)
     }
 
+    // 0.21 (round 32): the wrench on the trash and the disintegrator.
+    fn joint_asked(&self, housing: Pos) -> Option<Face> {
+        crate::game::rustcraft_window::asked(housing).flatten()
+    }
+
     fn testkit(&mut self, args: &str) -> String {
         let mut ran = false;
         base::on_testkit_command(self.game, &format!("rustcraft_testkit {args}"), &mut ran);

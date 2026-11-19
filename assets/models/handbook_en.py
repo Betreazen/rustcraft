@@ -71,7 +71,7 @@ PAGES = {
     'crafter': ('Autocrafter', 'Crafts items by recipes. It has pages, one recipe a page.'),
     'placer': ('Block Placer', 'Places a block in the cell in front of it, from its own inventory.'),
     'trash': ('Trash',
-              'Destroys for good the items and fluids the magistral brings it. Takes only what its filter lets through.'),
+              "Destroys for good the items and fluids the magistral brings it: the storage's surplus and what its joint's filter lets through."),
     'disintegrator': ('Disintegrator', 'Takes complex items apart into their recipe\'s ingredients and gives back half of each.'),
     'breaker': ('Block Breaker', 'Breaks the block in the cell in front of it and keeps what drops.'),
     'mixer': ('Mixer', 'Makes fluids from water and items: nutrient solution and catalysts.'),

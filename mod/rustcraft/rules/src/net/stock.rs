@@ -11,6 +11,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use crate::geom::Pos;
 use crate::net::items::{Inventories, ItemKey};
+use crate::net::surplus::Sink;
 use crate::storage::{Store, keys};
 
 /// The stack size of an item the snapshot was not told about.
@@ -61,6 +62,18 @@ pub struct Stocks {
     pub max_stack: HashMap<ItemKey, u32>,
     /// 0.20: the machines an order of a storage uses or may use now (`Inventories::busy`).
     pub busy: BTreeSet<Pos>,
+    /// 0.21 (round 32): the disintegrators and trashes of the net as sinks of the storages'
+    /// surplus (`net::surplus`).
+    pub sinks: HashMap<Pos, SinkStock>,
+}
+
+/// 0.21: a disintegrator or a trash as the net's sink of the storages' surplus.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SinkStock {
+    pub kind: Sink,
+    /// What it takes as surplus into its inputs, whatever their own rule for the net's flow: a
+    /// disintegrator what it takes apart now, a trash anything.
+    pub takes: BTreeSet<ItemKey>,
 }
 
 /// The stack size of `item` (a storage's key names a worn item after its id).
@@ -81,6 +94,28 @@ fn clamp(n: u64) -> u32 {
 impl Stocks {
     fn stack_of(&self, item: &str) -> u32 {
         stack_in(&self.max_stack, item)
+    }
+
+    /// How many of `item` the slots of `block` take: by their own rule for the net's flow, or
+    /// with `surplus` any input (0.21: a sink's for a storage's surplus).
+    fn slot_room(&self, block: Pos, item: &str, surplus: bool) -> u32 {
+        let Some(stock) = self.blocks.get(&block) else {
+            return 0;
+        };
+        if !surplus && stock.accepts.as_ref().is_some_and(|a| !a.contains(item)) {
+            return 0;
+        }
+        let stack = self.stack_of(item);
+        stock
+            .slots
+            .iter()
+            .filter(|s| s.takes(item) || (surplus && s.can_put))
+            .map(|s| match &s.item {
+                None => stack,
+                Some(i) if i == item => stack.saturating_sub(s.count),
+                Some(_) => 0,
+            })
+            .sum()
     }
 }
 
@@ -114,29 +149,53 @@ impl Inventories for Stocks {
     fn room_for(&self, block: Pos, item: &str) -> u32 {
         if let Some(s) = self.stores.get(&block) {
             let stack = |k: &str| stack_in(&self.max_stack, k);
+            // 0.21: what it keeps, under its limit; past it a storage that destroys the surplus
+            // takes what its sinks leave (`net::surplus::arriving`).
             return if s.works && keys::storable(item) {
-                clamp(s.store.room_for(item, &stack))
+                clamp(s.store.kept_room(item, &stack))
             } else {
                 0
             };
         }
-        let Some(stock) = self.blocks.get(&block) else {
-            return 0;
-        };
-        if stock.accepts.as_ref().is_some_and(|a| !a.contains(item)) {
-            return 0;
+        self.slot_room(block, item, false)
+    }
+
+    fn is_store(&self, block: Pos) -> bool {
+        self.stores.contains_key(&block)
+    }
+
+    fn surplus(&self, block: Pos) -> Vec<(ItemKey, u32)> {
+        self.stores
+            .get(&block)
+            .filter(|s| s.works)
+            .map(|s| s.store.surplus().into_iter().map(|(k, n)| (k, clamp(n))).collect())
+            .unwrap_or_default()
+    }
+
+    fn at_limit(&self, block: Pos, item: &str) -> bool {
+        self.stores.get(&block).is_some_and(|s| s.works && s.store.at_limit(item))
+    }
+
+    fn destroys(&self, block: Pos, item: &str) -> bool {
+        self.stores.get(&block).is_some_and(|s| {
+            s.works && keys::storable(item) && s.store.limits.get(item).is_some_and(|l| l.destroy_surplus)
+        })
+    }
+
+    fn sink(&self, block: Pos) -> Option<Sink> {
+        self.sinks.get(&block).map(|s| s.kind)
+    }
+
+    fn takes_surplus(&self, block: Pos, item: &str) -> bool {
+        self.sinks.get(&block).is_some_and(|s| s.takes.contains(item))
+    }
+
+    fn surplus_room(&self, block: Pos, item: &str) -> u32 {
+        if self.takes_surplus(block, item) {
+            self.slot_room(block, item, true)
+        } else {
+            0
         }
-        let stack = self.stack_of(item);
-        stock
-            .slots
-            .iter()
-            .filter(|s| s.takes(item))
-            .map(|s| match &s.item {
-                None => stack,
-                Some(i) if i == item => stack.saturating_sub(s.count),
-                Some(_) => 0,
-            })
-            .sum()
     }
 
     /// A machine's input takes `item` (a slot limited to its items, or the block's `accepts`),
@@ -212,16 +271,18 @@ impl Inventories for Stocks {
             };
         }
         let stack = self.stack_of(item);
+        // 0.21: a sink takes a storage's surplus into its inputs whatever their own rule.
+        let surplus = self.takes_surplus(block, item);
         let Some(stock) = self.blocks.get_mut(&block) else {
             return 0;
         };
-        if stock.accepts.as_ref().is_some_and(|a| !a.contains(item)) {
+        if !surplus && stock.accepts.as_ref().is_some_and(|a| !a.contains(item)) {
             return 0;
         }
         let mut left = count;
         // Onto stacks of the same item first, then into empty slots, as a hopper fills.
         for same in [true, false] {
-            for slot in stock.slots.iter_mut().filter(|s| s.takes(item)) {
+            for slot in stock.slots.iter_mut().filter(|s| s.takes(item) || (surplus && s.can_put)) {
                 if left == 0 {
                     break;
                 }

@@ -1,6 +1,8 @@
 //! What the wrench does to a machine (guide `wrench`): a click turns it a quarter clockwise as seen
 //! from above, a sneaking click lifts it as one item with its contents and settings.
 
+use crate::geom::{Face, Pos, step};
+
 /// The horizontal facings in the order a click turns them.
 pub const FACINGS: [&str; 4] = ["north", "east", "south", "west"];
 
@@ -21,6 +23,27 @@ pub const KEPT: [&str; 3] = ["rustcraft:station", "rustcraft:portal_dock", "rust
 /// Whether the wrench turns and lifts `block`, given it is a machine.
 pub fn handles(block: &str) -> bool {
     !KEPT.contains(&block)
+}
+
+/// 0.21 (round 32, SP9; the owner: «писало что на стыке настроить нужно, но его меню вообще не
+/// открывалось»): machines whose joint decides everything they do. The machine covers the face of
+/// the housing that looks at it, so a wrench click on it opens that joint's window instead of
+/// turning it; with no housing beside it, it turns as any machine.
+pub const OPENS_JOINT: [&str; 2] = ["rustcraft:trash", "rustcraft:disintegrator"];
+
+/// Whether a wrench click on `block` opens the joint window of a housing beside it first.
+pub fn opens_joint(block: &str) -> bool {
+    OPENS_JOINT.contains(&block)
+}
+
+/// The housing beside the block at `pos` whose joint window a wrench click on the block opens,
+/// and the face of that housing that looks at the block: the first beside it in `Face::ALL`
+/// order.
+pub fn joint_beside(pos: Pos, is_housing: impl Fn(Pos) -> bool) -> Option<(Pos, Face)> {
+    Face::ALL.into_iter().find_map(|f| {
+        let housing = step(pos, f);
+        is_housing(housing).then_some((housing, f.opposite()))
+    })
 }
 
 #[cfg(test)]
@@ -44,5 +67,25 @@ mod tests {
     #[test]
     fn the_projector_is_kept_so_its_wrench_sets_corners() {
         assert!(!handles("rustcraft:projector"));
+    }
+
+    #[test]
+    fn the_trash_and_the_disintegrator_open_their_joint_others_turn() {
+        // SP9: the owner could not reach the trash's joint, the trash covered it.
+        assert!(opens_joint("rustcraft:trash"));
+        assert!(opens_joint("rustcraft:disintegrator"));
+        for other in ["rustcraft:furnace", "rustcraft:crusher", "rustcraft:repair", "minecraft:chest"] {
+            assert!(!opens_joint(other), "{other}");
+        }
+    }
+
+    #[test]
+    fn the_joint_beside_is_the_housings_face_that_looks_at_the_block() {
+        // A trash at the origin, a housing to its west: the housing's east face is the joint.
+        let west = [-1, 0, 0];
+        assert_eq!(joint_beside([0, 0, 0], |p| p == west), Some((west, Face::XPos)));
+        let above = [0, 1, 0];
+        assert_eq!(joint_beside([0, 0, 0], |p| p == above), Some((above, Face::YNeg)));
+        assert_eq!(joint_beside([0, 0, 0], |_| false), None);
     }
 }

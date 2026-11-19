@@ -11,6 +11,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::geom::{Face, Pos};
+use crate::net::surplus::{self, Sink};
 
 /// An item kind as the game names it, with any components that keep stacks apart.
 pub type ItemKey = String;
@@ -146,6 +147,34 @@ pub trait Inventories {
     fn input_held(&self, _block: Pos) -> u32 {
         0
     }
+    /// 0.21 (round 32, `net::surplus`): the block is a storage.
+    fn is_store(&self, _block: Pos) -> bool {
+        false
+    }
+    /// 0.21 (SP1): what a storage holds over its limits, by item; nothing for any other block.
+    fn surplus(&self, _block: Pos) -> Vec<(ItemKey, u32)> {
+        Vec::new()
+    }
+    /// 0.21 (SP2): a storage limits `item` and holds all it keeps of it.
+    fn at_limit(&self, _block: Pos, _item: &str) -> bool {
+        false
+    }
+    /// 0.21: a storage destroys what comes of `item` over its limit (S5, «уничтожать излишек»).
+    fn destroys(&self, _block: Pos, _item: &str) -> bool {
+        false
+    }
+    /// 0.21 (SP3): what the block does with a storage's surplus, if anything.
+    fn sink(&self, _block: Pos) -> Option<Sink> {
+        None
+    }
+    /// 0.21: the sink at `block` takes `item` as surplus, room or not.
+    fn takes_surplus(&self, _block: Pos, _item: &str) -> bool {
+        false
+    }
+    /// 0.21: how many of `item` the sink at `block` takes as surplus now; `put` takes them.
+    fn surplus_room(&self, _block: Pos, _item: &str) -> u32 {
+        0
+    }
     /// Takes up to `count` of `item` out of the block; returns how many it took.
     fn take(&mut self, block: Pos, item: &str, count: u32) -> u32;
     /// Puts up to `count` of `item` into the block; returns how many fitted.
@@ -227,6 +256,8 @@ pub fn tick(
     // its ore to the crushers of its net on their default joints that no order uses, a few at a
     // time; their dust goes on as any product does.
     feed_refiners(joints, &receivers, inv, &mut available, &mut moved, &mut result.transfers);
+    // 0.21 (round 32, SP1): what a storage holds over its limits leaves for its sinks.
+    moved += surplus::stock_out(joints, &receivers, state, inv, &mut available, &mut result.transfers);
     if sources.is_empty() || receivers.is_empty() {
         state.budget -= f64::from(moved);
         return result;
@@ -302,13 +333,43 @@ pub fn tick(
                         &mut available,
                         inv,
                         &mut result.transfers,
+                        room_now,
                     );
                 }
                 moved += gave;
                 if left > 0 && available > 0 {
-                    // Items waited and every receiver of this priority had no room.
-                    full.extend(candidates);
+                    // Items waited and every receiver of this priority had no room; a storage
+                    // that destroys the surplus takes the rest below (0.21), it is not full.
+                    let item = &item;
+                    full.extend(candidates.into_iter().filter(|&r| !inv.destroys(joints[r].block, item)));
                 }
+            }
+            // 0.21 (round 32, SP2): what no receiver took of an item a storage of the net holds
+            // its limit of is surplus: its sinks take it, else a storage that destroys it (S5).
+            // A storage's stock is no such surplus (SP1 has its own), nor what a vanilla container
+            // on its default joint gives (the player's chests beside any line keep it): only a
+            // machine's products and a container the player set «из блока». A storage that
+            // destroys the surplus takes from any source, as before.
+            if left > 0 && available > 0 {
+                let limited: Vec<usize> = receivers
+                    .iter()
+                    .copied()
+                    .filter(|&r| open(r) && inv.at_limit(joints[r].block, &item))
+                    .collect();
+                let gives_surplus = !src.auto && !inv.is_store(src.block);
+                moved += surplus::arriving(
+                    joints,
+                    &receivers,
+                    &limited,
+                    state,
+                    inv,
+                    src.block,
+                    &item,
+                    left,
+                    gives_surplus,
+                    &mut available,
+                    &mut result.transfers,
+                );
             }
         }
     }
@@ -404,10 +465,16 @@ fn first_per_block(joints: &[Joint], wanted: fn(Mode) -> bool) -> Vec<usize> {
         .collect()
 }
 
+/// The room a receiver has for an item on the net's own flow.
+fn room_now(inv: &dyn Inventories, block: Pos, item: &str) -> u32 {
+    inv.room_for(block, item)
+}
+
 /// M8: hands `item` out one at a time to `candidates` in turn, starting at `turn`, while there is
-/// room, items `left` and throughput `available`. Returns how many moved.
+/// `room` (0.21: the net's own, or a sink's for the surplus), items `left` and throughput
+/// `available`. Returns how many moved.
 #[allow(clippy::too_many_arguments)]
-fn share_in_turn(
+pub(super) fn share_in_turn(
     joints: &[Joint],
     candidates: &[usize],
     turn: &mut usize,
@@ -417,11 +484,13 @@ fn share_in_turn(
     available: &mut u32,
     inv: &mut dyn Inventories,
     transfers: &mut Vec<Transfer>,
+    room: fn(&dyn Inventories, Pos, &str) -> u32,
 ) -> u32 {
     let mut gave = 0;
     while *left > 0 && *available > 0 {
         let Some(offset) = (0..candidates.len()).find(|i| {
-            inv.room_for(
+            room(
+                &*inv,
                 joints[candidates[(*turn + i) % candidates.len()]].block,
                 item,
             ) > 0
@@ -449,7 +518,7 @@ fn share_in_turn(
 }
 
 /// Adds one item to the transfer list, merging it into the last move if it is the same.
-fn record(transfers: &mut Vec<Transfer>, from: Pos, to: Pos, item: &str) {
+pub(super) fn record(transfers: &mut Vec<Transfer>, from: Pos, to: Pos, item: &str) {
     if let Some(t) = transfers
         .iter_mut()
         .find(|t| t.from == from && t.to == to && t.item == item)
