@@ -124,9 +124,12 @@ fn kitchen_cooks_one_dish_then_the_next(o: Pos, _: &Tuning) -> Scenario {
     Scenario::new("recipes21_kitchen_cooks_one_dish_then_the_next", plot_area(o))
         .then("a storage on a tier 3 line with 8 wheat and a cocoa bean", move |b, _| build(b, o, &parts))
         .until("the storage holds them", FILL, move |b, _| holds(b, o, &parts))
-        .then("a kitchen with energy on the line, bread and cookies on", move |b, _| {
+        .then("a kitchen with energy on the line", move |b, _| {
             machine(b, k, KITCHEN, true)?;
-            b.set_buffer(k, 400.0)?;
+            b.set_buffer(k, 400.0)
+        })
+        // A press waits for the kitchen's block entity, which comes the tick after it is placed.
+        .then("bread and cookies on", move |b, _| {
             toggle(b, k, BREAD_TOGGLE)?;
             toggle(b, k, COOKIE_TOGGLE)
         })
@@ -214,12 +217,12 @@ fn order_runs_on_a_kitchen_busy_with_its_own(o: Pos, _: &Tuning) -> Scenario {
     Scenario::new("recipes21_order_runs_on_a_kitchen_busy_with_its_own", plot_area(o))
         .then("a storage on a tier 3 line with 30 wheat and a cocoa bean", move |b, _| build(b, o, &parts))
         .until("the storage holds them", FILL, move |b, _| holds(b, o, &parts))
-        .then("a kitchen with energy baking bread, the book", move |b, _| {
+        .then("a kitchen with energy, the book", move |b, _| {
             machine(b, k, KITCHEN, true)?;
             b.set_buffer(k, 400.0)?;
-            toggle(b, k, BREAD_TOGGLE)?;
             put_book(b, o)
         })
+        .then("bread on", move |b, _| toggle(b, k, BREAD_TOGGLE))
         .until("it took wheat for its bread", 400, move |b, _| Ok(count_of(&b.items(k), WHEAT) > 0))
         .until("the storage takes an order for 8 cookies", FILL, move |b, _| {
             Ok(b.order(terminal_at(o), COOKIE, 8).is_ok())

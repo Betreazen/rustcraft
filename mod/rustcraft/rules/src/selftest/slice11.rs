@@ -96,6 +96,10 @@ fn mixer_makes_accelerator(o: Pos, _: &Tuning) -> Scenario {
                 b.place(at(m, [0, 0, 1]), CRYSTAL, &[])
             },
         )
+        // 0.21 (spec 39): the accelerator, its second recipe, turned on in its window.
+        .then("the accelerator turned on", move |b, _| {
+            b.press(m, crate::machines::sheet::Press::Toggle(1).id(), None)
+        })
         .until("a bucket of accelerator in the tank on top", LIMIT, move |b, _| {
             Ok(b.tank(product).is_some_and(|g| {
                 g.fluid.as_deref() == Some(ACCELERATOR) && g.amount >= 1000

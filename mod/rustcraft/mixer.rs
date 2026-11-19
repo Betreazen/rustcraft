@@ -468,7 +468,8 @@ pub(super) fn run(
     let fetched = (!held.job && ticks.is_multiple_of(FETCH_EVERY))
         .then(|| fetch(game, &dimension, topology, pos, all, &held, now, &mut after));
     let migrated = fetched.and_then(|f| f.migrated);
-    let now_name = held.pick.run().filter(|_| !held.job && held.pick.run() != held.now).map(|i| all[i].fluid.clone());
+    // The recipe it works on now, an order's too: else each tick of the job would start its batch afresh.
+    let now_name = held.pick.run().filter(|i| Some(*i) != held.now).map(|i| all[i].fluid.clone());
     let cells = after.split_off(content::MIXER_SLOTS.min(after.len()));
     if mixer == before && after == held.raw && cells == held.queue_before && migrated.is_none() && now_name.is_none() {
         return;
