@@ -154,7 +154,7 @@ pub(super) fn tick(game: &mut Game<'_>, dimension: &str, level: &LevelNet, t: &T
         let due = *state().due.entry(key.clone()).or_insert(now + strike_every(game, pos, t));
         if now >= due {
             state().due.insert(key, now + strike_every(game, pos, t));
-            let shown = strike(game, dimension, pos, t, now);
+            let shown = strike(game, dimension, level, pos, t, now);
             // Slice 12: its arm chops while it works.
             crate::game::rustcraft_anim::show_on(game, pos, matches!(shown, Shown::Working(_)));
             state().shown.insert((dimension.to_owned(), pos), shown);
@@ -227,7 +227,7 @@ fn gather(game: &mut Game<'_>, dimension: &str, pos: Pos, t: &Tuning, now: u64) 
 }
 
 /// One strike, if it has a sword, room for the drops and an animal over its number.
-fn strike(game: &mut Game<'_>, dimension: &str, pos: Pos, t: &Tuning, now: u64) -> Shown {
+fn strike(game: &mut Game<'_>, dimension: &str, level: &LevelNet, pos: Pos, t: &Tuning, now: u64) -> Shown {
     let Some(entity) = game.native_mod_block_entity(pos) else {
         return Shown::NoSword;
     };
@@ -306,8 +306,8 @@ fn strike(game: &mut Game<'_>, dimension: &str, pos: Pos, t: &Tuning, now: u64) 
                 mining::store(&mut b.items[..LOOT_SLOTS], stack, max)
             });
         }
-        // K6 (slice 18): the kill's experience into a condenser beside it.
-        xp_to_condenser(game, pos, &kind);
+        // K6 (slice 18): the kill's experience into a condenser beside it; 0.21: or on its line.
+        xp_to_condenser(game, level, pos, &kind);
     }
     if struck && let Some(b) = blade {
         if let Some(bat) = crate::game::rustcraft_gear::battery(game, &b) {
@@ -334,11 +334,20 @@ fn strike(game: &mut Game<'_>, dimension: &str, pos: Pos, t: &Tuning, now: u64) 
 
 /// K6 (guide `butcher`): «опыт за убийство уходит в конденсатор опыта вплотную, без него
 /// пропадает»: the points the animal is worth (the game's 1–3 for a farm animal) into a condenser
-/// touching the butcher (a kill with no player behind it drops no orbs).
-fn xp_to_condenser(game: &mut Game<'_>, pos: Pos, kind: &str) {
+/// touching the butcher (a kill with no player behind it drops no orbs). 0.21 (K6a): without one,
+/// into the nearest condenser with room beside the magistral line the butcher stands on.
+fn xp_to_condenser(game: &mut Game<'_>, level: &LevelNet, pos: Pos, kind: &str) {
+    use crate::game::rustcraft_utility as utility;
     let points = if kind == "minecraft:chicken" || kind == "minecraft:rabbit" { 1 } else { 2 };
-    if let Some(tank) = crate::game::rustcraft_utility::neighbour_of(game, pos, rustcraft_rules::utility::Util::XpTank.spec().block) {
-        crate::game::rustcraft_utility::add_xp(game, tank, points);
+    let block = rustcraft_rules::utility::Util::XpTank.spec().block;
+    let room = |game: &Game<'_>, p: Pos| utility::xp_of(game, p) < rustcraft_rules::utility::xp::CAPACITY;
+    let tank = utility::neighbour_of(game, pos, block).or_else(|| {
+        rules::line_neighbours(&level.topology, &level.layout, pos)
+            .into_iter()
+            .find(|p| game.native_block(*p) == block && room(game, *p))
+    });
+    if let Some(tank) = tank {
+        utility::add_xp(game, tank, points);
     }
 }
 

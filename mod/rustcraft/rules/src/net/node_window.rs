@@ -88,6 +88,10 @@ pub struct NodeView {
     pub capacity: f64,
     /// Line-boost modules in its sockets.
     pub modules: u8,
+    /// 0.21: what the energy channels of the line let through, E a second (the circuits' cap,
+    /// their weakest housing's tier with the nodes' modules); none without a circuit on the line.
+    #[serde(default)]
+    pub energy_cap: Option<f64>,
     /// 0.21: the line's housings of tiers 1–4.
     #[serde(default)]
     pub tiers: [u32; MAX_TIER as usize],
@@ -99,11 +103,23 @@ pub struct NodeView {
 }
 
 impl NodeView {
+    /// 0.21 (the owner's line: 710 E/s made, 54 used, «хватает: да», and its machines short): what
+    /// the line can deliver a second, the energy made and the batteries' held to the channels' cap.
+    pub fn deliverable(&self) -> f64 {
+        let offered = if self.stored > 0.0 { f64::INFINITY } else { self.made };
+        self.energy_cap.map_or(offered, |cap| offered.min(cap))
+    }
+
+    /// Whether the energy channels hold the line back, not the sources.
+    pub fn channel_short(&self) -> bool {
+        self.energy_cap.is_some_and(|cap| self.used > cap + 1e-9)
+    }
+
     /// The status line: 0 works, 1 works worse (energy short), 2 stands (no housing on the line).
     pub fn severity(&self) -> u8 {
         if self.housings == 0 {
             2
-        } else if self.used > self.made + 1e-9 && self.stored <= 0.0 {
+        } else if self.used > self.deliverable() + 1e-9 {
             1
         } else {
             0
@@ -112,10 +128,11 @@ impl NodeView {
 
     /// How much slower the machines on the line work, percent (0 when the energy is enough).
     pub fn slowed_percent(&self) -> u32 {
-        if self.used <= self.made || self.used <= 0.0 || self.stored > 0.0 {
+        let got = self.deliverable();
+        if self.used <= got || self.used <= 0.0 {
             return 0;
         }
-        ((1.0 - self.made / self.used) * 100.0).round() as u32
+        ((1.0 - got / self.used) * 100.0).round() as u32
     }
 }
 
@@ -301,26 +318,27 @@ pub fn net_boost(
 pub type Rect = [f32; 4];
 
 pub const WIDTH: f32 = 214.0;
-pub const HEIGHT: f32 = 210.0;
+pub const HEIGHT: f32 = 220.0;
 const LEFT: f32 = 8.0;
 /// The «Линия» label and the three axis buttons under it.
 pub const LINE_LABEL_Y: f32 = 18.0;
 pub const AXIS_Y: f32 = 28.0;
 const AXIS_H: f32 = 14.0;
 const AXIS_GAP: f32 = 2.0;
-/// The balance's four rows, then the line's five (0.21: its tiers and the upgrade added).
+/// The balance's four rows, then the line's six (0.21: its tiers, the upgrade and the energy
+/// channel added).
 pub const BALANCE_Y: f32 = 47.0;
 pub const LINE_ROWS_Y: f32 = 90.0;
 /// Wave 2: the balance's rows (ui.js `balance`: Производство, Потребление, В запасе, Хватает).
 pub const BALANCE_ROWS: usize = 4;
 pub const ROW: f32 = 10.0;
 /// The «Модули» label and the sockets' items.
-pub const LINE_ROWS: usize = 5;
-pub const MODULES_LABEL_Y: f32 = 143.0;
-pub const SOCKETS_Y: f32 = 154.0;
+pub const LINE_ROWS: usize = 6;
+pub const MODULES_LABEL_Y: f32 = 153.0;
+pub const SOCKETS_Y: f32 = 164.0;
 /// 0.21: the button that replaces the line's housings of its lowest tier.
-pub const UPGRADE: Rect = [LEFT, 174.0, WIDTH - 2.0 * LEFT, 14.0];
-pub const STATUS: Rect = [LEFT, 192.0, WIDTH - 2.0 * LEFT, 12.0];
+pub const UPGRADE: Rect = [LEFT, 184.0, WIDTH - 2.0 * LEFT, 14.0];
+pub const STATUS: Rect = [LEFT, 202.0, WIDTH - 2.0 * LEFT, 12.0];
 
 /// The axis buttons, west–east, north–south, up–down.
 pub fn axis_rects() -> [Rect; 3] {
@@ -453,6 +471,25 @@ mod tests {
     }
 
     #[test]
+    fn the_channels_cap_holds_the_line_back_though_the_sources_make_enough() {
+        // The owner's tier-1 line (0.21): 710 E/s made, 54 used, a tier-1 energy channel of 32.
+        let v = NodeView {
+            housings: 307,
+            made: 710.4,
+            used: 54.0,
+            stored: 57_523.0,
+            energy_cap: Some(32.0),
+            ..NodeView::default()
+        };
+        assert!(v.channel_short());
+        assert_eq!(v.severity(), 1);
+        assert_eq!(v.slowed_percent(), 41);
+        let wide = NodeView { energy_cap: Some(128.0), ..v.clone() };
+        assert!(!wide.channel_short());
+        assert_eq!((wide.severity(), wide.slowed_percent()), (0, 0));
+    }
+
+    #[test]
     fn a_click_presses_an_axis_or_a_socket() {
         let axes = axis_rects();
         let mid = |r: Rect| [r[0] + r[2] / 2.0, r[1] + r[3] / 2.0];
@@ -463,7 +500,7 @@ mod tests {
         assert_eq!(press_at([1.0, 1.0], false), None);
         assert!(STATUS[1] + STATUS[3] <= HEIGHT);
         assert!(BALANCE_Y + ROW * BALANCE_ROWS as f32 <= LINE_ROWS_Y, "the four balance rows fit");
-        assert!(LINE_ROWS_Y + ROW * LINE_ROWS as f32 <= MODULES_LABEL_Y, "the five line rows fit");
+        assert!(LINE_ROWS_Y + ROW * LINE_ROWS as f32 <= MODULES_LABEL_Y, "the six line rows fit");
         assert!(SOCKETS_Y + 18.0 <= UPGRADE[1] && UPGRADE[1] + UPGRADE[3] <= STATUS[1]);
         assert_eq!(press_at([UPGRADE[0] + 5.0, UPGRADE[1] + 5.0], true), Some(Press::Upgrade));
     }

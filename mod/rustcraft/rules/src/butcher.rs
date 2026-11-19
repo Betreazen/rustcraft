@@ -11,6 +11,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::geom::{Face, Pos, step};
+use crate::net::topology::{Layout, Topology};
 use crate::tuning::Tuning;
 
 pub const BLOCK: &str = "rustcraft:butcher";
@@ -272,9 +274,53 @@ pub fn is_its_drop(kills: &[Kill], now: u64, at: [f64; 3], item: &str) -> bool {
     })
 }
 
+/// 0.21 (K6a; owner 2026-11-19: «по каналу опыт не ходит: забойщик убивает скот, а в конденсаторе
+/// опыта пусто»): the blocks beside the magistral lines that touch the butcher at `machine`, the
+/// nearest first. A kill's experience goes into the first condenser among them with room when no
+/// condenser touches the butcher itself.
+pub fn line_neighbours(topology: &Topology, layout: &Layout, machine: Pos) -> Vec<Pos> {
+    let mut lines: Vec<usize> = Face::ALL
+        .iter()
+        .map(|f| step(machine, *f))
+        .filter(|h| layout.housings.contains_key(h))
+        .filter_map(|h| topology.line_of(h))
+        .collect();
+    lines.sort_unstable();
+    lines.dedup();
+    let mut out: Vec<Pos> = lines
+        .iter()
+        .flat_map(|&l| topology.lines[l].iter())
+        .flat_map(|&h| Face::ALL.map(|f| step(h, f)))
+        .filter(|b| *b != machine && !layout.housings.contains_key(b) && !layout.nodes.contains_key(b))
+        .collect();
+    let far = |b: &Pos| (0..3).map(|i| i64::from(b[i] - machine[i]).pow(2)).sum::<i64>();
+    out.sort_unstable_by_key(|b| (far(b), *b));
+    out.dedup();
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_kills_experience_finds_the_condensers_on_its_line() {
+        use crate::net::topology::{Housing, Node, analyse};
+        let mut l = Layout::default();
+        l.nodes.insert([0, 0, 0], Node { tier: 1 });
+        for x in 1..=5 {
+            l.housings.insert([x, 0, 0], Housing::default());
+        }
+        let topo = analyse(&l, &Tuning::default());
+        let butcher = [1, 1, 0];
+        let found = line_neighbours(&topo, &l, butcher);
+        assert!(found.contains(&[5, 0, 1]), "beside the line's far end");
+        assert!(found.contains(&[6, 0, 0]), "past its last housing");
+        assert!(!found.contains(&butcher) && !found.contains(&[0, 0, 0]), "not itself nor the node");
+        assert!(!found.contains(&[3, 2, 0]), "two blocks off the line");
+        assert_eq!(found[0], [2, 1, 0], "the nearest first");
+        assert!(line_neighbours(&topo, &l, [9, 9, 9]).is_empty(), "no line beside it");
+    }
 
     #[test]
     fn it_picks_up_only_its_kills_drops() {

@@ -233,6 +233,8 @@ fn view_of(
         let mut members = around.clone();
         for c in level.power.circuits.iter().filter(|c| !c.members.is_disjoint(&around)) {
             members.extend(c.members.iter().copied());
+            // 0.21: the line's energy channels let through no more than their circuit's cap.
+            view.energy_cap = Some(view.energy_cap.map_or(c.cap, |m: f64| m.min(c.cap)));
         }
         let balance = ledger.balance(&members, got);
         view.made = balance.produced;
@@ -643,6 +645,10 @@ pub(super) fn draw(
     }
     let (severity, status) = match v.severity() {
         0 => (Severity::Ok, tr("rustcraft.machine.working", "Working")),
+        1 if v.channel_short() => (
+            Severity::Warn,
+            tr("rustcraft.node.window.channel_short", "Narrow energy channel: raise the housings"),
+        ),
         1 => (
             Severity::Warn,
             tr("rustcraft.node.window.short", "Not enough energy: machines slowed"),
@@ -687,8 +693,14 @@ fn rows(v: &NodeView) -> Vec<(String, String)> {
     let es = |x: f64| {
         tr_with("rustcraft.node.window.eps", "%s E/s", &[rustcraft_rules::machines::panel::energy_text(x)])
     };
-    let enough = if v.used <= v.made {
+    let enough = if v.used <= v.deliverable() + 1e-9 {
         tr("rustcraft.node.window.yes", "yes")
+    } else if v.channel_short() {
+        tr_with(
+            "rustcraft.node.window.channel_slowed",
+            "no, narrow channel: −%s",
+            &[format!("{}%", v.slowed_percent())],
+        )
     } else {
         tr_with(
             "rustcraft.node.window.slowed",
@@ -717,6 +729,8 @@ fn rows(v: &NodeView) -> Vec<(String, String)> {
     } else {
         tr("rustcraft.window.stored.none", "no batteries")
     };
+    // 0.21: what the line's energy channels let through.
+    let cap = v.energy_cap.map_or_else(|| "—".to_owned(), es);
     let farthest = tr_with(
         "rustcraft.node.window.of_blocks",
         "%s of %s blocks",
@@ -731,7 +745,8 @@ fn rows(v: &NodeView) -> Vec<(String, String)> {
         (tr("rustcraft.node.window.tiers", "By tier"), tiers_text(v)),
         (tr("rustcraft.node.window.upgrade_need", "To replace"), need_text(v)),
         (tr("rustcraft.node.window.farthest", "Farthest"), farthest),
-        (tr("rustcraft.node.window.items", "Item channel on the section"), items),
+        (tr("rustcraft.node.window.items", "Item channel"), items),
+        (tr("rustcraft.node.window.energy_cap", "Energy channel"), cap),
     ]
 }
 
