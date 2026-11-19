@@ -1695,7 +1695,7 @@
   "rustcraft.handbook.page.structure.part.1.label": "Отдача",
   "rustcraft.handbook.page.structure.part.1": "Сколько энергии блок отдаёт в магистраль прямо сейчас.",
   "rustcraft.handbook.page.structure.part.2.label": "Раствор",
-  "rustcraft.handbook.page.structure.part.2": "Запас питательного раствора и его расход. Без раствора структура даёт столько же, сколько один кристалл.",
+  "rustcraft.handbook.page.structure.part.2": "Запас питательного раствора, расход сейчас и на сколько хватит. Раствор тратится, только пока у структуры берут энергию. Без раствора структура даёт столько же, сколько один кристалл.",
   "rustcraft.handbook.page.structure.part.3": "Баланс всей цепи, к которой подключён блок: сколько она производит и тратит, сколько энергии в накопителях и хватает ли её.",
   "rustcraft.handbook.page.structure.part.4": "Структура называет, что её сейчас ограничивает: размер, раствор или канал.",
   "rustcraft.handbook.page.grow.name": "Выращивание кристаллов",
