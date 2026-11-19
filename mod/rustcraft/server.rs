@@ -160,6 +160,17 @@ pub(super) fn old_slots(nbt: &Compound) -> Option<OldSlots> {
     }
 }
 
+/// 0.21 (spec 45, CR2): an old channel item a player carries becomes its alloy in its slot, two
+/// channels an ingot and an odd one a whole ingot (rustcraft_rules::net::old_channels).
+pub(super) fn on_inventory_tick(game: &mut Game<'_>, slot: i32) {
+    let Some(stack) = game.native_carried_stack(slot) else {
+        return;
+    };
+    if let Some((alloy, n)) = rustcraft_rules::net::old_channels::convert(&stack.item, stack.count) {
+        *stack = ItemStack::new(alloy, n);
+    }
+}
+
 /// Round 31: a housing written as 0.19 saved it (the self-test's old housings).
 pub(super) fn write_old_slots(nbt: &mut Compound, slots: &OldSlots) {
     nbt.insert(
@@ -620,12 +631,14 @@ pub(super) fn on_destroy_block(game: &mut Game<'_>, pos: [i32; 3]) {
         return;
     }
     // Round 31: a housing of 0.19 broken before its level was read again still holds the
-    // channels set into it: they come back as they did.
+    // channels set into it. 0.21 (spec 45, CR4): they come back as their alloy.
     let old = crate::game::rustcraft_machines::entity(game, pos).and_then(|entity| old_slots(&entity.nbt));
-    for channel in old.into_iter().flatten().flatten() {
-        let item = content::channel_item(channel.kind, channel.tier);
-        if game.native_give_items(item, 1) == 0 {
-            drop_item(game, &player.dimension, pos, item);
+    let parts = rustcraft_rules::net::old_channels::parts_of_channels(old.into_iter().flatten().flatten());
+    for (alloy, n) in parts {
+        for _ in 0..n {
+            if game.native_give_items(alloy, 1) == 0 {
+                drop_item(game, &player.dimension, pos, alloy);
+            }
         }
     }
     // s18/pipe: the facade and the block of its look come back too (guide `facade`).

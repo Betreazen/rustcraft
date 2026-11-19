@@ -8,7 +8,6 @@ use crate::game::Game;
 use horizon_client::containers::ModContainer;
 use horizon_mods::content::{Block, BlockProperties, BlockShapes, Item, StateProperty};
 use horizon_world::nbt::Compound;
-use rustcraft_rules::net::topology::ChannelKind;
 use rustcraft_rules::utility::Util;
 use std::{
     collections::{BTreeMap, HashMap},
@@ -402,27 +401,6 @@ const SOLAR_BOX: [f64; 6] = [0.0, 0.0, 0.0, 1.0, 0.40625, 1.0];
 const PLATE_BOX: [f64; 6] = [0.0, 0.0, 0.0, 1.0, 0.071875, 1.0];
 /// The crystal's outline and collision: the staged model's cluster, 2..14 across, 15 high.
 const CRYSTAL_BOX: [f64; 6] = [0.125, 0.0, 0.125, 0.875, 0.9375, 0.875];
-pub const ITEM_CHANNEL: &str = "rustcraft:item_channel";
-pub const FLUID_CHANNEL: &str = "rustcraft:fluid_channel";
-pub const ENERGY_CHANNEL: &str = "rustcraft:energy_channel";
-/// Slice 10: the channels by kind and tier, one item each (tiers 2 and 3 of plan slice 2). Round
-/// 31: the channels are built into the housing and none is made any more; these items stay so that
-/// those a player has are taken apart into their alloy (the content mod's `*_channel*_apart`
-/// recipes), and the joint window's rows show them as icons.
-const CHANNEL_ITEMS: [(ChannelKind, u8, &str); 12] = [
-    (ChannelKind::Item, 1, ITEM_CHANNEL),
-    (ChannelKind::Item, 2, "rustcraft:item_channel_2"),
-    (ChannelKind::Item, 3, "rustcraft:item_channel_3"),
-    (ChannelKind::Item, 4, "rustcraft:item_channel_4"),
-    (ChannelKind::Fluid, 1, FLUID_CHANNEL),
-    (ChannelKind::Fluid, 2, "rustcraft:fluid_channel_2"),
-    (ChannelKind::Fluid, 3, "rustcraft:fluid_channel_3"),
-    (ChannelKind::Fluid, 4, "rustcraft:fluid_channel_4"),
-    (ChannelKind::Energy, 1, ENERGY_CHANNEL),
-    (ChannelKind::Energy, 2, "rustcraft:energy_channel_2"),
-    (ChannelKind::Energy, 3, "rustcraft:energy_channel_3"),
-    (ChannelKind::Energy, 4, "rustcraft:energy_channel_4"),
-];
 pub const WRENCH: &str = "rustcraft:wrench";
 
 /// The node's and (round 31) the housing's state property: its tier, 1 to 4 (N3, M10).
@@ -438,16 +416,6 @@ const JOINS: &str = "rustcraft:magistral";
 /// exported cage is 6 pixels across (5..11) and the collars at the arms' ends 6.5 (4.75..11.25),
 /// so the outline and collision wrap the collars.
 const HOUSING_THICKNESS: f32 = 6.5;
-
-/// The item that carries a channel of `kind` and `tier`; a tier no item has (4, from a save of
-/// another version) gives back the highest item of its kind.
-pub fn channel_item(kind: ChannelKind, tier: u8) -> &'static str {
-    CHANNEL_ITEMS
-        .iter()
-        .filter(|(k, t, _)| *k == kind && *t <= tier.max(1))
-        .last()
-        .map_or(ITEM_CHANNEL, |(_, _, i)| i)
-}
 
 /// The housing, the node, the crystal and the machines, each with its block item.
 ///
@@ -866,9 +834,11 @@ fn declare_tier_items(items: &mut Vec<Item>) {
     }
 }
 
-/// The channels, the wrench and the dusts. The wrench's template has no use of its own: what a
-/// click with it does is all `native_use_item_on`'s (rustcraft_server::on_use_item_on). Round 31:
-/// the channels have no use at all; they are taken apart on a crafting table.
+/// The old channels, the wrench and the dusts. The wrench's template has no use of its own: what
+/// a click with it does is all `native_use_item_on`'s (rustcraft_server::on_use_item_on). 0.21
+/// (spec 45): the channel items of 0.19 stay registered only so that a saved stack is not lost;
+/// no list shows them, and the mod turns every one it sees into its alloy
+/// (rustcraft_rules::net::old_channels).
 pub fn declare_items(items: &mut Vec<Item>) {
     declare_gear(items);
     // Slice 18, stream 3: the machines' higher tiers.
@@ -879,7 +849,7 @@ pub fn declare_items(items: &mut Vec<Item>) {
         template: "minecraft:iron_ingot".into(),
         ..Item::default()
     });
-    for (_, _, id) in CHANNEL_ITEMS {
+    for (id, _, _) in rustcraft_rules::net::old_channels::OLD_CHANNELS {
         items.push(Item {
             id: id.into(),
             template: "minecraft:iron_ingot".into(),

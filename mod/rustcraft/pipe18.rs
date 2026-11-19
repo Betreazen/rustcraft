@@ -240,12 +240,10 @@ fn take_housing(game: &mut Game<'_>, dimension: &str, pos: Pos) -> Option<Vec<St
     let tier = server::housing_at(game, pos).tier;
     let mut items = vec![rustcraft_rules::housing::item_of_tier(tier)];
     items.extend(facade_items(game, pos));
-    items.extend(
-        old.into_iter()
-            .flatten()
-            .flatten()
-            .map(|c| content::channel_item(c.kind, c.tier).to_owned()),
-    );
+    // 0.21 (spec 45, CR4): its old channels come back as their alloy, not as channel items.
+    for (alloy, n) in rustcraft_rules::net::old_channels::parts_of_channels(old.into_iter().flatten().flatten()) {
+        items.extend(std::iter::repeat_n(alloy.to_owned(), n as usize));
+    }
     housing_handled(dimension, pos);
     // Flags 3: neighbours hear it and the players see it.
     game.native_set_block(dimension, pos, air, 3).then_some(items)

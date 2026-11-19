@@ -774,7 +774,9 @@ fn stack_of(game: &Game<'_>, ctx: &Context, cell: &Cell) -> Option<ItemStack> {
             slot,
             kind: Some(kind),
         } => named(
-            content::channel_item(*kind, 1),
+            // 0.21 (spec 45, CR6): the old channel item only as the row's picture; no player gets
+            // one from here (the window's cells are no stacks to take).
+            rustcraft_rules::net::old_channels::item_of(*kind, 1),
             1,
             server::line(
                 "rustcraft.window.slot",

@@ -231,6 +231,12 @@ fn decode_cells(list: &[Tag]) -> Vec<Cell> {
         if cells.len() <= slot {
             cells.resize(slot + 1, None);
         }
+        // 0.21 (spec 45, CR2): an old channel item becomes its alloy; the file keeps the
+        // channels until the backpack is next written, and each read turns them again.
+        if let Some((alloy, n)) = rustcraft_rules::net::old_channels::convert(&stack.item, count) {
+            cells[slot] = Some((Key::of(&ItemStack::new(alloy, 1)), n));
+            continue;
+        }
         cells[slot] = Some((Key::of(&stack), count));
     }
     cells

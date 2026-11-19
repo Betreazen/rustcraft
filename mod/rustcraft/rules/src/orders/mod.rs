@@ -168,7 +168,8 @@ impl PlanRecipe {
 
     /// An autocrafter recipe from a crafting grid `width` cells wide, each cell the items it takes
     /// (none for an empty cell). Cells that take the same items are one input. None for a grid
-    /// wider or taller than 3 or with no cell.
+    /// wider or taller than 3 or with no cell, and (0.21, spec 45, CR5) for one that takes an old
+    /// channel item: taking channels apart is no way to make an alloy.
     pub fn crafting(
         width: usize,
         cells: &[Option<Vec<ItemKey>>],
@@ -177,6 +178,10 @@ impl PlanRecipe {
         let width = width.max(1);
         let height = cells.len().div_ceil(width);
         if width > 3 || height > 3 {
+            return None;
+        }
+        let old_channel = |items: &Vec<ItemKey>| items.iter().any(|i| crate::net::old_channels::is_old_channel(i));
+        if cells.iter().flatten().any(old_channel) {
             return None;
         }
         let mut inputs: Vec<(Vec<ItemKey>, u32)> = Vec::new();
@@ -719,13 +724,30 @@ mod tests {
         assert_eq!(p.reserved["minecraft:sugar_cane"], 6);
     }
 
+    /// An item made of 4 coppersteel and a hopper, 8 at a time: the old item channel's recipe.
+    const GADGET: &str = "rustcraft:gadget";
+
+    #[test]
+    fn taking_old_channels_apart_is_no_recipe_of_the_book() {
+        // 0.21 (spec 45, CR5): `item_channel_apart` (two channels, one coppersteel) stays for
+        // stacks in plain chests, but no order makes an alloy from channels.
+        let two = |item: &str| vec![None, None, None, Some(vec![item.to_owned()]), None, Some(vec![item.to_owned()])];
+        let apart = PlanRecipe::crafting(3, &two("rustcraft:item_channel"), ("rustcraft:coppersteel".into(), 1));
+        assert!(apart.is_none());
+        let apart = PlanRecipe::crafting(3, &two("rustcraft:energy_channel_4"), ("rustcraft:starsteel".into(), 1));
+        assert!(apart.is_none());
+        let own = PlanRecipe::crafting(3, &two("minecraft:copper_ingot"), ("rustcraft:coppersteel".into(), 1));
+        assert!(own.is_some());
+    }
+
     #[test]
     fn a_recipe_that_needs_its_own_item_is_no_way_to_make_it() {
         // The owner: 24 item channels waited for 264 iron ingots. The planner made iron from
         // nuggets, the nuggets by smelting iron pickaxes, the pickaxes from iron: a loop, taken
-        // because it gathered something (the sticks). 24 channels need 6 + 15 = 21 iron.
+        // because it gathered something (the sticks). 24 channels need 6 + 15 = 21 iron. 0.21:
+        // the channel items are gone; the test keeps their recipe under another name.
         let book = vec![
-            r("crafter", &[("rustcraft:coppersteel", 4), ("minecraft:hopper", 1)], ("rustcraft:item_channel", 8)),
+            r("crafter", &[("rustcraft:coppersteel", 4), ("minecraft:hopper", 1)], (GADGET, 8)),
             r("crafter", &[("minecraft:copper_ingot", 1), ("minecraft:iron_ingot", 1)], ("rustcraft:coppersteel", 2)),
             r("crafter", &[("minecraft:iron_ingot", 5), ("minecraft:chest", 1)], ("minecraft:hopper", 1)),
             r("crafter", &[("minecraft:oak_planks", 8)], ("minecraft:chest", 1)),
@@ -738,12 +760,12 @@ mod tests {
             r("furnace", &[("minecraft:raw_iron", 1)], ("minecraft:iron_ingot", 1)),
         ];
         let s = stock(&[("minecraft:copper_ingot", 64), ("minecraft:oak_planks", 64)]);
-        let p = plan("rustcraft:item_channel", 24, &s, &book, ALL);
+        let p = plan(GADGET, 24, &s, &book, ALL);
         assert_eq!(p.missing, stock(&[("minecraft:iron_ingot", 21)]), "{p:?}");
         assert!(!p.steps.iter().any(|st| st.output.0 == "minecraft:iron_pickaxe"), "{:?}", p.steps);
         // With the iron in stock the order runs, and still without a pickaxe.
         let rich = stock(&[("minecraft:copper_ingot", 64), ("minecraft:oak_planks", 64), ("minecraft:iron_ingot", 21)]);
-        let p = plan("rustcraft:item_channel", 24, &rich, &book, ALL);
+        let p = plan(GADGET, 24, &rich, &book, ALL);
         assert!(p.ready(), "{p:?}");
         assert_eq!(p.reserved["minecraft:iron_ingot"], 21);
     }

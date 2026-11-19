@@ -352,6 +352,8 @@ fn load(game: &mut Game<'_>, dimension: &str, level: &mut LevelStorage) {
     level.stores = saved.stores;
     level.next_id = saved.next_id.max(1);
     level.loaded = true;
+    // 0.21 (spec 45, CR2): the old channel items a storage kept become their alloy.
+    convert_old_channels(level);
     if !saved.orders.is_empty() {
         orders::restore(dimension, &saved.orders);
     }
@@ -1064,17 +1066,38 @@ pub(super) fn between_storages(
     put as u32
 }
 
+/// Ticks between two looks for old channel items in the level's storages: what a chest on a
+/// joint sends in becomes alloy within a second.
+const OLD_CHANNELS_EVERY: u64 = 20;
+
+/// 0.21 (spec 45, CR2): every storage of the level with its old channel items turned into their
+/// alloy (rustcraft_rules::net::old_channels::convert_store).
+fn convert_old_channels(level: &mut LevelStorage) {
+    let changed: Vec<u32> = level
+        .stores
+        .iter_mut()
+        .filter_map(|(id, store)| (rustcraft_rules::net::old_channels::convert_store(store) > 0).then_some(*id))
+        .collect();
+    for id in changed {
+        level.changed(id);
+    }
+}
+
 // ---- The level's tick: saving and the viewers' lists ----
 
-/// `native_level_tick_post`: the record written when it changed, and every SEND_EVERY ticks the
-/// changed lists sent to the players who have a terminal of this level open.
+/// `native_level_tick_post`: every OLD_CHANNELS_EVERY ticks the old channel items turned into
+/// alloy, the record written when it changed, and every SEND_EVERY ticks the changed lists sent
+/// to the players who have a terminal of this level open.
 pub(super) fn tick(game: &mut Game<'_>, dimension: &str) {
-    save(game, dimension);
     let (send, sides) = with_level(dimension, |level| {
         level.ticks += 1;
+        if level.loaded && level.ticks.is_multiple_of(OLD_CHANNELS_EVERY) {
+            convert_old_channels(level);
+        }
         (level.ticks.is_multiple_of(SEND_EVERY), level.ticks.is_multiple_of(SIDES_EVERY))
     })
     .unwrap_or((false, false));
+    save(game, dimension);
     if sides {
         show_sides(game, dimension);
     }

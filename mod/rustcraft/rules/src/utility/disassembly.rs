@@ -32,12 +32,18 @@ pub fn share_percent(yield_modules: usize) -> u32 {
 }
 
 /// The recipe that makes `item`, or why there is none to undo. `recipes` are the game's crafting
-/// recipes; `charged` whether the item still holds charge.
+/// recipes; `charged` whether the item still holds charge. 0.21 (spec 45, CR5): a recipe that
+/// takes old channel items apart is none, or an ingot of sparksteel would come apart into a
+/// channel.
 pub fn recipe_for<'a>(item: &str, recipes: &'a [Recipe], charged: bool) -> Result<&'a Recipe, Refusal> {
     if charged {
         return Err(Refusal::Charged);
     }
-    let r = recipes.iter().find(|r| r.result == item).ok_or(Refusal::NoRecipe)?;
+    let r = recipes
+        .iter()
+        .filter(|r| !r.ingredients.iter().any(|(i, _)| crate::net::old_channels::is_old_channel(i)))
+        .find(|r| r.result == item)
+        .ok_or(Refusal::NoRecipe)?;
     if r.result_count > 1 {
         return Err(Refusal::ManyResults);
     }
@@ -119,6 +125,17 @@ pub fn amount_text(thousandths: u32) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_alloy_never_comes_apart_into_old_channels() {
+        let apart = r("rustcraft:sparksteel", 1, &[("rustcraft:item_channel_2", 2)]);
+        let own = r("rustcraft:coppersteel", 2, &[("minecraft:copper_ingot", 1), ("minecraft:iron_ingot", 1)]);
+        let apart_1 = r("rustcraft:coppersteel", 1, &[("rustcraft:fluid_channel", 2)]);
+        let recipes = [apart.clone(), apart_1, own];
+        assert_eq!(recipe_for("rustcraft:sparksteel", &recipes, false), Err(Refusal::NoRecipe));
+        // Coppersteel's own recipe makes two: still not taken apart, and never into channels.
+        assert_eq!(recipe_for("rustcraft:coppersteel", &recipes, false), Err(Refusal::ManyResults));
+    }
 
     #[test]
     fn preview_is_the_share_of_each_ingredient() {

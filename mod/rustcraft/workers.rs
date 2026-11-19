@@ -171,6 +171,12 @@ fn load(game: &mut Game<'_>, level: &mut LevelFleet) {
         })
     };
     level.loaded = true;
+    // 0.21 (spec 45, CR2): old channel items in a hold become their alloy.
+    for w in &mut level.fleet.workers {
+        if rustcraft_rules::net::old_channels::convert_hold(&mut w.hold) {
+            level.dirty = true;
+        }
+    }
 }
 
 fn save(game: &mut Game<'_>, level: &mut LevelFleet) {

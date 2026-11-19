@@ -200,14 +200,28 @@ impl Page {
     }
 }
 
+impl Shown {
+    /// The items that go into it: a grid's cells, a machine's inputs.
+    pub fn inputs(&self) -> Vec<&str> {
+        match &self.made {
+            Made::Grid(cells) => cells.iter().flatten().map(String::as_str).collect(),
+            Made::Machine { inputs, .. } => inputs.iter().map(|(i, _)| i.as_str()).collect(),
+        }
+    }
+}
+
 /// The recipes the page shows, out of every recipe the game has: those whose result it makes,
-/// in the order of its `makes`, then by tier, then grids before machines; each once.
+/// in the order of its `makes`, then by tier, then grids before machines; each once. 0.21 (spec
+/// 45, CR5): a recipe that takes an old channel item (the `_apart` ones) is never shown.
 pub fn for_page(page: &Page, all: Vec<Shown>) -> Vec<Shown> {
     let mut picked: Vec<(usize, u32, bool, usize, Shown)> = Vec::new();
     for (n, s) in all.into_iter().enumerate() {
         let Some(at) = page.makes_at(&s.out) else {
             continue;
         };
+        if s.inputs().into_iter().any(crate::net::old_channels::is_old_channel) {
+            continue;
+        }
         if picked.iter().any(|p| p.4 == s) {
             continue;
         }
@@ -409,6 +423,29 @@ mod tests {
             page(&[]).makes_at(&Out::Item("rustcraft:blade_2".into(), 1)),
             None
         );
+    }
+
+    #[test]
+    fn for_page_leaves_out_what_takes_old_channels_apart() {
+        // 0.21 (spec 45, CR5): two old channels gave an alloy on the crafting table; the alloys'
+        // page shows only the alloy's own recipes.
+        let alloys = page(&["rustcraft:coppersteel", "rustcraft:sparksteel"]);
+        let mut apart = [None, None, None, None, None, None, None, None, None];
+        apart[3] = same("rustcraft:item_channel");
+        apart[5] = same("rustcraft:item_channel");
+        let mut apart_2 = apart.clone();
+        apart_2[3] = same("rustcraft:energy_channel_2");
+        apart_2[5] = same("rustcraft:energy_channel_2");
+        let mut own = apart.clone();
+        own[3] = same("minecraft:copper_ingot");
+        own[5] = same("minecraft:iron_ingot");
+        let all = vec![
+            Shown { made: Made::Grid(apart), out: Out::Item("rustcraft:coppersteel".into(), 1) },
+            Shown { made: Made::Grid(own.clone()), out: Out::Item("rustcraft:coppersteel".into(), 2) },
+            Shown { made: Made::Grid(apart_2), out: Out::Item("rustcraft:sparksteel".into(), 1) },
+        ];
+        let got = for_page(&alloys, all);
+        assert_eq!(got, vec![Shown { made: Made::Grid(own), out: Out::Item("rustcraft:coppersteel".into(), 2) }]);
     }
 
     #[test]

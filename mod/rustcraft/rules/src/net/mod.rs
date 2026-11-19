@@ -8,6 +8,8 @@ pub mod joint_window;
 pub mod joints;
 // Round 31: housings saved with channels set by hand get them built in.
 pub mod migrate;
+// 0.21 (spec 45): the channel items of 0.19 turned into their alloy wherever the mod sees them.
+pub mod old_channels;
 pub mod settings;
 pub mod stock;
 // 0.21 (round 32): a storage's surplus to the disintegrator and the trash.

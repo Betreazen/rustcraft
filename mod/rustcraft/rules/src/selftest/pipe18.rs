@@ -3,7 +3,8 @@
 //! - The housing and the node of every tier and the wrench are crafted from their handbook
 //!   recipes (guide `housing`, `node`, `wrench`: «для ступеней 2–4 вместо медностали берётся сплав
 //!   этой ступени»); round 31: the channels are built into the housing, and the channel items left
-//!   from 0.19 are taken apart into their alloy.
+//!   from 0.19 are taken apart into their alloy (0.21: on the crafting table only for a stack in a
+//!   plain chest; the mod turns the others itself, s21_channels).
 
 use super::magistral::{line, place_housing, place_node};
 use super::transport::{COBBLE, chest, fill, item_line, joint};
@@ -98,22 +99,15 @@ pub const RECIPES: [Recipe; 9] = [
     },
 ];
 
-/// Round 31: the channel items of 0.19, by kind and tier; two of one are taken apart into one
-/// alloy of their tier (the half alloy each was made of).
-pub const OLD_CHANNELS: [(&str, &str); 12] = [
-    ("rustcraft:item_channel", A1),
-    ("rustcraft:item_channel_2", A2),
-    ("rustcraft:item_channel_3", A3),
-    ("rustcraft:item_channel_4", A4),
-    ("rustcraft:fluid_channel", A1),
-    ("rustcraft:fluid_channel_2", A2),
-    ("rustcraft:fluid_channel_3", A3),
-    ("rustcraft:fluid_channel_4", A4),
-    ("rustcraft:energy_channel", A1),
-    ("rustcraft:energy_channel_2", A2),
-    ("rustcraft:energy_channel_3", A3),
-    ("rustcraft:energy_channel_4", A4),
-];
+/// Round 31: the channel items of 0.19 and the alloy of their tier; two of one are taken apart
+/// into one alloy (the half alloy each was made of). 0.21: the table is
+/// rustcraft_rules::net::old_channels's, which also turns them into alloy wherever the mod sees
+/// them (spec 45); the `_apart` recipes stay for stacks in plain chests.
+pub fn old_channels() -> impl Iterator<Item = (&'static str, &'static str)> {
+    crate::net::old_channels::OLD_CHANNELS
+        .iter()
+        .filter_map(|(id, _, _)| Some((*id, crate::net::old_channels::parts_of(id)?)))
+}
 
 impl Recipe {
     /// The 3 × 3 grid the recipe fills.
@@ -143,7 +137,7 @@ fn recipes_craft(o: Pos, _t: &Tuning) -> Scenario {
             },
         )
         .check("two old channels of a tier give back its alloy; none is made any more", |b, _| {
-            for (channel, alloy) in OLD_CHANNELS {
+            for (channel, alloy) in old_channels() {
                 let mut grid = [None; 9];
                 grid[3] = Some(channel);
                 grid[5] = Some(channel);
@@ -559,7 +553,7 @@ mod tests {
 
     #[test]
     fn old_channels_come_apart_into_their_alloy_and_none_is_made() {
-        for (channel, alloy) in OLD_CHANNELS {
+        for (channel, alloy) in old_channels() {
             let name = channel.trim_start_matches("rustcraft:");
             let r = content(&format!("data/rustcraft/recipe/{name}_apart.json"));
             assert_eq!(r["type"], "minecraft:crafting_shapeless", "{name}");
