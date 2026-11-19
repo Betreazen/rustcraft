@@ -139,14 +139,23 @@ fn holds_items(block: &str) -> bool {
 }
 
 /// Whether the station has its open water: the 5 × 5 under it, the sky over it, the magistral that
-/// feeds it aside (0.18.4).
+/// feeds it aside (0.18.4); 0.21: or the cell under it in a pond big enough (`pond`).
 fn water_open(game: &Game<'_>, pos: Pos) -> bool {
-    rules::open_water_beside(&depths(game, pos), &line_cells(game, pos)) && !sky_closed(game, pos)
+    rules::water_enough(&depths(game, pos), &line_cells(game, pos), pond(game, pos)) && !sky_closed(game, pos)
+}
+
+/// 0.21 (owner: «смягчи правило»): the cells of the pond 2 deep the station stands over, counted
+/// up to `rules::POND_CELLS`.
+fn pond(game: &Game<'_>, pos: Pos) -> usize {
+    let water = |x: i32, y: i32, z: i32| game.native_block([x, y, z]) == "minecraft:water";
+    let deep = |x: i32, z: i32| (1..=rules::WATER_DEPTH).all(|d| water(x, pos[1] - d, z));
+    rules::pond_cells((pos[0], pos[2]), deep, rules::POND_CELLS)
 }
 
 /// Slice 18: whether any cell over the 5 × 5 water is filled: the row beside the station and the
 /// row over it. The magistral's body does not count (0.18.4), nor a chest touching the station
-/// for its catch (0.19.2).
+/// for its catch (0.19.2). 0.21: only a cell over water counts (a wall beside a pond is not over
+/// its water), nor another fishing station.
 fn sky_closed(game: &Game<'_>, pos: Pos) -> bool {
     let half = rules::WATER_SIDE / 2;
     let mut filled = Vec::new();
@@ -154,6 +163,9 @@ fn sky_closed(game: &Game<'_>, pos: Pos) -> bool {
         for dx in -half..=half {
             for dz in -half..=half {
                 if dy == 0 && dx == 0 && dz == 0 {
+                    continue;
+                }
+                if game.native_block([pos[0] + dx, pos[1] - 1, pos[2] + dz]) != "minecraft:water" {
                     continue;
                 }
                 let b = game.native_block([pos[0] + dx, pos[1] + dy, pos[2] + dz]);
@@ -175,9 +187,11 @@ pub(super) fn fishery_debug(game: &Game<'_>, dimension: &str, pos: Pos) -> Vec<S
     let depths = depths(game, pos);
     let line = line_cells(game, pos);
     let mut out = vec![format!(
-        "fishery: water open {} (5x5 beside the line {}, sky closed {}), next catch at tick {:?}",
+        "fishery: water open {} (5x5 beside the line {}, pond {} of {} needed, sky closed {}), next catch at tick {:?}",
         water_open(game, pos),
         rules::open_water_beside(&depths, &line),
+        pond(game, pos),
+        rules::POND_CELLS,
         sky_closed(game, pos),
         state().fish_due.get(&(dimension.to_owned(), pos)),
     )];

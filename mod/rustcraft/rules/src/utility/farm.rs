@@ -167,6 +167,44 @@ pub fn open_water_beside(depths: &[i32], line: &[bool]) -> bool {
             .all(|(i, d)| *d >= WATER_DEPTH || (i != middle && line.get(i).copied().unwrap_or(false)))
 }
 
+/// 0.21 (owner 2026-11-19: «смягчи правило»): the open water cells a pond must have when the
+/// 5 × 5 under a station is not all water: a station over water 2 deep fishes when the water of
+/// that depth joined to the cell under it has at least this many cells.
+pub const POND_CELLS: usize = 25;
+/// How far from the station the pond is searched, blocks either way.
+pub const POND_REACH: i32 = 16;
+
+/// The cells of the pond under a station: from `start`, the cells joined side by side for which
+/// `deep` holds (water 2 deep), no farther than `POND_REACH`; counting stops at `need`.
+pub fn pond_cells(start: (i32, i32), deep: impl Fn(i32, i32) -> bool, need: usize) -> usize {
+    if !deep(start.0, start.1) {
+        return 0;
+    }
+    let mut seen = std::collections::BTreeSet::from([start]);
+    let mut todo = vec![start];
+    while let Some((x, z)) = todo.pop() {
+        if seen.len() >= need {
+            break;
+        }
+        for (nx, nz) in [(x + 1, z), (x - 1, z), (x, z + 1), (x, z - 1)] {
+            let near = (nx - start.0).abs() <= POND_REACH && (nz - start.1).abs() <= POND_REACH;
+            if near && !seen.contains(&(nx, nz)) && deep(nx, nz) {
+                seen.insert((nx, nz));
+                todo.push((nx, nz));
+            }
+        }
+    }
+    seen.len().min(need)
+}
+
+/// 0.21: whether a station has water enough: the 5 × 5 under it open as before (0.18.4, the line
+/// aside), or the cell under it 2 deep in a pond of `POND_CELLS` (`pond`, from `pond_cells`).
+pub fn water_enough(depths: &[i32], line: &[bool], pond: usize) -> bool {
+    let middle = depths.len() / 2;
+    open_water_beside(depths, line)
+        || (depths.get(middle).is_some_and(|d| *d >= WATER_DEPTH) && pond >= POND_CELLS)
+}
+
 /// The fishing station's next wait, from a random number 0..1; slice 18 (guide `fishery`): Lure
 /// takes 5 s off a level (with Lure III 15–45 s).
 pub fn fish_wait(random: f64, lure: u32) -> u64 {
@@ -225,6 +263,25 @@ pub fn harvest(has_bottle: bool) -> (&'static str, u32) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_station_at_the_edge_of_a_big_pond_has_water_enough() {
+        // A strip 6 wide and 10 long, 2 deep: 60 cells; a station at its edge has water under it
+        // but not the 5 × 5.
+        let deep = |x: i32, z: i32| (0..10).contains(&x) && (0..6).contains(&z);
+        assert_eq!(pond_cells((0, 0), deep, POND_CELLS), POND_CELLS);
+        assert_eq!(pond_cells((0, 0), deep, 100), 60);
+        assert_eq!(pond_cells((20, 20), deep, POND_CELLS), 0, "no water under it");
+        let small = |x: i32, z: i32| (0..2).contains(&x) && (0..3).contains(&z);
+        assert_eq!(pond_cells((0, 0), small, POND_CELLS), 6);
+        let mut edge = vec![0; 25];
+        edge[12] = 3;
+        assert!(water_enough(&edge, &[], POND_CELLS), "the pond is big enough");
+        assert!(!water_enough(&edge, &[], 6), "a pond of 6 is not");
+        edge[12] = 1;
+        assert!(!water_enough(&edge, &[], POND_CELLS), "1 deep under it is not");
+        assert!(water_enough(&[2; 25], &[], 0), "the 5 x 5 as before");
+    }
 
     #[test]
     fn the_window_chooses_honey_or_combs() {
