@@ -965,6 +965,8 @@
   "rustcraft.group.wool.name": "wool of any colour",
   "rustcraft.group.coals.name": "coal or charcoal",
   "rustcraft.group.stone.name": "cobblestone of any kind",
+  "rustcraft.orders.not_made": "%s is not made on machines: it is only gathered",
+  "rustcraft.terminal.not_made": "Not made on machines: only gathered",
   "rustcraft.util.fishery.water_ok": "Open water: a pond of 25 cells, deeper than 2 blocks",
   "rustcraft.util.fishery.water_bad": "Not enough open water: water deeper than 2 blocks under the station in a pond of 25 cells (or 5×5 under it), no blocks over the water",
   "rustcraft.util.fishery.rod": "Rod: %s of %s %s",

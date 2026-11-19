@@ -478,9 +478,28 @@ fn book_of(game: &Game<'_>, recipes: &machines::MachineRecipes) -> Arc<Book> {
 /// Why an order was not taken, as a lang key and its English.
 pub(super) type Refusal = (&'static str, &'static str);
 
+/// 0.21 (OT8): the refusal of an order for an item no recipe makes; its `%s` is the item's name.
+pub(super) const NOT_MADE: Refusal = (
+    "rustcraft.orders.not_made",
+    "%s is not made on machines: it is only gathered",
+);
+
+/// 0.21 (OT8): an order or a «держать» for `key` can be made: a recipe of the book makes it,
+/// not only from itself. True while the book is not built yet: the queue's round drops what it
+/// cannot make (OT9).
+pub(super) fn can_order(key: &str) -> bool {
+    orders()
+        .book
+        .as_ref()
+        .is_none_or(|b| rustcraft_rules::orders::can_make(key, &b.recipes))
+}
+
 /// O3: an order for `count` of `item` (a fluid's key in buckets) at the storage `storage`; a
-/// refusal when its line takes no orders or its queue is full.
+/// refusal when no recipe makes the item (OT8), its line takes no orders or its queue is full.
 pub(super) fn order(dimension: &str, storage: u32, item: &str, count: u32) -> Result<(), Refusal> {
+    if !can_order(item) {
+        return Err(NOT_MADE);
+    }
     let mut o = orders();
     let level = o.levels.entry(dimension.to_owned()).or_default();
     match level.smart.get(&storage).copied().unwrap_or(Smart::NoNet) {
@@ -2040,6 +2059,11 @@ fn storage_round(
     let plan_stock = stock_with_fluids(game, level, stock, (id, anchor), &mixers);
     let queue = state.queues.entry(id).or_default();
     if book_in {
+        // OT8: «держать N» of an item no recipe makes orders nothing.
+        let keeps: BTreeMap<ItemKey, u64> = keeps
+            .into_iter()
+            .filter(|(k, _)| rustcraft_rules::orders::can_make(k, &book.recipes))
+            .collect();
         queue.keep(&keeps, &plan_stock, &running);
     }
     let busy: BTreeSet<Pos> = jobs.iter().map(|r| r.job.machine).collect();

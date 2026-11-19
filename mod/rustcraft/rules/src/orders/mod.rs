@@ -281,6 +281,17 @@ impl Plan {
     }
 }
 
+/// 0.21 (OT8, OT9): an order for `item` can be made at all: a recipe of the book makes it whose
+/// every input takes something besides the item itself. A crystal shard, which only drops from
+/// druses and grows on a solution tank, cannot (the owner's order for 9 shards waited «ждёт
+/// ингредиентов: осколок кристалла ×9» for good), nor an item whose only recipes take it back.
+/// What a recipe takes deeper down may be in the storage, so only the item itself counts.
+pub fn can_make(item: &str, book: &[PlanRecipe]) -> bool {
+    book.iter().any(|r| {
+        r.output.0 == item && r.inputs.iter().all(|(alts, _)| alts.iter().any(|a| a != item))
+    })
+}
+
 /// Plans an order for `count` of `item`, given the storage's stock, the recipe book and the
 /// machine kinds on the line.
 pub fn plan(
@@ -608,6 +619,27 @@ mod tests {
     }
 
     const ALL: &[&str] = &["crafter", "furnace", "crusher", "alloy"];
+
+    #[test]
+    fn an_item_no_recipe_makes_or_only_from_itself_cannot_be_ordered() {
+        // OT8: shards only drop from druses; an item whose only recipe takes it back (a block of
+        // 9 from itself) is no way either; a recipe that takes it or something else is.
+        let mut book = book();
+        assert!(can_make("minecraft:piston", &book));
+        assert!(can_make("minecraft:iron_ingot", &book));
+        assert!(!can_make("rustcraft:crystal_shard", &book));
+        assert!(!can_make("minecraft:cobblestone", &book));
+        book.push(r("crafter", &[("rc:block", 1)], ("rc:block", 1)));
+        assert!(!can_make("rc:block", &book));
+        let either = vec!["rc:block".to_string(), "rc:dust".to_string()];
+        book.push(PlanRecipe { inputs: vec![(either, 2)], ..r("crafter", &[], ("rc:block", 1)) });
+        assert!(can_make("rc:block", &book));
+        // A cycle through another item is a way: that item may be in the storage (diamonds
+        // from a diamond block).
+        book.push(r("crafter", &[("rc:gem_block", 1)], ("rc:gem", 9)));
+        book.push(r("crafter", &[("rc:gem", 9)], ("rc:gem_block", 1)));
+        assert!(can_make("rc:gem", &book));
+    }
 
     #[test]
     fn an_order_for_pistons_sets_their_ingredients_aside() {

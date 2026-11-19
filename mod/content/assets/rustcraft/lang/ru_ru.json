@@ -965,6 +965,8 @@
   "rustcraft.group.wool.name": "шерсть любого цвета",
   "rustcraft.group.coals.name": "уголь или древесный уголь",
   "rustcraft.group.stone.name": "булыжник любого вида",
+  "rustcraft.orders.not_made": "%s не делается на машинах: его только добывают",
+  "rustcraft.terminal.not_made": "Не делается на машинах: его только добывают",
   "rustcraft.util.fishery.water_ok": "Открытая вода: пруд от 25 клеток глубже 2 блоков",
   "rustcraft.util.fishery.water_bad": "Мало открытой воды: под станцией нужна вода глубже 2 блоков в пруду от 25 клеток (или 5×5 под ней), без блоков над водой",
   "rustcraft.util.fishery.rod": "Удочка: %s из %s %s",

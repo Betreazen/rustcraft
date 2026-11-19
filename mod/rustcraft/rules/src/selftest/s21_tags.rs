@@ -4,7 +4,8 @@
 //!
 //! Here a storage holds books and no wood: the order for a bookshelf names planks of any wood
 //! (OT4). Birch logs come: the autocrafter makes birch planks from them and the bookshelf of
-//! those (OT2), the two planks left over go back to the storage.
+//! those (OT2), the two planks left over go back to the storage. An order for crystal shards,
+//! which no recipe makes, is refused at once (OT8).
 
 use super::slice15::{CRAFTER, FILL, build, crafter_at, held, holds, machine, put_book, terminal_at};
 use super::transport::{chest, fill};
@@ -22,6 +23,7 @@ const BIRCH_LOG: &str = "minecraft:birch_log";
 const BIRCH_PLANKS: &str = "minecraft:birch_planks";
 const OAK_LOG: &str = "minecraft:oak_log";
 const OAK_PLANKS: &str = "minecraft:oak_planks";
+const SHARD: &str = "rustcraft:crystal_shard";
 const LOGS: u32 = 16;
 
 fn bookshelves_take_the_birch_logs_the_storage_holds(o: Pos, _: &Tuning) -> Scenario {
@@ -39,6 +41,12 @@ fn bookshelves_take_the_birch_logs_the_storage_holds(o: Pos, _: &Tuning) -> Scen
         .until("the order names 6 planks of any wood, not oak logs", 200, move |b, _| {
             let want = Wait::Items(vec![(group_key(GROUPS[0]), 6)]);
             Ok(b.orders(terminal_at(o)).first().is_some_and(|q| q.wait == want))
+        })
+        .check("an order for crystal shards, which no recipe makes, is refused (OT8)", move |b, _| {
+            match b.order(terminal_at(o), SHARD, 9) {
+                Err(why) if why.contains("not made on machines") => Ok(()),
+                other => Err(format!("the shard order: {other:?}")),
+            }
         })
         .then("16 birch logs come", move |b, _| fill(b, chest(o, 1), BIRCH_LOG, LOGS))
         .until("a bookshelf is back in the storage", 1600, move |b, _| Ok(held(b, o, SHELF)? == 1))
