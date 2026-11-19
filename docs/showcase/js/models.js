@@ -772,16 +772,27 @@
     const face = figure(o, out, 'steve', o.flying ? { glow: 0.06 * pulse(t, 8) } : undefined, arms);
     const fb = (u, v, z, w, d, h, tex, extra) => figBox(o, out, face, u, v, z, w, d, h, typeof tex === 'string' ? flat(tex) : tex, extra);
     if (o.armor) {
-      // Technical armour of the third tier: helmet, chestplate, leggings and boots a pixel
-      // proud of the body.
-      const A = TIER[3], D = shade(A, -0.3);
-      fb(-4.5, -4.5, 28.5, 9, 9, 4, A);
-      fb(-4.5, -2.5, 15, 9, 5, 9.5, A);
-      fb(-8.5, -2.5, 19, 4.5, 5, 5.5, D, armExtra(undefined, arms, 0));
-      fb(4, -2.5, 19, 4.5, 5, 5.5, D, armExtra(undefined, arms, 1));
-      fb(-4.5, -2.5, 4, 9, 5, 8.5, D);
-      fb(-4.5, -2.5, 0, 9, 5, 3.5, A);
-      fb(-1.5, 2.6, 17, 3, 0, 4, '#ffe14a', { glow: 0.2 });
+      // Technical armour of the third tier, as the Blender gear and the game draw it (gear.py,
+      // gear_mc.py): steel plates half a pixel proud of the body, trim in the tier's colour, a
+      // cyan visor, a yellow energy core, pauldrons, knee caps and boots with black soles.
+      const A = TIER[3], S = '#6b7380';
+      fb(-4.5, -4.5, 24.5, 9, 9, 8, S);
+      fb(-4.6, -4.6, 30, 9.2, 9.2, 2.6, A);
+      fb(-4, 4.5, 27, 8, 0.1, 2, '#56dbe2', { glow: 0.2 });
+      fb(-4.5, -2.5, 12.5, 9, 5, 11.5, S);
+      fb(-4.6, -2.6, 12.5, 9.2, 5.2, 1.2, A);
+      fb(-2, 2.5, 17, 4, 0.1, 4, A);
+      fb(-1.2, 2.6, 17.8, 2.4, 0, 2.4, '#ffe14a', { glow: 0.2 });
+      for (const [u, side] of [[-8.5, 0], [4, 1]]) {
+        fb(u, -2.6, 19, 4.5, 5.2, 5.5, A, armExtra(undefined, arms, side));
+        fb(u + 0.1, -2.5, 14.5, 4.3, 5, 3, S, armExtra(undefined, arms, side));
+      }
+      fb(-4.5, -2.5, 4, 9, 5, 8.5, '#5d6470');
+      fb(-4, 2.5, 6, 3.5, 0.3, 2.5, A);
+      fb(0.5, 2.5, 6, 3.5, 0.3, 2.5, A);
+      fb(-4.6, -2.6, 1, 9.2, 5.2, 3, S);
+      fb(-4.7, -2.7, 3.2, 9.4, 5.4, 0.8, A);
+      fb(-4.6, -2.6, 0, 9.2, 5.6, 1, '#15171c');
     }
     if (o.pack) {
       fb(-3.5, -5, 13, 7, 3, 10, '#a8793f');
