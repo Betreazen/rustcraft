@@ -261,6 +261,11 @@ pub fn plan(
     planner.plan
 }
 
+/// How many items a plan takes from the storage, of every kind.
+fn taken(plan: &Plan) -> u64 {
+    plan.reserved.values().sum()
+}
+
 struct Planner<'a> {
     /// What the storage still has free, plus what earlier steps make beyond their need.
     stock: BTreeMap<ItemKey, u64>,
@@ -304,14 +309,21 @@ impl Planner<'_> {
             self.short(item, rest);
             return;
         }
-        // Each recipe in turn on a copy of the plan: the first that needs nothing the storage
-        // lacks is taken; else the first that lacks only a machine (O13); else the first that
-        // gathers some of its inputs, whose shortages are named. When no recipe gathers any input,
-        // the item itself is what is short (O6: «не хватает: железный слиток ×2», not the dust it
-        // could be smelted from).
+        // Each recipe in turn on a copy of the plan: of those that need nothing the storage lacks,
+        // the one that takes the fewest items from it (0.20, round 31: «надо, чтобы всегда умная
+        // магистраль искала оптимизированный рецепт»); else the first that lacks only a machine
+        // (O13); else the first that gathers some of its inputs, whose shortages are named. When
+        // no recipe gathers any input, the item itself is what is short (O6: «не хватает:
+        // железный слиток ×2», not the dust it could be smelted from).
+        let mut ready: Option<(u64, Self)> = None;
         let mut lacks_machine: Option<Self> = None;
         let mut lacks_items: Option<Self> = None;
         for index in self.preferred(&found, rest).into_iter().take(MAX_TRIES) {
+            // A way that works is in hand: another is weighed only while the budget lasts, so a
+            // big order's tree does not branch four ways at every step.
+            if ready.is_some() && self.budget < BUDGET / 2 {
+                break;
+            }
             let mut trial = self.copy();
             let hopeless = trial.run(item, rest, index);
             self.budget = trial.budget;
@@ -329,10 +341,19 @@ impl Planner<'_> {
                 continue;
             }
             if trial.plan.missing_machines == self.plan.missing_machines {
-                *self = trial;
-                return;
+                let taken = taken(&trial.plan) - taken(&self.plan);
+                if ready.as_ref().is_none_or(|(best, _)| taken < *best) {
+                    ready = Some((taken, trial));
+                }
+                continue;
             }
             lacks_machine.get_or_insert(trial);
+        }
+        if let Some((_, trial)) = ready {
+            let budget = self.budget;
+            *self = trial;
+            self.budget = budget;
+            return;
         }
         match lacks_machine.or(lacks_items) {
             Some(trial) => {
@@ -772,6 +793,26 @@ mod tests {
         assert!(p.ready(), "{p:?}");
         assert_eq!(p.steps[0].machine, "furnace");
         assert_eq!(p.steps[0].times, 3);
+    }
+
+    #[test]
+    fn of_the_ways_that_work_the_one_that_takes_least_from_the_storage_is_taken() {
+        // 0.20 (round 31): gold from nuggets (first in the book) or from raw gold through the
+        // crusher and the furnace: the nuggets cost 9 an ingot, the raw gold half of one.
+        let book = vec![
+            r("crafter", &[("minecraft:gold_nugget", 9)], ("minecraft:gold_ingot", 1)),
+            r("furnace", &[("rc:dust_gold", 1)], ("minecraft:gold_ingot", 1)),
+            r("crusher", &[("minecraft:raw_gold", 1)], ("rc:dust_gold", 2)),
+        ];
+        let s = stock(&[("minecraft:gold_nugget", 90), ("minecraft:raw_gold", 10)]);
+        let p = plan("minecraft:gold_ingot", 4, &s, &book, ALL);
+        assert!(p.ready(), "{p:?}");
+        assert_eq!(p.reserved, stock(&[("minecraft:raw_gold", 2)]));
+        assert!(p.steps.iter().all(|s| s.machine != "crafter"), "{p:?}");
+        // Without a crusher on the line the nuggets are the way that works.
+        let p = plan("minecraft:gold_ingot", 4, &s, &book, &["crafter", "furnace"]);
+        assert!(p.ready(), "{p:?}");
+        assert_eq!(p.reserved, stock(&[("minecraft:gold_nugget", 36)]));
     }
 
     #[test]

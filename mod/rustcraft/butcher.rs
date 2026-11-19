@@ -168,6 +168,8 @@ fn strike_every(game: &Game<'_>, pos: Pos, t: &Tuning) -> u64 {
     let speed = rustcraft_rules::tiers::family_of_block(rules::BLOCK)
         .map_or(1.0, |f| rustcraft_rules::tiers::speed(f, tier, t.tier_speed_step));
     let economy = modules::count(&base::modules_at(game, pos), Module::Economy);
+    // 0.20: its owner's tree strikes sooner (rustcraft_perks).
+    let speed = speed * crate::game::rustcraft_perks::machine_speed(game, pos, Machine::Butcher);
     rules::tier_strike_ticks(rules::strike_ticks(t.butcher_ticks, economy, t.economy_work), speed)
 }
 
@@ -242,13 +244,18 @@ fn strike(game: &mut Game<'_>, dimension: &str, pos: Pos, t: &Tuning, now: u64) 
     let keep = read_keep(&entity.nbt, t);
     let r = radius(game, pos, t);
     let herd = animals(game, pos, r);
+    let away = crate::game::rustcraft_trips::away(&entity);
     let (id, kind) = match rules::decide(sword.is_some(), full, &herd, &keep, t) {
         Ok(a) => (a.id, a.kind.clone()),
+        // 0.20 (round 31): its sword is at the repair stand (rustcraft_trips).
+        Err(Shown::NoSword) if away => return Shown::SwordAtRepair,
         Err(shown) => return shown,
     };
     // Slice 18: 4 E/s, from its buffer (×0.6 an economy module); a blade needs its charge.
     let economy = modules::count(&base::modules_at(game, pos), Module::Economy);
-    let cost = rules::strike_energy(t.butcher_ticks, economy);
+    // 0.20: a strike of an owner's tree costs less as it comes sooner (rustcraft_perks).
+    let cost = rules::strike_energy(t.butcher_ticks, economy)
+        / crate::game::rustcraft_perks::machine_speed(game, pos, Machine::Butcher);
     let energy = machines::buffer_energy(game, pos);
     if energy + 1e-9 < cost {
         return Shown::NoEnergy;
@@ -347,6 +354,7 @@ fn shown_text(s: &Shown) -> Text {
             &[animal_name(kind)],
         ),
         Shown::NoSword => line("rustcraft.butcher.no_sword", "No sword", &[]),
+        Shown::SwordAtRepair => line("rustcraft.butcher.sword_at_repair", "The sword is at the repair stand", &[]),
         Shown::NothingToCull => line(
             "rustcraft.butcher.nothing",
             "Nothing to cull: no more adults than it keeps",
@@ -364,7 +372,7 @@ fn shown_text(s: &Shown) -> Text {
 fn severity(s: &Shown) -> Severity {
     match s {
         Shown::Working(_) => Severity::Ok,
-        Shown::NothingToCull => Severity::Warn,
+        Shown::NothingToCull | Shown::SwordAtRepair => Severity::Warn,
         Shown::NoSword | Shown::OutputFull | Shown::NoEnergy => Severity::Bad,
     }
 }
@@ -407,6 +415,12 @@ pub(super) fn sheet(game: &Game<'_>, dimension: &str, pos: Pos, t: &Tuning, s: &
                 ],
             )
         }
+        // 0.20 (round 31): away at the repair stand (rustcraft_trips).
+        _ if crate::game::rustcraft_trips::away(&entity) => line(
+            "rustcraft.butcher.sword_at_repair",
+            "The sword is at the repair stand",
+            &[],
+        ),
         _ => line(
             "rustcraft.butcher.sword_none",
             "Put a sword in the last slot",
@@ -421,7 +435,7 @@ pub(super) fn sheet(game: &Game<'_>, dimension: &str, pos: Pos, t: &Tuning, s: &
         ))],
         vec![base::v(&line(
             "rustcraft.butcher.sword_hint",
-            "A plain sword loses durability with each strike",
+            "A plain sword loses durability with each strike; with a repair stand on its magistral it goes there before it breaks",
             &[],
         ))],
     ];

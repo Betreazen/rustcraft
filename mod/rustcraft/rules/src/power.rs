@@ -177,7 +177,7 @@ pub fn form_name(form: Form) -> Option<String> {
     }
 }
 
-/// The solution a box of `n` crystals drinks, mB a second (spec 12.3: 0.1 bucket a minute each).
+/// The solution a box of `n` crystals drinks, mB a second (spec 12.3; 0.20: 0.025 bucket a minute each).
 pub fn solution_per_second(n: usize, t: &Tuning) -> f64 {
     n as f64 * t.solution_per_minute * BUCKET / 60.0
 }
@@ -427,8 +427,8 @@ mod tests {
         assert!(close(structure_output(4, b, false, &t), 4.0));
         assert!(close(structure_output(3, Form::Broken, true, &t), 4.0));
         assert_eq!(structure_shown(4, b, false, &t), Shown::NoSolution(4.0));
-        // 0.1 bucket a minute a crystal: a 2×2 drinks 400 mB a minute.
-        assert!(close(solution_per_second(4, &t) * 60.0, 400.0));
+        // 0.20: 0.025 bucket a minute a crystal: a 2×2 drinks 100 mB a minute.
+        assert!(close(solution_per_second(4, &t) * 60.0, 100.0));
     }
 
     #[test]

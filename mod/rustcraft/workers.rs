@@ -797,6 +797,17 @@ fn guard(game: &mut Game<'_>, dimension: &str, w: &mut Worker, cell: Pos, t: &Tu
     }
 }
 
+/// 0.20 (round 31): a job of `w`'s tool, shortened by its owner's tree in the tool's branch
+/// (rustcraft_perks: the saw by the woodcutter's, the reaper by the farmer's), its energy a second
+/// kept. The guard's shots keep their pace.
+fn spend(w: &mut Worker, ticks: f64, energy: f64, t: &Tuning) {
+    let perk = w
+        .tool
+        .and_then(rustcraft_rules::perks::tool_branch)
+        .map_or(1.0, |b| crate::game::rustcraft_perks::speed(Some(w.owner), Some(b)));
+    w.spend(ticks / perk, energy / perk, t);
+}
+
 /// The grab (guide `tool_grab`): every ore of its zone broken into the hold, every suspicious
 /// block the vein grew there taken whole (ST4), and the items lying in its zone picked up.
 fn grab(game: &mut Game<'_>, dimension: &str, w: &mut Worker, cell: Pos, mount: Face, t: &Tuning) {
@@ -832,7 +843,7 @@ fn grab(game: &mut Game<'_>, dimension: &str, w: &mut Worker, cell: Pos, mount: 
     // 0.18.5: a whole stretch with no ore and nothing lying beside the way, it says so.
     w.found_as(done, IDLE_CELLS, Note::NoOre);
     if done > 0 {
-        w.spend(t.grab_ticks * done as f64, t.grab_energy * done as f64, t);
+        spend(w, t.grab_ticks * done as f64, t.grab_energy * done as f64, t);
     }
 }
 
@@ -905,7 +916,7 @@ fn scoop(
     // After a whole stretch with nothing to dig, it says so («Рядом с путём нечего копать»).
     w.found(done, IDLE_CELLS);
     if done > 0 {
-        w.spend(t.scoop_ticks * done as f64, t.scoop_energy * done as f64, t);
+        spend(w, t.scoop_ticks * done as f64, t.scoop_energy * done as f64, t);
     }
 }
 
@@ -1016,7 +1027,7 @@ fn bore(game: &mut Game<'_>, dimension: &str, net: &Network, w: &mut Worker, cel
         }
     }
 
-    w.spend(t.grab_ticks * done as f64, t.grab_energy * done as f64, t);
+    spend(w, t.grab_ticks * done as f64, t.grab_energy * done as f64, t);
 }
 
 /// Breaks `pos` with its drops into the hold (what does not fit drops there); whether it broke.
@@ -1101,7 +1112,8 @@ fn saw(game: &mut Game<'_>, dimension: &str, w: &mut Worker, cell: Pos, mount: F
         w.note = Note::NoSaplings;
         w.idle = 0;
     }
-    w.spend(
+    spend(
+        w,
         t.saw_ticks_per_log * done as f64,
         t.saw_energy_per_log * done as f64,
         t,
@@ -1251,7 +1263,7 @@ fn reap(game: &mut Game<'_>, dimension: &str, w: &mut Worker, cell: Pos, mount: 
         w.idle = 0;
     }
     if done > 0 {
-        w.spend(t.reap_ticks * done as f64, t.reap_energy * done as f64, t);
+        spend(w, t.reap_ticks * done as f64, t.reap_energy * done as f64, t);
     }
 }
 

@@ -216,6 +216,8 @@ fn spec(tuning: &Tuning, fitted: &Fitted, catalyst: &CatalystTank) -> CrafterSpe
     // Slice 18 (cross, guide `fluids`): the accelerator and the economizer act here too.
     let (cat_work, cat_energy) = machines::catalyst_factors(content::CRAFTER, catalyst, tuning);
     let (work, energy) = (work * cat_work, energy * cat_energy);
+    // 0.20: its owner's tree shortens the work, not the draw (rustcraft_perks).
+    let work = work * fitted.perk;
     CrafterSpec {
         ticks: (tuning.crafter_ticks / (tier * work)).max(1.0),
         energy: tuning.crafter_energy * tier * energy,

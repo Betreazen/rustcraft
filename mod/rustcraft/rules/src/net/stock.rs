@@ -59,6 +59,8 @@ pub struct Stocks {
     /// The storages on the net, each at the block that stands for it.
     pub stores: HashMap<Pos, NetStore>,
     pub max_stack: HashMap<ItemKey, u32>,
+    /// 0.20: the machines an order of a storage uses or may use now (`Inventories::busy`).
+    pub busy: BTreeSet<Pos>,
 }
 
 /// The stack size of `item` (a storage's key names a worn item after its id).
@@ -157,6 +159,17 @@ impl Inventories for Stocks {
         self.blocks.get(&block).is_some_and(|s| {
             s.accepts.is_some() || s.slots.iter().any(|slot| slot.can_put && slot.only.is_some())
         })
+    }
+
+    fn busy(&self, block: Pos) -> bool {
+        self.busy.contains(&block)
+    }
+
+    /// What the block's input slots hold now.
+    fn input_held(&self, block: Pos) -> u32 {
+        self.blocks
+            .get(&block)
+            .map_or(0, |s| s.slots.iter().filter(|slot| slot.can_put).map(|slot| slot.count).sum())
     }
 
     fn take(&mut self, block: Pos, item: &str, count: u32) -> u32 {

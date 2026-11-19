@@ -663,6 +663,10 @@ impl Bench for GameBench<'_, '_> {
         crate::game::rustcraft_pipe18::bench(self.game, action, pos)
     }
 
+    fn set_pct_summary(&mut self, owner: u128, summary: Option<&str>) -> Result<(), String> {
+        crate::game::rustcraft_perks::set_for_selftest(owner, summary)
+    }
+
     fn testkit(&mut self, args: &str) -> String {
         let mut ran = false;
         base::on_testkit_command(self.game, &format!("rustcraft_testkit {args}"), &mut ran);

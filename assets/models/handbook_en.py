@@ -32,6 +32,8 @@ PAGES = {
     'glossary': ('Glossary', 'Words that come up all through the handbook.'),
     'xp': ('Experience from machines',
            'A machine brings its owner half the experience they would get doing the same work by hand.'),
+    'tree_perks': ('The tree speeds up machines',
+                   "The higher the owner's level in a branch of the skill tree, the faster their machines of that branch work: up to half again."),
     # ---- pipe
     'housing': ('Magistral Housing',
                 'A pipe block with four slots for channels. Add channels as you need them.'),

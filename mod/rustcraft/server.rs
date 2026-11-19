@@ -312,6 +312,10 @@ pub(super) fn on_level_tick(game: &mut Game<'_>, dimension: &str) {
     // Slice 15: the orders' jobs and a round of every storage's queue, once a second.
     if second {
         orders::tick(game, dimension, &mut level);
+        // 0.20 (round 31): the owners' tree summaries, and the machines' tools to and from the
+        // repair stands.
+        crate::game::rustcraft_perks::refresh(game);
+        crate::game::rustcraft_trips::tick(game, dimension, &level);
         // Wave 2: the plain item flow drawn in the housings (M5).
         crate::game::rustcraft_pipe18::show_flow(game, dimension, &level);
     }

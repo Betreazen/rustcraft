@@ -9,6 +9,8 @@ pub mod crafter;
 pub mod extras;
 pub mod fluid_windows;
 pub mod generator;
+// 0.20: what a machine takes by itself from the magistral or a hopper.
+pub mod intake;
 pub mod mixer;
 pub mod panel;
 pub mod processor;

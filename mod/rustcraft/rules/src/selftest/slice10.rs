@@ -1,7 +1,7 @@
 //! Slice 10: the mixer and the nutrient solution, the channels of tiers 2 and 3, the other tools
 //! of tier 2 (the cargo hold with its load dock, the grab, the scoop) and the hydro turbine.
 //!
-//! - The mixer makes a bucket of solution out of water, bone meal and redstone: water from a tank
+//! - The mixer makes a bucket of solution out of water and bone meal (0.20: no redstone): water from a tank
 //!   it touches, the solution into the tank on top of it (guide `mixer`). On a fluid channel of
 //!   tier 2 it takes water and gives solution by the same channel (M13, guide `ch_fluid`), and the
 //!   solution feeds a crystal structure (E8); on tier 1 the second fluid finds no lane.
@@ -71,7 +71,8 @@ fn sheet(b: &dyn Bench, pos: Pos) -> Result<Sheet, String> {
         .ok_or_else(|| format!("no window sheet at {pos:?}"))
 }
 
-/// A mixer at `pos` with bone meal and redstone for `batches` batches.
+/// A mixer at `pos` with bone meal for `batches` batches, and redstone the solution no longer
+/// takes (0.20).
 fn mixer(b: &mut dyn Bench, pos: Pos, batches: u32) -> Result<(), String> {
     b.place(pos, MIXER, &[])?;
     b.put(pos, 0, BONE_MEAL, batches)?;
@@ -104,11 +105,11 @@ fn mixer_makes_solution(o: Pos, _: &Tuning) -> Scenario {
             },
         )
         .check(
-            "a batch took one bone meal, one redstone and a bucket of water",
+            "a batch took one bone meal and a bucket of water, no redstone",
             move |b, _| {
                 let items = b.items(m);
                 let made = 2 - count_of(&items, BONE_MEAL);
-                same("redstone left", count_of(&items, REDSTONE), 2 - made)?;
+                same("redstone left", count_of(&items, REDSTONE), 2)?;
                 let tank = b.tank(water).map_or(0, |g| g.amount);
                 let v = mixer_view(b, m)?;
                 let product_now =

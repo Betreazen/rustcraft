@@ -353,7 +353,9 @@ impl Default for Tuning {
             battery_output_module: 0.5,
             structure_base: 4.0,
             structure_power: 1.5,
-            solution_per_minute: 0.1,
+            // 0.20 (round 31): a quarter of 0.1, with the solution of bone meal alone: about four
+            // times cheaper a crystal-hour (1.5 bone meal and 1.5 buckets of water).
+            solution_per_minute: 0.025,
             solution_buffer: 1.0,
             miner_energy: 8.0,
             miner_sides: [11, 22, 33],

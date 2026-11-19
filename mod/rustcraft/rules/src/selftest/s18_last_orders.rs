@@ -35,18 +35,20 @@ fn o11_product_goes_straight_to_the_next_machine(o: Pos, _: &Tuning) -> Scenario
             move |b, _| build(b, o, &parts),
         )
         .until("the storage holds the parts", FILL, move |b, _| holds(b, o, &p2))
-        .then(
-            "a crusher, an electric furnace and an autocrafter on the line, the book",
-            move |b, _| {
-                machine(b, crafter_at(o), CRAFTER, true)?;
-                machine(b, furnace_at(o), FURNACE, true)?;
-                crusher_on(b, o)?;
-                put_book(b, o)
-            },
-        )
+        .then("the book", move |b, _| put_book(b, o))
+        // 0.20: the order comes before the crusher, so the storage keeps its ore for it and gives
+        // the idle crusher none of its own accord (rustcraft_rules::net::items::ORE_BATCH).
         .until("the storage takes an order for 2 pistons", FILL, move |b, _| {
             Ok(b.order(terminal_at(o), PISTON, 2).is_ok())
         })
+        .then(
+            "a crusher, an electric furnace and an autocrafter on the line",
+            move |b, _| {
+                machine(b, crafter_at(o), CRAFTER, true)?;
+                machine(b, furnace_at(o), FURNACE, true)?;
+                crusher_on(b, o)
+            },
+        )
         .until(
             "2 pistons are back, no iron ingot ever in the storage",
             2400,

@@ -71,6 +71,8 @@ fn spec(tuning: &Tuning, fitted: &Fitted, catalyst: &CatalystTank) -> AlloySpec 
     // Slice 18 (cross, guide `fluids`): its catalyst's speed and energy too.
     let (cat_work, cat_energy) = machines::catalyst_factors(content::ALLOY, catalyst, tuning);
     let (work, energy) = (work * cat_work, energy * cat_energy);
+    // 0.20: its owner's tree shortens the work, not the draw (rustcraft_perks).
+    let work = work * fitted.perk;
     AlloySpec {
         ticks_on_fuel: (tuning.alloy_ticks_on_fuel / (tier * work)).max(1.0),
         ticks_on_energy: (tuning.alloy_ticks_on_energy / (tier * work)).max(1.0),

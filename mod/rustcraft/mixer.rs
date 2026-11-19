@@ -152,10 +152,12 @@ fn spec_of(game: &Game<'_>, pos: Pos, nbt: &Compound, t: &Tuning) -> Spec {
     let tier = rustcraft_rules::tiers::family_of_block(content::MIXER).map_or(1.0, |f| {
         rustcraft_rules::tiers::speed(f, crate::game::rustcraft_tiers::tier_of(game, pos, content::MIXER), t.tier_speed_step)
     });
+    // 0.20: its owner's tree shortens the work, not the draw (rustcraft_perks).
+    let perk = crate::game::rustcraft_perks::machine_speed(game, pos, crate::game::rustcraft_content::Machine::Mixer);
     Spec {
         tank: tank_size(t),
         energy: t.mixer_energy * tier,
-        work: work * tier,
+        work: work * tier * perk,
         energy_factor,
     }
 }

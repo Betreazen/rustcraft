@@ -63,6 +63,8 @@ pub mod s18_last_orders;
 pub mod s18_w2_rail_gear;
 // Slice 18, wave 2: the magistral and the energy.
 pub mod w2_pipe_energy;
+// 0.20 (round 31): the machines stream.
+pub mod s20_machines;
 
 use std::collections::BTreeMap;
 
@@ -494,6 +496,14 @@ pub trait Bench {
         let _ = args;
         Err("no diagnostics command on this bench".into())
     }
+
+    // ---- 0.20: Path-of-craft-tree's summary ----
+    /// Gives the made-up owner `owner` a tree summary as PCT writes it (`summary` its JSON text,
+    /// crate::perks::fixture; none takes it away), as the server reads it from a player online.
+    fn set_pct_summary(&mut self, owner: u128, summary: Option<&str>) -> Result<(), String> {
+        let _ = (owner, summary);
+        Err("no tree summaries on this bench".into())
+    }
 }
 
 /// A mob as the self-test reads it.
@@ -730,6 +740,8 @@ pub fn catalog() -> Vec<Build> {
     all.extend(w2_machine::ALL);
     // The diagnostics command and the event journal.
     all.extend(debug::ALL);
+    // 0.20 (round 31): the machines stream.
+    all.extend(s20_machines::ALL);
     all
 }
 

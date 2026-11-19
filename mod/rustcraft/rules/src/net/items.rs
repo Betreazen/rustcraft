@@ -137,6 +137,15 @@ pub trait Inventories {
     fn is_machine(&self, _block: Pos) -> bool {
         false
     }
+    /// 0.20: an order uses the machine now, or an order of its storage may (its crushers are the
+    /// orders' while the storage has any): the storage gives it no ore of its own accord.
+    fn busy(&self, _block: Pos) -> bool {
+        false
+    }
+    /// 0.20: what the machine's inputs hold now, of any item.
+    fn input_held(&self, _block: Pos) -> u32 {
+        0
+    }
     /// Takes up to `count` of `item` out of the block; returns how many it took.
     fn take(&mut self, block: Pos, item: &str, count: u32) -> u32;
     /// Puts up to `count` of `item` into the block; returns how many fitted.
@@ -181,6 +190,10 @@ pub struct TickResult {
 /// The turn key of the auto containers' group (`NetState::turn`).
 const AUTO_TURN: i32 = i32::MIN;
 
+/// 0.20 (round 31): the most ore a storage keeps in an idle crusher's input: a few at a time, so
+/// an order that wants the crusher finds it free soon.
+pub const ORE_BATCH: u32 = 4;
+
 /// One tick of an item net that carries `per_second` items, with `joints` on it.
 pub fn tick(
     joints: &[Joint],
@@ -208,7 +221,14 @@ pub fn tick(
                 && stores.insert(joints[j].block)
         }));
     }
+    let mut moved = 0u32;
+    // 0.20 (round 31; the owner: «если положили руду… из неё однозначно сразу можно делать пыль,
+    // если есть дробилки, и они там свободны от заказов»): a storage on its default joint gives
+    // its ore to the crushers of its net on their default joints that no order uses, a few at a
+    // time; their dust goes on as any product does.
+    feed_refiners(joints, &receivers, inv, &mut available, &mut moved, &mut result.transfers);
     if sources.is_empty() || receivers.is_empty() {
+        state.budget -= f64::from(moved);
         return result;
     }
     // Receivers by priority, highest first; the order inside a priority is the joints' order.
@@ -223,7 +243,6 @@ pub fn tick(
             .push(r);
     }
     let mut full = BTreeSet::new();
-    let mut moved = 0u32;
     let start = state.first_source % sources.len();
     for k in 0..sources.len() {
         let src = &joints[sources[(start + k) % sources.len()]];
@@ -300,6 +319,64 @@ pub fn tick(
         .map(|j| (j, JointNote::ReceiverFull))
         .collect();
     result
+}
+
+/// 0.20: each storage of the net on its default joint (`Joint::store`, taking) gives each idle
+/// crusher on its default joint (`Joint::refiner`, not `busy`) the ore it takes (`needs`) until
+/// its input holds ORE_BATCH, while the net has throughput.
+fn feed_refiners(
+    joints: &[Joint],
+    receivers: &[usize],
+    inv: &mut dyn Inventories,
+    available: &mut u32,
+    moved: &mut u32,
+    transfers: &mut Vec<Transfer>,
+) {
+    let mut seen = BTreeSet::new();
+    // A storage with orders keeps its ore for them (`busy` at its block).
+    let stores: Vec<Pos> = joints
+        .iter()
+        .filter(|j| j.store && j.mode.takes() && !inv.busy(j.block) && seen.insert(j.block))
+        .map(|j| j.block)
+        .collect();
+    if stores.is_empty() {
+        return;
+    }
+    let crushers: Vec<Pos> = receivers
+        .iter()
+        .map(|&r| &joints[r])
+        .filter(|j| j.refiner && !inv.busy(j.block))
+        .map(|j| j.block)
+        .collect();
+    for crusher in crushers {
+        for &store in &stores {
+            for (item, count) in inv.offered(store) {
+                if *available == 0 {
+                    return;
+                }
+                if count == 0 || !inv.needs(crusher, &item) {
+                    continue;
+                }
+                let want = ORE_BATCH
+                    .saturating_sub(inv.input_held(crusher))
+                    .min(inv.room_for(crusher, &item))
+                    .min(count)
+                    .min(*available);
+                for _ in 0..want {
+                    if inv.take(store, &item, 1) == 0 {
+                        break;
+                    }
+                    if inv.put(crusher, &item, 1) == 0 {
+                        inv.put(store, &item, 1);
+                        break;
+                    }
+                    record(transfers, store, crusher, &item);
+                    *available -= 1;
+                    *moved += 1;
+                }
+            }
+        }
+    }
 }
 
 /// Slice 18 (guide `quickstart` 5, «слитками в правом»): with `nearest`, the candidates grouped
@@ -402,6 +479,8 @@ mod tests {
         got: HashMap<Pos, HashMap<ItemKey, u32>>,
         /// What a machine takes as an ingredient, room or not (`Inventories::needs`).
         need: HashMap<Pos, BTreeSet<ItemKey>>,
+        /// 0.20: machines an order uses.
+        busy: BTreeSet<Pos>,
     }
 
     impl World {
@@ -453,6 +532,12 @@ mod tests {
         }
         fn is_machine(&self, block: Pos) -> bool {
             self.need.contains_key(&block)
+        }
+        fn busy(&self, block: Pos) -> bool {
+            self.busy.contains(&block)
+        }
+        fn input_held(&self, block: Pos) -> u32 {
+            self.got.get(&block).map_or(0, |m| m.values().sum())
         }
         fn take(&mut self, block: Pos, item: &str, count: u32) -> u32 {
             let mut left = count;
@@ -843,5 +928,44 @@ mod tests {
         let set = [store, Joint { loader: false, ..dock }];
         run(&set, &mut world, 10);
         assert_eq!(world.got(DOCK, "minecraft:cobblestone"), 0);
+    }
+
+    #[test]
+    fn a_storage_feeds_its_ore_to_an_idle_crusher_a_few_at_a_time() {
+        // 0.20 (round 31): ore in the storage goes to a free crusher of its net by itself, not to
+        // the furnace or a chest, and only a batch at a time; a crusher an order uses gets none.
+        const STORE: Pos = [9, 0, 0];
+        const RAW: &str = "minecraft:raw_iron";
+        let store = Joint { store: true, ..joint(STORE, Mode::Into, 0) };
+        let crusher = Joint { refiner: true, ..joint(CRUSHER, Mode::Both, 0) };
+        let joints = [store.clone(), crusher.clone(), joint(CHEST, Mode::Into, 0), joint(FURNACE, Mode::Both, 0)];
+        let mut world = World::default();
+        world.gives(STORE, RAW, 20);
+        world.gives(STORE, "minecraft:cobblestone", 20);
+        world.machine_takes(CRUSHER, RAW, 64);
+        world.machine_takes(FURNACE, RAW, 64);
+        world.takes(CHEST, RAW, 64);
+        run(&joints, &mut world, 20);
+        assert_eq!(world.got(CRUSHER, RAW), ORE_BATCH, "a batch, not the stack");
+        assert_eq!(world.got(CRUSHER, "minecraft:cobblestone"), 0);
+        assert_eq!(world.got(FURNACE, RAW) + world.got(CHEST, RAW), 0);
+        assert_eq!(world.left(STORE, RAW), 20 - ORE_BATCH);
+        // An order uses it, or the storage has orders: nothing.
+        for busy in [CRUSHER, STORE] {
+            let mut world = World::default();
+            world.gives(STORE, RAW, 20);
+            world.machine_takes(CRUSHER, RAW, 64);
+            world.busy.insert(busy);
+            run(&joints, &mut world, 20);
+            assert_eq!(world.got(CRUSHER, RAW), 0);
+        }
+        // A crusher the player set, or a storage set «в блок», trade nothing so.
+        let mut world = World::default();
+        world.gives(STORE, RAW, 20);
+        world.machine_takes(CRUSHER, RAW, 64);
+        run(&[store, joint(CRUSHER, Mode::Both, 0)], &mut world, 20);
+        assert_eq!(world.got(CRUSHER, RAW), 0);
+        run(&[joint(STORE, Mode::Into, 0), crusher], &mut world, 20);
+        assert_eq!(world.got(CRUSHER, RAW), 0);
     }
 }

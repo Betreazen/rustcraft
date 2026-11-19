@@ -21,6 +21,8 @@ pub mod modules;
 pub mod monorail;
 pub mod net;
 pub mod orders;
+// 0.20: Path-of-craft-tree's tree on its owner's machines.
+pub mod perks;
 pub mod power;
 pub mod ray;
 pub mod reports;

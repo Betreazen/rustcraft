@@ -260,6 +260,21 @@ file = "crates/horizon-client/src/game.rs"
 name = "rustcraft_builder"
 source = "builder.rs"
 
+# 0.20 (round 31): a machine's worn tool rides to a repair stand of its item net and back.
+[[module]]
+id = "trips"
+file = "crates/horizon-client/src/game.rs"
+name = "rustcraft_trips"
+source = "trips.rs"
+
+# 0.20 (round 31): Path-of-craft-tree's summary of each owner (`pct:summary`) speeds up the
+# owner's machines by branch.
+[[module]]
+id = "perks"
+file = "crates/horizon-client/src/game.rs"
+name = "rustcraft_perks"
+source = "perks.rs"
+
 # Slice 13: the cartographer's atlas and the scout compass (rustcraft_rules::explore).
 [[module]]
 id = "explore"

@@ -169,6 +169,8 @@ pub(super) fn read(game: &Game<'_>, pos: Pos, machine: Machine, t: &Tuning) -> O
     // more energy, as the pump does.
     let tier = tier_speed(game, pos, machine, entity, t);
     let (work, energy) = (work * tier, energy * tier);
+    // 0.20: its owner's tree shortens the work, not the draw (rustcraft_perks).
+    let work = work * crate::game::rustcraft_perks::machine_speed(game, pos, machine);
     let cycle = Cycle {
         progress: read_f64(&entity.nbt, PROGRESS_KEY),
     };
@@ -925,7 +927,8 @@ pub(super) fn sheet(
         let mode = machines::read_work(&entity.nbt);
         let (work, draw) = rules::factors(mode, &slots, t);
         let tier = tier_speed(game, pos, machine, entity, t);
-        let secs = ticks / (work * tier).max(0.01) / t.ticks_per_second;
+        let perk = crate::game::rustcraft_perks::machine_speed(game, pos, machine);
+        let secs = ticks / (work * tier * perk).max(0.01) / t.ticks_per_second;
         let energy = energy * draw * tier;
         let secs = format!("{secs:.1}").trim_end_matches(".0").replace('.', ",");
         s.rows.push(base::v(&title));
