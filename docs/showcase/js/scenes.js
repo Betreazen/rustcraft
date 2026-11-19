@@ -27,6 +27,25 @@
         return n && !ENV.has(n.type) && !n.type.startsWith('ore_');
       }).map((d) => d[0]).join('');
     }
+    plug(s, at);
+  }
+  // A block with connectors (link_* parts) shows them on the sides a housing touches, as in the
+  // game: the crystal, the panel and the windmill since slice 18, every machine, the tank, the
+  // storage's cell and terminal since round 31 (assets/models/kit.py `links`). A node joins no
+  // machine, so it shows no connector.
+  const PLUGS = new Set(['crystal', 'solar', 'windmill',
+    'furnace', 'crusher', 'crafter', 'alloy', 'mixer', 'charger', 'placer', 'breaker', 'pump', 'miner', 'vein', 'trash',
+    'disintegrator', 'gen_fuel', 'gen_lava', 'battery', 'turbine', 'cell', 'terminal', 'dock_unload', 'dock_load',
+    'dock_charge', 'turret', 'anchor', 'station', 'tank', 'pdock', 'repair', 'kitchen', 'fishery', 'feeder', 'shearer',
+    'apiary', 'brewer', 'xp_tank', 'enchanter', 'archeo', 'projector', 'builder', 'butcher']);
+  function plug(s, at) {
+    for (const o of s.objs.values()) {
+      if (!PLUGS.has(o.type)) continue;
+      o.link = DIRS.filter(([, dx, dy, dz]) => {
+        const n = at.get(o.x + dx + ',' + (o.y + dy) + ',' + (o.z + dz));
+        return n && n.type === 'pipe';
+      }).map((d) => d[0]);
+    }
   }
   // Name tags: one per kind of block, on the first object of that kind.
   function autoTag(s) {
@@ -153,16 +172,9 @@
   ]);
 
   // ================================================================ pipe
-  // A source that a housing can join (crystal, solar panel, windmill) shows its connector only on
-  // the sides where a housing or a node touches it: plugScene sets their link prop every step.
-  const PLUGS = new Set(['crystal', 'solar', 'windmill']), HOUSINGS = new Set(['pipe', 'node', 'node_hub']);
-  function plug(s) {
-    const at = new Set();
-    for (const o of s.objs.values()) if (!o.path && HOUSINGS.has(o.type)) at.add(o.x + ',' + o.y + ',' + o.z);
-    for (const o of s.objs.values())
-      if (PLUGS.has(o.type)) o.link = DIRS.filter(([, dx, dy, dz]) => at.has(o.x + dx + ',' + (o.y + dy) + ',' + (o.z + dz))).map((d) => d[0]);
-  }
-  const plugScene = (id, steps) => scene(id, steps.map((st) => step(st.text, (s) => { st.run(s); plug(s); }, st.dur)));
+  // Every scene shows the connectors (link() calls plug()); plugScene is kept for the scenes that
+  // were written with it.
+  const plugScene = scene;
 
   const slots = (s, text) => s.badge('g', 2, 1, 0, 'гнёзда: ' + text, 'info');
   plugScene('housing', [
