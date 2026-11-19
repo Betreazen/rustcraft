@@ -51,8 +51,7 @@ HANDBOOK = 'handbook'
 # The guide's page id -> the content mod's item whose icon and crafting recipe the page shows. A
 # page with none (an overview, a fluid, an entity) shows the handbook's own icon and no recipe.
 ITEM = {
-    'housing': 'housing', 'node': 'node', 'ch_item': 'item_channel', 'ch_fluid': 'fluid_channel',
-    'ch_energy': 'energy_channel', 'facade': 'facade', 'wrench': 'wrench',
+    'housing': 'housing', 'node': 'node', 'facade': 'facade', 'wrench': 'wrench',
     'crystal': 'crystal', 'structure': 'crystal', 'solar': 'solar', 'turbine': 'turbine',
     'gen_fuel': 'gen_fuel', 'windmill': 'windmill', 'gen_lava': 'gen_lava', 'battery': 'battery',
     'alloy': 'alloy', 'furnace': 'furnace', 'crusher': 'crusher', 'tank': 'tank', 'pump': 'pump',

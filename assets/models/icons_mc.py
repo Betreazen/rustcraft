@@ -1,9 +1,10 @@
 """The guide's item icons for the items the content mod has, as 16 x 16 RGBA pixel rows.
 
 A port of the drawing in docs/showcase/js/icons.js (the shapes `channel`, `wrench`, `dust`, `ingot`
-and `module`, the module sign `cap`, the palette and the icons ch_item, ch_fluid, ch_energy, wrench,
-dust, dust_cu, dust_au, the alloys a1 to a4 and mod_cap). export_mc.py writes them as the item
-textures; keep them in step with icons.js when an icon there changes.
+and `module`, the module sign `cap`, the palette and the icons wrench, dust, dust_cu, dust_au, the
+alloys a1 to a4 and mod_cap). export_mc.py writes them as the item textures; keep them in step with
+icons.js when an icon there changes. The old channel items keep the icons the guide drew for its
+channel pages until 0.21 (spec 45): the items stay registered, hidden, for stacks in plain chests.
 """
 import math
 

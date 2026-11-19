@@ -241,25 +241,6 @@
     s.put('ci', 'chest', 1, -1, 0); s.put('tw', 'tank', 2, -1, 0, { fluid: 'water', level: 0.8 }); s.put('end', 'furnace', 7, 0, 0, { on: true });
   }
 
-  scene('ch_item', [
-    step('Предметный канал переносит предметы из источника в приёмники. Одинаковые приёмники получают их по очереди.', (s) => {
-      bus(s, [['chest'], ['chest'], ['chest'], null], { ch: 'i---', src: null });
-      s.flow('a', r(0, 1)); s.flow('b', r(0, 2), { n: 2 });
-      s.badge('s', 0, 0, 0, 'источник', 'info'); s.badge('t', 2, 0, 0, 'приёмник', 'info');
-    }, 8),
-    step('Приёмник с более высоким приоритетом заполняется первым. Приоритет задаётся ключом на стыке.', (s) => {
-      s.badges = []; s.flow('a', null); s.flow('b', r(0, 2), { n: 3 });
-      s.badge('p', 2, 0, 0, 'приоритет 2', 'info'); s.badge('q', 1, 0, 0, 'приоритет 1', 'info');
-    }, 8),
-    step('Когда приёмникам некуда класть, предмет остаётся в источнике. В трубе ничего не застревает и на землю не выпадает.', (s) => {
-      s.flows = []; s.badges = []; s.badge('f', 2, 0, 0, 'Приёмник полон');
-    }, 8),
-    step('Дробилке нужна руда, а алмазы она не принимает. Они уходят в сундук со стыком «в сундук»; без такого сундука алмазы остались бы в источнике.', (s) => {
-      s.badges = []; s.put('b1', 'crusher', 1, 0, 0, { on: true }); s.put('k', 'crystal', 1, 0, 1);
-      s.flow('ore', r(0, 1), { color: '#d8a47a', n: 2 }); s.flow('gem', r(0, 2), { color: '#5fe6dd', n: 2 }); s.flow('dust', r(1, 2), { color: '#c9a27a', n: 1 });
-      s.flow('en', [[1, 0, 1], [1, 0, 0]], { color: EN, n: 1, speed: 0.8 }); s.badge('t', 2, 0, -0.9, 'стык «в сундук»', 'info');
-    }, 9),
-  ]);
 
   // A pump over a pool of water at the origin. pumpLine adds a line of housings with a fluid and
   // an energy channel at y = 1 from x = 0 to n - 1, the node on its left end and an energy crystal
@@ -275,22 +256,6 @@
     s.put('node', 'node', -1, 1, 0); s.put('src', 'crystal', -1, 1, 1);
   }
   const pumpPower = (s, ...targets) => targets.forEach((b) => s.flow('en' + b, [[-1, 1, 1], [-1, 1, 0], [b, 1, 0], [b, 0, 0]], { color: EN, n: 2 }));
-  plugScene('ch_fluid', [
-    step('Жидкостный канал встроен в каждый корпус. Насос над водой качает воду по линии в бак.', (s) => {
-      pumpPool(s, 9); pumpLine(s, 9); s.set('b0', { on: true });
-      s.put('tw', 'tank', 6, 0, 0, { fluid: 'water', level: 0.3, ease: 2 }); s.flow('w', r(0, 6), { color: FL }); pumpPower(s, 0);
-    }, 8),
-    step('По тому же каналу идёт и лава: из бака в лавовый генератор. У каждой жидкости своя полоса, они не смешиваются.', (s) => {
-      s.put('tl', 'tank', 2, 0, 0, { fluid: 'lava', level: 0.9, ease: 2 }); s.put('gl', 'gen_lava', 4, 0, 0, { on: true });
-      s.set('tw', { level: 0.5 }); s.flow('l', r(2, 4), { color: LAVA, n: 2 }); s.badge('c', 7, 1, 0, 'один канал: вода и лава', 'info');
-    }, 9),
-    step('Смеситель берёт воду и отдаёт раствор, третью жидкость, по тому же каналу. Канал любой ступени несёт сколько угодно жидкостей.', (s) => {
-      s.put('mx', 'mixer', 5, 0, 0, { on: true }); s.put('ts', 'tank', 8, 0, 0, { fluid: 'sol', level: 0.5, ease: 2 });
-      s.set('tw', { level: 0.6 }).set('tl', { level: 0.75 });
-      s.flow('wm', r(0, 5), { color: FL, n: 2 }); s.flow('sol', r(5, 8), { color: SOL, n: 2 }); pumpPower(s, 5);
-      s.badges = []; s.badge('c', 7, 1, 0, 'любая ступень: сколько угодно жидкостей', 'info');
-    }, 9),
-  ]);
   plugScene('pump', [
     step('Насос ставится прямо над источником воды или лавы.', (s) => pumpPool(s, 3)),
     step('Подведи магистраль с жидкостным и энергетическим каналом и поставь бак.', (s) => { pumpLine(s, 3); s.put('b2', 'tank', 2, 0, 0, { fluid: 'empty', level: 0 }); }, 7),
@@ -319,32 +284,8 @@
     step('Бак держит одну жидкость. Для воды и раствора ставят два бака: смеситель берёт воду из линии и наполняет бак раствора.', (s) => {
       s.put('mx', 'mixer', 3, 0, 0, { on: true }); s.put('b4', 'tank', 4, 0, 0, { fluid: 'sol', level: 0.45, ease: 2.5 }); s.set('b3', { level: 0.6 });
       s.flow('m', r(0, 3), { color: FL, n: 2 }); s.flow('sol', r(3, 4), { color: SOL, n: 2 }); pumpPower(s, 3);
-      s.badge('c', 4, 1, -0.6, 'канал 2-й ступени: вода и раствор', 'info');
+      s.badge('c', 4, 1, -0.6, 'одна линия: вода и раствор', 'info');
     }, 9),
-  ]);
-
-  // The node window shows the balance of the line: what the sources give and the machines take.
-  const balance = (s, x, give, take, kind) => s.badge('bal', x, 1, 0, 'узел: дают ' + give + ' · ' + (kind === 'warn' ? 'просят ' : 'тратят ') + take + ' Е/с', kind || 'info');
-  plugScene('ch_energy', [
-    step('Энергетический канал несёт энергию от источника к машинам. Одного кристалла хватает одной печи в экономном режиме.', (s) => {
-      bus(s, [['furnace', { on: true }], null, null, null, null]); power(s, 0); balance(s, 5, 4, '2,8');
-    }, 8),
-    step('Машин стало больше, и энергии не хватает. Все машины получают равную долю и работают медленнее, но магистраль не останавливается.', (s) => {
-      s.put('b1', 'crusher', 1, 0, 0, { on: true }); s.put('b2', 'furnace', 2, 0, 0, { on: true });
-      [0, 1, 2].forEach((b) => s.flow('en' + b, fromSrc(b), { color: EN, n: 1, speed: 0.5 }));
-      balance(s, 5, 4, '8,4', 'warn'); s.badge('w', 1, 0, 0, 'Не хватает энергии: машины замедлены', 'warn');
-    }, 8),
-    step('Добавь источник, и скорость вернётся. Окно узла показывает баланс: сколько линия производит и сколько тратит.', (s) => {
-      s.put('b3', 'gen_fuel', 3, 0, 0, { on: true }); s.badge('w', 0, 0, 0, null);
-      [0, 1, 2].forEach((b) => s.flow('en' + b, r(3, b), { color: EN, n: 2, speed: 1.8 })); balance(s, 5, 20, '8,4', 'ok');
-    }, 8),
-    step('Без канала тоже можно: кристалл питает машину, которая стоит к нему вплотную.', (s) => {
-      s.objs.clear(); s.flows = []; s.badges = []; floor(s, -1, 0, 6, 2);
-      s.put('k', 'crystal', 0, 0, 0); s.put('f1', 'furnace', 1, 0, 0, { on: true }); s.flow('e', [[0, 0, 0], [1, 0, 0]], { color: EN, n: 1, speed: 0.6 });
-    }, 7),
-    step('Машина машину не питает. Вторая печь касается только первой и стоит без энергии.', (s) => {
-      s.put('f2', 'furnace', 2, 0, 0); s.badge('d', 2, 0, 0, 'Нет энергии');
-    }, 7),
   ]);
 
   plugScene('facade', [

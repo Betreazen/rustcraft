@@ -658,8 +658,9 @@ fn apply(
 /// housing opens its joint window on the face clicked (or its first joint); on a machine or a
 /// container beside the magistral it opens the window of the first housing with a channel that
 /// touches it, on the face that looks at it. The click does nothing else (a machine's window and
-/// a chest's lid stay shut). With sneaking the wrench takes a channel out of a housing instead
-/// (rustcraft_server::on_use_item_on).
+/// a chest's lid stay shut). With sneaking the wrench takes the housing itself instead
+/// (rustcraft_server::on_use_item_on, rustcraft_pipe18::lift_housing); since round 31 a housing
+/// has no channels to take out.
 pub(super) fn on_right_click_block(
     game: &mut Game<'_>,
     pos: Pos,

@@ -22,7 +22,7 @@ Items, energy and fluids travel in a single housing, and machines take their inp
 
 ## What it is
 
-RustCraft is a mod about tidy automation. Inside a base everything is joined by the **magistral**: a slim housing with four sockets for item, energy and fluid channels. You don't wrap a machine in pipes. It stands against the housing and takes what it needs. A **monorail** with a capsule runs between bases, **workers** ride the rails, and a single **storage** with a terminal replaces your chests.
+RustCraft is a mod about tidy automation. Inside a base everything is joined by the **magistral**: a slim housing with item, energy and fluid channels built in. You don't wrap a machine in pipes. It stands against the housing and takes what it needs. A **monorail** with a capsule runs between bases, **workers** ride the rails, and a single **storage** with a terminal replaces your chests.
 
 The mod is written entirely in Rust as a native Horizon mod and runs on the same server as [Path-of-craft-tree](https://github.com/Betreazen/path-of-craft-tree) and [SoulsCraft](https://github.com/Betreazen/soulscraft).
 
@@ -33,11 +33,11 @@ The mod is written entirely in Rust as a native Horizon mod and runs on the same
 
 ## Features
 
-- **Magistral.** The housing connects to neighbouring housings and nodes by itself. A node carries a line up to 32 blocks, and channels come in three tiers of throughput. The wrench removes channels and opens the joint window: a direction for every face, and a filter and priority for items.
+- **Magistral.** The housing connects to neighbouring housings and nodes by itself. A node carries a line up to 32 blocks, and housings come in four tiers of throughput. The wrench opens the joint window: a direction for every face, and a filter and priority for items.
 - **Energy.** Crystal, solar panel, windmill, hydro turbine, fuel and lava generators, batteries with modules. Crystal structures grow on a nutrient solution.
 - **Machines.** Electric furnace, crusher (two dusts per ore), alloy smelter, autocrafter with recipe pages, mixer, miner, block placer and breaker, and a butcher for animal farms. Modules go into machine sockets.
 - **Catalysts.** The mixer makes an accelerator, an economizer and an enricher: the furnace and crusher run faster, use less energy, or sometimes give an extra product.
-- **Fluids.** Tanks, a pump and the fluid channel.
+- **Fluids.** Tanks, a pump and the housing's fluid channel.
 - **Storage.** Cells add up to one storage. The terminal searches, filters by tabs and keeps limits. With the recipe book the storage fills orders itself: it spreads the crafting chain over free machines, the mixer included, keeps N items in stock, and the queue survives a server restart. The tablet shows the storage and hands out stacks from a distance.
 - **Monorail.** Rail on floors, walls and ceilings, named stations with a network map, a capsule at 32 blocks per second, a lift.
 - **Workers.** A chassis on the rails with tools: saw, reaper, cargo hold, grab, scoop, the shooter that turns a worker into a guard, and the tunneler bore that digs its own tunnel and lays its own rails. Unload, load and charge docks.

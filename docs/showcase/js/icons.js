@@ -470,10 +470,6 @@
   def('alloys', ART.a1);
   def('dusts', ART.dust);
   def('fluids', ART.f_sol);
-  // Channels: a short tube with a window in the channel's colour and its sign.
-  def('ch_item', { rows: S.channel, a: '#5d6470', e: '#ffa53c', over: [[6, 6, ['xxxx', 'xwwx', 'xwwx', 'xxxx']]] });
-  def('ch_fluid', { rows: S.channel, a: '#5d6470', e: '#4c9bf5', over: [[6, 6, ['..w.', '.ww.', 'wwww', '.ww.']]] });
-  def('ch_energy', { rows: S.channel, a: '#5d6470', e: '#ffe14a', over: [[6, 6, ['..xx', '.xx.', 'xxxx', '.xx.']]] });
   // Tools and gear.
   def('wrench', { rows: S.wrench, a: T[1], e: T[1] });
   def('tablet', { rows: S.tablet, a: T[4], e: '#5ad1e6' });

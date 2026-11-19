@@ -83,6 +83,8 @@ pub mod s21_surplus;
 pub mod s21_orders;
 // 0.21 (spec 38): rods from the storage, and orders for them.
 pub mod s21_rods;
+// 0.21 (spec 45): the channel items gone, those left turned into their alloy.
+pub mod s21_channels;
 
 use std::collections::BTreeMap;
 
@@ -828,6 +830,8 @@ pub fn catalog() -> Vec<Build> {
     all.extend(s21_rods::ALL);
     // 0.21 (spec 40): the side walls show whether a block works.
     all.extend(s21_sides::ALL);
+    // 0.21 (spec 45): the channel items gone, those left turned into their alloy.
+    all.extend(s21_channels::ALL);
     all
 }
 

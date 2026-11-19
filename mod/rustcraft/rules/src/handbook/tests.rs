@@ -649,3 +649,60 @@ fn the_turrets_tables_come_from_the_guide() {
     assert_eq!(head[0], "Модуль");
     assert_eq!(rows[0][0], "Кровотечение");
 }
+
+#[test]
+fn no_page_link_scene_or_text_shows_an_old_channel() {
+    // 0.21 (spec 45, CR1; the owner: «из справочника … нужно это все удалить»): the channel items
+    // and their pages are gone; the housing tells of its built-in channels.
+    use crate::net::old_channels::{OLD_CHANNELS, is_old_channel};
+    const GONE: [&str; 3] = ["ch_item", "ch_fluid", "ch_energy"];
+    for p in PAGES {
+        assert!(!GONE.contains(&p.id), "page {}", p.id);
+        assert!(!p.item.is_some_and(is_old_channel), "{} shows {:?}", p.id, p.item);
+        assert!(!p.makes.iter().any(|m| is_old_channel(m)), "{} makes {:?}", p.id, p.makes);
+        for see in p.see {
+            assert!(!GONE.contains(see), "{} links {see}", p.id);
+        }
+    }
+    for look in super::scenes::LOOKS {
+        if let super::scene::Look::Item(item) | super::scene::Look::Model(item, _) = look {
+            assert!(!is_old_channel(item), "a scene shows {item}");
+        }
+    }
+    assert!(super::scenes::SCENES.iter().all(|s| !GONE.contains(&s.id)));
+    for (key, line) in lang("ru_ru").into_iter().chain(lang("en_us")) {
+        if !key.starts_with("rustcraft.handbook.") {
+            continue;
+        }
+        for gone in GONE {
+            assert!(!key.contains(&format!(".{gone}.")), "{key}");
+        }
+        assert!(!line.contains("Старый") && !line.contains("Старые"), "{key}: {line}");
+        for (id, _, _) in OLD_CHANNELS {
+            assert!(!line.contains(id), "{key}: {line}");
+        }
+    }
+}
+
+#[test]
+fn every_item_the_handbook_names_exists() {
+    // A page's icon and recipes come from its item and its `makes`; each must be an item the
+    // content mod has (its item model definition), the fluids' wildcard aside.
+    let known = |item: &str| {
+        let Some(name) = item.strip_prefix("rustcraft:") else {
+            return item.starts_with("minecraft:");
+        };
+        repo_file(&format!("mod/content/assets/rustcraft/items/{name}.json")).is_some()
+    };
+    for p in PAGES {
+        if let Some(item) = p.item {
+            assert!(known(item), "{}: no item {item}", p.id);
+        }
+        for m in p.makes {
+            if *m == super::recipes::ANY_FLUID {
+                continue;
+            }
+            assert!(known(m), "{}: makes no item {m}", p.id);
+        }
+    }
+}
