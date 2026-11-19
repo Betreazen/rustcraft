@@ -125,6 +125,12 @@ fn stands_near(game: &Game<'_>, level: &LevelNet, pos: Pos) -> Vec<(Pos, bool)> 
     out
 }
 
+/// 0.21 (spec 38, FR2): whether a repair stand stands on the item nets of the machine at `pos`: a
+/// fishing station whose storage has no whole rod leaves its worn one to the stand.
+pub(super) fn stand_near(game: &Game<'_>, level: &LevelNet, pos: Pos) -> bool {
+    !stands_near(game, level, pos).is_empty()
+}
+
 /// The storages on the item nets of the stand at `stand`, by id.
 fn storages_near(dimension: &str, level: &LevelNet, stand: Pos) -> Vec<u32> {
     let mut ids: Vec<u32> = level

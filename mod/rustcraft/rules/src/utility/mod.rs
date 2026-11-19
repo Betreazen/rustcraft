@@ -14,6 +14,8 @@ pub mod grown;
 pub mod kitchen;
 pub mod plan;
 pub mod repair;
+// 0.21 (spec 38): rods from the storage, and orders for them.
+pub mod rods;
 pub mod transit;
 pub mod vein;
 pub mod xp;

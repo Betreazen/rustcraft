@@ -15,6 +15,7 @@
 //   bottle for a glass bottle, else its combs: `honey`.
 use crate::game::{
     Game, rustcraft_base as base,
+    rustcraft_fish_rods as fish_rods,
     rustcraft_server::{self as server, LevelNet, line},
     rustcraft_transport as transport,
     rustcraft_utility::{self as util, fits, items, put, spend, take_one, with_items},
@@ -68,7 +69,7 @@ pub(super) fn step(game: &mut Game<'_>, dimension: &str, level: &LevelNet, pos: 
             // 0.21 (owner 2026-11-19: «если несколько рыболовных станций так близко находятся,
             // они не блокируют работу друг друга»): stations side by side share their water; wave
             // 2's patch a station is gone, as the magistral's body over the water went in 0.18.4.
-            fish(game, dimension, pos, cost, now)
+            fish(game, dimension, level, pos, cost, now)
         }
         Util::Feeder => feed(game, pos, cost),
         Util::Shearer => shear(game, level, pos, cost, now, t),
@@ -363,21 +364,31 @@ fn route_row(game: &Game<'_>, dimension: &str, level: &LevelNet, pos: Pos) -> Te
     }
 }
 
-fn fish(game: &mut Game<'_>, dimension: &str, pos: Pos, cost: f64, now: u64) -> Shown {
-    let Some(rod) = items(game, pos).first().cloned().flatten() else {
+fn fish(game: &mut Game<'_>, dimension: &str, level: &LevelNet, pos: Pos, cost: f64, now: u64) -> Shown {
+    let rod = match items(game, pos).first().cloned().flatten() {
+        Some(rod) => rod,
         // 0.20 (round 31): its rod is away at the repair stand (rustcraft_trips).
-        if crate::game::rustcraft_trips::away_at(game, pos) {
-            return Shown::Idle("fish_rod_at_repair");
-        }
-        return Shown::Blocked("fish_no_rod");
+        None if crate::game::rustcraft_trips::away_at(game, pos) => return Shown::Idle("fish_rod_at_repair"),
+        // 0.21 (spec 38): a rod from the storage on its net, or the storage orders rods.
+        None => match fish_rods::restock(game, dimension, level, pos, None, now) {
+            Ok(rod) => rod,
+            Err(shown) => return shown,
+        },
     };
     if !water_open(game, pos) {
         return Shown::Blocked("fish_no_water");
     }
     let max = game.items().get(&rod.item).map_or(0, |i| i.max_damage);
-    if rules::rod_worn(rod.damage, max) {
-        return Shown::Blocked("fish_rod_worn");
-    }
+    let rod = if rules::rod_worn(rod.damage, max) {
+        // 0.21 (spec 38): a whole rod from the storage for the worn one.
+        match fish_rods::restock(game, dimension, level, pos, Some(rod), now) {
+            Ok(rod) => rod,
+            Err(shown) => return shown,
+        }
+    } else {
+        fish_rods::served(dimension, pos);
+        rod
+    };
     let lure = rod.enchantment_level("minecraft:lure");
     let key = (dimension.to_owned(), pos);
     // 0.20 (round 31): its owner's fisher's branch shortens the wait (rustcraft_perks).

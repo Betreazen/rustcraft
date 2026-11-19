@@ -80,6 +80,8 @@ pub mod s21_stranded;
 pub mod s21_surplus;
 // 0.21 (spec 36): orders without a deadlock.
 pub mod s21_orders;
+// 0.21 (spec 38): rods from the storage, and orders for them.
+pub mod s21_rods;
 
 use std::collections::BTreeMap;
 
@@ -821,6 +823,8 @@ pub fn catalog() -> Vec<Build> {
     all.extend(s21_surplus::ALL);
     // 0.21 (spec 36): orders without a deadlock.
     all.extend(s21_orders::ALL);
+    // 0.21 (spec 38): rods from the storage, and orders for them.
+    all.extend(s21_rods::ALL);
     all
 }
 
