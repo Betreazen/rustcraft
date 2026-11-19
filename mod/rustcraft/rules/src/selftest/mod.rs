@@ -89,6 +89,8 @@ pub mod s21_rods;
 pub mod s21_channels;
 // 0.21 (spec 42): one fluid a tank structure.
 pub mod s21_tanks;
+// 0.21 (spec 43): sources burn their fuel only for the energy taken.
+pub mod s21_catalyst;
 
 use std::collections::BTreeMap;
 
@@ -840,6 +842,8 @@ pub fn catalog() -> Vec<Build> {
     all.extend(s21_tanks::ALL);
     // 0.21 (spec 46): the butcher and the turret pick up loot for the magistral.
     all.extend(s21_loot::ALL);
+    // 0.21 (spec 43): sources burn their fuel only for the energy taken.
+    all.extend(s21_catalyst::ALL);
     all
 }
 

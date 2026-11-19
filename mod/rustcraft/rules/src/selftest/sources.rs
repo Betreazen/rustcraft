@@ -374,19 +374,23 @@ fn crystal_square_fed(o: Pos, t: &Tuning) -> Scenario {
     let drink = rules::solution_per_second(4, t) * SPAN as f64 / t.ticks_per_second;
     Scenario::new("power_crystal_square_with_solution", plot_area(o))
         .then(
-            "four crystals in a square and a tank of solution",
+            // 0.21 (spec 43, ED2): it drinks only for the energy taken, so empty batteries on
+            // every crystal take its whole output.
+            "four crystals in a square, a tank of solution and a battery on each crystal",
             move |b, _| {
                 for c in cells {
                     b.place(c, CRYSTAL, &[])?;
+                    b.place(at(c, [0, 1, 0]), BATTERY, &[])?;
                 }
                 b.place(tank, TANK, &[])?;
                 b.set_tank(tank, rules::SOLUTION, 1000)
             },
         )
-        .until("E7, E8: a 2×2 gives 32 E/s", LIMIT, move |b, m| {
+        .until("E7, E8: a 2×2 gives 32 E/s, all of it taken", LIMIT, move |b, m| {
             let v = view(b, cells[3])?;
             m.mark("solution", v.fluid);
-            Ok(v.shown == Shown::Gives(total) && v.fluid > 0.0)
+            let poured = b.tank(tank).is_none_or(|g| g.amount == 0);
+            Ok(v.shown == Shown::Gives(total) && v.fluid > 0.0 && poured && (v.drawn - total).abs() < 1e-6)
         })
         .wait(SPAN)
         .check(

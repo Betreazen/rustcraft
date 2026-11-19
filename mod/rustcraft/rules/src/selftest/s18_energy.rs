@@ -134,8 +134,9 @@ fn structure_scenario(name: &'static str, o: crate::geom::Pos, t: &Tuning, fed: 
     } else {
         Shown::NoSolution(total)
     };
+    // 0.21 (spec 43, ED3): the furnace has no work, so nobody takes the fed structure's energy.
     let (limit, severity) = if fed {
-        ("rustcraft.structure.limit_size", 0)
+        ("rustcraft.power.structure_idle", 0)
     } else {
         ("rustcraft.structure.limit_solution", 1)
     };

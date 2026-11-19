@@ -53,6 +53,12 @@ pub struct PowerView {
     pub fluid: f64,
     /// Slice 18: the most a battery structure gives, E/s (ui.js «отдаёт 0 из 192»).
     pub max_out: f64,
+    /// 0.21 (spec 43, ED1): E a second taken from it (a structure: from the whole structure) this
+    /// tick, by machines and by batteries that are not full.
+    pub drawn: f64,
+    /// 0.21 (ED3): a source that burns what it holds (a fed crystal structure, a lava generator
+    /// with lava) and that nobody takes energy from: it burns nothing now.
+    pub idle: bool,
 }
 
 // ---- Structures ----
@@ -180,6 +186,30 @@ pub fn form_name(form: Form) -> Option<String> {
 /// The solution a box of `n` crystals drinks, mB a second (spec 12.3; 0.20: 0.025 bucket a minute each).
 pub fn solution_per_second(n: usize, t: &Tuning) -> f64 {
     n as f64 * t.solution_per_minute * BUCKET / 60.0
+}
+
+/// ED1 (spec 43): the share of its `output` E/s a source gave this tick, 0 to 1: to machines and
+/// to batteries that are not full (a full battery takes nothing, so it draws nothing).
+pub fn drawn_share(drawn: f64, output: f64) -> f64 {
+    if output <= 0.0 {
+        0.0
+    } else {
+        (drawn.max(0.0) / output).clamp(0.0, 1.0)
+    }
+}
+
+/// ED2: the solution a fed box of `n` crystals drinks over `dt` seconds, mB, when `drawn` of its
+/// `output` E/s was taken: the full rate (spec 12.3) times the share taken, nothing when nobody
+/// takes its energy.
+pub fn solution_drunk(n: usize, drawn: f64, output: f64, dt: f64, t: &Tuning) -> f64 {
+    solution_per_second(n, t) * drawn_share(drawn, output) * dt.max(0.0)
+}
+
+/// ED4: the seconds `held` mB of solution last a box of `n` crystals at this draw; none while
+/// nobody takes its energy (it drinks nothing then).
+pub fn solution_lasts(held: f64, n: usize, drawn: f64, output: f64, t: &Tuning) -> Option<f64> {
+    let per_second = solution_per_second(n, t) * drawn_share(drawn, output);
+    (per_second > 1e-12).then(|| held.max(0.0) / per_second)
 }
 
 /// The most solution a structure keeps, mB.
@@ -429,6 +459,58 @@ mod tests {
         assert_eq!(structure_shown(4, b, false, &t), Shown::NoSolution(4.0));
         // 0.20: 0.025 bucket a minute a crystal: a 2×2 drinks 100 mB a minute.
         assert!(close(solution_per_second(4, &t) * 60.0, 100.0));
+    }
+
+    #[test]
+    fn a_structure_drinks_only_for_the_energy_taken_from_it() {
+        // Spec 43, ED1, ED2: a 2×2 gives 32 E/s and drinks 100 mB a minute at full draw.
+        let t = Tuning::default();
+        let out = structure_output(4, Form::Box([1, 2, 2]), true, &t);
+        let full = solution_per_second(4, &t) * 60.0;
+        assert!(close(solution_drunk(4, out, out, 60.0, &t), full));
+        assert_eq!(solution_drunk(4, 0.0, out, 60.0, &t), 0.0, "nobody takes: nothing drunk");
+        assert!(close(solution_drunk(4, out / 2.0, out, 60.0, &t), full / 2.0), "half the draw");
+        // More than its output is never taken; a source that gives nothing drinks nothing.
+        assert!(close(solution_drunk(4, out * 3.0, out, 60.0, &t), full));
+        assert_eq!(solution_drunk(4, 5.0, 0.0, 60.0, &t), 0.0);
+        // ED4: a bucket lasts 10 minutes at full draw, 20 at half, forever with no draw.
+        assert!(close(solution_lasts(1000.0, 4, out, out, &t).unwrap_or(0.0), 600.0));
+        assert!(close(solution_lasts(1000.0, 4, out / 2.0, out, &t).unwrap_or(0.0), 1200.0));
+        assert_eq!(solution_lasts(1000.0, 4, 0.0, out, &t), None);
+    }
+
+    #[test]
+    fn full_batteries_draw_nothing_so_the_structure_drinks_nothing() {
+        // ED1: energy into batteries counts only while they are not full.
+        use crate::net::energy::{Producer, Store, supply_with_storage};
+        let t = Tuning::default();
+        let out = structure_output(4, Form::Box([1, 2, 2]), true, &t);
+        let cells = [[0, 0, 0], [1, 0, 0], [0, 0, 1], [1, 0, 1]];
+        let producers: Vec<Producer> = cells
+            .iter()
+            .map(|&block| Producer { block, output: out / 4.0 })
+            .collect();
+        let b = battery(4, &[], &t);
+        let drawn_with = |stored: f64| {
+            let (give, take) = b.flow(stored, &t);
+            // One battery block under each crystal, each its share of the structure's flow.
+            let stores: Vec<Store> = cells
+                .iter()
+                .map(|c| Store {
+                    block: [c[0], -1, c[2]],
+                    give: shares(give, 4),
+                    take: shares(take, 4),
+                })
+                .collect();
+            let shared = supply_with_storage(&producers, &[], &stores, &[], 1.0 / t.ticks_per_second);
+            cells.iter().filter_map(|c| shared.used.get(c)).sum::<f64>()
+        };
+        let empty = drawn_with(0.0);
+        assert!(close(empty, out), "empty batteries take it all: {empty}");
+        assert!(close(solution_drunk(4, empty, out, 1.0, &t), solution_per_second(4, &t)));
+        let full = drawn_with(b.capacity);
+        assert_eq!(full, 0.0, "full batteries take nothing");
+        assert_eq!(solution_drunk(4, full, out, 1.0, &t), 0.0);
     }
 
     #[test]

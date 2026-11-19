@@ -1673,7 +1673,7 @@
   "rustcraft.handbook.page.structure.text.1": "Как только поставлен последний кристалл такого блока, они сразу сливаются в структуру. Отдельные кристаллы пропадают из вида: на их месте один цельный блочный кристалл на весь размер.",
   "rustcraft.handbook.page.structure.text.2": "Если блок не сплошной или размер не из списка, например 3×2, кристаллы не сливаются и структура показывает «Нарушена форма структуры». Сломай лишний кристалл или доставь недостающий.",
   "rustcraft.handbook.page.structure.text.3": "Раствор делает смеситель. Он подаётся жидкостным каналом к любой грани структуры; энергия забирается энергетическим каналом тоже с любой грани. Машину, стоящую вплотную, структура питает и без канала.",
-  "rustcraft.handbook.page.structure.text.4": "Без раствора вся структура даёт столько же, сколько один кристалл. Структура показывает, что её ограничивает: размер, раствор или канал.",
+  "rustcraft.handbook.page.structure.text.4": "Без раствора вся структура даёт столько же, сколько один кристалл. Структура показывает, что её ограничивает: размер, раствор или канал. Раствор тратится, только пока у структуры берут энергию: без потребителей или с полными накопителями она стоит в простое и раствор не пьёт.",
   "rustcraft.handbook.page.structure.text.5": "Большую структуру сдерживает только число кристаллов: на 3×3×3 их нужно 27. Осколки для них находят в друзах или выращивают из затравки на баке с раствором.",
   "rustcraft.handbook.page.structure.stat.0.key": "2×1",
   "rustcraft.handbook.page.structure.stat.0.value": "11 Е/с",
@@ -1686,7 +1686,7 @@
   "rustcraft.handbook.page.structure.stat.4.key": "Любая форма без раствора",
   "rustcraft.handbook.page.structure.stat.4.value": "4 Е/с",
   "rustcraft.handbook.page.structure.stat.5.key": "Расход раствора",
-  "rustcraft.handbook.page.structure.stat.5.value": "0,025 ведра в минуту на каждый кристалл",
+  "rustcraft.handbook.page.structure.stat.5.value": "0,025 ведра в минуту на кристалл при полной нагрузке, в простое 0",
   "rustcraft.handbook.page.structure.diag.0": "Нет раствора",
   "rustcraft.handbook.page.structure.diag.0.fix": "Подай питательный раствор из смесителя жидкостным каналом.",
   "rustcraft.handbook.page.structure.diag.1": "Нарушена форма структуры",
@@ -6927,5 +6927,13 @@
   "rustcraft.handbook.page.tool_map.part.4.w.4": "Построек",
   "rustcraft.handbook.page.tool_map.part.4.w.5": "деревня, руины портала",
   "rustcraft.handbook.page.tool_map.part.5.w.0": "Работает: наносит чанки",
-  "rustcraft.handbook.page.tool_map.window": "Картограф · шасси из кристаллита"
+  "rustcraft.handbook.page.tool_map.window": "Картограф · шасси из кристаллита",
+  "rustcraft.power.idle": "Простой: энергию никто не берёт",
+  "rustcraft.power.structure_idle": "Структура из %s · простой: энергию никто не берёт",
+  "rustcraft.structure.lasts": "раствора хватит на %s",
+  "rustcraft.structure.solution_now": "%s мВ в минуту сейчас · %s из %s мВ · хватит на %s",
+  "rustcraft.structure.solution_idle": "не тратится: энергию никто не берёт · %s из %s мВ",
+  "rustcraft.time.seconds": "%s с",
+  "rustcraft.time.minutes": "%s мин",
+  "rustcraft.time.hours": "%s ч"
 }

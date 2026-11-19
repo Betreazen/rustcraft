@@ -41,6 +41,8 @@ use rustcraft_rules::{
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 const LAVA_KEY: &str = "lava";
+/// Spec 43 (ED3): a source that gives less than this, E/s, counts as nobody taking from it.
+const IDLE_BELOW: f64 = 1e-9;
 const SOLUTION_KEY: &str = "solution";
 /// Panels and windmills look at the sky and the wind once a second.
 const REFRESH_EVERY: u64 = 20;
@@ -331,6 +333,9 @@ pub(super) fn run_source(
                 capacity: 0.0,
                 fluid: lava,
                 max_out: 0.0,
+                drawn: used,
+                // ED3: lava it holds and nobody to take its energy: it burns none.
+                idle: held.output > 0.0 && used <= IDLE_BELOW,
             }
         }
         _ => {
@@ -362,6 +367,8 @@ pub(super) fn run_source(
                 capacity: 0.0,
                 fluid: 0.0,
                 max_out: 0.0,
+                drawn: used,
+                idle: false,
             }
         }
     };
@@ -434,6 +441,8 @@ pub(super) fn settle(
             capacity: b.capacity,
             fluid: taken,
             max_out: b.give,
+            drawn: given,
+            idle: false,
         };
         for &p in &g {
             s.views.insert(p, view);
@@ -451,9 +460,18 @@ pub(super) fn settle(
         let form = rules::form(g);
         let fed = g.len() > 1 && solution > 0.0;
         let total = rules::structure_output(g.len(), form, fed, t);
+        // Spec 43 (ED1): what machines and batteries that are not full took from it this tick.
+        let drawn: f64 = g.iter().filter_map(|p| shared.used.get(p)).sum();
+        let burns = fed && matches!(form, Form::Box(_));
         let mut left = solution;
-        if fed && matches!(form, Form::Box(_)) {
-            left = (solution - rules::solution_per_second(g.len(), t) * dt).max(0.0);
+        // ED2: it drinks for the share of its output taken, nothing while nobody takes any.
+        let drunk = if burns {
+            rules::solution_drunk(g.len(), drawn, total, dt, t)
+        } else {
+            0.0
+        };
+        if drunk > 0.0 {
+            left = (solution - drunk).max(0.0);
             let anchor = rules::anchor(g);
             for &p in g {
                 let want = if p == anchor { left } else { 0.0 };
@@ -470,6 +488,8 @@ pub(super) fn settle(
             capacity: 0.0,
             fluid: left,
             max_out: 0.0,
+            drawn,
+            idle: burns && drawn <= IDLE_BELOW,
         };
         for &p in g {
             s.views.insert(p, view);
@@ -858,6 +878,17 @@ fn e(n: f64) -> Text {
 
 fn shown_text(v: &PowerView) -> Text {
     match v.shown {
+        // Spec 43 (ED3): it would burn, but nobody takes its energy.
+        Shown::Gives(_) if v.idle && v.blocks > 1 => line(
+            "rustcraft.power.structure_idle",
+            "Structure of %s · idle: nobody takes its energy",
+            &[Text::literal(v.blocks.to_string())],
+        ),
+        Shown::Gives(_) if v.idle => line(
+            "rustcraft.power.idle",
+            "Idle: nobody takes its energy",
+            &[],
+        ),
         Shown::Gives(x) if v.blocks > 1 => line(
             "rustcraft.power.structure_gives",
             "Structure of %s · gives %s E/s",
@@ -964,7 +995,35 @@ pub(super) fn diagnosis(
             &[buckets(v.fluid), buckets(rules::lava_capacity(t))],
         ));
     }
+    // Spec 43 (ED4): how long a drawn structure's solution lasts at this draw.
+    if block == content::CRYSTAL
+        && let Some(g) = level.sources.crystals.iter().find(|g| g.contains(&pos))
+        && let Some(secs) = solution_lasts(v, g.len(), t)
+    {
+        text.push(Text::literal(" · "));
+        text.push(line("rustcraft.structure.lasts", "solution for %s", &[lasts_text(secs)]));
+    }
     Some(text)
+}
+
+/// ED4: the seconds the solution a fed box structure holds lasts at its draw now; none for a
+/// structure that drinks nothing (unfed, not a box, or nobody takes its energy).
+fn solution_lasts(v: &PowerView, n: usize, t: &Tuning) -> Option<f64> {
+    if v.blocks < 2 || v.fluid <= 0.0 || !matches!(v.shown, Shown::Gives(_)) {
+        return None;
+    }
+    rules::solution_lasts(v.fluid, n, v.drawn, v.output, t)
+}
+
+/// A span of time as the windows say it: seconds under a minute, else minutes, else hours.
+fn lasts_text(secs: f64) -> Text {
+    if secs < 60.0 {
+        line("rustcraft.time.seconds", "%s s", &[e(secs.ceil())])
+    } else if secs < 3600.0 {
+        line("rustcraft.time.minutes", "%s min", &[e((secs / 60.0 * 10.0).floor() / 10.0)])
+    } else {
+        line("rustcraft.time.hours", "%s h", &[e((secs / 3600.0 * 10.0).floor() / 10.0)])
+    }
 }
 
 /// The cells of the solar panel's server menu (one row): its numbers and its state.
@@ -1303,21 +1362,41 @@ fn structure_sheet(level: &LevelNet, pos: Pos, v: &PowerView, t: &Tuning, s: &mu
     s.bars.push(gives_bar(v.output, most));
     let room = rules::solution_room(g.len(), t);
     let per_minute = rules::solution_per_second(g.len(), t) * 60.0 / rules::BUCKET;
-    s.bars.push(SheetBar {
-        label: base::v(&line("rustcraft.structure.solution", "Solution", &[])),
-        value: base::v(&line(
+    // Spec 43 (ED4): a drawn structure says its rate now and how long what it holds lasts; an
+    // idle one that it drinks nothing; an unfed one its rate at full draw.
+    let value = if v.idle {
+        line(
+            "rustcraft.structure.solution_idle",
+            "not drunk: nobody takes energy · %s of %s mB",
+            &[e(v.fluid.floor()), e(room)],
+        )
+    } else if let Some(secs) = solution_lasts(v, g.len(), t) {
+        // mB a minute: a quarter of a 2×1's rate is 12,5 mB, not «0 buckets».
+        let now = per_minute * rules::BUCKET * rules::drawn_share(v.drawn, v.output);
+        line(
+            "rustcraft.structure.solution_now",
+            "%s mB a minute now · %s of %s mB · lasts %s",
+            &[e(now), e(v.fluid.floor()), e(room), lasts_text(secs)],
+        )
+    } else {
+        line(
             "rustcraft.structure.solution_line",
             // The rate first, as the guide's tank shows it (ui.js `structure`).
             "%s buckets a minute · %s of %s mB",
             &[e(per_minute), e(v.fluid.floor()), e(room)],
-        )),
+        )
+    };
+    s.bars.push(SheetBar {
+        label: base::v(&line("rustcraft.structure.solution", "Solution", &[])),
+        value: base::v(&value),
         share: if room > 0.0 { (v.fluid / room).min(1.0) } else { 0.0 },
         energy: false,
         colour: Some(SOLUTION_COLOUR),
     });
     let balance = level.sources.balances.get(&anchor).copied().unwrap_or_default();
     s.rows.extend(balance_rows(&balance));
-    let (severity, text) = if g.len() == 1 {
+    let (severity, text) = if g.len() == 1 || v.idle {
+        // ED3: an idle structure says so before what holds it back.
         (Severity::Ok, shown_text(v))
     } else {
         let limit = level
