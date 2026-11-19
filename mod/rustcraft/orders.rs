@@ -1663,6 +1663,8 @@ pub(super) fn tick(game: &mut Game<'_>, dimension: &str, level: &mut LevelNet) {
     }
     // Slice 18 (O11): held products no order needs go to the storage.
     release_held(game, dimension, level, &state, &mut held, &mut ships, &anchors);
+    // 0.21 (owner: «остатки … возвращали обратно на склад»): inputs left standing in a machine.
+    return_stranded(game, dimension, level, &jobs, &mut ships, &anchors);
     // Slice 18: the shipments' items in the housings they ride, for clients to draw.
     show_rides(game, dimension, level, &ships, &anchors);
     // Storages that are gone take their orders with them.
@@ -1693,6 +1695,118 @@ pub(super) fn tick(game: &mut Game<'_>, dimension: &str, level: &mut LevelNet) {
         kept
     };
     storage::set_order_records(dimension, kept);
+}
+
+// ---- 0.21: what is left standing in a machine ----
+//
+// The owner (2026-11-19): «если к ним уходит что-то на выполнение заказа, то чтобы остатки, они
+// возвращали обратно на склад, потому что у меня много из-за этого теряется ресурсов … особенно
+// вот в плавильне сплавов». A job's own leftovers go back when it ends (spec 36, OD2); this takes
+// what stays behind any other way (an order cancelled or ended before 0.21, what the 0.20 line
+// pushed in, half a recipe nobody brings the rest of): an alloy smelter, a furnace or a crusher
+// on a storage's item net that holds inputs, has no job and stands idle on the same inputs for
+// `STRANDED_SECONDS` sends them back to that storage, all but what its joints' allow lists name
+// (those the line brings on purpose, spec 34).
+
+/// Seconds a machine stands idle on the same inputs before they go back to the storage.
+const STRANDED_SECONDS: u32 = 30;
+
+/// Each level's idle machines: a fingerprint of their inputs and the seconds it has stood.
+static STRANDED: LazyLock<Mutex<HashMap<String, HashMap<Pos, (u64, u32)>>>> = LazyLock::new(Mutex::default);
+
+fn stranded_state() -> MutexGuard<'static, HashMap<String, HashMap<Pos, (u64, u32)>>> {
+    STRANDED.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+fn fingerprint(slots: &[Slot]) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    slots.hash(&mut h);
+    h.finish()
+}
+
+/// Inputs left standing in idle machines with no job go back to the storage on their net.
+fn return_stranded(
+    game: &mut Game<'_>,
+    dimension: &str,
+    level: &LevelNet,
+    jobs: &[Running],
+    ships: &mut Vec<Shipment>,
+    anchors: &BTreeMap<u32, Pos>,
+) {
+    let idle: Vec<(Pos, Machine)> = level
+        .power
+        .status
+        .iter()
+        .filter(|(_, s)| matches!(s.shown, Shown::Idle))
+        .filter(|(_, s)| matches!(s.machine, Machine::Alloy | Machine::Furnace | Machine::Crusher))
+        .map(|(p, s)| (*p, s.machine))
+        .collect();
+    let mut seen: HashMap<Pos, (u64, u32)> = HashMap::new();
+    let before = stranded_state().remove(dimension).unwrap_or_default();
+    for (pos, machine) in idle {
+        let busy = jobs.iter().any(|r| r.job.machine == pos)
+            || ships.iter().any(|s| s.leg == Leg::Machine { machine: pos });
+        if busy {
+            continue;
+        }
+        let (inputs, _) = slots_of(machine);
+        let Some(slots) = read_slots(game, pos, inputs.clone()) else {
+            continue;
+        };
+        if slots.iter().all(Option::is_none) {
+            continue;
+        }
+        let print = fingerprint(&slots);
+        let stood = match before.get(&pos) {
+            Some((p, n)) if *p == print => n + 1,
+            _ => 1,
+        };
+        if stood < STRANDED_SECONDS {
+            seen.insert(pos, (print, stood));
+            continue;
+        }
+        let Some(id) = storage::storage_by(dimension, pos, &level.topology) else {
+            seen.insert(pos, (print, stood));
+            continue;
+        };
+        let filters = crate::game::rustcraft_utility::joint_filters(game, pos);
+        let back: Vec<(ItemKey, u32)> = game
+            .native_with_mod_block_entity(pos, |e| {
+                let before: Vec<Slot> = inputs.clone().map(|i| slot_of(e, i)).collect();
+                let mut after = before.clone();
+                let mut back = Vec::new();
+                for slot in after.iter_mut() {
+                    let keep = slot
+                        .as_ref()
+                        .is_none_or(|(item, _)| rustcraft_rules::machines::intake::named(&filters, item));
+                    if !keep && let Some((item, n)) = slot.take() {
+                        back.push((item, n));
+                    }
+                }
+                write_slots(e, inputs.clone(), &before, &after, &[]);
+                back
+            })
+            .unwrap_or_default();
+        if back.is_empty() {
+            seen.insert(pos, (print, stood));
+            continue;
+        }
+        let route = route_of(level, anchors.get(&id).copied(), pos);
+        let to = format!("({}) -> storage#{id} left standing", rustcraft_rules::debug::pos_text(pos));
+        for (item, n) in &back {
+            crate::game::rustcraft_debug::flow(dimension, &to, item, u64::from(*n));
+        }
+        let mut way = Way { storage: id, order: 0, route, ships };
+        if way.route.is_some() {
+            way.send(Leg::Back { from: pos }, back);
+        } else {
+            for (item, n) in back {
+                storage::restore_into(dimension, id, &item, u64::from(n));
+            }
+        }
+    }
+    stranded_state().insert(dimension.to_owned(), seen);
 }
 
 /// Presses cannot reach the queue while the tick has it, but keep anything a hook added.

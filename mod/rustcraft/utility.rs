@@ -694,7 +694,7 @@ fn retire_filter_cells(game: &mut Game<'_>, pos: Pos) {
 }
 
 /// Slice 18: the filters of the joints of the housings beside the trash at `pos` that face it.
-fn joint_filters(game: &Game<'_>, pos: Pos) -> Vec<rustcraft_rules::net::items::Filter> {
+pub(super) fn joint_filters(game: &Game<'_>, pos: Pos) -> Vec<rustcraft_rules::net::items::Filter> {
     let mut out = Vec::new();
     for face in Face::ALL {
         let o = face.offset();

@@ -75,6 +75,7 @@ pub mod s20_machines;
 pub mod s21_terminal;
 pub mod s21_upgrade;
 pub mod s21_fishery;
+pub mod s21_stranded;
 // 0.21 (round 32): the storage's surplus and the wrench on the trash.
 pub mod s21_surplus;
 // 0.21 (spec 36): orders without a deadlock.
@@ -815,6 +816,7 @@ pub fn catalog() -> Vec<Build> {
     all.extend(s21_terminal::ALL);
     all.extend(s21_upgrade::ALL);
     all.extend(s21_fishery::ALL);
+    all.extend(s21_stranded::ALL);
     // 0.21 (round 32): the storage's surplus and the wrench on the trash.
     all.extend(s21_surplus::ALL);
     // 0.21 (spec 36): orders without a deadlock.
