@@ -77,7 +77,7 @@ fn a_tier_takes_its_familys_page() {
     assert_eq!(id("rustcraft:furnace_3"), ["furnace"]);
     assert_eq!(id("rustcraft:housing_4"), ["housing"]);
     assert_eq!(id("rustcraft:node_2"), ["node"]);
-    assert_eq!(id("rustcraft:item_channel_3"), ["ch_item"]);
+    assert_eq!(id("rustcraft:trash_4"), ["trash"]);
     assert_eq!(id("rustcraft:monorail_4"), ["monorail"]);
     assert_eq!(id("rustcraft:chassis_3"), ["chassis"]);
     assert_eq!(id("rustcraft:backpack_3"), ["backpack"]);

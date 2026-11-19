@@ -71,7 +71,7 @@ fn page(id: &str) -> Option<&'static Page> {
 }
 
 /// The page of an item as written: the page whose recipes make it, else the page it is the
-/// icon of (`ch_item` for the item channel).
+/// icon of.
 fn page_of_exact(item: &str) -> Option<&'static Page> {
     PAGES
         .iter()
