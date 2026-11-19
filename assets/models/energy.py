@@ -3,7 +3,7 @@ generators, battery, charge plate.
 
 Sources a housing can join (crystal, windmill, solar panel) carry a connector part link_<side> on
 every side a housing can touch; the guide shows the connectors of the linked sides only."""
-from kit import SIDES, family, firebox, frame, panel, shade, shell, tier
+from kit import SIDES, family, firebox, frame, linked, panel, shade, shell, tier
 
 LAVA, CHARGE, CELLS = '#ff6a1f', '#59d38c', '#3f6fd9'
 COLORS = {
@@ -24,16 +24,16 @@ def crystal(m):
     m.box('steel_mid', 3, 3, 2, 10, 10, 1)
     m.box('plate_dark', 4, 4, 3, 8, 8, 0.5)
     m.box('copper', 2, 2, 2, 2, 2, 2, ring=True)
-    m.box('steel_dark', 4, 4, 3, 1, 1, 1.5, ring=True)
+    m.box('steel_dark', 4.25, 4.25, 3, 1, 1, 1.5, ring=True)
     # The main crystal narrows to a light tip.
     m.box('glow_crystal', 5, 5, 3, 6, 6, 8)
     m.box('glow_crystal_mid', 6, 6, 11, 4, 4, 2)
     m.box('glow_crystal_light', 7, 7, 13, 2, 2, 2)
     # Facets: a light and a deep strip on every side.
-    m.box('glow_crystal_light', 10.8, 6, 5, 0.5, 1, 6, ring=True)
+    m.box('glow_crystal_light', 10.8, 6, 5, 0.5, 1, 5.9, ring=True)
     m.box('glow_crystal_deep', 10.8, 9, 3, 0.5, 1, 5, ring=True)
     # Three leaning shards around it.
-    for x, y, size, height, tilt in ((2.5, 8.5, 2.5, 5, ('Y', -16)), (10.5, 3, 2.5, 4, ('X', 16)), (10.5, 10.5, 2, 3, ('Y', 14))):
+    for x, y, size, height, tilt in ((2.5, 8.5, 2.5, 5, ('Y', -16)), (10.4, 3, 2.5, 4, ('X', 16)), (10.5, 10.5, 2, 3, ('Y', 14))):
         pivot = (x + size / 2, y + size / 2, 3)
         m.box('glow_crystal', x, y, 3, size, size, height, tilt=tilt, pivot=pivot)
         m.box('glow_crystal_light', x + 0.5, y + 0.5, 3 + height, size - 1, size - 1, 1, tilt=tilt, pivot=pivot)
@@ -45,7 +45,7 @@ def crystal(m):
         m.box('copper', 13.5, 6, 0.5, 2, 4, 2.5, part=part, quarter=quarter)
         m.box('copper', 15.5, 5, 0, 0.5, 6, 4, part=part, quarter=quarter)
         m.box('glow_crystal_light', 15.75, 6.5, 1, 0.5, 3, 2, part=part, quarter=quarter)
-    m.box('copper', 1.25, 1.25, 0, 13.5, 13.5, 0.75, part='link_z-')
+    m.box('copper', 1.25, 1.25, 0.05, 13.5, 13.5, 0.75, part='link_z-')
     m.box('glow_crystal', 14.6, 7, 0.15, 0.25, 2, 0.45, part='link_z-', ring=True)
     m.box('copper', 5, 5, 13, 1, 1, 2.25, part='link_z+', ring=True)
     m.box('copper', 5, 5, 15.25, 6, 6, 0.75, part='link_z+')
@@ -65,7 +65,7 @@ def crystalblock(m):
 def geode(m):
     # A stone block with darker and lighter patches and blue crystals growing out of it.
     m.box('geode', 0, 0, 0, 16, 16, 16)
-    for x, y, w, d in ((15.9, 2, 0.2, 4), (15.9, 9, 0.2, 3)):
+    for x, y, w, d in ((15.9, 2, 0.2, 3.9), (15.9, 9, 0.2, 3)):
         m.box('geode_dark', x, y, 3 + y / 2, w, d, 3, ring=True)
     m.box('geode_light', 2, 9, 15.9, 4, 3, 0.2)
     m.box('geode_dark', 9, 2, 15.9, 3, 3, 0.2)
@@ -73,7 +73,7 @@ def geode(m):
         pivot = (x + size / 2, y + size / 2, 16)
         m.box('glow_crystal', x, y, 16, size, size, height, tilt=tilt, pivot=pivot)
         m.box('glow_crystal_light', x + 0.75, y + 0.75, 16 + height, size - 1.5, size - 1.5, 1.25, tilt=tilt, pivot=pivot)
-        m.box('glow_crystal_deep', x + size - 0.25, y + 0.5, 16, 0.5, 1, height * 0.7, tilt=tilt, pivot=pivot)
+        m.box('glow_crystal_deep', x + size - 0.25, y + 0.5, 15.9, 0.5, 1, height * 0.7 + 0.1, tilt=tilt, pivot=pivot)
     # Crystals grow out of all four sides as well, so the druse reads as one with a block on it.
     for y, z, size, height, lean in ((4.5, 5, 3, 5, 70), (11.5, 10, 2.5, 4, 58), (11.5, 3.5, 1.8, 2.5, 82)):
         pivot = (15, y, z)
@@ -84,15 +84,20 @@ def geode(m):
 
 def turbine(m):
     # The frame stands half a pixel out of the block, so water in the same cell stays inside it.
-    m.box('case_dark', -0.5, -0.5, 0, 17, 17, 2)
-    m.box('case', -0.5, -0.5, 0, 3.5, 3.5, 16, ring=True)
-    m.box('case', -0.5, -0.5, 13, 17, 17, 3)
+    # What stands out stops a quarter pixel short of the floor and the top of the cell, and the
+    # posts stand between the base and the top: next to a block or another turbine no two faces
+    # share a plane (round 31).
+    m.box('case_dark', 0, 0, 0, 16, 16, 2)
+    m.box('case_dark', 16, -0.5, 0.25, 0.5, 17, 1.75, ring=True)
+    m.box('case', -0.5, -0.5, 2, 3.5, 3.5, 11, ring=True)
+    m.box('case', 0, 0, 13, 16, 16, 3)
+    m.box('case', 16, -0.5, 13, 0.5, 17, 2.75, ring=True)
     m.box('case_light', 1, 1, 16, 14, 14, 0.5)
     # A blue band under the top and an intake grate over the rotor.
     m.box('glow_water', -0.75, -0.75, 12, 17.5, 17.5, 1)
     m.box('black', 4, 4, 16.5, 8, 8, 0.25)
-    for y in (5, 7, 9, 11):
-        m.box('steel', 4, y - 0.25, 16.5, 8, 0.5, 0.75)
+    for y in (5.2, 7.07, 8.93, 10.8):
+        m.box('steel', 4.25, y - 0.25, 16.5, 7.5, 0.5, 0.75)
     # Flaps: three slanted blades in every opening. The current passes between them.
     for y in (5, 8, 11):
         m.box('steel', 15.6, y - 1.5, 2, 0.8, 3, 10, tilt=('Z', 32), ring=True)
@@ -131,9 +136,9 @@ def windmill(m):
         m.box('case_dark', 15, 5, 0.5, 1, 6, 4.5, part=part, quarter=quarter)
         m.box('glow_energy', 15.75, 7, 1.75, 0.5, 2, 2, part=part, quarter=quarter)
         for y in (5.5, 9.9):
-            for z in (1, 4.4):
+            for z in (1, 4.3):
                 m.box('steel', 15.75, y, z, 0.4, 0.6, 0.6, part=part, quarter=quarter)
-    m.box('case', 2, 2, 0, 12, 12, 0.5, part='link_z-')
+    m.box('case', 2, 2, 0.05, 12, 12, 0.45, part='link_z-')
     m.box('steel', 2.5, 2.5, 0.5, 1, 1, 0.4, part='link_z-', ring=True)
     m.box('glow_energy', 13.9, 7, 0.1, 0.25, 2, 0.3, part='link_z-', ring=True)
 
@@ -157,7 +162,7 @@ def solar(m):
         m.box('steel_mid', 15, 5, 0.25, 1, 6, 4.3, part=part, quarter=quarter)
         m.box('plate_dark', 15.6, 6, 1, 0.5, 4, 2.8, part=part, quarter=quarter)
         m.box('glow_cell_light', 15.8, 7, 1.6, 0.45, 2, 1.6, part=part, quarter=quarter)
-    m.box('solar_frame', 3, 3, 0, 10, 10, 0.4, part='link_z-')
+    m.box('solar_frame', 3, 3, 0.08, 10, 10, 0.32, part='link_z-')
     m.box('glow_cell', 12.9, 7, 0.05, 0.25, 2, 0.3, part='link_z-', ring=True)
 
 
@@ -168,11 +173,11 @@ def gen_fuel(m):
     # A vent and a hazard stripe on the top, and a chimney.
     for y in (5, 7, 9):
         m.box('black', 3, y, 16.25, 6, 1, 0.25)
-    m.box('fuel_stripe', 1, 12.5, 16.25, 14, 2, 0.3)
+    m.box('fuel_stripe', 0.9, 12.4, 16.25, 14.2, 2.2, 0.3)
     for x in (1, 5, 9, 13):
         m.box('black', x, 12.5, 16.3, 2, 2, 0.3)
     m.box('steel_dark', 10.5, 4.5, 16.25, 3, 3, 5)
-    m.box('steel_mid', 10, 4, 21.25, 4, 4, 0.75)
+    m.box('steel_mid', 10.1, 4, 21.25, 3.9, 4, 0.65)
     m.box('black', 11, 5, 21.5, 2, 2, 0.6)
 
 
@@ -200,11 +205,11 @@ def battery(m):
     panel(m, 'charge_dark', 5.75, 3.25, 4.5, 9.5)
     panel(m, 'glow_charge', 6.25, 3.75, 3.5, 8.5, depth=0.4, part='level_charge')
     for z in (5.45, 7.15, 8.85, 10.55):
-        panel(m, 'black', 6.25, z, 3.5, 0.25, depth=0.45)
+        panel(m, 'black', 6, z, 4, 0.25, depth=0.45)
     # Terminals on the top.
     for x, y, cap in ((2.5, 2.5, 'led_red'), (10.5, 10.5, 'steel_dark')):
-        m.box('steel_mid', x, y, 16.25, 3, 3, 0.75)
-        m.box(cap, x + 0.5, y + 0.5, 17, 2, 2, 0.75)
+        m.box('steel_mid', x, y, 16.25, 3, 3, 0.7)
+        m.box(cap, x + 0.5, y + 0.5, 16.95, 2, 2, 0.75)
     m.box('glow_charge', 6, 7.5, 16.25, 4, 1, 0.25)
 
 
@@ -219,7 +224,11 @@ def charge_plate(m):
     m.box('copper', 1.5, 1.5, 1, 1.25, 1.25, 0.2, ring=True)
 
 
+# The generators, the battery and the turbine take the magistral's connectors (round 31,
+# kit.links); the crystal, the windmill and the panel keep their own (link_* above), the charge
+# plate lies on its housing.
 MODELS = {
-    'crystal': crystal, 'crystalblock': crystalblock, 'geode': geode, 'turbine': turbine, 'windmill': windmill,
-    'solar': solar, 'gen_fuel': gen_fuel, 'gen_lava': gen_lava, 'battery': battery, 'charge_plate': charge_plate,
+    'crystal': crystal, 'crystalblock': crystalblock, 'geode': geode, 'turbine': linked(turbine), 'windmill': windmill,
+    'solar': solar, 'gen_fuel': linked(gen_fuel), 'gen_lava': linked(gen_lava), 'battery': linked(battery),
+    'charge_plate': charge_plate,
 }

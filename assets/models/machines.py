@@ -1,6 +1,6 @@
 """Machines: furnace, crusher, crafter, alloy smelter, mixer, charger, placer, breaker, pump, miner, vein,
 utilizer (trash) and disintegrator (spec 25)."""
-from kit import family, firebox, frame, panel, port, shade, shell, tier
+from kit import family, firebox, frame, linked, panel, port, shade, shell, tier
 
 FIRE, ALLOY, SOL = '#ff9a3c', '#8a5645', '#59d38c'
 COLORS = {
@@ -35,8 +35,9 @@ def furnace(m):
 def crusher(m):
     shell(m, top=False)
     tier(m)
-    # Jaws on the faces: a dark slot with two rows of teeth.
-    panel(m, 'black', 3, 4, 10, 6)
+    # Jaws on the faces: a dark slot with two rows of teeth. The slot reaches a quarter pixel past
+    # the rows, so a tooth's top or bottom never lies in the slot's (round 31, z-fighting).
+    panel(m, 'black', 3, 3.75, 10, 6.5)
     for y in (3.5, 5.5, 7.5, 9.5, 11.5):
         panel(m, 'steel', y, 8.5, 1, 1.5, depth=0.5)
     for y in (4.5, 6.5, 8.5, 10.5):
@@ -87,8 +88,8 @@ def mixer(m):
     panel(m, 'white', 9.5, 9.5, 1, 1, depth=0.35)
     # The open vat: the solution and a stirrer under a bridge with its motor.
     m.box('glow_sol', 1.75, 1.75, 11.25, 12.5, 12.5, 2)
-    m.box('steel_mid', 0.5, 7, 16, 15, 2, 1)
-    m.box('steel_dark', 6.5, 6.5, 17, 3, 3, 2)
+    m.box('steel_mid', 0.5, 7, 15.95, 15, 2, 1)
+    m.box('steel_dark', 6.5, 6.5, 16.95, 3, 3, 2.05)
     m.pivot('stirrer', 8, 8, 12)
     m.box('steel', 7.5, 7.5, 12, 1, 1, 4.5, part='stirrer')
     for a in (0, 90):
@@ -139,9 +140,11 @@ def breaker(m):
     for y in (4, 11):
         m.box('breaker', 15.5, y, 5, 0.75, 1, 6)
     m.box('black', 15.5, 5, 5, 0.25, 6, 6)
-    m.box('steel_dark', 15.5, 5.5, 5.5, 1.5, 5, 5)
+    # The port ends a tenth of a pixel past the collar of a housing in front of it, and the drill
+    # is a tenth narrower than the housing's channels are apart (round 31, z-fighting).
+    m.box('steel_dark', 15.5, 5.5, 5.5, 1.6, 5, 5)
     m.pivot('drill', 17, 8, 8)
-    for i, (size, turn) in enumerate(((4, 0), (3.25, 45), (2.5, 0), (1.5, 45), (0.75, 0))):
+    for i, (size, turn) in enumerate(((3.9, 0), (3.25, 45), (2.5, 0), (1.5, 45), (0.75, 0))):
         mat = 'steel' if i % 2 == 0 else 'breaker_dark'
         m.box(mat, 17 + 0.8 * i, 8 - size / 2, 8 - size / 2, 0.8, size, size, part='drill', tilt=('X', turn), pivot=(17, 8, 8))
     status(m, 'glow_led_red', 'breaker')
@@ -162,7 +165,7 @@ def pump(m):
     for y in (4, 11):
         m.box('steel_mid', 7, y, 16.25, 2, 1, 5)
     m.box('steel_mid', 6.5, 4, 21.25, 3, 8, 1)
-    m.box('steel_dark', 6, 6, 16.25, 4, 4, 0.75)
+    m.box('steel_dark', 6, 6, 16.25, 4, 4, 0.7)
     m.box('steel', 7.25, 7.25, 14, 1.5, 1.5, 7, part='plunger')
     m.box('water_dark', 6.25, 6.25, 18, 3.5, 3.5, 1.5, part='plunger')
 
@@ -186,13 +189,13 @@ def miner(m):
     m.box('black', 2, 2, 16.25, 6, 5, 0.3)
     m.box('miner_screen', 2.5, 2.5, 16.55, 5, 4, 0.1)
     m.box('glow_miner_screen', 3, 4, 16.6, 3, 0.75, 0.15)
-    m.box('steel_dark', 10, 10, 16.25, 3, 3, 1)
+    m.box('steel_dark', 10.1, 10.1, 16.25, 3, 3, 1)
     m.box('steel_mid', 11, 11, 17.25, 1, 1, 4)
     m.pivot('scanner', 11.5, 11.5, 21)
     m.box('steel', 8, 11, 21, 7, 1, 0.75, part='scanner')
     m.box('steel_mid', 10.5, 10.5, 20.75, 2, 2, 1.25, part='scanner')
     for x in (7.5, 14.75):
-        m.box('glow_eye', x, 10.75, 20.75, 0.75, 1.5, 1.25, part='scanner')
+        m.box('glow_eye', x, 10.75, 20.75, 0.75, 1.5, 1.2, part='scanner')
     # The drill under the body turns about z.
     m.box('steel_dark', 5.5, 5.5, 3.25, 5, 5, 0.75)
     m.pivot('drill', 8, 8, 0)
@@ -211,7 +214,7 @@ def vein(m):
         m.box('vein_light', x + 0.5, y + 0.5, 4 + h, 3, 3, 0.5)
     for mat, x, y, z, s, tilt in (
             ('ore_cyan', 1, 1, 14.5, 2, ('X', 15)), ('ore_gold', 13, 1.5, 12.5, 1.75, ('Y', -15)),
-            ('ore_red', 13, 13, 7.5, 2, ('X', -20)), ('ore_cyan', 1.5, 12.5, 13.5, 1.5, ('Y', 20)),
+            ('ore_red', 13, 13, 7.5, 2, ('X', -20)), ('ore_cyan', 1.5, 12.6, 13.5, 1.5, ('Y', 20)),
             ('ore_gold', 4.5, 2.5, 4, 1.5, ('Y', 25)), ('ore_red', 2.5, 6, 4, 1.5, ('X', -25)),
             ('ore_cyan', 12, 6.5, 4, 1.75, ('X', 20)), ('ore_red', 9, 12, 4, 1.25, ('Y', -20))):
         m.box(mat, x, y, z, s, s, s * 1.6, tilt=tilt)
@@ -250,7 +253,9 @@ def trash(m):
     # The grate across the mouth.
     for x in (5, 10):
         m.box('steel_dark', x, 1.5, 11.5, 1, 13, 0.75)
-    m.box('steel_mid', 1.5, 7.5, 11.5, 13, 1, 0.75)
+    # The crossbar is a little thicker than the bars it crosses, so their tops and bottoms do
+    # not share a plane (round 31).
+    m.box('steel_mid', 1.5, 7.5, 11.4, 13, 1, 0.95)
 
 
 def disintegrator(m):
@@ -262,7 +267,7 @@ def disintegrator(m):
     m.box('case_light', 0.5, 0.5, 6, 15, 15, 0.25)
     m.box('case_dark', 1.5, 0.5, 6.25, 13, 1, 0.75, ring=True)
     m.box('case', 0, 0, 14.5, 16, 1.5, 1.5, ring=True)
-    m.box('case_light', 0, 0, 16, 16, 1.5, 0.25, ring=True)
+    m.box('case_light', 0.25, 0.25, 16, 15.5, 1.25, 0.25, ring=True)
     m.box('tint', 0, 0, 16.25, 16, 1.5, 0.25, part='tier')
     m.box('case', 1.5, 7, 15, 13, 2, 1)
     m.box('case_light', 1.5, 7, 16, 13, 2, 0.25)
@@ -277,28 +282,32 @@ def disintegrator(m):
         m.box('iron_item', 7.25, y0, 10.75, 1.5, 4, 1.25, part=part)
         m.box('iron_item_dark', 7.25, tip, 9.75, 1.5, 1, 1, part=part)
     # The beam shines from the cutter hub down onto the split; the cutter turns about z.
-    m.box('glow_beam_light', 7.4, 7.4, 12, 1.2, 1.2, 1.25, part='beam')
+    m.box('glow_beam_light', 7.4, 7.4, 12, 1.2, 1.2, 1.35, part='beam')
     m.box('glow_beam', 6.25, 7.8, 9.5, 3.5, 0.4, 3.75, part='beam')
     m.pivot('cutter', 8, 8, 13.5)
     m.box('steel_dark', 6.5, 6.5, 13.25, 3, 3, 1.75, part='cutter')
     for a in (0, 90):
         m.box('steel', 2.5, 7.25, 13.5, 11, 1.5, 0.5, part='cutter', tilt=('Z', a), pivot=(8, 8, 13.5))
-        m.box('glow_beam', 2.5, 7.5, 13.4, 1, 1, 0.7, part='cutter', tilt=('Z', a), pivot=(8, 8, 13.5))
+        m.box('glow_beam', 2.4, 7.5, 13.4, 1, 1, 0.7, part='cutter', tilt=('Z', a), pivot=(8, 8, 13.5))
     # The output tray on the x+ face with two ingots in it; a lamp strip on the other three faces.
     m.box('black', 15.5, 4.75, 2.25, 0.1, 6.5, 3.25)
     m.box('steel_mid', 15.5, 4, 1.5, 1.25, 8, 0.75)
     for y in (4, 11.25):
         m.box('steel_mid', 15.5, y, 2.25, 1.25, 0.75, 2)
-    m.box('steel_mid', 16.25, 4, 2.25, 0.5, 8, 1)
+    m.box('steel_mid', 16.3, 4, 2.25, 0.5, 8, 1)
     for y in (5.25, 8.5):
         m.box('iron_item', 15.6, y, 2.25, 0.65, 2.25, 0.75)
+    # The strips are a quarter pixel narrower than the tray, whose sides reach into the next
+    # block: two disintegrators side by side would otherwise share the strip's and the tray's
+    # sides (round 31).
     for quarter in (1, 2, 3):
-        m.box('black', 15.5, 4, 2.5, 0.25, 8, 2.5, quarter=quarter)
+        m.box('black', 15.5, 4.25, 2.5, 0.25, 7.5, 2.5, quarter=quarter)
         m.box('glow_beam', 15.5, 4.75, 3.25, 0.4, 6.5, 1, quarter=quarter)
 
 
-MODELS = {
+# Every machine here takes the magistral's connectors (round 31, kit.links).
+MODELS = {name: linked(draw) for name, draw in {
     'furnace': furnace, 'crusher': crusher, 'crafter': crafter, 'alloy': alloy, 'mixer': mixer, 'charger': charger,
     'placer': placer, 'breaker': breaker, 'pump': pump, 'miner': miner, 'vein': vein,
     'trash': trash, 'disintegrator': disintegrator,
-}
+}.items()}

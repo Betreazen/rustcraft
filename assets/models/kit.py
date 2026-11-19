@@ -31,19 +31,22 @@ COLORS = {
 }
 
 
-def shell(m, body='case', top=True):
-    """The usual machine casing: a dark plinth, a body set half a pixel back between four corner
-    posts, and a top slab with a lighter roof plate. top=False leaves the top open down to z 11."""
+def shell(m, body='case', top=True, bay=0.5):
+    """The usual machine casing: a dark plinth, a body set `bay` pixels back (half a pixel by
+    default) between four corner posts, and a top slab with a lighter roof plate. top=False
+    leaves the top open down to z 11."""
     m.box(body + '_dark', 0, 0, 0, 16, 16, 1.5)
-    m.box(body, 0.5, 0.5, 1.5, 15, 15, 13 if top else 9.5)
+    m.box(body, bay, bay, 1.5, 16 - 2 * bay, 16 - 2 * bay, 13 if top else 9.5)
     m.box(body, 0, 0, 1.5, 1.5, 1.5, 13 if top else 14.5, ring=True)
     if top:
         m.box(body, 0, 0, 14.5, 16, 16, 1.5)
         m.box(body + '_light', 0.5, 0.5, 16, 15, 15, 0.25)
         return
-    # An open top: a rim, walls with a dark lining inside and a dark floor.
+    # An open top: a rim, walls with a dark lining inside and a dark floor. The light caps on the
+    # posts stand a quarter pixel in from the outer faces, so a block put on top hides their
+    # sides instead of fighting them (round 31).
     m.box(body, 1.5, 0, 14.5, 13, 1.5, 1.5, ring=True)
-    m.box(body + '_light', 0, 0, 16, 1.5, 1.5, 0.25, ring=True)
+    m.box(body + '_light', 0.25, 0.25, 16, 1.25, 1.25, 0.25, ring=True)
     m.box(body, 1.5, 0.5, 11, 13, 1, 3.5, ring=True)
     m.box(body + '_dark', 1.5, 1.5, 11.25, 13, 0.25, 4.5, ring=True)
     m.box('black', 1.5, 1.5, 11, 13, 13, 0.25)
@@ -102,3 +105,44 @@ def port(m, rim, centre, z=16.25):
     """A round port on the top: a rim of four bars around a dark centre."""
     m.box(rim, 10, 5, z, 1, 6, 0.6, ring=True)
     m.box(centre, 6, 6, z, 4, 4, 0.3)
+
+
+# Round 31: the connectors («присоски») a housing of the magistral plugs into. A housing's arm
+# ends in a collar 6.5 pixels across (4.75..11.25, transport.py `pipe`); the connector is a bolted
+# frame round it with a small energy window under it, in the style of the crystal's, the
+# windmill's and the solar panel's connectors (energy.py). One part per side: link_x+, link_y+,
+# link_x-, link_y- and link_z+ on the top; the game shows the ones whose side a housing touches
+# (rustcraft_rules::connectors), the guide the sides in the object's `link`. No connector below:
+# a housing under a machine meets its plinth.
+# Its sizes stay off the quarter-pixel grid the machines' faces are drawn on, so no face of a
+# connector lies in a plane of the machine's or the housing's (zfight.rs checks it).
+LINK_FRAME = ((3.8, 3.8, 8.4, 1), (3.8, 11.2, 8.4, 1), (3.8, 4.8, 1, 6.4), (11.2, 4.8, 1, 6.4))
+LINK_BOLTS = (4.05, 11.45)
+
+
+def links(m):
+    """The five connectors of a machine, each its own part."""
+    for quarter, side in enumerate(SIDES):
+        part = 'link_' + side
+        # The frame stands from inside the body to 0.15 out of the face, past the face's frames.
+        for y, z, w, h in LINK_FRAME:
+            m.box('case_dark', 15.4, y, z, 0.75, w, h, part=part, quarter=quarter)
+        for y in LINK_BOLTS:
+            for z in LINK_BOLTS:
+                m.box('steel', 16.15, y, z, 0.3, 0.5, 0.5, part=part, quarter=quarter)
+        m.box('glow_energy', 16.15, 7.1, 4.05, 0.15, 1.8, 0.5, part=part, quarter=quarter)
+    # On the top the frame stands on the roof plate.
+    for x, y, w, d in LINK_FRAME:
+        m.box('case_dark', x, y, 15.85, w, d, 0.87, part='link_z+')
+    for x in LINK_BOLTS:
+        for y in LINK_BOLTS:
+            m.box('steel', x, y, 16.72, 0.5, 0.5, 0.25, part='link_z+')
+    m.box('glow_energy', 7.1, 4.05, 16.72, 1.8, 0.5, 0.15, part='link_z+')
+
+
+def linked(draw):
+    """`draw` with the connectors of `links` added."""
+    def model(m):
+        draw(m)
+        links(m)
+    return model

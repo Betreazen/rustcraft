@@ -463,7 +463,10 @@ pub fn channel_of(item: &str) -> Option<Channel> {
 /// one), the terminal and the tank (72) and the monorail's 480 keep the registry under 2^16, so
 /// chunks keep vanilla's 16-bit palette
 /// (SRC/docs/modpacks.md:281-284). Which channel sits in which slot is block entity data, not
-/// state: four slots of four kinds would multiply the housing's states by 256.
+/// state: four slots of four kinds would multiply the housing's states by 256. Round 31: the
+/// machines, the tank, the terminal and the cell have five connector sides (32 states each over
+/// the above, about 24,000 in all), which the registry still holds under 2^16
+/// (rustcraft_rules::connectors).
 pub fn declare_blocks(blocks: &mut Vec<Block>) {
     blocks.push(Block {
         id: HOUSING.into(),
@@ -659,6 +662,7 @@ fn declare_storage_and_tanks(blocks: &mut Vec<Block>) {
         item: true,
         ..Block::default()
     });
+    with_links(blocks.last_mut());
     for id in [TERMINAL, TANK] {
         blocks.push(Block {
             id: id.into(),
@@ -673,6 +677,7 @@ fn declare_storage_and_tanks(blocks: &mut Vec<Block>) {
             item: true,
             ..Block::default()
         });
+        with_links(blocks.last_mut());
     }
 }
 
@@ -746,6 +751,7 @@ fn declare_slice7(blocks: &mut Vec<Block>) {
             ..Block::default()
         });
         with_tier(blocks.last_mut());
+        with_links(blocks.last_mut());
     }
 }
 
@@ -793,6 +799,7 @@ fn declare_machines(blocks: &mut Vec<Block>) {
             ..Block::default()
         });
         with_tier(blocks.last_mut());
+        with_links(blocks.last_mut());
     }
 }
 
@@ -814,6 +821,26 @@ fn with_tier(block: Option<&mut Block>) {
     block
         .default_state
         .insert(tiers::PROPERTY.to_owned(), family.first.to_string());
+}
+
+/// Round 31: a block with connectors (rustcraft_rules::connectors) declares a boolean for each side
+/// a connector shows on, all false at first; the server sets them from the housings around it
+/// (rustcraft_connectors). A world saved before loads them false and gets them on its first read
+/// of the magistral. 32 states a block: the registry stays under 2^16 (connectors' test).
+fn with_links(block: Option<&mut Block>) {
+    use rustcraft_rules::connectors;
+    let Some(block) = block else { return };
+    if !connectors::has(&block.id) {
+        return;
+    }
+    for (side, _) in connectors::FACES {
+        block
+            .state_properties
+            .insert(side.to_owned(), StateProperty::Boolean);
+        block
+            .default_state
+            .insert(side.to_owned(), "false".to_owned());
+    }
 }
 
 /// Slice 18, stream 3: the items of the tiers above each family's first; each places its

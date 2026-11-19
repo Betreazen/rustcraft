@@ -5,7 +5,7 @@ archaeology table, holo projector, building machine; and the butcher (spec 23).
 Every machine wears the tier stripe (part tier) somewhere on its top, as the other machines do; the
 guide shows it above the first tier. Moving parts are named in the pose of each block in
 docs/showcase/js/poses.js; fills are parts level_*, stretched upright from their bottom."""
-from kit import family, frame, panel, shade, shell, tier
+from kit import family, frame, linked, panel, shade, shell, tier
 
 FEED, MILK, HONEY, BREW, XP, HOLO = '#d9b44a', '#f4f1ea', '#ffb32a', '#c05ad8', '#7cfc5a', '#5ae6ff'
 COLORS = {
@@ -79,7 +79,7 @@ def repair(m):
     m.box('steel_dark', 9, 6, 9, 4, 4, 1.5)
     m.box('steel_mid', 7.5, 4, 10.5, 8, 8, 2.5)
     m.box('steel', 7.5, 4, 13, 8, 8, 0.25)
-    m.box('steel_mid', 15.5, 5.5, 11, 1.5, 5, 2)
+    m.box('steel_mid', 15.5, 5.5, 11, 1.6, 5, 2)
     m.box('steel_mid', 17, 6.5, 11.5, 1, 3, 1.25)
     # A vice on the anvil holds a blade; its jaw clamp closes towards y- while the stand works.
     m.box('steel_dark', 9, 5.5, 13.25, 4, 1.5, 2.25)
@@ -151,8 +151,8 @@ def fishery(m):
     m.box('steel', 7.5, 3, 14.5, 1, 10, 1)
     # The winch drum turns about y as it lets the line down and winds it up.
     m.pivot('winch', 8, 8, 15)
-    octagon(m, 'rope', 6, 4.75, 13, 4, 6.5, 4, 'Y', (8, 8, 15), 'winch')
-    for y in (4, 11.25):
+    octagon(m, 'rope', 6, 4.85, 13, 4, 6.3, 3.9, 'Y', (8, 8, 15), 'winch')
+    for y in (4.1, 11.15):
         octagon(m, 'steel_mid', 5.5, y, 12.5, 5, 0.75, 5, 'Y', (8, 8, 15), 'winch')
     # The line with its bobber and hook; it reaches up into the drum, so it never ends short.
     m.box('line', 7.75, 7.75, -10, 0.5, 0.5, 26, part='line')
@@ -164,7 +164,7 @@ def fishery(m):
     m.box('steel_dark', 13, 13, 12.75, 1.5, 1.5, 0.5)
     m.box('glow_lantern', 13.25, 13.25, 13.25, 1, 1, 1.75)
     m.box('steel_dark', 13, 13, 15, 1.5, 1.5, 0.5)
-    m.box('crate', 4, 13, 1, 3.5, 2.5, 2.5)
+    m.box('crate', 4, 13.25, 1, 3.5, 2.25, 2.5)
     m.box('crate_dark', 3.9, 12.9, 2.5, 3.7, 2.7, 0.4)
     m.box('fish', 4.5, 13.5, 3.5, 2.5, 1, 0.5)
 
@@ -208,17 +208,19 @@ def shearer(m):
     m.box('steel_dark', 1.5, 9.5, 16.25, 5, 5, 0.5)
     for x in (1.5, 5.75):
         for y in (9.5, 13.75):
-            m.box('steel_mid', x, y, 16.75, 0.75, 0.75, 4.25)
-    m.box('steel_mid', 1.5, 9.5, 21, 5, 5, 0.75)
-    m.box('milk', 2, 10, 16.75, 4, 4, 3.75, part='level_milk')
-    m.box('milk_light', 2, 10, 20, 4, 4, 0.5, part='level_milk')
+            m.box('steel_mid', x, y, 16.75, 0.75, 0.75, 4.3)
+    m.box('steel_mid', 1.5, 9.5, 21.05, 5, 5, 0.75)
+    m.box('milk', 2.05, 10.05, 16.75, 3.9, 3.9, 3.75, part='level_milk')
+    m.box('milk_light', 2.05, 10.05, 20, 3.9, 3.9, 0.5, part='level_milk')
     m.box('glass', 6.25, 11, 18.5, 0.25, 0.75, 1.75)
     # The arm on a turntable in the middle swings about z; the shears at its end cut about x.
-    m.box('steel_dark', 6, 6, 16.25, 4, 4, 1)
+    # The turntable and the arm's hub stand off the planes of the channels of a housing above
+    # (round 31, z-fighting).
+    m.box('steel_dark', 6.1, 6.1, 16.25, 3.8, 3.8, 1)
     m.pivot('arm', 8, 8, 17.25)
-    m.box('steel_mid', 7, 7, 17.25, 2, 2, 1.75, part='arm')
+    m.box('steel_mid', 7.05, 7.05, 17.25, 1.9, 1.9, 1.75, part='arm')
     m.box('steel', 8, 7.25, 17.75, 9, 1.5, 1, part='arm')
-    m.box('steel_mid', 16, 7.25, 15, 1.5, 1.5, 3.75, part='arm')
+    m.box('steel_mid', 16, 7.35, 15, 1.5, 1.3, 3.65, part='arm')
     m.box('steel_dark', 15.75, 7, 14.25, 2, 2, 1, part='arm')
     for part, y in (('blade_a', 7.4), ('blade_b', 8.1)):
         m.pivot(part, 16.75, 8, 14.5)
@@ -237,15 +239,17 @@ def apiary(m):
     m.box('case', 0, 0, 1.5, 2.5, 2.5, 9.5, ring=True)
     m.box('case', 2.5, 0.5, 9.5, 11, 1.5, 1.5, ring=True)
     m.box('case', 14.5, 2.5, 5, 1, 11, 1.5, ring=True)
-    m.box('steel_mid', 14, 6, 4.25, 0.5, 4, 3, ring=True)
+    m.box('steel_mid', 14, 6, 4.25, 0.5, 4, 2.9, ring=True)
     m.box('case', 0.5, 0.5, 11, 15, 15, 1)
     stripe(m, 0.5, 0.5, 12, 15, 1.5)
     # The honey tank on the top; the honey is level_honey.
     m.box('case_light', 3, 3, 12, 1, 1, 4, ring=True)
     m.box('black', 4, 4, 12, 8, 8, 0.25)
-    m.box('glow_honey', 4, 4, 12.25, 8, 8, 3, part='level_honey')
+    m.box('glow_honey', 4, 4, 12.25, 8, 8, 2.75, part='level_honey')
     m.box('glow_honey_top', 4, 4, 15, 8, 8, 0.5, part='level_honey')
-    m.box('case', 3, 3, 16, 10, 10, 0.75)
+    # The lid sinks a quarter pixel into the cell and is a little wider than the posts under it,
+    # so a block on top does not share its underside (the apiary lets the eye through).
+    m.box('case', 2.9, 2.9, 15.75, 10.2, 10.2, 1)
     m.box('steel_dark', 6.5, 6.5, 16.75, 3, 3, 0.75)
     m.box('glass', 12.1, 5, 13, 0.25, 1, 2.5, ring=True)
     # Three bees fly round it while it works.
@@ -259,20 +263,23 @@ def apiary(m):
 
 
 def brewer(m):
-    shell(m, top=False)
+    shell(m, top=False, bay=1.5)
     tier(m)
-    # A rack of three bottles on every face over the glowing blaze heater.
-    panel(m, 'glow_blaze', 3, 2, 10, 1, depth=0.35)
-    panel(m, 'black', 2, 3.5, 12, 7)
-    m.box('steel_mid', 15.5, 2, 3.5, 1.5, 12, 0.75, ring=True)
+    # A rack of three bottles on every face over the glowing blaze heater. The racks sit in a bay
+    # a pixel deep between the corner posts and end at the face of the block: racks that stood
+    # out of it met their neighbour's, red bottle on green, when two brewers stood side by side
+    # (round 31, z-fighting).
+    m.box('glow_blaze', 14.5, 3, 2, 0.35, 10, 1, ring=True)
+    m.box('black', 14.5, 2.25, 3.6, 0.25, 11.5, 6.8, ring=True)
+    m.box('steel_mid', 14.5, 2, 3.5, 1.5, 12, 0.75, ring=True)
     for y in (2, 13.25):
-        m.box('steel_dark', 15.5, y, 4.25, 1.5, 0.75, 5.25, ring=True)
-    m.box('steel_mid', 15.5, 2, 9.5, 1.5, 12, 0.75, ring=True)
+        m.box('steel_dark', 14.5, y, 4.25, 1.5, 0.75, 5.25, ring=True)
+    m.box('steel_mid', 14.5, 2, 9.5, 1.5, 12, 0.75, ring=True)
     for y, potion in ((3.5, 'glow_potion_r'), (7, 'glow_potion_b'), (10.5, 'glow_potion_g')):
-        m.box(potion, 15.6, y, 4.25, 1.4, 2, 2.25, ring=True)
-        m.box('glass', 15.6, y, 6.5, 1.4, 2, 0.75, ring=True)
-        m.box('glass', 15.9, y + 0.5, 7.25, 0.8, 1, 1, ring=True)
-        m.box('cork', 15.9, y + 0.5, 8.25, 0.8, 1, 0.6, ring=True)
+        m.box(potion, 14.6, y, 4.25, 1.4, 2, 2.25, ring=True)
+        m.box('glass', 14.6, y, 6.5, 1.4, 2, 0.75, ring=True)
+        m.box('glass', 14.9, y + 0.5, 7.25, 0.8, 1, 1, ring=True)
+        m.box('cork', 14.9, y + 0.5, 8.25, 0.8, 1, 0.6, ring=True)
     # The vat in the open top; the brew is level_brew and bubbles while it brews.
     m.box('glow_brew', 1.75, 1.75, 11.25, 12.5, 12.5, 2.5, part='level_brew')
     m.box('glow_brew_top', 1.75, 1.75, 13.75, 12.5, 12.5, 0.5, part='level_brew')
@@ -297,7 +304,7 @@ def xp_tank(m):
     m.box('steel_dark', 4, 4, 15.25, 8, 8, 0.75)
     m.box('glow_xp', 11, 4.5, 16, 0.75, 7, 0.75, ring=True)
     m.box('steel_mid', 5.5, 5.5, 16, 5, 5, 1.25)
-    m.box('steel_dark', 6.5, 6.5, 17.25, 3, 3, 0.5)
+    m.box('steel_dark', 6.5, 6.5, 17.25, 3, 3, 0.45)
     m.pivot('orb', 8, 8, 19.5)
     m.box('glow_xp_orb', 6.75, 6.75, 18.25, 2.5, 2.5, 2.5, part='orb', tilt=('Z', 45), pivot=(8, 8, 18.25))
     m.box('glow_xp_top', 7.25, 7.25, 20.75, 1.5, 1.5, 0.5, part='orb', tilt=('Z', 45), pivot=(8, 8, 20.75))
@@ -359,9 +366,9 @@ def archeo(m):
     for y in (0.5, 14.25):
         m.box('steel_mid', 0.5, y, 15.25, 15, 1.25, 0.75)
     m.pivot('brush', 8, 8, 16)
-    m.box('steel', 7, 0.25, 16, 2, 15.5, 0.75, part='brush')
-    m.box('steel_dark', 7, 0, 15, 2, 1, 1.75, part='brush')
-    m.box('steel_dark', 7, 15, 15, 2, 1, 1.75, part='brush')
+    m.box('steel', 7, 0.25, 15.95, 2, 15.5, 0.75, part='brush')
+    m.box('steel_dark', 6.9, 0, 15, 2.2, 1, 1.85, part='brush')
+    m.box('steel_dark', 6.9, 15, 15, 2.2, 1, 1.85, part='brush')
     m.box('wood', 7.5, 7.5, 13, 1, 1, 3, part='brush')
     m.box('wood', 6.5, 6, 12.75, 3, 4, 0.75, part='brush')
     m.box('bristle', 6.75, 6.25, 12, 2.5, 3.5, 0.75, part='brush')
@@ -407,9 +414,9 @@ def builder(m):
     for x in (0, 14.5):
         m.box('gantry_dark', x, 1.5, 14.5, 1.5, 13, 1.5)
     stripe(m, 0, 1.5, 16, 1.5, 13)
-    m.box('gantry_light', 0, 0, 16, 1.5, 1.5, 0.25, ring=True)
+    m.box('gantry_light', 0.25, 0.25, 16, 1.25, 1.25, 0.25, ring=True)
     # The bridge runs along x on the rails; the head runs along y on the bridge.
-    m.box('steel_mid', 7, -0.25, 16, 2, 16.5, 1.25, part='bridge')
+    m.box('steel_mid', 6.9, -0.25, 15.95, 2.2, 16.5, 1.3, part='bridge')
     for y in (-0.5, 14.75):
         m.box('steel_dark', 6.75, y, 15.5, 2.5, 1.75, 2, part='bridge')
     m.box('gantry', 6.5, 6.5, 14, 3, 3, 3.5, part='head')
@@ -449,8 +456,9 @@ def butcher(m):
     m.box('sword_edge', 16.25, 9, 8.75, 1, 0.25, 6, part='arm')
 
 
-MODELS = {
+# Every block here takes the magistral's connectors (round 31, kit.links).
+MODELS = {name: linked(draw) for name, draw in {
     'repair': repair, 'kitchen': kitchen, 'fishery': fishery, 'feeder': feeder, 'shearer': shearer, 'apiary': apiary,
     'brewer': brewer, 'xp_tank': xp_tank, 'enchanter': enchanter, 'archeo': archeo, 'projector': projector,
     'builder': builder, 'butcher': butcher,
-}
+}.items()}

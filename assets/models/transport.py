@@ -2,7 +2,7 @@
 portal dock."""
 import math
 
-from kit import FACES, face_box, family, frame, panel, shade, shell, tier
+from kit import FACES, face_box, family, frame, linked, panel, shade, shell, tier
 
 NODE, STATION, CAPSULE, CHASSIS, TANK = '#3d4658', '#4a5568', '#e6e8ee', '#e2bd55', '#9fb4c2'
 TOOLS = {'saw': '#d8dce4', 'reaper': '#8fd35a', 'hold': '#a8793f', 'grab': '#ffa53c', 'bore': '#9aa3b2', 'gun': '#e0564a',
@@ -82,7 +82,7 @@ def station(m):
     m.box('station_dark', 0, 0, 0, 16, 16, 2)
     m.box('black', 0.25, 0.25, 2, 15.5, 15.5, 2)
     for y in (1, 5, 9, 13):
-        m.box('hazard', 15.5, y, 2, 0.5, 2, 2, ring=True)
+        m.box('hazard', 15.5, y, 2, 0.5, 2, 1.9, ring=True)
     m.box('station', 1, 1, 4, 14, 14, 8)
     # A route screen on every side: two lines of the scheme and three status lamps.
     m.box('black', 14.6, 3, 6, 0.8, 10, 5.2, ring=True)
@@ -96,7 +96,7 @@ def station(m):
     m.box('station_light', 1, 1, 14, 14, 14, 0.5)
     m.box('case', 3, 3, 14.5, 10, 10, 0.5)
     m.box('steel_dark', 7, 7, 15, 2, 2, 1)
-    m.box('glow_lamp', 6.5, 6.5, 16, 3, 3, 1.5)
+    m.box('glow_lamp', 6.5, 6.5, 15.75, 3, 3, 1.75)
 
 
 # A housing is 6 pixels across. Its four channel strips run inside, 1 pixel thick, placed as four
@@ -147,12 +147,14 @@ ARC_STEPS = 8
 SLOPE = 16 * math.sqrt(2)
 
 
-def rail_section(m, part, x, length, **turn):
+def rail_section(m, part, x, length, sink=0.0, **turn):
     """A straight piece of rail along x from `x`: the dark foot, the rail in the tier colour and
-    its light top, 2 pixels high in all, centred on y 8."""
-    m.box('steel_dark', x, 6.5, 0, length, 3, 0.5, part=part, **turn)
+    its light top, 2 pixels high in all, centred on y 8. `sink` lowers the foot's underside into
+    the floor. The light top is a twentieth of a pixel narrower than the rail under it: where two
+    pieces overlap at a joint, one's top and the other's rail never share a side (round 31)."""
+    m.box('steel_dark', x, 6.5, -sink, length, 3, 0.5 + sink, part=part, **turn)
     m.box('tint', x, 7, 0.5, length, 2, 1.25, part=part, **turn)
-    m.box('tint_light', x, 7, 1.75, length, 2, 0.25, part=part, **turn)
+    m.box('tint_light', x, 7.05, 1.75, length, 1.9, 0.25, part=part, **turn)
 
 
 def rail(m):
@@ -160,11 +162,14 @@ def rail(m):
     # guide shows the halves to connected sides and turns the model onto walls and ceilings.
     m.box('steel_dark', 6.5, 6.5, 0, 3, 3, 0.5)
     m.box('tint', 7, 7, 0.5, 2, 2, 1.25)
-    m.box('tint_light', 7, 7, 1.75, 2, 2, 0.25)
+    m.box('tint_light', 7, 7.05, 1.75, 2, 1.9, 0.25)
     for turn, half in enumerate(HALVES):
-        m.box('steel_dark', 9.5, 6.5, 0, 6.5, 3, 0.5, part=half, quarter=turn)
+        # The foot stops at the tie and goes on past it, so their undersides never share the
+        # floor (round 31, z-fighting).
+        m.box('steel_dark', 9.5, 6.5, 0, 2.5, 3, 0.5, part=half, quarter=turn)
+        m.box('steel_dark', 13.5, 6.5, 0, 2.5, 3, 0.5, part=half, quarter=turn)
         m.box('tint', 9, 7, 0.5, 7, 2, 1.25, part=half, quarter=turn)
-        m.box('tint_light', 9, 7, 1.75, 7, 2, 0.25, part=half, quarter=turn)
+        m.box('tint_light', 9, 7.05, 1.75, 7, 1.9, 0.25, part=half, quarter=turn)
         m.box('steel_mid', 12, 5, 0, 1.5, 6, 0.75, part=half, quarter=turn)
     # Corners: a quarter circle from one side to the next in place of the hub and two halves,
     # made of short straight pieces turned about the corner of the cell. arc_x+y+ joins x+ and
@@ -172,16 +177,18 @@ def rail(m):
     corner = (16, 16, 0)
     for turn, half in enumerate(HALVES):
         part = 'arc_' + half + HALVES[(turn + 1) % 4]
+        # The turned pieces reach past the cell, where nothing culls them: their undersides sink
+        # into the floor, the ties' less deep than the foot's, so no two share a plane (round 31).
         for k in range(ARC_STEPS):
-            rail_section(m, part, 14.9, 2.2, tilt=('Z', -(k + 0.5) * 90 / ARC_STEPS), pivot=corner, quarter=turn)
+            rail_section(m, part, 14.9, 2.2, tilt=('Z', -(k + 0.5) * 90 / ARC_STEPS), pivot=corner, quarter=turn, sink=0.1)
         for angle in (-22.5, -67.5):
-            m.box('steel_mid', 15.25, 5, 0, 1.5, 6, 0.75, part=part, tilt=('Z', angle), pivot=corner, quarter=turn)
+            m.box('steel_mid', 15.25, 5, -0.05, 1.5, 6, 0.8, part=part, tilt=('Z', angle), pivot=corner, quarter=turn)
     # The climbing piece: at 45 degrees from the floor of the cell on the x- side up to the
     # floor of the cell above the next one on the x+ side, on two posts.
     climb = dict(tilt=('Y', -45), pivot=(0, 8, 0))
     rail_section(m, 'slope', -0.5, SLOPE + 1, **climb)
     for d in (4, 11, 18):
-        m.box('steel_mid', d, 5, 0, 1.5, 6, 0.75, part='slope', **climb)
+        m.box('steel_mid', d, 5, -0.05, 1.5, 6, 0.8, part='slope', **climb)
     for x, h in ((5.25, 5.25), (11.25, 11.25)):
         m.box('steel_mid', x, 7.25, 0, 1.5, 1.5, h, part='slope')
         m.box('steel_dark', x - 0.75, 6.5, 0, 3, 3, 0.5, part='slope')
@@ -264,7 +271,7 @@ def tools(m):
     m.pivot('reaper_reel', 17, 8, 6.75)
     m.box('steel_dark', 16.25, 3.5, 6, 1.5, 9, 1.5, part='reaper_reel')
     for a in (0, 90):
-        for y in (3.5, 11.75):
+        for y in (3.4, 11.85):
             m.box(t + 'reaper_dark', 14, y, 6.5, 6, 0.75, 0.5, part='reaper_reel', tilt=('Y', a), pivot=(17, 8, 6.75))
     for dx, dz in ((2.5, 0), (-2.5, 0), (0, 2.5), (0, -2.5)):
         m.box(t + 'reaper', 16.5 + dx, 3, 6.25 + dz, 1, 10, 1, part='reaper_reel')
@@ -323,7 +330,7 @@ def tools(m):
     m.box('map_paper', 11.9, 6.75, 13.9, 0.4, 2.5, 1.6, part='map_drum')
     m.box('map_land', 12, 7, 14.2, 0.4, 1.25, 0.9, part='map_drum')
     m.box('steel', 9.75, 7.75, 16.25, 0.5, 0.5, 3.25, part='map_drum')
-    m.box('steel_mid', 8, 7.75, 18.25, 4, 0.5, 0.5, part='map_drum')
+    m.box('steel_mid', 8, 7.7, 18.25, 4, 0.6, 0.5, part='map_drum')
     m.box('glow_map_tip', 9.5, 7.5, 19.5, 1, 1, 1, part='map_drum')
 
 
@@ -334,7 +341,7 @@ def tank(m):
     m.box('tank', 0, 0, 1.5, 2, 2, 13, ring=True)
     m.box('tank', 0, 0, 14.5, 16, 16, 1.5)
     m.box('tank_light', 0.5, 0.5, 16, 15, 15, 0.25)
-    m.box('steel_mid', 6, 6, 16.25, 4, 4, 0.75)
+    m.box('steel_mid', 6, 6, 16.25, 4, 4, 0.7)
     m.box('tank_dark', 2, 0.5, 7.5, 12, 0.75, 1, ring=True)
     # Glass is suggested by two light streaks in every window.
     m.box('glass', 15.25, 3.5, 9.5, 0.25, 1, 4, ring=True)
@@ -360,7 +367,9 @@ def pdock(m):
     m.pivot('vortex', 8, 8, 16.5)
     for a in (0, 60, 120):
         m.box('glow_portal', 4.5, 7.5, 16.5, 7, 1, 0.3, part='vortex', tilt=('Z', a), pivot=(8, 8, 16.5))
-    m.box('glow_portal_light', 7, 7, 16.5, 2, 2, 0.5, part='vortex', tilt=('Z', 45), pivot=(8, 8, 16.5))
+    m.box('glow_portal_light', 7, 7, 16.55, 2, 2, 0.5, part='vortex', tilt=('Z', 45), pivot=(8, 8, 16.5))
 
 
-MODELS = {'node': node, 'node_hub': node_hub, 'station': station, 'pipe': pipe, 'rail': rail, 'capsule': capsule, 'worker': worker, 'tank': tank, 'pdock': pdock}
+# The station, the tank and the portal dock take the magistral's connectors (round 31, kit.links).
+MODELS = {'node': node, 'node_hub': node_hub, 'station': linked(station), 'pipe': pipe, 'rail': rail, 'capsule': capsule,
+          'worker': worker, 'tank': linked(tank), 'pdock': linked(pdock)}

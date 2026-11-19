@@ -1,12 +1,13 @@
 {
-  "variants": {
-    "facing=north,lit=false": {"model": "rustcraft:block/tank"},
-    "facing=north,lit=true": {"model": "rustcraft:block/tank"},
-    "facing=east,lit=false": {"model": "rustcraft:block/tank", "y": 90},
-    "facing=east,lit=true": {"model": "rustcraft:block/tank", "y": 90},
-    "facing=south,lit=false": {"model": "rustcraft:block/tank", "y": 180},
-    "facing=south,lit=true": {"model": "rustcraft:block/tank", "y": 180},
-    "facing=west,lit=false": {"model": "rustcraft:block/tank", "y": 270},
-    "facing=west,lit=true": {"model": "rustcraft:block/tank", "y": 270}
-  }
+  "multipart": [
+    {"when": {"facing": "north"}, "apply": {"model": "rustcraft:block/tank"}},
+    {"when": {"facing": "east"}, "apply": {"model": "rustcraft:block/tank", "y": 90}},
+    {"when": {"facing": "south"}, "apply": {"model": "rustcraft:block/tank", "y": 180}},
+    {"when": {"facing": "west"}, "apply": {"model": "rustcraft:block/tank", "y": 270}},
+    {"when": {"north": "true"}, "apply": {"model": "rustcraft:block/tank__link_north"}},
+    {"when": {"east": "true"}, "apply": {"model": "rustcraft:block/tank__link_east"}},
+    {"when": {"south": "true"}, "apply": {"model": "rustcraft:block/tank__link_south"}},
+    {"when": {"west": "true"}, "apply": {"model": "rustcraft:block/tank__link_west"}},
+    {"when": {"up": "true"}, "apply": {"model": "rustcraft:block/tank__link_up"}}
+  ]
 }

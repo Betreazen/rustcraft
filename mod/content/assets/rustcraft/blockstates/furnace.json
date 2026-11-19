@@ -2,8 +2,7 @@
   "multipart": [
     {
       "when": {
-        "facing": "north",
-        "lit": "false"
+        "facing": "north"
       },
       "apply": {
         "model": "rustcraft:block/furnace"
@@ -11,17 +10,7 @@
     },
     {
       "when": {
-        "facing": "north",
-        "lit": "true"
-      },
-      "apply": {
-        "model": "rustcraft:block/furnace"
-      }
-    },
-    {
-      "when": {
-        "facing": "east",
-        "lit": "false"
+        "facing": "east"
       },
       "apply": {
         "model": "rustcraft:block/furnace",
@@ -30,18 +19,7 @@
     },
     {
       "when": {
-        "facing": "east",
-        "lit": "true"
-      },
-      "apply": {
-        "model": "rustcraft:block/furnace",
-        "y": 90
-      }
-    },
-    {
-      "when": {
-        "facing": "south",
-        "lit": "false"
+        "facing": "south"
       },
       "apply": {
         "model": "rustcraft:block/furnace",
@@ -50,18 +28,7 @@
     },
     {
       "when": {
-        "facing": "south",
-        "lit": "true"
-      },
-      "apply": {
-        "model": "rustcraft:block/furnace",
-        "y": 180
-      }
-    },
-    {
-      "when": {
-        "facing": "west",
-        "lit": "false"
+        "facing": "west"
       },
       "apply": {
         "model": "rustcraft:block/furnace",
@@ -70,12 +37,42 @@
     },
     {
       "when": {
-        "facing": "west",
-        "lit": "true"
+        "north": "true"
       },
       "apply": {
-        "model": "rustcraft:block/furnace",
-        "y": 270
+        "model": "rustcraft:block/furnace__link_north"
+      }
+    },
+    {
+      "when": {
+        "east": "true"
+      },
+      "apply": {
+        "model": "rustcraft:block/furnace__link_east"
+      }
+    },
+    {
+      "when": {
+        "south": "true"
+      },
+      "apply": {
+        "model": "rustcraft:block/furnace__link_south"
+      }
+    },
+    {
+      "when": {
+        "west": "true"
+      },
+      "apply": {
+        "model": "rustcraft:block/furnace__link_west"
+      }
+    },
+    {
+      "when": {
+        "up": "true"
+      },
+      "apply": {
+        "model": "rustcraft:block/furnace__link_up"
       }
     },
     {

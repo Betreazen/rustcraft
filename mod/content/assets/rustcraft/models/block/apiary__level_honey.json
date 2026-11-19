@@ -1,7 +1,7 @@
 {
   "textures": {"particle": "rustcraft:block/apiary", "p0": "rustcraft:block/apiary"},
   "elements": [
-    {"from": [4, 12.25, 4], "to": [12, 15.25, 12], "light_emission": 15, "faces": {"down": {"uv": [14.5, 0.5, 15.5, 1.5], "texture": "#p0"}, "north": {"uv": [14.5, 0.5, 15.5, 1.5], "texture": "#p0"}, "south": {"uv": [14.5, 0.5, 15.5, 1.5], "texture": "#p0"}, "west": {"uv": [14.5, 0.5, 15.5, 1.5], "texture": "#p0"}, "east": {"uv": [14.5, 0.5, 15.5, 1.5], "texture": "#p0"}}},
-    {"from": [4, 15, 4], "to": [12, 15.5, 12], "light_emission": 15, "faces": {"up": {"uv": [0.5, 2.5, 1.5, 3.5], "texture": "#p0"}, "north": {"uv": [0.5, 2.5, 1.5, 3.5], "texture": "#p0"}, "south": {"uv": [0.5, 2.5, 1.5, 3.5], "texture": "#p0"}, "west": {"uv": [0.5, 2.5, 1.5, 3.5], "texture": "#p0"}, "east": {"uv": [0.5, 2.5, 1.5, 3.5], "texture": "#p0"}}}
+    {"from": [4, 12.25, 4], "to": [12, 15, 12], "light_emission": 15, "faces": {"down": {"uv": [14.5, 0.5, 15.5, 1.5], "texture": "#p0"}, "up": {"uv": [14.5, 0.5, 15.5, 1.5], "texture": "#p0"}, "north": {"uv": [14.5, 0.5, 15.5, 1.5], "texture": "#p0"}, "south": {"uv": [14.5, 0.5, 15.5, 1.5], "texture": "#p0"}, "west": {"uv": [14.5, 0.5, 15.5, 1.5], "texture": "#p0"}, "east": {"uv": [14.5, 0.5, 15.5, 1.5], "texture": "#p0"}}},
+    {"from": [4, 15, 4], "to": [12, 15.5, 12], "light_emission": 15, "faces": {"down": {"uv": [0.5, 2.5, 1.5, 3.5], "texture": "#p0"}, "up": {"uv": [0.5, 2.5, 1.5, 3.5], "texture": "#p0"}, "north": {"uv": [0.5, 2.5, 1.5, 3.5], "texture": "#p0"}, "south": {"uv": [0.5, 2.5, 1.5, 3.5], "texture": "#p0"}, "west": {"uv": [0.5, 2.5, 1.5, 3.5], "texture": "#p0"}, "east": {"uv": [0.5, 2.5, 1.5, 3.5], "texture": "#p0"}}}
   ]
 }

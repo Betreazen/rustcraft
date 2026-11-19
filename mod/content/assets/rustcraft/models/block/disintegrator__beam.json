@@ -1,7 +1,7 @@
 {
   "textures": {"particle": "rustcraft:block/disintegrator", "p0": "rustcraft:block/disintegrator"},
   "elements": [
-    {"from": [7.4, 12, 7.4], "to": [8.6, 13.25, 8.6], "light_emission": 15, "faces": {"down": {"uv": [2.5, 2.5, 3.5, 3.5], "texture": "#p0"}, "up": {"uv": [2.5, 2.5, 3.5, 3.5], "texture": "#p0"}, "north": {"uv": [2.5, 2.5, 3.5, 3.5], "texture": "#p0"}, "south": {"uv": [2.5, 2.5, 3.5, 3.5], "texture": "#p0"}, "west": {"uv": [2.5, 2.5, 3.5, 3.5], "texture": "#p0"}, "east": {"uv": [2.5, 2.5, 3.5, 3.5], "texture": "#p0"}}},
+    {"from": [7.4, 12, 7.4], "to": [8.6, 13.35, 8.6], "light_emission": 15, "faces": {"down": {"uv": [2.5, 2.5, 3.5, 3.5], "texture": "#p0"}, "up": {"uv": [2.5, 2.5, 3.5, 3.5], "texture": "#p0"}, "north": {"uv": [2.5, 2.5, 3.5, 3.5], "texture": "#p0"}, "south": {"uv": [2.5, 2.5, 3.5, 3.5], "texture": "#p0"}, "west": {"uv": [2.5, 2.5, 3.5, 3.5], "texture": "#p0"}, "east": {"uv": [2.5, 2.5, 3.5, 3.5], "texture": "#p0"}}},
     {"from": [6.25, 9.5, 7.8], "to": [9.75, 13.25, 8.2], "light_emission": 15, "faces": {"down": {"uv": [10.5, 0.5, 11.5, 1.5], "texture": "#p0"}, "up": {"uv": [10.5, 0.5, 11.5, 1.5], "texture": "#p0"}, "north": {"uv": [10.5, 0.5, 11.5, 1.5], "texture": "#p0"}, "south": {"uv": [10.5, 0.5, 11.5, 1.5], "texture": "#p0"}, "west": {"uv": [10.5, 0.5, 11.5, 1.5], "texture": "#p0"}, "east": {"uv": [10.5, 0.5, 11.5, 1.5], "texture": "#p0"}}}
   ]
 }

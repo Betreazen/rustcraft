@@ -5,6 +5,7 @@ pub mod anchor;
 pub mod anim;
 pub mod backpack;
 pub mod butcher;
+pub mod connectors;
 pub mod cull;
 // The diagnostics console command and the event journal.
 pub mod debug;
@@ -32,6 +33,9 @@ pub mod tuning;
 pub mod utility;
 pub mod turret;
 pub mod worker;
+// Round 31: the z-fighting check over the content mod's block models (tests only).
+#[cfg(test)]
+mod zfight;
 // Slice 18, base and gear (stream 7).
 pub mod aim;
 pub mod turret_owner;

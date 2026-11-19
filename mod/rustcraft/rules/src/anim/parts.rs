@@ -237,7 +237,7 @@ pub const PARTS: &[Part] = &[
         block: "rustcraft:breaker",
         model: "rustcraft:block/breaker__drill",
         pivot: [1.0625, 0.5, 0.5],
-        bottom: 0.375,
+        bottom: 0.378125,
         on: &[Motion { target: Target::Rot(0), base: -0.0, amp: -14.0, shape: Shape::Lin, freq: 1.0, phase: 0.0 }],
         off: Off::Rest,
         show: Show::Always,

@@ -12,6 +12,8 @@
 //! `{"mod","done","passed","failed","timings"}`.
 
 pub mod anchor;
+// Round 31, the models stream: the machines' connectors.
+pub mod connectors;
 pub mod craft18;
 pub mod craft18_w2;
 // The diagnostics command and the event journal.
@@ -730,6 +732,8 @@ pub fn catalog() -> Vec<Build> {
     all.extend(w2_machine::ALL);
     // The diagnostics command and the event journal.
     all.extend(debug::ALL);
+    // Round 31, the models stream: the machines' connectors.
+    all.extend(connectors::ALL);
     all
 }
 
