@@ -127,6 +127,17 @@ fn turn_of(nbt: &Compound) -> (u8, bool) {
     ((read_i64(nbt, TURN_KEY).rem_euclid(4)) as u8, read_i64(nbt, MIRROR_KEY) != 0)
 }
 
+/// 0.20 (round 31): the blocks of the plan of the projector beside the building machine at
+/// `pos`, which the magistral may bring it; none without a projector.
+pub(super) fn plan_blocks(game: &Game<'_>, pos: Pos) -> std::collections::BTreeSet<String> {
+    let Some(projector) = util::neighbour_of(game, pos, Util::Projector.spec().block) else {
+        return Default::default();
+    };
+    game.native_mod_block_entity(projector)
+        .map(|e| plan_of(&e.nbt).cells.iter().map(|c| c.id().to_owned()).collect())
+        .unwrap_or_default()
+}
+
 /// The plan as it stands now: remembered, turned and mirrored.
 pub(super) fn plan_of(nbt: &Compound) -> Plan {
     let (q, m) = turn_of(nbt);

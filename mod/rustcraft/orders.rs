@@ -726,6 +726,31 @@ pub(super) fn ordered_dishes() -> Vec<usize> {
     dishes
 }
 
+/// 0.20 (round 31): what the storages' own ore feed leaves alone (rustcraft_rules::net::items,
+/// `Inventories::busy`): the machines an order job runs on, and the anchors of the storages that
+/// have orders, whose crushers are the orders' while they wait.
+pub(super) fn busy_machines(dimension: &str) -> BTreeSet<Pos> {
+    let (mut busy, with_orders): (BTreeSet<Pos>, BTreeSet<u32>) = {
+        let o = orders();
+        let jobs = o.jobs.get(dimension).map(|j| j.iter().map(|r| r.job.machine).collect()).unwrap_or_default();
+        let ids = o
+            .levels
+            .get(dimension)
+            .map(|l| l.queues.iter().filter(|(_, q)| !q.orders.is_empty()).map(|(id, _)| *id).collect())
+            .unwrap_or_default();
+        (jobs, ids)
+    };
+    if !with_orders.is_empty() {
+        busy.extend(
+            storage::level_storages(dimension)
+                .into_iter()
+                .filter(|(id, _, _)| with_orders.contains(id))
+                .map(|(_, anchor, _)| anchor),
+        );
+    }
+    busy
+}
+
 /// Slice 18 (O11): the machines of the level whose order job makes a product for a later step of
 /// its order, and that product: the item nets' own moves leave it in their output slots, for
 /// the order takes it straight to the next step's machine (rustcraft_transport's snapshot).

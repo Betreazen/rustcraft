@@ -41,6 +41,8 @@ pub fn material_of(item: &str) -> Option<&'static [&'static str]> {
         "wolf_armor" => Some(&["minecraft:armadillo_scute"]),
         // Slice 18 (guide `repair`): the rod, the bow and the crossbow with string.
         "fishing_rod" | "bow" | "crossbow" => Some(&["minecraft:string"]),
+        // 0.20 (round 31): the archaeology table's brush goes to the stand too; its copper.
+        "brush" => Some(&["minecraft:copper_ingot"]),
         _ => None,
     }
 }
@@ -85,9 +87,77 @@ pub fn net_takes(tool_slot: bool, tools: &[&str], item: &str) -> bool {
     tools.iter().filter_map(|t| material_of(t)).any(|m| m.contains(&item))
 }
 
+// ---- 0.20 (round 31): a machine's worn tool to the stand and back ----
+//
+// The owner: «рыболовный стенд, у него портится удочка, у нас там есть ремонтный стенд, чтобы он
+// корректно забирал, отдавал удочку… забирал для её починки необходимые ресурсы… она целая, потом
+// возвращалась». A machine that works with a tool (the fishing station's rod, the butcher's
+// sword, the archaeology table's brush) hands it, one point before it breaks, to a repair stand
+// on its item net; the storage on the stand's net gives the stand the material it needs; the
+// mended tool goes straight back into its machine. One tool of a machine is away at a time.
+
+/// The custom data key a tool away for repair carries: the cell of its machine, `[x, y, z]`.
+pub const HOME_KEY: &str = "rustcraft:tool_home";
+/// The machine's saved key while its tool is away: the cell of the stand, `[x, y, z]`.
+pub const TRIP_KEY: &str = "tool_trip";
+
+/// Whether a tool with `damage` of `max_damage` goes to the stand: one point before it breaks
+/// (the fishing station stops there, «Удочка изношена»; the butcher and the archaeology table would
+/// spend the last point and lose the tool). A tool that does not wear stays.
+pub fn wants_repair(damage: u32, max_damage: u32) -> bool {
+    max_damage > 0 && damage + 1 >= max_damage
+}
+
+/// How many units of its material mend a tool with `damage` of `max_damage` whole: a quarter of
+/// its life a unit (`repaired`).
+pub fn units_for(damage: u32, max_damage: u32) -> u32 {
+    damage.div_ceil((max_damage / 4).max(1))
+}
+
+/// How many units the storage gives the stand: what its tools away for repair still `need`, less
+/// what its material cells `have`, no more than their `room`.
+pub fn top_up(need: u32, have: u32, room: u32) -> u32 {
+    need.saturating_sub(have).min(room)
+}
+
+/// The stand a machine at `from` sends its tool to: of the stands on its item net with a free
+/// cell for it (`stands`: where each is and whether it has one), the nearest.
+pub fn pick_stand(from: [i32; 3], stands: &[([i32; 3], bool)]) -> Option<[i32; 3]> {
+    let far = |p: &[i32; 3]| (0..3).map(|i| i64::from((p[i] - from[i]).abs())).sum::<i64>();
+    stands.iter().filter(|(_, free)| *free).map(|(p, _)| *p).min_by_key(far)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_tool_goes_to_the_stand_one_point_before_it_breaks() {
+        assert!(wants_repair(63, 64), "the rod's last point");
+        assert!(!wants_repair(62, 64));
+        assert!(wants_repair(249, 250), "an iron sword");
+        assert!(!wants_repair(0, 0), "what does not wear stays");
+        assert_eq!(material_of("minecraft:brush"), Some(&["minecraft:copper_ingot"][..]));
+    }
+
+    #[test]
+    fn the_stand_gets_as_much_material_as_mends_the_tool_whole() {
+        // A rod of 64 points: 16 a string.
+        assert_eq!(units_for(63, 64), 4);
+        assert_eq!(units_for(16, 64), 1);
+        assert_eq!(units_for(0, 64), 0);
+        assert_eq!(units_for(249, 250), 5, "62 points a unit");
+        assert_eq!(top_up(4, 1, 8), 3);
+        assert_eq!(top_up(4, 5, 8), 0);
+        assert_eq!(top_up(9, 0, 2), 2, "no more than the cells hold");
+    }
+
+    #[test]
+    fn the_nearest_stand_with_room_takes_the_tool() {
+        let stands = [([10, 0, 0], true), ([3, 0, 0], false), ([5, 0, 1], true)];
+        assert_eq!(pick_stand([0, 0, 0], &stands), Some([5, 0, 1]));
+        assert_eq!(pick_stand([0, 0, 0], &[([3, 0, 0], false)]), None);
+    }
 
     #[test]
     fn the_net_brings_only_what_the_stand_mends_and_its_material() {

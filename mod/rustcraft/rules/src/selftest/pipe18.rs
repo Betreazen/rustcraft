@@ -195,10 +195,12 @@ fn node_tiers(o: Pos, t: &Tuning) -> Scenario {
         })
 }
 
-/// Guide `quickstart` 5: ore in the left chest, an electric furnace beside the line with a
-/// crystal against it, an empty chest on the right; no joint is set. The magistral gives the
-/// furnace the ore and the right chest the ingots, and never moves ore from chest to chest.
+/// Guide `quickstart` 5: dust in the left chest (0.20: the furnace takes dust and raw food by
+/// itself, ore goes through a crusher), an electric furnace beside the line with a crystal
+/// against it, an empty chest on the right; no joint is set. The magistral gives the furnace the
+/// dust and the right chest the ingots, and never moves dust from chest to chest.
 fn chests_work_both_ways(o: Pos, _t: &Tuning) -> Scenario {
+    const DUST: &str = "rustcraft:dust_iron";
     let (left, right) = (chest(o, 1), chest(o, 3));
     let furnace = at(o, [2, 0, -1]);
     Scenario::new("pipe_chests_work_both_ways_by_default", plot_area(o))
@@ -206,18 +208,18 @@ fn chests_work_both_ways(o: Pos, _t: &Tuning) -> Scenario {
             item_line(b, o, 1, 3, &[1, 3])?;
             b.place(furnace, "rustcraft:furnace", &[])?;
             b.place(at(o, [2, 0, -2]), "rustcraft:crystal", &[])?;
-            fill(b, left, "minecraft:raw_iron", 2)
+            fill(b, left, DUST, 2)
         })
         .until("an ingot reaches the right chest", 1200, move |b, _| {
             let items = b.items(right);
-            if count_of(&items, "minecraft:raw_iron") > 0 {
-                return Err("ore went from chest to chest".into());
+            if count_of(&items, DUST) > 0 {
+                return Err("dust went from chest to chest".into());
             }
             Ok(count_of(&items, "minecraft:iron_ingot") >= 1)
         })
-        .check("the left chest gave its ore", move |b, _| {
-            let n = count_of(&b.items(left), "minecraft:raw_iron");
-            if n == 0 { Ok(()) } else { Err(format!("{n} ore left in the left chest")) }
+        .check("the left chest gave its dust", move |b, _| {
+            let n = count_of(&b.items(left), DUST);
+            if n == 0 { Ok(()) } else { Err(format!("{n} dust left in the left chest")) }
         })
 }
 

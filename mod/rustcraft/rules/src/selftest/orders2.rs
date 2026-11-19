@@ -185,6 +185,7 @@ fn mixer_line(b: &mut dyn Bench, o: Pos, water: bool) -> Result<(), String> {
 }
 
 fn mixer_order_makes_solution(o: Pos, _: &Tuning) -> Scenario {
+    // 0.20: the solution is bone meal and water; the redstone stays.
     let parts: Vec<(&str, u32)> = vec![(BONE_MEAL, 2), (REDSTONE, 2)];
     let p2 = parts.clone();
     let top = at(crafter_at(o), [0, 1, 0]);
@@ -223,7 +224,7 @@ fn mixer_order_makes_solution(o: Pos, _: &Tuning) -> Scenario {
         .wait(40)
         .check("one batch of parts went, the order is done", move |b, _| {
             same("bone meal in the storage", held(b, o, BONE_MEAL)?, 1)?;
-            same("redstone in the storage", held(b, o, REDSTONE)?, 1)?;
+            same("redstone in the storage", held(b, o, REDSTONE)?, 2)?;
             same("orders", b.orders(terminal_at(o)).len(), 0)
         })
 }

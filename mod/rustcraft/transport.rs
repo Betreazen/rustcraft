@@ -32,7 +32,7 @@
 use crate::game::{
     Game,
     rustcraft_content::{self as content, Machine},
-    rustcraft_machines::slot_takes,
+    rustcraft_machines::{NetIntake, net_takes, slot_takes},
     rustcraft_server::{self as server, LevelNet},
     rustcraft_storage as storage, rustcraft_window as window,
 };
@@ -434,7 +434,11 @@ fn snapshot(
 ) -> Stocks {
     let mut read: BTreeMap<Pos, Vec<ReadSlot>> = BTreeMap::new();
     let mut seen: BTreeSet<String> = BTreeSet::new();
-    let mut stocks = Stocks::default();
+    let mut stocks = Stocks {
+        // 0.20: the crushers an order uses or may use get no ore of the storage's accord.
+        busy: crate::game::rustcraft_orders::busy_machines(dimension),
+        ..Stocks::default()
+    };
     for joint in joints {
         if read.contains_key(&joint.block) || stocks.stores.contains_key(&joint.block) {
             continue;
@@ -464,9 +468,32 @@ fn snapshot(
     }
     // Slice 18 (O11): a product an order takes straight to its next step's machine stays put.
     let kept = crate::game::rustcraft_orders::kept_outputs(dimension);
+    // 0.20 (round 31): raw food a kitchen of this net takes stays out of its furnaces.
+    let kept_raw: BTreeSet<String> = read
+        .keys()
+        .filter(|p| machines.get(*p) == Some(&Machine::Util(rustcraft_rules::utility::Util::Kitchen)))
+        .filter_map(|p| crate::game::rustcraft_machines::entity(game, *p))
+        .flat_map(|e| {
+            rustcraft_rules::machines::intake::RAW_FOOD
+                .iter()
+                .filter(move |raw| slot_takes(e, 0, raw, tuning))
+                .map(|raw| (*raw).to_owned())
+        })
+        .collect();
     for (pos, slots) in read {
         let machine = machines.get(&pos).copied();
         let entity = machine.and_then(|_| crate::game::rustcraft_machines::entity(game, pos));
+        let filters: Vec<rustcraft_rules::net::items::Filter> = joints
+            .iter()
+            .filter(|j| j.block == pos)
+            .map(|j| j.filter.clone())
+            .collect();
+        let plan = if machine == Some(Machine::Util(rustcraft_rules::utility::Util::Builder)) {
+            crate::game::rustcraft_projector::plan_blocks(game, pos)
+        } else {
+            BTreeSet::new()
+        };
+        let net = NetIntake { filters: &filters, kept_raw: &kept_raw, plan: &plan };
         let slots = slots
             .into_iter()
             .map(|(slot, held, can_take)| {
@@ -476,7 +503,7 @@ fn snapshot(
                 let can_take = can_take && !ordered;
                 let only = entity.as_ref().filter(|_| input).map(|entity| {
                     seen.iter()
-                        .filter(|item| slot_takes(entity, slot, keys::item_of(item), tuning))
+                        .filter(|item| net_takes(entity, slot, keys::item_of(item), tuning, &net))
                         .cloned()
                         .collect()
                 });

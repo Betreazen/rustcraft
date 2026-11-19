@@ -351,6 +351,10 @@ fn route_row(game: &Game<'_>, dimension: &str, level: &LevelNet, pos: Pos) -> Te
 
 fn fish(game: &mut Game<'_>, dimension: &str, pos: Pos, cost: f64, now: u64) -> Shown {
     let Some(rod) = items(game, pos).first().cloned().flatten() else {
+        // 0.20 (round 31): its rod is away at the repair stand (rustcraft_trips).
+        if crate::game::rustcraft_trips::away_at(game, pos) {
+            return Shown::Idle("fish_rod_at_repair");
+        }
         return Shown::Blocked("fish_no_rod");
     };
     if !water_open(game, pos) {
@@ -362,7 +366,10 @@ fn fish(game: &mut Game<'_>, dimension: &str, pos: Pos, cost: f64, now: u64) -> 
     }
     let lure = rod.enchantment_level("minecraft:lure");
     let key = (dimension.to_owned(), pos);
-    let due = *state().fish_due.entry(key.clone()).or_insert_with(|| now + rules::fish_wait(util::random(), lure));
+    // 0.20 (round 31): its owner's fisher's branch shortens the wait (rustcraft_perks).
+    let perk = crate::game::rustcraft_perks::util_speed(game, pos, Util::Fishery);
+    let wait = move || ((rules::fish_wait(util::random(), lure) as f64 / perk).round() as u64).max(1);
+    let due = *state().fish_due.entry(key.clone()).or_insert_with(|| now + wait());
     if now < due {
         // Wave 2 (guide: «Расход 4 Е/с»): it pays each step it fishes, the wait as the catch.
         return if spend(game, pos, cost) { Shown::Working } else { Shown::NoEnergy };
@@ -377,7 +384,7 @@ fn fish(game: &mut Game<'_>, dimension: &str, pos: Pos, cost: f64, now: u64) -> 
     if !spend(game, pos, cost) {
         return Shown::NoEnergy;
     }
-    state().fish_due.insert(key, now + rules::fish_wait(util::random(), lure));
+    state().fish_due.insert(key, now + wait());
     let catch = game.sequence_loot("minecraft:gameplay/fishing", "minecraft:gameplay/fishing", Some(&rod));
     with_items(game, pos, |items| {
         if let Some(Some(r)) = items.get_mut(0) {
@@ -425,6 +432,9 @@ pub(super) fn fishery_sheet(game: &Game<'_>, dimension: &str, level: &LevelNet, 
                     Text::literal(ench.join(", ")),
                 ],
             )
+        }
+        None if crate::game::rustcraft_trips::away_at(game, pos) => {
+            line("rustcraft.util.fish_rod_at_repair", "The rod is at the repair stand", &[])
         }
         None => line("rustcraft.util.fish_no_rod", "No rod", &[]),
     };

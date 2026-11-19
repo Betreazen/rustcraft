@@ -150,6 +150,8 @@ pub enum Shown {
     Working(String),
     /// «Нет меча».
     NoSword,
+    /// 0.20 (round 31): «Меч на ремонте»: its sword is away at a repair stand of its net.
+    SwordAtRepair,
     /// «Некого забивать: взрослых не больше, чем оставить».
     NothingToCull,
     /// «Добыче некуда деться»: its drop slots are full.

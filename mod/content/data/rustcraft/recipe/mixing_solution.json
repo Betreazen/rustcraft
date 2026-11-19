@@ -4,10 +4,6 @@
     {
       "item": "minecraft:bone_meal",
       "count": 1
-    },
-    {
-      "item": "minecraft:redstone",
-      "count": 1
     }
   ],
   "water": 1000,

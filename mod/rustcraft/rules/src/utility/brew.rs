@@ -110,6 +110,14 @@ pub fn chain(page: Page) -> Vec<&'static str> {
     out
 }
 
+/// 0.20 (round 31): whether the magistral brings a vat whose first `usable` pages are `pages`
+/// `item` into its reagent cells: only an ingredient of one of their chains. Before, it took any
+/// brewing ingredient, and the net filled it with the redstone, glowstone and sugar that rode to
+/// the storage. A hopper and a hand still give it any ingredient (`is_ingredient`).
+pub fn pages_take(pages: &[Page], usable: usize, item: &str) -> bool {
+    pages.iter().take(usable).any(|p| chain(*p).contains(&item))
+}
+
 /// Whether `item` is an ingredient of some page's chain.
 pub fn is_ingredient(item: &str) -> bool {
     item == WART
@@ -142,6 +150,18 @@ pub fn next_step(chain: &[&'static str], applies: impl Fn(&str) -> bool, has: im
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_magistral_brings_only_what_its_pages_brew_with() {
+        // 0.20: the owner's redstone and sugar rode to the storage past a vat.
+        let swiftness = EFFECTS.iter().position(|(_, i)| *i == "minecraft:sugar").expect("swiftness");
+        let pages = [Page { effect: Some(swiftness), kind: Kind::default() }, Page::default()];
+        assert!(pages_take(&pages, 1, WART));
+        assert!(pages_take(&pages, 1, "minecraft:sugar"));
+        assert!(!pages_take(&pages, 1, "minecraft:glowstone_dust"));
+        assert!(!pages_take(&[Page::default()], 1, WART), "an empty page brews nothing");
+        assert!(!pages_take(&pages, 0, "minecraft:sugar"), "no usable page");
+    }
 
     #[test]
     fn a_stack_module_lets_the_brewers_reagents_and_powder_hold_256() {

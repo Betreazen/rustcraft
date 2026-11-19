@@ -390,7 +390,7 @@ fn crystal_square_fed(o: Pos, t: &Tuning) -> Scenario {
         })
         .wait(SPAN)
         .check(
-            "spec 12.3: it drinks 0.1 bucket a minute a crystal",
+            "spec 12.3 (0.20): it drinks 0.025 bucket a minute a crystal",
             move |b, m| {
                 near(
                     "drunk, mB",

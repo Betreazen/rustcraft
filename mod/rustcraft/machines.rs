@@ -33,6 +33,7 @@ use horizon_client::{
 use horizon_world::nbt::{Compound, JavaString, Tag};
 use rustcraft_rules::machines::{
     extras::{self, Extras},
+    intake,
     queue,
     sheet::{Cursor, press_socket_in},
     sockets,
@@ -769,7 +770,8 @@ fn job_of(
     };
     // A8: a higher tier works faster for the same energy a recipe; the stack module's 256.
     let speed = fitted.speed(machine, tuning);
-    let (ticks, energy) = ((ticks / speed).max(1.0), energy * speed);
+    // 0.20: its owner's tree shortens the work, not the draw.
+    let (ticks, energy) = ((ticks / (speed * fitted.perk)).max(1.0), energy * speed);
     let output_capacity = modules::machine_stack(&fitted.modules, max_stack(game, &result.item));
     Some(Job {
         recipe: Recipe {
@@ -1107,9 +1109,17 @@ pub(super) fn slot_takes(
     if !machine.inputs().contains(&slot) {
         return false;
     }
+    // 0.20 (round 31): a machine whose tool is away at a repair stand keeps its tool cell for it.
+    if crate::game::rustcraft_trips::tool_slot(machine) == Some(slot)
+        && crate::game::rustcraft_trips::away(entity)
+    {
+        return false;
+    }
     let a = accepts();
     match machine {
-        Machine::Furnace => a.smeltable.contains(item),
+        // 0.20 (round 31, the owner's choice): by itself only dust and raw food
+        // (rustcraft_rules::machines::intake); the rest with an order or by hand.
+        Machine::Furnace => intake::furnace_takes(item, a.smeltable.contains(item), &BTreeSet::new()),
         Machine::Crusher => a.crushable.contains(item),
         Machine::Generator => a.fuels.contains(item),
         Machine::Placer => a.placeable.contains(item),
@@ -1155,6 +1165,60 @@ pub(super) fn slot_takes(
             crafter::buffer_takes(entity, slot, item, tuning)
         }
         _ => false,
+    }
+}
+
+/// 0.20 (round 31): what the magistral's own flow may bring a machine's input, where a hopper
+/// asks `slot_takes` alone: the joints to the machine (their filters) and what the net's kitchens
+/// cook raw.
+pub(super) struct NetIntake<'a> {
+    /// The filters of the joints to this block.
+    pub filters: &'a [rustcraft_rules::net::items::Filter],
+    /// Raw food a kitchen on the same net takes: the furnace leaves it to the kitchen.
+    pub kept_raw: &'a BTreeSet<String>,
+    /// A building machine's: the blocks of its projector's plan.
+    pub plan: &'a BTreeSet<String>,
+}
+
+/// Whether the item net's own moves may put `item` into slot `slot` of the machine `entity`
+/// (rustcraft_transport's snapshot): `slot_takes`, and for some machines less
+/// (rustcraft_rules::machines::intake): the furnace keeps out raw food a kitchen of the net
+/// cooks raw; the generator's and the alloy smelter's fuel is coal, charcoal and the like, not
+/// logs; the placer takes only more of a block it holds; the disintegrator only what a joint's
+/// allow list names; the enchanting machine books and what a joint names; the brewing vat only
+/// what its pages brew with; the building machine only the blocks of its projector's plan (it
+/// takes the rest from the storage itself). An order's shipment and a player's hand are not
+/// asked.
+pub(super) fn net_takes(
+    entity: &ModBlockEntity,
+    slot: usize,
+    item: &str,
+    tuning: &Tuning,
+    net: &NetIntake<'_>,
+) -> bool {
+    use rustcraft_rules::utility::Util;
+    if !slot_takes(entity, slot, item, tuning) {
+        return false;
+    }
+    match Machine::of(&entity.id) {
+        Some(Machine::Furnace) => intake::furnace_takes(item, true, net.kept_raw),
+        Some(Machine::Generator) => intake::net_fuel(item, true),
+        Some(Machine::Alloy) if slot == content::ALLOY_FUEL => intake::net_fuel(item, true),
+        Some(Machine::Placer) => {
+            let held: Vec<&str> = (0..content::BLOCK_SLOTS)
+                .filter_map(|i| entity.items.get(i).and_then(Option::as_ref))
+                .filter(|s| s.count > 0)
+                .map(|s| &*s.item)
+                .collect();
+            intake::placer_net_takes(&held, item)
+        }
+        Some(Machine::Util(Util::Disintegrator)) => intake::disintegrator_net_takes(net.filters, item),
+        Some(Machine::Util(Util::Enchanter)) if slot == 0 => intake::enchanter_net_takes(net.filters, item),
+        Some(Machine::Util(Util::Brewer)) if rustcraft_rules::utility::BREW_INGREDIENTS.contains(&slot) => {
+            crate::game::rustcraft_utility::brew_takes(entity, item)
+        }
+        Some(Machine::Util(Util::Builder)) => net.plan.contains(item),
+        _ => true,
     }
 }
 
@@ -1402,6 +1466,9 @@ pub(super) struct Fitted {
     pub modules: Vec<Option<Module>>,
     pub tier: u8,
     pub saved_tier: Option<i32>,
+    /// 0.20 (round 31): how much faster its owner's tree makes its work (rustcraft_perks): the
+    /// work takes less time, its energy a second stays.
+    pub perk: f64,
 }
 
 pub(super) fn fitted(game: &Game<'_>, pos: Pos, entity: &ModBlockEntity) -> Fitted {
@@ -1409,6 +1476,7 @@ pub(super) fn fitted(game: &Game<'_>, pos: Pos, entity: &ModBlockEntity) -> Fitt
         modules: modules::read(&base::read_module_items(&entity.nbt)),
         tier: crate::game::rustcraft_tiers::tier_of(game, pos, &entity.id),
         saved_tier: read_int(&entity.nbt, sockets::TIER_KEY),
+        perk: Machine::of(&entity.id).map_or(1.0, |m| crate::game::rustcraft_perks::machine_speed(game, pos, m)),
     }
 }
 

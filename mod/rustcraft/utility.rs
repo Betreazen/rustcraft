@@ -318,6 +318,14 @@ pub(super) fn paced(game: &Game<'_>, pos: Pos, u: Util) -> (u64, f64) {
     let base_ticks = rules::tier_ticks(u, tiered::step_ticks(u, tier), tier, t.tier_speed_step);
     let ticks = modules::paced_ticks(base_ticks, &slots, t);
     let cost = rules::step_energy(u) * modules::factors(&slots, t).1;
+    // 0.20 (round 31): its owner's tree shortens its step and keeps its energy a second
+    // (rustcraft_perks).
+    let perk = crate::game::rustcraft_perks::util_speed(game, pos, u);
+    let (ticks, cost) = if perk > 1.0 {
+        (((ticks as f64 / perk).round() as u64).max(1), cost / perk)
+    } else {
+        (ticks, cost)
+    };
     // Slice 18: the living vein keeps its own work mode (rustcraft_mining).
     if u == Util::Vein {
         return crate::game::rustcraft_mining::vein_paced(game, pos, ticks, cost);
@@ -453,7 +461,7 @@ pub(super) fn tick(game: &mut Game<'_>, dimension: &str, level: &LevelNet, t: &T
             Util::Disintegrator => disintegrate(game, pos, cost),
             Util::Charger => charge_slots(game, dimension, pos, every),
             Util::ChargePlate => plate(game, dimension, pos, every),
-            Util::Repair => repair_one(game, pos, cost),
+            Util::Repair => repair_one(game, level, pos, cost),
             Util::Kitchen => cook(game, dimension, level, pos, cost, t),
             Util::Brewer => brew(game, dimension, pos, cost),
             Util::XpTank => xp_tank_shown(game, pos),
@@ -896,32 +904,48 @@ fn plate(game: &mut Game<'_>, dimension: &str, pos: Pos, every: u64) -> Shown {
 
 // ---- The repair stand ----
 
-fn repair_one(game: &mut Game<'_>, pos: Pos, cost: f64) -> Shown {
+fn repair_one(game: &mut Game<'_>, level: &LevelNet, pos: Pos, cost: f64) -> Shown {
     use rustcraft_rules::utility::{REPAIR_MATERIAL, REPAIR_OUT, REPAIR_TOOLS, repair_material_end};
     let slots = items(game, pos);
-    // Slice 18: three cells to repair, worked in turn.
-    let Some((at, tool)) = REPAIR_TOOLS
+    let end = repair_material_end(module_count(game, pos, CAPACITY));
+    // Slice 18: three cells to repair. 0.20 (round 31): a whole tool first (out, or home to its
+    // machine), then the first one whose material lies here; a tool that waits for its material
+    // no longer holds up the cells after it (another machine's tool away for repair among them).
+    let tools: Vec<(usize, ItemStack)> = REPAIR_TOOLS
         .clone()
-        .find_map(|i| slots.get(i).cloned().flatten().map(|s| (i, s)))
-    else {
+        .filter_map(|i| slots.get(i).cloned().flatten().map(|s| (i, s)))
+        .collect();
+    if tools.is_empty() {
         return Shown::Idle("repair_empty");
+    }
+    let max_of = |t: &ItemStack| game.items().get(&t.item).map_or(0, |i| i.max_damage);
+    let material_slot = |t: &ItemStack| -> Option<usize> {
+        let material = repair::material_of(&t.item)?;
+        (REPAIR_MATERIAL.start..end)
+            .find(|i| slots.get(*i).cloned().flatten().is_some_and(|s| material.contains(&&*s.item)))
     };
-    let max = game.items().get(&tool.item).map_or(0, |i| i.max_damage);
+    let whole = tools.iter().find(|(_, t)| max_of(t) == 0 || t.damage == 0);
+    let Some((at, tool)) = whole
+        .or_else(|| tools.iter().find(|(_, t)| material_slot(t).is_some()))
+        .cloned()
+    else {
+        return Shown::Blocked("repair_no_material");
+    };
+    let max = max_of(&tool);
+    let slot = material_slot(&tool);
     if max == 0 || tool.damage == 0 {
+        // 0.20 (round 31): a machine's tool goes straight back into it (rustcraft_trips).
+        if crate::game::rustcraft_trips::send_home(game, level, pos, at, &tool) {
+            return Shown::Working;
+        }
         // Whole: to the output slots.
-        if put(game, pos, REPAIR_OUT, tool).is_none() {
+        if put(game, pos, REPAIR_OUT, crate::game::rustcraft_trips::unmarked(tool)).is_none() {
             with_items(game, pos, |items| items[at] = None);
             return Shown::Working;
         }
         return Shown::Blocked("output_full");
     }
-    let Some(material) = repair::material_of(&tool.item) else {
-        return Shown::Blocked("repair_no_material");
-    };
-    let end = repair_material_end(module_count(game, pos, CAPACITY));
-    let Some(slot) = (REPAIR_MATERIAL.start..end)
-        .find(|i| slots.get(*i).cloned().flatten().is_some_and(|s| material.contains(&&*s.item)))
-    else {
+    let Some(slot) = slot else {
         return Shown::Blocked("repair_no_material");
     };
     if !spend(game, pos, cost) {
@@ -1024,6 +1048,13 @@ fn kitchen_press(game: &Game<'_>, pos: Pos, entity: &mut ModBlockEntity, i: usiz
 /// (rustcraft_rules::utility::kitchen::takes).
 pub(super) fn kitchen_page_rule(entity: &ModBlockEntity) -> (Vec<Option<usize>>, usize) {
     (kitchen_pages(&entity.nbt), rustcraft_rules::utility::kitchen::pages(capacity_of(entity)))
+}
+
+/// 0.20 (round 31): whether the magistral brings the vat `entity` `item` into its reagent cells:
+/// an ingredient of its usable pages' chains (rustcraft_rules::utility::brew::pages_take).
+pub(super) fn brew_takes(entity: &ModBlockEntity, item: &str) -> bool {
+    use rustcraft_rules::utility::brew;
+    brew::pages_take(&brew_pages(&entity.nbt), brew::pages(capacity_of(entity)), item)
 }
 
 fn capacity_of(entity: &ModBlockEntity) -> u32 {
@@ -1556,6 +1587,10 @@ fn brush(game: &mut Game<'_>, pos: Pos, cost: f64) -> Shown {
         return Shown::Idle("archeo_empty");
     };
     let Some(brush) = slots.get(1).cloned().flatten() else {
+        // 0.20 (round 31): its brush is away at the repair stand (rustcraft_trips).
+        if crate::game::rustcraft_trips::away_at(game, pos) {
+            return Shown::Idle("archeo_brush_at_repair");
+        }
         return Shown::Blocked("archeo_no_brush");
     };
     // Slice 18: a block that remembers no place brushes by its kind's usual table.
