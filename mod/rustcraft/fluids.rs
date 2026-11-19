@@ -1272,18 +1272,19 @@ pub(super) fn dock_move(game: &mut Game<'_>, level: &LevelNet, pos: Pos, fluid: 
     let before = read_groups(game, &level.fluids.tanks, per_block);
     let mut after = before.clone();
     let mut done = 0;
-    for g in after.iter_mut().filter(|g| g.blocks.iter().any(|b| near.contains(b))) {
+    let reach = |g: &TankGroup| g.blocks.iter().any(|b| near.contains(b));
+    // 0.21 (FT3): unloading, the tanks kept for the fluid first, a free one only without them.
+    let order: Vec<usize> = if sink {
+        tanks::fill_order(&after, reach, fluid)
+    } else {
+        (0..after.len()).filter(|&i| reach(&after[i])).collect()
+    };
+    for i in order {
         if done >= amount {
             break;
         }
-        done += if sink {
-            if g.fluid.as_deref().is_some_and(|f| f != fluid) {
-                continue;
-            }
-            g.put(fluid, amount - done)
-        } else {
-            g.take(fluid, amount - done)
-        };
+        let g = &mut after[i];
+        done += if sink { g.put(fluid, amount - done) } else { g.take(fluid, amount - done) };
     }
     if done > 0 {
         write_back(game, &before, &after, per_block);
@@ -1316,10 +1317,14 @@ fn touching_group(game: &Game<'_>, level: &LevelNet, pos: Pos, fluid: &str, fill
     let groups = read_groups(game, &level.fluids.tanks, per_block);
     let mut near: BTreeSet<Pos> = Face::ALL.into_iter().map(|f| step(pos, f)).collect();
     near.extend(net_reach(level, pos, fill));
-    let i = groups.iter().position(|g| {
-        g.blocks.iter().any(|b| near.contains(b))
-            && (g.fluid.as_deref() == Some(fluid) || (fill && g.fluid.is_none() && !g.kept_for_other(fluid)))
-    })?;
+    let reach = |g: &TankGroup| g.blocks.iter().any(|b| near.contains(b));
+    let i = if fill {
+        // 0.21 (FT3): the tank kept for the fluid with room first; a free one only without one.
+        let order = tanks::fill_order(&groups, reach, fluid);
+        order.iter().copied().find(|&i| groups[i].room_for(fluid) > 0).or(order.first().copied())?
+    } else {
+        groups.iter().position(|g| reach(g) && g.fluid.as_deref() == Some(fluid))?
+    };
     Some((groups, i))
 }
 

@@ -190,6 +190,21 @@ fn group_of(
     }
 }
 
+/// 0.21 (FT3): the groups `reach` lets a machine fill with `fluid` straight (a shearer, a dock), in
+/// the order to fill them: those kept for it; the free ones only when none of them is.
+pub fn fill_order(groups: &[TankGroup], reach: impl Fn(&TankGroup) -> bool, fluid: &str) -> Vec<usize> {
+    let near: Vec<usize> = (0..groups.len()).filter(|&i| reach(&groups[i])).collect();
+    let kept: Vec<usize> = near
+        .iter()
+        .copied()
+        .filter(|&i| groups[i].pin.as_deref() == Some(fluid))
+        .collect();
+    if !kept.is_empty() {
+        return kept;
+    }
+    near.into_iter().filter(|&i| groups[i].pin.is_none()).collect()
+}
+
 /// 0.21 (FT2, FT6): the pin of an empty group: the one most of its blocks keep (ties to the first
 /// by name), none when none keeps one. A group that holds a fluid is kept for it instead.
 fn pin_of(blocks: &[Pos], tanks: &BTreeMap<Pos, TankBlock>) -> Option<FluidKey> {
@@ -371,6 +386,22 @@ mod tests {
         // A fluid it holds wins over the blocks' pins.
         let tanks = BTreeMap::from([([0, 0, 0], kept(MILK)), ([1, 0, 0], tank(Some(WATER), 100))]);
         assert_eq!(groups(&tanks, PER)[0].pin.as_deref(), Some(WATER));
+    }
+
+    #[test]
+    fn a_machine_fills_the_tank_kept_for_its_fluid_and_a_free_one_only_without_it() {
+        // FT3 for the shearer and the dock: milk goes to the milk tank, never to the free one
+        // while the milk tank is there; with no milk tank, to the free one.
+        let tanks = BTreeMap::from([
+            ([0, 0, 0], tank(None, 0)),
+            ([2, 0, 0], kept(MILK)),
+            ([4, 0, 0], tank(Some(WATER), 1_000)),
+        ]);
+        let g = groups(&tanks, PER);
+        let at = |p: Pos| g.iter().position(|x| x.blocks.contains(&p)).unwrap();
+        assert_eq!(fill_order(&g, |_| true, MILK), vec![at([2, 0, 0])]);
+        assert_eq!(fill_order(&g, |x| !x.blocks.contains(&[2, 0, 0]), MILK), vec![at([0, 0, 0])]);
+        assert_eq!(fill_order(&g, |_| true, LAVA), vec![at([0, 0, 0])]);
     }
 
     #[test]
