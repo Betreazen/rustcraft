@@ -5,4 +5,6 @@ fn rustcraft_standalone_models(models: &mut Vec<String>) {
     // Slice 18, base and gear: the gear seen on players.
     models.extend(crate::game::rustcraft_gear::WORN_MODELS.iter().map(|m| (*m).to_owned()));
     crate::game::rustcraft_pipe18::standalone_models(models);
+    // Round 32: the connectors under machines standing on housings.
+    crate::game::rustcraft_connectors::standalone_models(models);
 }

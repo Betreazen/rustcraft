@@ -192,6 +192,12 @@ pub trait Bench {
         let _ = pos;
         None
     }
+    /// Round 32: whether the block entity at `pos` says a housing stands below
+    /// (crate::connectors::BOTTOM_KEY); none when the block has no block entity.
+    fn bottom_connector(&self, pos: Pos) -> Option<bool> {
+        let _ = pos;
+        None
+    }
     /// What the machine at `pos` showed on its last tick.
     fn shown(&self, pos: Pos) -> Option<Shown>;
     /// Whether an item net found the receiver at `pos` full lately («Приёмник полон»).

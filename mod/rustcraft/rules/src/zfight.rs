@@ -6,9 +6,10 @@
 //! - within each model;
 //! - between the models a blockstate shows together (the body, the tier stripe, the connectors);
 //! - between a block's body and the parts its block entity draws over it (moving parts at rest,
-//!   the crystal's, panel's and windmill's connectors);
+//!   the crystal's, panel's and windmill's connectors, round 32: every machine's bottom connector);
 //! - between a block and its neighbours: a full block, the same block, and a housing on the side
-//!   of each connector the block shows.
+//!   of each connector the block shows (round 32: and below each block with a bottom connector,
+//!   its arm up into the block).
 //!
 //! A pair is left out when the overlap is buried: something solid stands right in front of it,
 //! so no eye ever sees it. A pair whose two faces look alike (one texture, one colour cell, the
@@ -639,7 +640,8 @@ fn housing_beside(tier: u8, toward_block: &str, offset: [i32; 3]) -> [Spot; 2] {
 
 /// The spots a block shows in `state`: its blockstate's parts; with no `facing` or facing north,
 /// the parts its block entity draws (they turn with the body); and a housing of `tier` beside each
-/// side it links.
+/// side it links. Round 32: a block with a bottom connector stands on a housing in every state,
+/// its block entity drawing the connector unturned (crate::connectors::bottom_model).
 fn scene_of(
     board: &mut Board<'_>,
     block: &str,
@@ -658,6 +660,10 @@ fn scene_of(
     }
     if block == "rustcraft:housing" {
         return scene;
+    }
+    if let Some(model) = crate::connectors::bottom_model(block) {
+        scene.push((model.to_owned(), Turn::default(), 0, [0; 3]));
+        scene.extend(housing_beside(tier, "up", [0, -1, 0]));
     }
     let name = block.trim_start_matches("rustcraft:");
     for (side, offset) in SIDES {

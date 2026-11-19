@@ -462,6 +462,10 @@ impl Bench for GameBench<'_, '_> {
             .map(|e| window::read_joints(&e.nbt))
     }
 
+    fn bottom_connector(&self, pos: Pos) -> Option<bool> {
+        machines::entity(self.game, pos).map(|e| crate::game::rustcraft_connectors::bottom_of(&e.nbt))
+    }
+
     fn shown(&self, pos: Pos) -> Option<Shown> {
         self.with_level(|l| l.power.status.get(&pos).map(|s| s.shown))
             .flatten()

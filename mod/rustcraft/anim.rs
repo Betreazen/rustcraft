@@ -119,12 +119,15 @@ pub(super) fn update_tag(entity: &ModBlockEntity, tag: &mut Option<Compound>) {
     let power = crate::game::rustcraft_power::DRAW_KEYS;
     // Slice 18: the turret's aim (rustcraft_base).
     let aim = crate::game::rustcraft_base::AIM_KEYS;
+    // Round 32: whether a housing stands below (rustcraft_connectors::draw_bottom).
+    let bottom = [rustcraft_rules::connectors::BOTTOM_KEY];
     for key in [ON_KEY, LEVEL_KEY, COLOUR_KEY]
         .into_iter()
         .chain(EXTRA_KEYS)
         .chain(zipline)
         .chain(power)
         .chain(aim)
+        .chain(bottom)
     {
         if let Some(v) = entity.nbt.get(&JavaString::from(key)) {
             c.insert(JavaString::from(key), v.clone());

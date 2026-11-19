@@ -112,8 +112,10 @@ def port(m, rim, centre, z=16.25):
 # frame round it with a small energy window under it, in the style of the crystal's, the
 # windmill's and the solar panel's connectors (energy.py). One part per side: link_x+, link_y+,
 # link_x-, link_y- and link_z+ on the top; the game shows the ones whose side a housing touches
-# (rustcraft_rules::connectors), the guide the sides in the object's `link`. No connector below:
-# a housing under a machine meets its plinth.
+# (rustcraft_rules::connectors), the guide the sides in the object's `link`. Round 32: link_z-
+# under the plinth, the top one mirrored, round the collar of a housing's arm that comes up from
+# below; the blockstate has no `down` (it would double the states), so the block entity draws it
+# (rustcraft_connectors::draw_bottom).
 # Its sizes stay off the quarter-pixel grid the machines' faces are drawn on, so no face of a
 # connector lies in a plane of the machine's or the housing's (zfight.rs checks it).
 LINK_FRAME = ((3.8, 3.8, 8.4, 1), (3.8, 11.2, 8.4, 1), (3.8, 4.8, 1, 6.4), (11.2, 4.8, 1, 6.4))
@@ -121,7 +123,7 @@ LINK_BOLTS = (4.05, 11.45)
 
 
 def links(m):
-    """The five connectors of a machine, each its own part."""
+    """The six connectors of a machine, each its own part."""
     for quarter, side in enumerate(SIDES):
         part = 'link_' + side
         # The frame stands from inside the body to 0.15 out of the face, past the face's frames.
@@ -138,6 +140,14 @@ def links(m):
         for y in LINK_BOLTS:
             m.box('steel', x, y, 16.72, 0.5, 0.5, 0.25, part='link_z+')
     m.box('glow_energy', 7.1, 4.05, 16.72, 1.8, 0.5, 0.15, part='link_z+')
+    # Under the plinth: the top one mirrored, from inside the plinth to 0.72 below the block, round
+    # the collar (z 15..16 of the housing below).
+    for x, y, w, d in LINK_FRAME:
+        m.box('case_dark', x, y, -0.72, w, d, 0.87, part='link_z-')
+    for x in LINK_BOLTS:
+        for y in LINK_BOLTS:
+            m.box('steel', x, y, -0.97, 0.5, 0.5, 0.25, part='link_z-')
+    m.box('glow_energy', 7.1, 4.05, -0.87, 1.8, 0.5, 0.15, part='link_z-')
 
 
 def linked(draw):

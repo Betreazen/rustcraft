@@ -598,7 +598,8 @@ def machine_states(out):
 
 
 # Round 31: the sides a machine shows a connector on, as its state properties name them, and the
-# model side of each (rustcraft_rules::connectors::FACES; no connector below).
+# model side of each (rustcraft_rules::connectors::FACES). Round 32: the bottom one, link_z-, is no
+# state property; energy_parts exports it as `<model>__link_down` for the block entity to draw.
 LINK_PROPS = (('north', 'y-'), ('east', 'x+'), ('south', 'y+'), ('west', 'x-'), ('up', 'z+'))
 # Models whose connectors the block entity draws instead (rustcraft_power, slice 18).
 LINKED = ('crystal', 'windmill', 'solar')

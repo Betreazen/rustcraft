@@ -18,6 +18,8 @@ fn rustcraft_block_entity_submit(
         crate::game::rustcraft_zipline::draw_anchor(game, pos, entity, draw);
         return;
     }
+    // Round 32: the connector under a machine standing on a housing, drawn first, unturned.
+    let bottom = crate::game::rustcraft_connectors::draw_bottom(game, block, entity, draw);
     // Slice 18, wave 2: the charger's and the plate's pulsing glow.
     if crate::game::rustcraft_utility::draw_glow(game, block, state, draw) {
         return;
@@ -32,5 +34,10 @@ fn rustcraft_block_entity_submit(
     if crate::game::rustcraft_power::draw(game, block, entity, draw) {
         return;
     }
-    crate::game::rustcraft_anim::draw(game, block, state, entity, draw);
+    let parts = crate::game::rustcraft_anim::draw(game, block, state, entity, draw);
+    // Round 32: a block with no moving parts keeps its bottom connector drawn until its block
+    // entity changes; the terminal's holes and the projector's ghost read the world each frame.
+    if bottom && !parts && block != "rustcraft:terminal" && block != "rustcraft:projector" {
+        draw.keep();
+    }
 }

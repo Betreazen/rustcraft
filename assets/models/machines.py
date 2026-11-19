@@ -157,8 +157,9 @@ def pump(m):
     for y in (4, 7, 10):
         panel(m, 'black', y, 3, 2, 8)
     m.box('glow_water', -0.25, -0.25, 12, 16.5, 16.5, 1)
-    # A hose down into the water.
-    m.box('steel_dark', 6, 6, -5, 4, 4, 5)
+    # A hose down into the water. Round 32: a tenth of a pixel narrower than 4, so on a housing its
+    # sides do not lie on the channels of the housing's arm up (6..7 and 9..10).
+    m.box('steel_dark', 6.1, 6.1, -5, 3.8, 3.8, 5)
     for z in (-4, -2):
         m.box('steel_mid', 5.5, 5.5, z, 5, 5, 0.75)
     # A plunger in a guide frame on the top; it goes up and down.

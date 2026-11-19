@@ -5,11 +5,16 @@
 //! side that is `true`; the server sets them from the housings around it
 //! (rustcraft_connectors).
 //!
-//! Five sides, not six: the bottom of a machine is its plinth, which a housing under it meets
-//! with nothing to show, and a sixth boolean would double the states again. Every machine copies
-//! the furnace (`facing` 4 × `lit` 2), many have a `tier` (4); 32 combinations of five sides keep
-//! the registry under 2^16 states, where chunks keep vanilla's 16-bit palette
+//! Five sides in the state, not six: a sixth boolean would double the states again. Every machine
+//! copies the furnace (`facing` 4 × `lit` 2), many have a `tier` (4); 32 combinations of five
+//! sides keep the registry under 2^16 states, where chunks keep vanilla's 16-bit palette
 //! (SRC/docs/modpacks.md, «Limits»), and 64 would not ([`tests`]).
+//!
+//! Round 32: the sixth, the bottom, goes through the block entity instead. The server writes
+//! whether a housing stands right below into the block's entity ([`BOTTOM_KEY`]) and tells
+//! clients when that changes; the client draws [`bottom_model`] (`<model>__link_down`, part
+//! `link_z-` of kit.py `links`) at the block's place, unturned, and keeps the drawing until the
+//! entity changes. Every block of [`BLOCKS`] has a block entity.
 //!
 //! Housings only: a node is pipe and joins no machine (net::joints), so it shows no connector,
 //! as the crystal's, the panel's and the windmill's connectors of slice 18 (rustcraft_power).
@@ -69,6 +74,66 @@ pub const BLOCKS: [&str; 40] = [
     "rustcraft:vein",
     "rustcraft:xp_tank",
 ];
+
+/// The bottom side, drawn by the block entity: the face, and the key of the block entity's
+/// compound that holds 1 while a housing stands below.
+pub const BOTTOM: Face = Face::YNeg;
+pub const BOTTOM_KEY: &str = "link_dn";
+
+/// The bottom connector's model of each of [`BLOCKS`], in its order: the model the blockstate
+/// names for the other sides, `__link_down` (the portal dock's model is `pdock`).
+pub const BOTTOM_MODELS: [&str; 40] = [
+    "rustcraft:block/alloy__link_down",
+    "rustcraft:block/anchor__link_down",
+    "rustcraft:block/apiary__link_down",
+    "rustcraft:block/archeo__link_down",
+    "rustcraft:block/battery__link_down",
+    "rustcraft:block/breaker__link_down",
+    "rustcraft:block/brewer__link_down",
+    "rustcraft:block/builder__link_down",
+    "rustcraft:block/butcher__link_down",
+    "rustcraft:block/cell__link_down",
+    "rustcraft:block/charger__link_down",
+    "rustcraft:block/crafter__link_down",
+    "rustcraft:block/crusher__link_down",
+    "rustcraft:block/disintegrator__link_down",
+    "rustcraft:block/dock_charge__link_down",
+    "rustcraft:block/dock_load__link_down",
+    "rustcraft:block/dock_unload__link_down",
+    "rustcraft:block/enchanter__link_down",
+    "rustcraft:block/feeder__link_down",
+    "rustcraft:block/fishery__link_down",
+    "rustcraft:block/furnace__link_down",
+    "rustcraft:block/gen_fuel__link_down",
+    "rustcraft:block/gen_lava__link_down",
+    "rustcraft:block/kitchen__link_down",
+    "rustcraft:block/miner__link_down",
+    "rustcraft:block/mixer__link_down",
+    "rustcraft:block/placer__link_down",
+    "rustcraft:block/pdock__link_down",
+    "rustcraft:block/projector__link_down",
+    "rustcraft:block/pump__link_down",
+    "rustcraft:block/repair__link_down",
+    "rustcraft:block/shearer__link_down",
+    "rustcraft:block/station__link_down",
+    "rustcraft:block/tank__link_down",
+    "rustcraft:block/terminal__link_down",
+    "rustcraft:block/trash__link_down",
+    "rustcraft:block/turbine__link_down",
+    "rustcraft:block/turret__link_down",
+    "rustcraft:block/vein__link_down",
+    "rustcraft:block/xp_tank__link_down",
+];
+
+/// The model of `block`'s bottom connector, none for a block without connectors.
+pub fn bottom_model(block: &str) -> Option<&'static str> {
+    BLOCKS.iter().position(|b| *b == block).map(|i| BOTTOM_MODELS[i])
+}
+
+/// The cell under a block at `pos`: its bottom shows a connector when a housing stands there.
+pub fn below(pos: Pos) -> Pos {
+    step(pos, BOTTOM)
+}
 
 /// The blocks that join the magistral but take no connector of this kind, and why: they meet a
 /// housing on one side only or already draw their own (slice 18).
@@ -179,7 +244,7 @@ mod tests {
     fn the_registry_keeps_the_16_bit_palette() {
         let total = VANILLA + connected_states() + RUSTCRAFT_REST + OTHER_MODS;
         assert!(total <= 1 << 16, "{total} block states: chunks would need a 17-bit palette");
-        // A sixth side would not fit: the reason the bottom has no connector.
+        // A sixth side would not fit: the reason the bottom's connector is the block entity's.
         assert!(VANILLA + 2 * connected_states() > 1 << 16);
     }
 
@@ -190,7 +255,34 @@ mod tests {
         assert_eq!(
             got,
             [("north", false), ("east", true), ("south", false), ("west", false), ("up", true)],
-            "east and up; the housing below shows nothing"
+            "east and up; the housing below is the block entity's"
         );
+        assert_eq!(below([0, 0, 0]), [0, -1, 0]);
+    }
+
+    /// Each bottom model is the blockstate's connector model of the same block, `down` for
+    /// `north`, and is exported; no block shows it through its state.
+    #[test]
+    fn every_block_with_connectors_has_its_bottom_model() {
+        for (block, model) in BLOCKS.iter().zip(BOTTOM_MODELS) {
+            assert_eq!(bottom_model(block), Some(model));
+            let state = blockstate(block).unwrap();
+            let parts = state["multipart"].as_array().unwrap();
+            let north = parts
+                .iter()
+                .find(|p| p["when"]["north"] == "true")
+                .and_then(|p| p["apply"]["model"].as_str())
+                .unwrap_or_else(|| panic!("{block} has no north connector"));
+            assert_eq!(north.replace("__link_north", "__link_down"), model, "{block}");
+            let path = model.strip_prefix("rustcraft:block/").unwrap();
+            assert!(
+                std::path::Path::new(&format!("{ASSETS}/models/block/{path}.json")).exists(),
+                "{model} is not exported"
+            );
+            assert!(parts.iter().all(|p| p["apply"]["model"] != model), "{block} shows {model} through its state");
+        }
+        for (block, _) in WITHOUT {
+            assert_eq!(bottom_model(block), None);
+        }
     }
 }
