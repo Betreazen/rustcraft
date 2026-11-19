@@ -21,6 +21,9 @@ pub struct Tuning {
     pub fluid_kinds: [usize; 4],
     /// E2: the E a second an energy channel of each tier lets through.
     pub energy_per_second: [f64; 4],
+    /// 0.21 (spec 44, XC6): the experience points a second an experience channel of each tier
+    /// carries. Generous: a tier-1 net moves a level-30 enchantment's points (306) in a second.
+    pub xp_per_second: [f64; 4],
     /// Server ticks a second.
     pub ticks_per_second: f64,
     /// A single energy crystal's output, E a second, always and free (energy table, E6).
@@ -266,6 +269,7 @@ impl Default for Tuning {
             fluid_buckets_per_second: [1.0, 4.0, 16.0, 64.0],
             fluid_kinds: [crate::net::fluids::ANY_KINDS; 4],
             energy_per_second: [32.0, 128.0, 512.0, 2048.0],
+            xp_per_second: [400.0, 1600.0, 6400.0, 25600.0],
             ticks_per_second: 20.0,
             crystal_output: 4.0,
             furnace_energy: 8.0,
@@ -451,6 +455,11 @@ impl Tuning {
     /// E a second an energy net with weakest channel `tier` lets through (E2).
     pub fn energy_of(&self, tier: u8) -> f64 {
         self.energy_per_second[tier_index(tier)]
+    }
+
+    /// Experience points a second an experience net with weakest channel `tier` carries (XC6).
+    pub fn xp_of(&self, tier: u8) -> f64 {
+        self.xp_per_second[tier_index(tier)]
     }
 
     /// The monorail's numbers as its rules take them.

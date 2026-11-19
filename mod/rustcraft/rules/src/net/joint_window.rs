@@ -1,8 +1,8 @@
 //! The joint window (M7, the guide's `wrench` window): one page per face of a housing that is a
 //! joint, a row per channel of the housing with its direction, filter and priority. The game shows
 //! it as a chest of six rows (a server menu, which every client can show): the top row picks the
-//! face, rows 1–3 are the three built-in channels (round 31: items, fluid, energy), the bottom row
-//! holds the hint and copy/paste.
+//! face, rows 1–4 are the built-in channels (round 31: items, fluid, energy; 0.21, XC1: and
+//! experience), the bottom row holds the hint and copy/paste.
 //! No slot of it holds an item the player can take: a filter cell shows an item, and an item is
 //! added by clicking an empty cell, then the item in the player's own inventory below.
 //!
@@ -34,10 +34,12 @@ const PASTE: usize = CELLS - 1;
 pub enum Unused {
     /// The slot has no channel (no housing since round 31; kept for a page built without one).
     Empty,
-    /// A filter or a priority on an energy or fluid channel: only items have them.
+    /// A filter or a priority on an energy or experience channel: only items and fluids have
+    /// them.
     NotItems,
     /// The block behind this face has nothing this channel carries: no inventory for an item
-    /// channel, no energy for an energy channel, and no fluid block yet for a fluid channel.
+    /// channel, no energy for an energy channel, no fluid block for a fluid channel, and nothing
+    /// that makes, keeps or spends experience for the experience channel.
     NotHere,
 }
 
@@ -181,8 +183,9 @@ fn row_cells(page: &Page, slot: usize) -> Vec<Cell> {
     }
     let s = &page.settings[slot];
     row.push(Cell::Direction { slot, mode: s.mode });
-    // s18/pipe: a fluid channel has a filter (of fluids) and a priority too; energy has neither.
-    if kind == ChannelKind::Energy {
+    // s18/pipe: a fluid channel has a filter (of fluids) and a priority too; energy has neither,
+    // nor has experience (0.21, XC4).
+    if !kind.filtered() {
         row.resize(COLUMNS, unused(Unused::NotItems));
         return row;
     }
@@ -469,8 +472,15 @@ mod tests {
             }
         ));
         assert_eq!(click(&p, 2 * COLUMNS + DIRECTION, false), Action::None);
-        // The row under the last channel is blank.
-        assert!(cells[4 * COLUMNS..5 * COLUMNS].iter().all(|c| *c == Cell::Blank));
+        // 0.21 (XC4): the fourth row is experience: a direction and nothing else, as energy.
+        let xp = &cells[4 * COLUMNS..5 * COLUMNS];
+        assert_eq!(xp[0], Cell::Channel { slot: 3, kind: Some(ChannelKind::Xp) });
+        assert!(matches!(xp[DIRECTION], Cell::Direction { slot: 3, .. }));
+        assert!(xp[LIST..].iter().all(|c| matches!(c, Cell::Unused { why: Unused::NotItems, .. })));
+        assert_eq!(click(&p, 4 * COLUMNS + LIST, false), Action::None);
+        // The bottom row keeps the hint and copy/paste.
+        assert_eq!(cells[HELP], Cell::Help);
+        assert_eq!(cells[COPY], Cell::Copy);
     }
 
     #[test]

@@ -152,6 +152,7 @@ fn kind_name(row: &ViewRow) -> String {
         Some(ChannelKind::Item) => tr("rustcraft.joint.window.kind.item", "Items"),
         Some(ChannelKind::Fluid) => tr("rustcraft.joint.window.kind.fluid", "Fluids"),
         Some(ChannelKind::Energy) => tr("rustcraft.joint.window.kind.energy", "Energy"),
+        Some(ChannelKind::Xp) => tr("rustcraft.joint.window.kind.xp", "Experience"),
         None => tr("rustcraft.joint.window.kind.empty", "empty"),
     }
 }

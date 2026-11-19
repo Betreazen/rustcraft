@@ -54,6 +54,7 @@ use rustcraft_rules::{
         style::Severity,
     },
     modules::{self, Module},
+    net::xp::{self as xp_net, XpPort},
     reports::Report,
     tuning::Tuning,
     utility::{
@@ -468,7 +469,7 @@ pub(super) fn tick(game: &mut Game<'_>, dimension: &str, level: &LevelNet, t: &T
             Util::Kitchen => cook(game, dimension, level, pos, cost, t),
             Util::Brewer => brew(game, dimension, pos, cost),
             Util::XpTank => xp_tank_shown(game, pos),
-            Util::Enchanter => enchant(game, pos, cost),
+            Util::Enchanter => enchant(game, dimension, level, pos, cost, t),
             Util::Archeo => brush(game, pos, cost),
             Util::Fishery | Util::Feeder | Util::Shearer | Util::Apiary => {
                 farm::step(game, dimension, level, pos, u, cost, now, t)
@@ -1702,6 +1703,89 @@ pub(super) fn add_xp(game: &mut Game<'_>, tank: Pos, points: u32) {
     });
 }
 
+/// `points` out of the condenser at `tank`, as far as it holds.
+fn take_xp(game: &mut Game<'_>, tank: Pos, points: u32) {
+    game.native_with_mod_block_entity(tank, |t| {
+        let now = read_i64(&t.nbt, XP_KEY).max(0) as u32;
+        set_xp(&mut t.nbt, now.saturating_sub(points));
+    });
+}
+
+// ---- 0.21 (spec 44): the experience channel ----
+
+/// What each level's experience nets may still carry, and the second it is for (XC6).
+static XP_BUDGET: LazyLock<Mutex<HashMap<String, (u64, xp_net::Budget)>>> = LazyLock::new(Mutex::default);
+
+/// The level's blocks the experience channel joins: butchers, condensers, enchanting machines.
+fn xp_ports(level: &LevelNet) -> BTreeMap<Pos, XpPort> {
+    level
+        .machines
+        .iter()
+        .filter_map(|(p, m)| {
+            let port = match m {
+                Machine::Butcher => XpPort::Source,
+                Machine::Util(Util::XpTank) => XpPort::Store,
+                Machine::Util(Util::Enchanter) => XpPort::Consumer,
+                _ => return None,
+            };
+            Some((*p, port))
+        })
+        .collect()
+}
+
+/// The experience nets of `level` round `ports`, as `net::xp` reads them.
+fn xp_world<'a>(level: &'a LevelNet, t: &'a Tuning, ports: &'a BTreeMap<Pos, XpPort>) -> xp_net::World<'a> {
+    xp_net::World {
+        topology: &level.topology,
+        layout: &level.layout,
+        tuning: t,
+        settings: &level.joints,
+        ports,
+    }
+}
+
+/// `f` with the budget the experience nets of `dimension` have left this second.
+fn with_xp_budget<R>(dimension: &str, level: &LevelNet, t: &Tuning, f: impl FnOnce(&mut xp_net::Budget) -> R) -> R {
+    let second = level.ticks / (t.ticks_per_second.max(1.0) as u64);
+    let mut all = XP_BUDGET.lock().unwrap_or_else(PoisonError::into_inner);
+    let entry = all.entry(dimension.to_owned()).or_insert((u64::MAX, xp_net::Budget::new()));
+    if entry.0 != second {
+        *entry = (second, xp_net::budget(&level.topology, t));
+    }
+    f(&mut entry.1)
+}
+
+/// XC5: `points` made at `at` (a butcher's kill) into a condenser touching it, else over its
+/// experience channel into the nearest condenser with room; what finds no room is lost. Gives
+/// back the points stored.
+pub(super) fn xp_made(game: &mut Game<'_>, dimension: &str, level: &LevelNet, t: &Tuning, at: Pos, points: u32) -> u32 {
+    let ports = xp_ports(level);
+    let world = xp_world(level, t, &ports);
+    let stores = {
+        let g = &*game;
+        xp_net::reach(&world, at, xp_net::Way::Fill, &|p| xp::CAPACITY.saturating_sub(xp_of(g, p)))
+    };
+    let moves = with_xp_budget(dimension, level, t, |budget| {
+        let moves = xp_net::fill(points, &stores, budget);
+        xp_net::spend(budget, &moves);
+        moves
+    });
+    for &(tank, n) in &moves.moves {
+        add_xp(game, tank, n);
+    }
+    moves.total()
+}
+
+/// XC10: the condensers the block at `at` reaches `way` (touching it, or on its experience nets)
+/// and the points they hold, for the windows.
+pub(super) fn xp_reached(game: &Game<'_>, level: &LevelNet, t: &Tuning, at: Pos, way: xp_net::Way) -> (u32, u64) {
+    let ports = xp_ports(level);
+    let world = xp_world(level, t, &ports);
+    let stores = xp_net::reach(&world, at, way, &|_| 1);
+    let held = stores.iter().map(|s| u64::from(xp_of(game, s.pos))).sum();
+    (stores.len() as u32, held)
+}
+
 fn set_xp(nbt: &mut Compound, points: u32) {
     write_i64(nbt, XP_KEY, i64::from(points.min(xp::CAPACITY)));
 }
@@ -1770,7 +1854,7 @@ fn enchant_level(game: &Game<'_>, pos: Pos) -> u32 {
         .map_or(xp::LEVEL_MAX, |l| (l as u32).clamp(xp::LEVEL_MIN, xp::LEVEL_MAX))
 }
 
-fn enchant(game: &mut Game<'_>, pos: Pos, cost: f64) -> Shown {
+fn enchant(game: &mut Game<'_>, dimension: &str, net: &LevelNet, pos: Pos, cost: f64, t: &Tuning) -> Shown {
     let slots = items(game, pos);
     let Some(mut item) = slots.first().cloned().flatten() else {
         return Shown::Idle("enchant_empty");
@@ -1779,8 +1863,16 @@ fn enchant(game: &mut Game<'_>, pos: Pos, cost: f64) -> Shown {
     // magistral went whole: all of it enchanted for one price, or, the enchanted books stacking to
     // one, it never fit the output and the machine kept the stack.
     item.count = 1;
-    let Some(tank) = neighbour_of(game, pos, Util::XpTank.spec().block) else {
+    // 0.21 (spec 44, XC7): the experience of a condenser beside it, then of the condensers on its
+    // experience channel, the nearest first; all of it this step or none.
+    let ports = xp_ports(net);
+    let world = xp_world(net, t, &ports);
+    if xp_net::reach(&world, pos, xp_net::Way::Draw, &|_| 1).is_empty() {
         return Shown::Blocked("enchant_no_tank");
+    }
+    let stores = {
+        let g = &*game;
+        xp_net::reach(&world, pos, xp_net::Way::Draw, &|p| xp_of(g, p))
     };
     // Slice 18: the level the player chose, 1–30; its price by tens.
     let level = enchant_level(game, pos);
@@ -1790,9 +1882,13 @@ fn enchant(game: &mut Game<'_>, pos: Pos, cost: f64) -> Shown {
     if lapis < need {
         return Shown::Blocked("enchant_no_lapis");
     }
-    if !xp::enough_for(xp_of(game, tank), level) {
-        return Shown::Blocked("enchant_no_xp");
-    }
+    let points = xp::enchant_points(level, need);
+    // «В конденсаторе не меньше уровней, чем уровень чар»: `xp::enough_for`, over all it reaches.
+    let moves = match with_xp_budget(dimension, net, t, |budget| xp_net::draw(points, xp::total(level), &stores, budget)) {
+        Ok(moves) => moves,
+        Err(xp_net::Short::Slow) => return Shown::Blocked("enchant_xp_slow"),
+        Err(_) => return Shown::Blocked("enchant_no_xp"),
+    };
     let seed = (random() * f64::from(i32::MAX)) as i32;
     let e = &game.stations().enchantments;
     let offers = horizon_client::stations::enchant_offers(e, game.items(), seed, 15, Some(&item));
@@ -1802,17 +1898,16 @@ fn enchant(game: &mut Game<'_>, pos: Pos, cost: f64) -> Shown {
     let Some(enchanted) = horizon_client::stations::apply_enchantment(e, game.items(), seed, tier, level as i32, &item) else {
         return Shown::Blocked("enchant_not_enchantable");
     };
-    let points = xp::enchant_points(level, need);
     if !fits(game, pos, 2..3, std::slice::from_ref(&enchanted)) {
         return Shown::Blocked("output_full");
     }
     if !spend(game, pos, cost) {
         return Shown::NoEnergy;
     }
-    game.native_with_mod_block_entity(tank, |t| {
-        let now = read_i64(&t.nbt, XP_KEY).max(0) as u32;
-        set_xp(&mut t.nbt, now.saturating_sub(points));
-    });
+    with_xp_budget(dimension, net, t, |budget| xp_net::spend(budget, &moves));
+    for &(tank, n) in &moves.moves {
+        take_xp(game, tank, n);
+    }
     with_items(game, pos, |items| {
         take_one(items, 0);
         for _ in 0..need {
@@ -2352,13 +2447,13 @@ fn craft_sheet(game: &Game<'_>, dimension: &str, level: &LevelNet, pos: Pos, u: 
         Util::Builder => crate::game::rustcraft_projector::builder_sheet(game, pos, s),
         Util::Brewer => brew_sheet(game, pos, s),
         Util::Enchanter => {
-            let level = enchant_level(game, pos);
-            let need = xp::enchant_cost(level);
+            let chosen = enchant_level(game, pos);
+            let need = xp::enchant_cost(chosen);
             let row = line(
                 "rustcraft.util.enchanter.level",
                 "Enchanting level %s · costs %s levels and %s lapis",
                 &[
-                    Text::literal(level.to_string()),
+                    Text::literal(chosen.to_string()),
                     Text::literal(need.to_string()),
                     Text::literal(need.to_string()),
                 ],
@@ -2366,6 +2461,25 @@ fn craft_sheet(game: &Game<'_>, dimension: &str, level: &LevelNet, pos: Pos, u: 
             if let Some(r) = s.rows.get_mut(1) {
                 *r = base::v(&row);
             }
+            // 0.21 (spec 44, XC10): the experience it reaches, beside it and over its channel.
+            let t = crate::game::rustcraft_server::tuning();
+            let (tanks, held) = xp_reached(game, level, t, pos, xp_net::Way::Draw);
+            let want = xp::total(chosen);
+            s.bars.push(Bar {
+                label: base::v(&line("rustcraft.util.enchanter.reach", "Experience", &[])),
+                value: base::v(&line(
+                    "rustcraft.util.enchanter.reach_value",
+                    "%s points in condensers: %s (needs %s)",
+                    &[
+                        Text::literal(held.to_string()),
+                        Text::literal(tanks.to_string()),
+                        Text::literal(want.to_string()),
+                    ],
+                )),
+                share: if want == 0 { 1.0 } else { (held as f64 / f64::from(want)).min(1.0) },
+                energy: false,
+                colour: Some(0xFF7C_E05A),
+            });
         }
         Util::Archeo => {
             // «Расчищает: песок из пустынного храма».
@@ -2406,13 +2520,27 @@ fn craft_sheet(game: &Game<'_>, dimension: &str, level: &LevelNet, pos: Pos, u: 
                 energy: false,
                 colour: Some(0xFF7C_E05A),
             });
+            // 0.21 (spec 44, XC10): or who shares its experience channel.
             let beside = neighbour_of(game, pos, Util::Enchanter.spec().block).is_some();
+            let ports = xp_ports(level);
+            let partners = xp_net::partners(&xp_world(level, crate::game::rustcraft_server::tuning(), &ports), pos);
+            let n = |port| partners.get(&port).copied().unwrap_or(0);
+            let row = if beside {
+                line("rustcraft.util.xp_tank.beside", "Beside it: an enchanting machine", &[])
+            } else if !partners.is_empty() {
+                line(
+                    "rustcraft.util.xp_tank.channel",
+                    "Experience channel: %s enchanting machines · %s butchers",
+                    &[
+                        Text::literal(n(XpPort::Consumer).to_string()),
+                        Text::literal(n(XpPort::Source).to_string()),
+                    ],
+                )
+            } else {
+                line("rustcraft.util.xp_tank.alone", "No enchanting machine beside it or on its experience channel", &[])
+            };
             if let Some(r) = s.rows.get_mut(1) {
-                *r = base::v(&if beside {
-                    line("rustcraft.util.xp_tank.beside", "Beside it: an enchanting machine", &[])
-                } else {
-                    line("rustcraft.util.xp_tank.alone", "No enchanting machine beside it", &[])
-                });
+                *r = base::v(&row);
             }
         }
         Util::Feeder => {

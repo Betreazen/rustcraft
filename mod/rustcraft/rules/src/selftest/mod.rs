@@ -95,6 +95,8 @@ pub mod s21_catalyst;
 pub mod s21_tags;
 // 0.21 (spec 39): the mixer's and the kitchen's recipes turned on and off.
 pub mod s21_recipes;
+// 0.21 (spec 44): experience on the fourth built-in channel.
+pub mod s21_xp;
 
 use std::collections::BTreeMap;
 
@@ -852,6 +854,8 @@ pub fn catalog() -> Vec<Build> {
     all.extend(s21_tags::ALL);
     // 0.21 (spec 39): the mixer's and the kitchen's recipes turned on and off.
     all.extend(s21_recipes::ALL);
+    // 0.21 (spec 44): experience on the fourth built-in channel.
+    all.extend(s21_xp::ALL);
     all
 }
 

@@ -1,6 +1,7 @@
 //! Round 32 (spec 33): the «Сеть» page of the storage terminal. What the storage sees on its
 //! magistral: the housings its cells and terminals touch and their weakest tier, what that
-//! branch carries, the energy of its circuits, the storage's own cells, the machines and the
+//! branch carries, the energy of its circuits, the experience its condensers keep (0.21, spec
+//! 44), the storage's own cells, the machines and the
 //! vanilla containers on its item joints, and every tank on its fluid lane. A tank in the list is
 //! connected right (the owner: «если терминал склада их видит, значит всё подключено правильно»).
 //!
@@ -98,7 +99,7 @@ pub fn decode_ask(bytes: &[u8]) -> Option<Ask> {
 // ---- What the page shows ----
 
 /// The magistral the storage sees: the item nets its blocks touch (since round 31 every housing
-/// carries items, fluid and energy, so the fluid and energy nets are the same housings).
+/// carries every channel, so the fluid, energy and experience nets are the same housings).
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Magistral {
     /// Working nets the storage touches: 0 when it touches no working housing.
@@ -113,6 +114,11 @@ pub struct Magistral {
     pub items: f32,
     pub fluid: f32,
     pub energy_cap: f32,
+    /// 0.21 (XC8): experience points a second the branch carries, and the condensers on its
+    /// experience nets with the points they hold.
+    pub xp: f32,
+    pub condensers: u16,
+    pub xp_held: u32,
 }
 
 /// The energy of the circuits on the branch, as the node's window counts it.
@@ -371,6 +377,8 @@ pub enum Row {
     Tier,
     Items,
     Fluid,
+    /// 0.21 (XC8): the experience channel and its condensers.
+    Xp,
     Energy,
     Stored,
     /// The terminal touches no cell.
@@ -400,7 +408,7 @@ pub fn rows(page: &NetPage) -> Vec<Row> {
     if m.branches == 0 {
         out.push(Row::NoBranch);
     } else {
-        out.extend([Row::Housings, Row::Tier, Row::Items, Row::Fluid]);
+        out.extend([Row::Housings, Row::Tier, Row::Items, Row::Fluid, Row::Xp]);
     }
     if m.out_of_reach > 0 {
         out.push(Row::OutOfReach);
@@ -480,8 +488,8 @@ pub fn pages(rows: &[Row]) -> Vec<Range<usize>> {
 
 // ---- The message ----
 
-/// 0.21 (spec 42): 2, with the empty tanks' pins.
-const VERSION: u8 = 2;
+/// 0.21 (spec 42): 2, with the empty tanks' pins; (spec 44) 3, with the experience channel.
+const VERSION: u8 = 3;
 /// The lists a message carries at most; the page says how many tanks there are in all.
 pub const MAX_MACHINES: usize = 48;
 pub const MAX_TANKS: usize = 96;
@@ -513,9 +521,11 @@ pub fn encode(page: &NetPage) -> Vec<u8> {
     out.extend(m.housings.to_le_bytes());
     out.extend(m.out_of_reach.to_le_bytes());
     out.push(m.min_tier);
-    for v in [m.items, m.fluid, m.energy_cap] {
+    for v in [m.items, m.fluid, m.energy_cap, m.xp] {
         put_f32(&mut out, v);
     }
+    out.extend(m.condensers.to_le_bytes());
+    out.extend(m.xp_held.to_le_bytes());
     match page.energy {
         Some(e) => {
             out.push(1);
@@ -624,6 +634,9 @@ pub fn decode(bytes: &[u8]) -> Option<NetPage> {
         items: r.f32()?,
         fluid: r.f32()?,
         energy_cap: r.f32()?,
+        xp: r.f32()?,
+        condensers: r.u16()?,
+        xp_held: r.u32()?,
     };
     let energy = match r.u8()? {
         0 => None,

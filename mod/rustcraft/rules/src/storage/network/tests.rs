@@ -16,6 +16,9 @@ fn page() -> NetPage {
             items: 16.0,
             fluid: 4.0,
             energy_cap: 128.0,
+            xp: 1600.0,
+            condensers: 2,
+            xp_held: 31_000,
         },
         energy: Some(Energy {
             made: 40.0,
@@ -174,6 +177,7 @@ fn the_rows_follow_the_page() {
             Row::Tier,
             Row::Items,
             Row::Fluid,
+            Row::Xp,
             Row::OutOfReach,
             Row::Energy,
             Row::Stored,
@@ -214,7 +218,7 @@ fn the_rows_follow_the_page() {
 fn pages_hold_ten_rows_and_keep_a_part_whole() {
     let r = rows(&page());
     // The magistral; the storage and what is connected; the tanks and the fluid ends.
-    assert_eq!(pages(&r), vec![0..8, 8..16, 16..22]);
+    assert_eq!(pages(&r), vec![0..9, 9..17, 17..23]);
     assert_eq!(pages(&[]), vec![0..0]);
     let short = rows(&NetPage::default());
     assert_eq!(pages(&short), vec![0..short.len()]);

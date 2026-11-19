@@ -2,11 +2,16 @@
 //!
 //! Such a housing keeps the channels a player set into its four slots (four bytes, `kind * 16 +
 //! tier` each, 0 for an empty slot) and its joints' settings per face and per old slot. On update
-//! every housing gets all three channels (`net::topology`): its tier is the highest tier among the
+//! every housing gets all its channels (`net::topology`): its tier is the highest tier among the
 //! channels it had (1 with none), and its joints' settings move by channel kind to that kind's
 //! fixed slot. Where it had two channels of one kind, the settings of the one in the bigger net
 //! win; a face only the other one had a setting for keeps that setting, so nothing set is lost.
 //! The bundle reads the old save, asks `plan` and `remap`, and writes the housing back.
+//!
+//! 0.21 (XC9): a housing saved by 0.20 keeps its settings of slots 0–2 as they are, and the
+//! experience slot it never had is empty, so its joints work in their default. Before 0.21 there
+//! was no experience channel, so no old slot names one and `plan` gives the experience slot no
+//! sources.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -26,11 +31,13 @@ const EMPTY: u8 = 0;
 /// An old slot's byte is `kind * KIND_STEP + tier`; tiers 1 to 15 fit below the step.
 const KIND_STEP: u8 = 16;
 
-fn kind_code(kind: ChannelKind) -> u8 {
+/// The kind's code in a 0.19 save; none for experience, which 0.19 had no channel of.
+fn kind_code(kind: ChannelKind) -> Option<u8> {
     match kind {
-        ChannelKind::Item => 1,
-        ChannelKind::Fluid => 2,
-        ChannelKind::Energy => 3,
+        ChannelKind::Item => Some(1),
+        ChannelKind::Fluid => Some(2),
+        ChannelKind::Energy => Some(3),
+        ChannelKind::Xp => None,
     }
 }
 
@@ -56,11 +63,12 @@ pub fn decode(bytes: &[u8]) -> OldSlots {
     slots
 }
 
-/// The old save of `slots`: what 0.19 wrote, for the self-test that builds an old housing.
+/// The old save of `slots`: what 0.19 wrote, for the self-test that builds an old housing. An
+/// experience channel, which 0.19 could not hold, is written as an empty slot.
 pub fn encode(slots: &OldSlots) -> [u8; OLD_SLOTS] {
-    slots.map(|slot| match slot {
-        None => EMPTY,
-        Some(c) => kind_code(c.kind) * KIND_STEP + c.tier.clamp(1, KIND_STEP - 1),
+    slots.map(|slot| {
+        slot.and_then(|c| kind_code(c.kind).map(|code| code * KIND_STEP + c.tier.clamp(1, KIND_STEP - 1)))
+            .unwrap_or(EMPTY)
     })
 }
 
@@ -256,9 +264,9 @@ mod tests {
         let layout = layout_of(&old, &[([0, 64, 82], 4)]);
         let plans = plan(&old, &layout, &Tuning::default());
         assert!(plans.values().all(|p| p.tier == 1));
-        assert_eq!(plans[&[5, 64, 82]].sources, [vec![1], vec![], vec![0]]);
-        assert_eq!(plans[&[36, 64, 82]].sources, [vec![], vec![], vec![0]]);
-        assert_eq!(plans[&[90, 64, 82]].sources, [vec![2], vec![], vec![0]]);
+        assert_eq!(plans[&[5, 64, 82]].sources, [vec![1], vec![], vec![0], vec![]]);
+        assert_eq!(plans[&[36, 64, 82]].sources, [vec![], vec![], vec![0], vec![]]);
+        assert_eq!(plans[&[90, 64, 82]].sources, [vec![2], vec![], vec![0], vec![]]);
         // Built in, the channels join: the fishing station's catch at one end reaches the storage
         // at the other on one item net.
         let topology = analyse(&layout, &Tuning::default());
@@ -295,7 +303,7 @@ mod tests {
         let layout = layout_of(&old, &[([0, 0, 0], 1)]);
         let p = &plan(&old, &layout, &Tuning::default())[&[2, 0, 0]];
         assert_eq!(p.tier, 2);
-        assert_eq!(p.sources, [vec![1, 3], vec![2], vec![]]);
+        assert_eq!(p.sources, [vec![1, 3], vec![2], vec![], vec![]]);
         let records = [
             // Both item channels on the north face: the bigger net's wins.
             record(Face::ZNeg, 1, Mode::From),
@@ -311,6 +319,43 @@ mod tests {
         assert_eq!(moved.get(Face::ZNeg, ITEM_SLOT).map(|s| s.mode), Some(Mode::From));
         assert_eq!(moved.get(Face::ZPos, ITEM_SLOT).map(|s| s.mode), Some(Mode::Off));
         assert_eq!(moved.get(Face::ZPos, FLUID_SLOT).map(|s| s.mode), Some(Mode::Into));
+    }
+
+    #[test]
+    fn a_housing_saved_with_three_slots_keeps_them_and_its_experience_joints_default() {
+        // 0.21 (XC9): what 0.20 saved, settings of slots 0–2, reads back as it was; slot 3 has
+        // none, so every experience joint works in the block's default.
+        use crate::net::topology::XP_SLOT;
+        let saved = HousingJoints::default()
+            .with(Face::ZNeg, ITEM_SLOT, JointSetting::of_mode(Mode::From))
+            .with(Face::ZNeg, FLUID_SLOT, JointSetting::of_mode(Mode::Into))
+            .with(Face::XPos, ENERGY_SLOT, JointSetting::of_mode(Mode::Off));
+        let records = saved.to_records();
+        assert!(records.iter().all(|r| usize::from(r.slot) < XP_SLOT));
+        let read = HousingJoints::from_records(&records);
+        assert_eq!(read, saved);
+        assert!(Face::ALL.iter().all(|&f| read.get(f, XP_SLOT).is_none()));
+        assert_eq!(
+            read.resolved(Face::ZNeg, XP_SLOT, crate::net::xp::XP_DEFAULT).mode,
+            Mode::Both
+        );
+    }
+
+    #[test]
+    fn an_old_fourth_slot_moves_by_its_kind_not_into_experience() {
+        // A 0.19 housing with energy in its fourth slot: its settings go to the energy slot, and
+        // the experience slot (the fourth since 0.21) gets nothing of it.
+        use crate::net::topology::XP_SLOT;
+        let mut old = BTreeMap::new();
+        old.insert([1, 0, 0], [None, None, None, ch(ChannelKind::Energy, 2)]);
+        let layout = layout_of(&old, &[([0, 0, 0], 1)]);
+        let p = &plan(&old, &layout, &Tuning::default())[&[1, 0, 0]];
+        assert_eq!(p.sources, [vec![], vec![], vec![3], vec![]]);
+        let moved = HousingJoints::from_records(&remap(&[record(Face::YPos, 3, Mode::From)], p));
+        assert_eq!(moved.get(Face::YPos, ENERGY_SLOT).map(|s| s.mode), Some(Mode::From));
+        assert_eq!(moved.get(Face::YPos, XP_SLOT), None);
+        // 0.19 had no experience channel: one written is an empty slot.
+        assert_eq!(encode(&[ch(ChannelKind::Xp, 2), None, None, None]), [EMPTY; OLD_SLOTS]);
     }
 
     #[test]

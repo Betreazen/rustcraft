@@ -6,9 +6,10 @@
 //! to some node is within that node's range (N3); otherwise it shows a diagnosis and takes no part
 //! in any channel network.
 //!
-//! Round 31: every housing carries all three channels, built in (items, fluid, energy, each in a
-//! fixed slot), and has a tier of its own, 1 to 4. The working housings joined to each other carry
-//! one net of each kind together; the weakest housing on a net sets what it carries (M10).
+//! Round 31: every housing carries its channels built in (items, fluid, energy, each in a fixed
+//! slot), and has a tier of its own, 1 to 4. The working housings joined to each other carry one
+//! net of each kind together; the weakest housing on a net sets what it carries (M10). 0.21 (spec
+//! 44, XC1): a fourth channel, experience, in the fourth slot.
 
 use std::collections::{BTreeSet, BinaryHeap, HashMap};
 
@@ -21,11 +22,16 @@ pub enum ChannelKind {
     Item,
     Fluid,
     Energy,
+    /// 0.21 (spec 44, XC1; owner: «четвертым каналом … зеленый канал. Ну, типа опыт»):
+    /// experience points between the blocks that make it, the condensers and the enchanting
+    /// machine (`net::xp`).
+    Xp,
 }
 
 impl ChannelKind {
     /// Every kind, in the order of a housing's slots.
-    pub const ALL: [ChannelKind; SLOTS] = [ChannelKind::Item, ChannelKind::Fluid, ChannelKind::Energy];
+    pub const ALL: [ChannelKind; SLOTS] =
+        [ChannelKind::Item, ChannelKind::Fluid, ChannelKind::Energy, ChannelKind::Xp];
 
     /// The slot of a housing this kind is built into.
     pub const fn slot(self) -> usize {
@@ -33,7 +39,14 @@ impl ChannelKind {
             ChannelKind::Item => ITEM_SLOT,
             ChannelKind::Fluid => FLUID_SLOT,
             ChannelKind::Energy => ENERGY_SLOT,
+            ChannelKind::Xp => XP_SLOT,
         }
+    }
+
+    /// Whether a joint of this kind has a filter and a priority: items and fluids do, energy and
+    /// experience only a direction.
+    pub const fn filtered(self) -> bool {
+        matches!(self, ChannelKind::Item | ChannelKind::Fluid)
     }
 
     /// The kind built into `slot`; none past the last slot.
@@ -49,16 +62,20 @@ pub struct Channel {
     pub tier: u8,
 }
 
-/// Number of channels in a housing: one of each kind, built in (round 31; M1 had four free slots).
-pub const SLOTS: usize = 3;
+/// Number of channels in a housing: one of each kind, built in (round 31: three; M1 had four free
+/// slots; 0.21, XC1: the fourth is experience).
+pub const SLOTS: usize = 4;
 /// The slot of each kind: the joints' settings are kept per face and per slot (M7).
 pub const ITEM_SLOT: usize = 0;
 pub const FLUID_SLOT: usize = 1;
 pub const ENERGY_SLOT: usize = 2;
+/// 0.21 (XC1): a housing saved with three slots has no settings here, so its experience joints
+/// work in their default.
+pub const XP_SLOT: usize = 3;
 /// Housing tiers run from 1 to this, as the machines' (`tiers::MAX_TIER`).
 pub const MAX_TIER: u8 = crate::tiers::MAX_TIER;
 
-/// A housing of the magistral: its three channels are built in, and its tier sets how much they
+/// A housing of the magistral: its channels are built in, and its tier sets how much they
 /// carry (round 31).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Housing {
@@ -92,7 +109,7 @@ impl Housing {
         })
     }
 
-    /// Its three channels, in slot order.
+    /// Its channels, in slot order.
     pub fn channels(self) -> [Channel; SLOTS] {
         ChannelKind::ALL.map(|kind| Channel {
             kind,
@@ -582,7 +599,7 @@ mod tests {
             assert_eq!(net.min_tier, 1);
         }
         assert_eq!(
-            [ITEM_SLOT, FLUID_SLOT, ENERGY_SLOT].map(ChannelKind::of_slot),
+            [ITEM_SLOT, FLUID_SLOT, ENERGY_SLOT, XP_SLOT].map(ChannelKind::of_slot),
             ChannelKind::ALL.map(Some)
         );
         assert_eq!(ChannelKind::of_slot(SLOTS), None);
@@ -592,6 +609,34 @@ mod tests {
         let t = analyse(&layout, &Tuning::default());
         assert_eq!(t.net_of_kind([0, 0, 0], ChannelKind::Energy).unwrap().min_tier, 3);
         assert_eq!(t.net_of_kind([2, 0, 0], ChannelKind::Energy).unwrap().min_tier, 2);
+    }
+
+    #[test]
+    fn every_housing_carries_an_experience_channel_in_its_fourth_slot() {
+        // 0.21 (XC1): four slots; the experience net is the item net's housings, held to the same
+        // weakest tier, and only experience and energy go without a filter.
+        assert_eq!(SLOTS, 4);
+        assert_eq!(ChannelKind::Xp.slot(), XP_SLOT);
+        assert_eq!(ChannelKind::of_slot(XP_SLOT), Some(ChannelKind::Xp));
+        assert_eq!(
+            ChannelKind::ALL.map(ChannelKind::filtered),
+            [true, true, false, false]
+        );
+        let mut layout = Layout::default();
+        layout.nodes.insert([0, 0, 0], Node { tier: 2 });
+        for (x, tier) in [(1, 3), (2, 2), (3, 4)] {
+            layout.housings.insert([x, 0, 0], housing(tier));
+        }
+        let t = analyse(&layout, &Tuning::default());
+        let xp = t.net_of([3, 0, 0], XP_SLOT).unwrap();
+        let items = t.net_of_kind([3, 0, 0], ChannelKind::Item).unwrap();
+        assert_eq!((xp.kind, xp.min_tier), (ChannelKind::Xp, 2));
+        assert_eq!(xp.housings, items.housings);
+        assert_eq!(
+            Housing::new(2).channel(XP_SLOT),
+            Some(Channel { kind: ChannelKind::Xp, tier: 2 })
+        );
+        assert_eq!(Housing::new(2).channels().len(), 4);
     }
 
     #[test]

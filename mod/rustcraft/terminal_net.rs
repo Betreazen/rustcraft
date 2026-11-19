@@ -210,6 +210,17 @@ fn magistral(game: &Game<'_>, level: &LevelNet, branch: &net::Branch, tuning: &T
         })
         .collect();
     let boosts = node_window::node_modules(game, nodes.into_iter());
+    let condensers: BTreeSet<Pos> = branch
+        .housings
+        .iter()
+        .flat_map(|&h| Face::ALL.map(|f| step(h, f)))
+        .filter(|p| {
+            matches!(
+                level.machines.get(p),
+                Some(content::Machine::Util(rustcraft_rules::utility::Util::XpTank))
+            )
+        })
+        .collect();
     let slowest = |rate: &dyn Fn(u8) -> f64| {
         nets.iter()
             .map(|n| rate(n.min_tier) * net_boost(&n.housings, &level.topology.reach, &boosts))
@@ -228,6 +239,17 @@ fn magistral(game: &Game<'_>, level: &LevelNet, branch: &net::Branch, tuning: &T
         } else {
             tuning.energy_of(branch.min_tier) as f32
         },
+        // 0.21 (spec 44, XC8): the experience channel and the condensers beside the branch.
+        xp: if nets.is_empty() {
+            0.0
+        } else {
+            tuning.xp_of(branch.min_tier) as f32
+        },
+        condensers: u16::try_from(condensers.len()).unwrap_or(u16::MAX),
+        xp_held: condensers
+            .iter()
+            .map(|p| crate::game::rustcraft_utility::xp_of(game, *p))
+            .fold(0u32, u32::saturating_add),
     }
 }
 
@@ -565,6 +587,19 @@ fn line(p: &NetPage, row: Row) -> Line {
             "Fluid buckets a second",
             energy_text(f64::from(m.fluid)),
         ),
+        Row::Xp => pair(
+            "rustcraft.netpage.xp",
+            "Experience, points/s",
+            if m.condensers == 0 {
+                tr_with("rustcraft.netpage.xp_none", "%s · no condenser", &[energy_text(f64::from(m.xp))])
+            } else {
+                tr_with(
+                    "rustcraft.netpage.xp_value",
+                    "%s · %s points in condensers: %s",
+                    &[energy_text(f64::from(m.xp)), grouped(u64::from(m.xp_held)), m.condensers.to_string()],
+                )
+            },
+        ),
         Row::Energy => {
             let e = p.energy.unwrap_or_default();
             pair(
@@ -787,7 +822,7 @@ pub(super) fn row_tooltip(page: Option<&NetPage>, index: usize, i: usize, lines:
             "rustcraft.netpage.reach_hint",
             "A housing works within its node's range: put a node closer, or one of a higher tier",
         )),
-        Row::Tier | Row::Items | Row::Fluid => lines.push(hint(
+        Row::Tier | Row::Items | Row::Fluid | Row::Xp => lines.push(hint(
             "rustcraft.netpage.tier_hint",
             "The weakest housing sets what the whole branch carries",
         )),

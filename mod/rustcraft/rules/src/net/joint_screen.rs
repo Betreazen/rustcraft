@@ -1,6 +1,6 @@
 //! s18/pipe: the joint window drawn as the guide's table (ui.js `wrench`, «Стык: Электропечь»):
-//! a row per channel of the housing (round 31: its three built-in channels, items, fluid and
-//! energy) with «Гнездо / Канал / Направление / Фильтр / Приоритет» and
+//! a row per channel of the housing (round 31: its built-in channels, items, fluid and energy;
+//! 0.21: and experience) with «Гнездо / Канал / Направление / Фильтр / Приоритет» and
 //! «Скопировать настройки / Вставить» under it. It is a screen of the mod's own, as the node's
 //! window is (`node_window`): the server sends the view of one face (`JointView`), the client
 //! draws it and sends back what was pressed (`Press`), the server turns a press into the same
@@ -26,7 +26,7 @@ pub const PRESS: &str = "rustcraft:joint_press";
 /// One row of the table, numbers and ids only: the client writes the words.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ViewRow {
-    /// The channel in the slot: 0 items, 1 fluids, 2 energy; none for an empty slot.
+    /// The channel in the slot: 0 items, 1 fluids, 2 energy, 3 experience; none for an empty slot.
     pub kind: Option<u8>,
     /// The block on the face works with this channel.
     pub here: bool,
@@ -47,9 +47,9 @@ impl ViewRow {
         self.kind.is_some() && self.here
     }
 
-    /// Whether the row has a filter and a priority (items and fluids, not energy).
+    /// Whether the row has a filter and a priority (items and fluids, not energy or experience).
     pub fn filtered(&self) -> bool {
-        self.directed() && self.channel() != Some(ChannelKind::Energy)
+        self.directed() && self.channel().is_some_and(ChannelKind::filtered)
     }
 }
 
@@ -77,6 +77,7 @@ pub fn kind_code(kind: ChannelKind) -> u8 {
         ChannelKind::Item => 0,
         ChannelKind::Fluid => 1,
         ChannelKind::Energy => 2,
+        ChannelKind::Xp => 3,
     }
 }
 
@@ -85,6 +86,7 @@ pub fn kind_of_code(code: u8) -> Option<ChannelKind> {
         0 => Some(ChannelKind::Item),
         1 => Some(ChannelKind::Fluid),
         2 => Some(ChannelKind::Energy),
+        3 => Some(ChannelKind::Xp),
         _ => None,
     }
 }
@@ -140,7 +142,7 @@ pub enum Press {
 pub fn action(page: &Page, press: &Press, held: Option<&str>) -> Action {
     let row = |slot: usize| page.rows.get(slot).copied();
     let directed = |slot| row(slot).is_some_and(|r| r.kind.is_some() && r.here);
-    let filtered = |slot| directed(slot) && row(slot).and_then(|r| r.kind) != Some(ChannelKind::Energy);
+    let filtered = |slot| directed(slot) && row(slot).and_then(|r| r.kind).is_some_and(ChannelKind::filtered);
     let edit = |slot, edit| Action::Edit { slot, edit };
     match press {
         Press::Face(i) => match Face::from_index(*i) {
@@ -201,8 +203,9 @@ pub fn mode_of(row: &ViewRow) -> Mode {
 pub type Rect = [f32; 4];
 
 pub const WIDTH: f32 = 354.0;
-/// Round 31: three rows, one a built-in channel (it had four slots).
-pub const HEIGHT: f32 = 152.0;
+/// Round 31: three rows, one a built-in channel (it had four slots); 0.21 (XC4): four, the fourth
+/// experience.
+pub const HEIGHT: f32 = 172.0;
 const LEFT: f32 = 8.0;
 /// The face tabs under the title.
 pub const TABS_Y: f32 = 18.0;
@@ -338,6 +341,7 @@ mod tests {
                 row(Some(ChannelKind::Item), true),
                 row(Some(ChannelKind::Fluid), false),
                 row(Some(ChannelKind::Energy), true),
+                row(Some(ChannelKind::Xp), true),
             ],
             settings,
             armed: None,
@@ -357,6 +361,10 @@ mod tests {
         assert_eq!(mode_of(&v.rows[2]), Mode::From);
         assert!(v.rows[2].directed() && !v.rows[2].filtered(), "energy: a direction, no filter");
         assert!(!v.rows[1].directed(), "no fluid at a furnace: only dashes");
+        assert_eq!(v.rows[3].channel(), Some(ChannelKind::Xp));
+        assert!(v.rows[3].directed() && !v.rows[3].filtered(), "experience: a direction, no filter");
+        assert_eq!(kind_of_code(kind_code(ChannelKind::Xp)), Some(ChannelKind::Xp));
+        assert_eq!(kind_of_code(4), None);
     }
 
     #[test]
@@ -372,6 +380,12 @@ mod tests {
         assert_eq!(action(&p, &Press::Mode { slot: 1, back: false }, None), Action::None);
         assert_eq!(action(&p, &Press::Mode { slot: SLOTS, back: false }, None), Action::None);
         assert_eq!(action(&p, &Press::List { slot: 2 }, None), Action::None, "energy has no filter");
+        assert_eq!(action(&p, &Press::List { slot: 3 }, None), Action::None, "experience has no filter");
+        assert_eq!(action(&p, &Press::Add { slot: 3 }, Some("minecraft:experience_bottle")), Action::None);
+        assert_eq!(
+            action(&p, &Press::Mode { slot: 3, back: false }, None),
+            Action::Edit { slot: 3, edit: Edit::NextMode }
+        );
         assert_eq!(
             action(&p, &Press::Priority { slot: 0, delta: 5 }, None),
             Action::Edit { slot: 0, edit: Edit::Priority(1) },
@@ -420,6 +434,8 @@ mod tests {
         assert_eq!(press_at(&v, mid(tab_rects()[usize::from(Face::XNeg.index())]), false), None);
         assert_eq!(press_at(&v, mid(mode_rect(0)), true), Some(Press::Mode { slot: 0, back: true }));
         assert_eq!(press_at(&v, mid(list_rect(2)), false), None, "energy has no list");
+        assert_eq!(press_at(&v, mid(list_rect(3)), false), None, "experience has no list");
+        assert_eq!(press_at(&v, mid(mode_rect(3)), false), Some(Press::Mode { slot: 3, back: false }));
         assert_eq!(press_at(&v, mid(list_rect(0)), false), Some(Press::List { slot: 0 }));
         let first = item_at(0, 0);
         assert_eq!(
@@ -444,6 +460,8 @@ mod tests {
         assert!(add_rect(0)[0] + add_rect(0)[2] < COLUMNS[4]);
         assert!(mode_rect(0)[0] + mode_rect(0)[2] < COLUMNS[3]);
         assert!(HINT_Y + 8.0 <= HEIGHT);
+        // The fourth row (experience) ends above the buttons.
+        assert!(mode_rect(SLOTS - 1)[1] + mode_rect(SLOTS - 1)[3] < BUTTONS_Y);
         let tabs = tab_rects();
         assert!(tabs[5][0] + tabs[5][2] <= WIDTH - LEFT);
     }

@@ -17,7 +17,8 @@
 // - The number to keep, one an animal of rustcraft_rules::butcher::ANIMALS: JSON in its saved
 //   compound (`keep`); a press on an animal's toggle in its window steps it (2 to 16, K3).
 // - The radius module doubles its pen (4 → 8 blocks, K1). Slice 18: the kill's experience goes
-//   into an experience condenser it touches, and is lost without one (K6).
+//   into an experience condenser it touches (K6); 0.21 (spec 44): else over the experience
+//   channel of its line into the nearest condenser with room (rustcraft_utility::xp_made).
 // - Wave 2: tiers 2–4 (rustcraft_rules::tiers): a strike every 10 s on tier 2, faster a tier
 //   above, ×0.85 slower an economy module; 4 E/s from its buffer.
 use crate::game::{
@@ -319,8 +320,9 @@ fn strike(game: &mut Game<'_>, dimension: &str, level: &LevelNet, pos: Pos, t: &
                 mining::store(&mut b.items[..LOOT_SLOTS], stack, max)
             });
         }
-        // K6 (slice 18): the kill's experience into a condenser beside it; 0.21: or on its line.
-        xp_to_condenser(game, level, pos, &kind);
+        // K6 (slice 18): the kill's experience into a condenser beside it; 0.21 (spec 44, XC5):
+        // else over its experience channel.
+        crate::game::rustcraft_utility::xp_made(game, dimension, level, t, pos, rules::kill_xp(&kind));
     }
     if struck && let Some(b) = blade {
         if let Some(bat) = crate::game::rustcraft_gear::battery(game, &b) {
@@ -343,25 +345,6 @@ fn strike(game: &mut Game<'_>, dimension: &str, level: &LevelNet, pos: Pos, t: &
         });
     }
     Shown::Working(kind)
-}
-
-/// K6 (guide `butcher`): «опыт за убийство уходит в конденсатор опыта вплотную, без него
-/// пропадает»: the points the animal is worth (the game's 1–3 for a farm animal) into a condenser
-/// touching the butcher (a kill with no player behind it drops no orbs). 0.21 (K6a): without one,
-/// into the nearest condenser with room beside the magistral line the butcher stands on.
-fn xp_to_condenser(game: &mut Game<'_>, level: &LevelNet, pos: Pos, kind: &str) {
-    use crate::game::rustcraft_utility as utility;
-    let points = if kind == "minecraft:chicken" || kind == "minecraft:rabbit" { 1 } else { 2 };
-    let block = rustcraft_rules::utility::Util::XpTank.spec().block;
-    let room = |game: &Game<'_>, p: Pos| utility::xp_of(game, p) < rustcraft_rules::utility::xp::CAPACITY;
-    let tank = utility::neighbour_of(game, pos, block).or_else(|| {
-        rules::line_neighbours(&level.topology, &level.layout, pos)
-            .into_iter()
-            .find(|p| game.native_block(*p) == block && room(game, *p))
-    });
-    if let Some(tank) = tank {
-        utility::add_xp(game, tank, points);
-    }
 }
 
 fn animal_name(kind: &str) -> Text {

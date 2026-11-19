@@ -40,6 +40,7 @@ use rustcraft_rules::{
         joint_screen::{self as js, Press},
         joint_window::{self, Action, Cell, Page, Row, Unused},
         joints::ENERGY_DEFAULT,
+        xp::{XP_DEFAULT, XpPort},
         settings::{HousingJoints, JointSetting, Record},
         topology::{ChannelKind, SLOTS},
     },
@@ -429,6 +430,8 @@ struct FaceBlock {
     energy: bool,
     /// The default direction of a fluid joint there (a tank, a pump); none for other blocks.
     fluid: Option<Mode>,
+    /// 0.21 (XC4): a butcher, a condenser or an enchanting machine: an experience joint works there.
+    xp: bool,
 }
 
 /// The housing as the window needs it, read fresh from the level.
@@ -461,11 +464,13 @@ fn context(game: &mut Game<'_>, dimension: &str, housing: Pos) -> Option<Context
         } else {
             fluids::default_mode(&block)
         };
+        let xp = !pipe && XpPort::of(&block).is_some();
         FaceBlock {
             block,
             inventory,
             energy,
             fluid,
+            xp,
         }
     });
     Some(Context { joints, faces })
@@ -476,7 +481,7 @@ fn face_block(ctx: &Context, face: Face) -> &FaceBlock {
 }
 
 fn is_joint(f: &FaceBlock) -> bool {
-    f.inventory.is_some() || f.energy || f.fluid.is_some()
+    f.inventory.is_some() || f.energy || f.fluid.is_some() || f.xp
 }
 
 /// The default direction of `kind` at a face.
@@ -485,13 +490,14 @@ fn default_for(kind: Option<ChannelKind>, f: &FaceBlock) -> Mode {
         Some(ChannelKind::Item) => f.inventory.unwrap_or(Mode::Into),
         Some(ChannelKind::Energy) => ENERGY_DEFAULT,
         Some(ChannelKind::Fluid) => f.fluid.unwrap_or(Mode::Both),
+        Some(ChannelKind::Xp) => XP_DEFAULT,
         None => Mode::Both,
     }
 }
 
 fn page(ctx: &Context, face: Face, armed: Option<usize>, clipboard: bool) -> Page {
     let f = face_block(ctx, face);
-    // Round 31: every housing has the three channels, each kind in its own slot.
+    // Round 31: every housing has its channels built in, each kind in its own slot (0.21: four).
     let kinds: [Option<ChannelKind>; SLOTS] = ChannelKind::ALL.map(Some);
     Page {
         joints: ctx.faces.each_ref().map(is_joint),
@@ -502,6 +508,7 @@ fn page(ctx: &Context, face: Face, armed: Option<usize>, clipboard: bool) -> Pag
                 Some(ChannelKind::Item) => f.inventory.is_some(),
                 Some(ChannelKind::Energy) => f.energy,
                 Some(ChannelKind::Fluid) => f.fluid.is_some(),
+                Some(ChannelKind::Xp) => f.xp,
                 None => false,
             },
         }),
@@ -714,6 +721,7 @@ fn kind_name(kind: ChannelKind) -> Text {
         ChannelKind::Item => tr("rustcraft.channel.item", "Item channel"),
         ChannelKind::Fluid => tr("rustcraft.channel.fluid", "Fluid channel"),
         ChannelKind::Energy => tr("rustcraft.channel.energy", "Energy channel"),
+        ChannelKind::Xp => tr("rustcraft.channel.xp", "Experience channel"),
     }
 }
 
@@ -775,8 +783,13 @@ fn stack_of(game: &Game<'_>, ctx: &Context, cell: &Cell) -> Option<ItemStack> {
             kind: Some(kind),
         } => named(
             // 0.21 (spec 45, CR6): the old channel item only as the row's picture; no player gets
-            // one from here (the window's cells are no stacks to take).
-            rustcraft_rules::net::old_channels::item_of(*kind, 1),
+            // one from here (the window's cells are no stacks to take). 0.21 (XC4): the experience
+            // row, which never had an item, shows a bottle o' enchanting.
+            if *kind == ChannelKind::Xp {
+                "minecraft:experience_bottle"
+            } else {
+                rustcraft_rules::net::old_channels::item_of(*kind, 1)
+            },
             1,
             server::line(
                 "rustcraft.window.slot",
