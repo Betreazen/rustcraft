@@ -460,8 +460,6 @@ class Writer:
 
 # The housing's arms by side of the model, and the Minecraft side each one points to.
 ARMS = {'x+': 'east', 'x-': 'west', 'y+': 'south', 'y-': 'north', 'z+': 'up', 'z-': 'down'}
-# The model's axes as the game's: x+ east, y+ south, z+ up.
-MC_AXIS = {'x': 'x', 'y': 'z', 'z': 'y'}
 BLOCK = 'minecraft:block/block'
 # The bottleneck's frame the client draws round a housing while the wrench is in hand
 # (rustcraft_pipe18): twelve edges 0.75 pixel thick round the cage, tinted red by the client.
@@ -469,10 +467,11 @@ WEAK_LO, WEAK_HI, WEAK_T = 4.25, 11.75, 0.75
 
 
 def housing(out, report):
-    """Round 31: the housing's blockstate and models. Its three channels are built in and run along
-    the axes it is joined along (along x when it is joined along none); its tier, 1 to 4, colours
-    its corner caps and the collars of its arms, as the node's tier colours its pips. The client
-    draws no strip of its own: a housing shows its channels as soon as its block is there."""
+    """Round 31: the housing's blockstate and models. Its three channels are built in and run in its
+    arms, from the middle of the block to each joined side, so they follow the line whichever way
+    it turns (a housing joined to nothing shows them along x); its tier, 1 to 4, colours its corner
+    caps and the collars of its arms, as the node's tier colours its pips. The client draws no strip
+    of its own: a housing shows its channels as soon as its block is there."""
     boxes = read(transport.pipe)
     tints = {'tint_%d' % t: TIER[t] for t in range(1, 5)}
     skin = Skin('housing', tints)
@@ -496,13 +495,12 @@ def housing(out, report):
         # An arm with its collar in one model, so the collar hides the ends of the arm's beams.
         for arm, side in ARMS.items():
             models['housing_arm_%s_%d' % (side, t)] = tiered(by_part[arm] + by_part['collar_' + arm], t)
-    for axis, mc in MC_AXIS.items():
-        models['housing_channels_' + mc] = by_part['ch_' + axis]
+    models['housing_channels'] = by_part['ch_x']
     for name, part_boxes in models.items():
         out.text('models/block/%s.json' % name, model_json(skin.textures(), elements(part_boxes, skin, stats)))
     # In the inventory: a straight piece of the item's tier, its channels along it.
     for t in range(1, 5):
-        piece = by_part['body'] + by_part['ch_x'] + by_part['x-'] + by_part['collar_x-'] + by_part['x+'] + by_part['collar_x+']
+        piece = by_part['body'] + by_part['x-'] + by_part['collar_x-'] + by_part['x+'] + by_part['collar_x+']
         name = 'housing_inventory' if t == 1 else 'housing_inventory_%d' % t
         out.text('models/block/%s.json' % name, model_json(skin.textures(), elements(tiered(piece, t), skin, stats), BLOCK))
     out.skin(skin)
@@ -515,19 +513,12 @@ def housing(out, report):
         for t in range(1, 5):
             parts.append({'when': {side: 'true', 'tier': str(t)},
                           'apply': {'model': 'rustcraft:block/housing_arm_%s_%d' % (side, t)}})
-    alone = {s: 'false' for s in ('north', 'south', 'up', 'down')}
-    along = {
-        'x': {'OR': [{'east': 'true'}, {'west': 'true'}, alone]},
-        'z': {'OR': [{'north': 'true'}, {'south': 'true'}]},
-        'y': {'OR': [{'up': 'true'}, {'down': 'true'}]},
-    }
-    for mc, when in along.items():
-        parts.append({'when': when, 'apply': {'model': 'rustcraft:block/housing_channels_' + mc}})
+    parts.append({'when': {s: 'false' for s in sides}, 'apply': {'model': 'rustcraft:block/housing_channels'}})
     out.text('blockstates/housing.json', '{\n  "multipart": [\n%s\n  ]\n}\n' % ',\n'.join('    ' + json.dumps(p) for p in parts))
     for t in range(2, 5):
         out.text('items/housing_%d.json' % t,
                  '{\n  "model": { "type": "minecraft:model", "model": "rustcraft:block/housing_inventory_%d" }\n}\n' % t)
-    report.append(('pipe', 'housing_core_<tier> x4, housing_arm_<side>_<tier> x24, housing_channels_<axis> x3, '
+    report.append(('pipe', 'housing_core_<tier> x4, housing_arm_<side>_<tier> x24, housing_channels, '
                    'housing_inventory x4, housing_weak', stats))
 
 

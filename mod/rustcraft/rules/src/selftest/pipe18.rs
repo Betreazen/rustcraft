@@ -571,8 +571,8 @@ mod tests {
 
     #[test]
     fn the_housing_shows_its_tier_and_its_channels_along_its_joins() {
-        // Round 31 (R5): a core and an arm a side for each tier, the channels by axis; every model
-        // it names is there.
+        // Round 31 (R5): a core and an arm a side for each tier, the channels in the arms and
+        // across the centre of a housing joined to nothing; every model it names is there.
         let states = content("assets/rustcraft/blockstates/housing.json");
         let parts = states["multipart"].as_array().unwrap();
         let models: Vec<&str> = parts.iter().map(|p| p["apply"]["model"].as_str().unwrap()).collect();
@@ -582,8 +582,9 @@ mod tests {
                 assert!(models.contains(&format!("rustcraft:block/housing_arm_{side}_{tier}").as_str()));
             }
         }
-        for axis in ["x", "y", "z"] {
-            assert!(models.contains(&format!("rustcraft:block/housing_channels_{axis}").as_str()));
+        let alone = parts.iter().find(|p| p["apply"]["model"] == "rustcraft:block/housing_channels").unwrap();
+        for side in crate::housing::SIDES {
+            assert_eq!(alone["when"][side], "false", "the centre's channels show only when nothing is joined");
         }
         for model in models {
             let path = format!("assets/rustcraft/models/block/{}.json", model.trim_start_matches("rustcraft:block/"));

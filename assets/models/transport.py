@@ -73,8 +73,10 @@ def node_hub(m):
         m.pivot(rotor, 8, 8, 8)
         face_box(m, 'tint', face, 5, 7.25, 6, 1.5, inset=2, depth=0.5, part=rotor)
         face_box(m, 'tint', face, 7.25, 5, 1.5, 6, inset=2, depth=0.5, part=rotor)
-        face_box(m, 'tint_light', face, 5, 7.25, 1, 1.5, inset=1.9, depth=0.5, part=rotor)
-        face_box(m, 'tint_light', face, 7.25, 10, 1.5, 1, inset=1.9, depth=0.5, part=rotor)
+        # The light tips are a little narrower than the bars, so no side of a tip lies on a bar's
+        # (round 31, z-fighting).
+        face_box(m, 'tint_light', face, 5, 7.3, 1, 1.4, inset=1.9, depth=0.5, part=rotor)
+        face_box(m, 'tint_light', face, 7.3, 10, 1.4, 1, inset=1.9, depth=0.5, part=rotor)
         face_box(m, 'white', face, 7.25, 7.25, 1.5, 1.5, inset=1.75, depth=0.75, part=rotor)
 
 
@@ -133,11 +135,10 @@ def pipe(m):
         for y in CAPS:
             for z in CAPS:
                 m.box('tint', x, y, z, 1, 1, 1)
-    # The channels across the centre, one part an axis: the guide and the game show those of the
-    # axes the housing is joined along, and those along x when it is joined along none.
-    for axis in 'xyz':
-        for k, lane in enumerate(LANE):
-            m.box('glow_tint_%d' % k, *along(axis, 5, 6, lane, lane), part='ch_' + axis)
+    # The channels across the centre of a housing joined to nothing: along x. A joined housing
+    # shows them in its arms.
+    for k, lane in enumerate(LANE):
+        m.box('glow_tint_%d' % k, *along('x', 5, 6, lane, lane), part='ch_x')
     # An arm to every side, one part each; the guide shows the arms to connected sides only.
     for axis in 'xyz':
         for sign, start in (('-', 0), ('+', 11)):
@@ -146,8 +147,13 @@ def pipe(m):
                 for b in (5, 10):
                     edge = 'pipe' if axis == 'z' else 'pipe_light' if b == 10 else 'pipe_dark'
                     m.box(edge, *along(axis, start, 5, a, b), part=arm)
+            # Its channels run from the middle of the block to the next one. Each starts at its
+            # own lane, so the same channel of every arm meets in one cube in the middle and the
+            # line's channels follow its arms, whichever way it turns: no arm tells the line's axis
+            # (an arm to a machine is a joint, round 31 models stream).
             for k, lane in enumerate(LANE):
-                m.box('glow_tint_%d' % k, *along(axis, start, 5, lane, lane), part=arm)
+                lo, hi = (0, lane + 1) if sign == '-' else (lane, 16)
+                m.box('glow_tint_%d' % k, *along(axis, lo, hi - lo, lane, lane), part=arm)
             # A collar where the arm meets the next block, in the colour of the tier.
             m.box('tint', *along(axis, 0 if start == 0 else 15, 1, 4.75, 4.75, 6.5), part='collar_' + arm)
 

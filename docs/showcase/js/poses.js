@@ -80,15 +80,14 @@
 
   // ---- trunk and transport
   // Housing (round 31): an arm and its collar to every connected side; the three built-in channels
-  // (items, fluid, energy) run across the centre along the axes it is connected along, along x
-  // when it is connected along none; the collars and the corner caps wear the tier's colour.
+  // (items, fluid, energy) run in the arms from the middle of the block, and across the centre
+  // along x when nothing is connected; the collars and the corner caps wear the tier's colour.
   const ARMS = ['x-', 'x+', 'y-', 'y+', 'z-', 'z+'];
   P.pipe = (o) => {
     const con = o.con || '';
     const parts = {};
     for (const a of ARMS) if (!con.includes(a)) { parts[a] = HIDE; parts['collar_' + a] = HIDE; }
-    const axes = ['x', 'y', 'z'].filter((ax) => con.includes(ax + '-') || con.includes(ax + '+'));
-    for (const ax of ['x', 'y', 'z']) if (!(axes.includes(ax) || (!axes.length && ax === 'x'))) parts['ch_' + ax] = HIDE;
+    if (ARMS.some((a) => con.includes(a))) parts.ch_x = HIDE;
     return { glow: o.bad ? 0 : 0.12, dim: o.bad ? 0.45 : 0, tint: TIER[o.tier || 1], tints: { 0: CH.i, 1: CH.f, 2: CH.e }, parts };
   };
 

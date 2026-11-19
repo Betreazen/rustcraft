@@ -28,8 +28,6 @@
     {"when": {"down": "true", "tier": "2"}, "apply": {"model": "rustcraft:block/housing_arm_down_2"}},
     {"when": {"down": "true", "tier": "3"}, "apply": {"model": "rustcraft:block/housing_arm_down_3"}},
     {"when": {"down": "true", "tier": "4"}, "apply": {"model": "rustcraft:block/housing_arm_down_4"}},
-    {"when": {"OR": [{"east": "true"}, {"west": "true"}, {"north": "false", "south": "false", "up": "false", "down": "false"}]}, "apply": {"model": "rustcraft:block/housing_channels_x"}},
-    {"when": {"OR": [{"north": "true"}, {"south": "true"}]}, "apply": {"model": "rustcraft:block/housing_channels_z"}},
-    {"when": {"OR": [{"up": "true"}, {"down": "true"}]}, "apply": {"model": "rustcraft:block/housing_channels_y"}}
+    {"when": {"north": "false", "east": "false", "south": "false", "west": "false", "up": "false", "down": "false"}, "apply": {"model": "rustcraft:block/housing_channels"}}
   ]
 }
