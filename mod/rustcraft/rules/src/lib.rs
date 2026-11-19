@@ -31,6 +31,8 @@ pub mod selftest;
 pub mod storage;
 pub mod traversal;
 pub mod tiers;
+// 0.21: an item's description in its tooltip (spec 41).
+pub mod tips;
 pub mod tuning;
 pub mod utility;
 pub mod turret;

@@ -1196,6 +1196,27 @@ bindings = [
   { name = "bar", ty = "&mut Option<(i32, u32)>", value = "&mut *bar" },
 ]
 
+# 0.21: an item's description in its tooltip (spec 41; rustcraft_rules::tips): the summary of its
+# handbook page under its name, on the client only (API 12, game/native_hooks.rs:7911-7920, from
+# game/stations.rs:2622-2626 once vanilla built the lines). The same hook JEI's bundle injects into.
+[[module]]
+id = "tips"
+file = "crates/horizon-client/src/game.rs"
+name = "rustcraft_tips"
+source = "tips.rs"
+
+[[injection]]
+id = "tooltip"
+hook = "tooltip"
+hook_version = 1
+kind = "HEAD"
+helper = "hook_tooltip.rs"
+bindings = [
+  { name = "game", ty = "&crate::game::Game<'_>", value = "&*self" },
+  { name = "stack", ty = "&horizon_client::items::ItemStack", value = "stack" },
+  { name = "lines", ty = "&mut Vec<(horizon_client::text::Text, u32)>", value = "&mut *lines" },
+]
+
 # The gear's keys (Z magnet, B backpack, ; night vision), rebindable in Options > Mods.
 [[module]]
 id = "gear_keys"
