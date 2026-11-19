@@ -346,12 +346,17 @@ pub fn tick(
             }
             // 0.21 (round 32, SP2): what no receiver took of an item a storage of the net holds
             // its limit of is surplus: its sinks take it, else a storage that destroys it (S5).
-            if left > 0 && available > 0 && !inv.is_store(src.block) {
+            // A storage's stock is no such surplus (SP1 has its own), nor what a vanilla container
+            // on its default joint gives (the player's chests beside any line keep it): only a
+            // machine's products and a container the player set «из блока». A storage that
+            // destroys the surplus takes from any source, as before.
+            if left > 0 && available > 0 {
                 let limited: Vec<usize> = receivers
                     .iter()
                     .copied()
                     .filter(|&r| open(r) && inv.at_limit(joints[r].block, &item))
                     .collect();
+                let gives_surplus = !src.auto && !inv.is_store(src.block);
                 moved += surplus::arriving(
                     joints,
                     &receivers,
@@ -361,6 +366,7 @@ pub fn tick(
                     src.block,
                     &item,
                     left,
+                    gives_surplus,
                     &mut available,
                     &mut result.transfers,
                 );

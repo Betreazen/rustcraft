@@ -10,6 +10,8 @@
 //! - Water in the storage's cells over its limit burns in the trash of its fluid line (SP8).
 //! - The wrench opens the joint of the housing beside the trash and the disintegrator instead of
 //!   turning them; a trash with no housing beside it turns (SP9).
+//! - A chest on its default joint keeps a limited item the storage does not take, while the
+//!   storage's own stock over its limit burns in the same trash (SP2).
 
 use super::craft18::status_key;
 use super::magistral::line;
@@ -23,13 +25,14 @@ use crate::orders::fluid_key;
 use crate::storage::terminal::LimitChange;
 use crate::tuning::Tuning;
 
-pub const ALL: [Build; 6] = [
+pub const ALL: [Build; 7] = [
     gear_taken_apart_ingots_burnt,
     lowered_limit_pushes_the_stock_out,
     no_sink_changes_nothing,
     trash_without_a_filter_takes_only_surplus,
     water_over_the_limit_burns,
     wrench_opens_the_trash_joint,
+    default_chest_keeps_its_items,
 ];
 
 const DISINTEGRATOR: &str = "rustcraft:disintegrator";
@@ -195,6 +198,37 @@ fn trash_without_a_filter_takes_only_surplus(o: Pos, _: &Tuning) -> Scenario {
         .check("the trash does not say it has no filter", move |b, _| {
             let key = status_key(b, trash);
             if key == NO_FILTER { Err(format!("it says {key}")) } else { Ok(()) }
+        })
+}
+
+fn default_chest_keeps_its_items(o: Pos, _: &Tuning) -> Scenario {
+    // SP2: a chest on its default joint (every chest beside a line, the owner's own among them)
+    // gives no surplus: with the storage at its limits, its pickaxe and cobblestone stay put while
+    // the storage's own cobblestone over the limit burns in the same trash.
+    let (set, own, dis, trash, t) = (chest(o, 1), at(o, [2, 0, 1]), dis_at(o), trash_at(o), terminal_at(o));
+    Scenario::new("surplus21_default_chest_keeps_its_items", plot_area(o))
+        .then("a storage, a disintegrator, a trash and a chest on its default; 20 cobblestone in", move |b, _| {
+            build(b, o, 2, true, true)?;
+            b.place(own, "minecraft:chest", &[])?;
+            fill(b, set, COBBLE, 20)
+        })
+        .until("the storage holds the 20", 400, move |b, _| Ok(held(b, t, COBBLE)? == 20))
+        .then("limits of 5 cobblestone and no pickaxes; the chest on its default gets both", move |b, _| {
+            limit(b, t, COBBLE, 5)?;
+            limit(b, t, PICK, 0)?;
+            same("a pickaxe in", b.insert(own, PICK, 1)?, 1)?;
+            fill(b, own, COBBLE, 10)
+        })
+        .until("the storage's 15 over its limit burn", 600, move |b, _| {
+            Ok(held(b, t, COBBLE)? == 5 && total(&b.items(trash)) == 0)
+        })
+        .wait(60)
+        .check("the chest on its default keeps its pickaxe and cobblestone", move |b, _| {
+            same("pickaxe", count_of(&b.items(own), PICK), 1)?;
+            same("cobblestone", count_of(&b.items(own), COBBLE), 10)?;
+            same("in the disintegrator", total(&b.items(dis)), 0)?;
+            same("stored cobblestone", held(b, t, COBBLE)?, 5)?;
+            same("stored pickaxes", held(b, t, PICK)?, 0)
         })
 }
 

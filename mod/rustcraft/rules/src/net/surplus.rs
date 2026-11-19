@@ -4,7 +4,10 @@
 //!
 //! A storage's limit on an item is how much of it the storage keeps (`storage::surplus`). Its
 //! surplus is what it holds over the limit (SP1) and what arrives that no receiver of the net
-//! keeps while a storage of the net holds its limit (SP2). The surplus goes to a sink of the net
+//! keeps while a storage of the net holds its limit (SP2): a machine's products, or what a
+//! container the player set «из блока» gives. A vanilla container on its default joint
+//! (`Joint::auto`, every chest beside a line) gives no surplus: its items stay in it, as before
+//! round 32. The surplus goes to a sink of the net
 //! (SP3): to the disintegrators that take it apart, else to the trashes. A sink takes the surplus
 //! with no joint filter; its allow list only adds what it takes beyond the surplus, a block list
 //! still keeps out what it names (SP4). With no sink for an item it stays as before: the storage
@@ -131,9 +134,11 @@ pub fn stock_out(
     moved
 }
 
-/// SP2: `left` of `item` from `from` (no storage) that no receiver took, while the storages
-/// `limited` of the net hold their limit of it, go to its sinks; what they do not take goes into
-/// a storage of them that destroys the surplus (S5, as before). How many moved.
+/// SP2: `left` of `item` from `from` that no receiver took, while the storages `limited` of the
+/// net hold their limit of it. With `surplus` (`from` is a machine, or a container the player set
+/// «из блока»; no storage and no container on its default joint) it goes to its sinks first. What
+/// they do not take goes into a storage of `limited` that destroys the surplus (S5), from any
+/// source, as before round 32. How many moved.
 #[allow(clippy::too_many_arguments)]
 pub fn arriving(
     joints: &[Joint],
@@ -144,13 +149,18 @@ pub fn arriving(
     from: Pos,
     item: &str,
     left: u32,
+    surplus: bool,
     available: &mut u32,
     transfers: &mut Vec<Transfer>,
 ) -> u32 {
     if limited.is_empty() {
         return 0;
     }
-    let mut gave = to_sinks(joints, receivers, state, inv, from, item, left, available, transfers);
+    let mut gave = if surplus {
+        to_sinks(joints, receivers, state, inv, from, item, left, available, transfers)
+    } else {
+        0
+    };
     for &r in limited {
         let block = joints[r].block;
         if !inv.destroys(block, item) {
@@ -440,6 +450,42 @@ mod tests {
         let moved = run(&j, &mut s, 2000.0, 2);
         assert!(!moved.keys().any(|(_, to, _)| *to == TRASH), "{moved:?}");
         assert_eq!(s.stores[&STORE2].store.count(COBBLE), 10);
+    }
+
+    #[test]
+    fn a_chest_on_its_default_joint_keeps_what_the_storage_does_not_take() {
+        // SP2: a vanilla container on its default joint (every chest beside a line, the owner's
+        // own among them) gives no surplus: its cobblestone and pickaxe stay while the storage
+        // holds its limits, as before round 32.
+        let chest = &[(COBBLE, 10), (PICK, 1)];
+        let mut s = line(&[(COBBLE, 4, false), (PICK, 0, false)], &[(COBBLE, 4)], chest);
+        let mut j = joints();
+        j[0] = Joint { auto: true, ..joint(CHEST, Mode::Both) };
+        assert!(run(&j, &mut s, 2000.0, 3).is_empty());
+        assert_eq!((held(&s, CHEST, COBBLE), held(&s, CHEST, PICK)), (10, 1));
+        // A storage that destroys the surplus still takes it from such a chest, as before.
+        let mut s = line(&[(COBBLE, 4, true)], &[(COBBLE, 4)], &[(COBBLE, 10)]);
+        let moved = run(&j, &mut s, 2000.0, 1);
+        assert_eq!(moved.get(&(CHEST, STORE, COBBLE.into())), Some(&10));
+        assert!(!moved.keys().any(|(_, to, _)| *to == TRASH || *to == DIS), "{moved:?}");
+        // The same chest set «из блока» empties into the net: its surplus goes to the sinks.
+        let mut s = line(&[(COBBLE, 4, false), (PICK, 0, false)], &[(COBBLE, 4)], chest);
+        let moved = run(&joints(), &mut s, 2000.0, 1);
+        assert_eq!(moved.get(&(CHEST, TRASH, COBBLE.into())), Some(&10));
+        assert_eq!(moved.get(&(CHEST, DIS, PICK.into())), Some(&1));
+    }
+
+    #[test]
+    fn a_machines_products_no_receiver_keeps_are_surplus() {
+        // SP2: the disintegrator's sticks past their limit burn; it never takes back its own.
+        let mut s = line(&[(STICK, 0, false)], &[], &[]);
+        s.blocks.insert(DIS, Stock {
+            slots: vec![StockSlot { item: Some(STICK.into()), count: 3, can_take: true, ..StockSlot::default() }],
+            accepts: None,
+        });
+        s.sinks.insert(DIS, sink(Sink::Disintegrator, &[STICK]));
+        let moved = run(&joints(), &mut s, 2000.0, 1);
+        assert_eq!(moved.get(&(DIS, TRASH, STICK.into())), Some(&3));
     }
 
     #[test]
