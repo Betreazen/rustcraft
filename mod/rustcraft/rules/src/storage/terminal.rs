@@ -16,6 +16,7 @@
 
 use crate::machines::panel::{Rect, inside, slot_frame};
 use crate::net::items::ItemKey;
+use crate::storage::network;
 use crate::storage::view::{PER_PAGE, Tab};
 use crate::storage::{Limit, Store};
 
@@ -149,6 +150,10 @@ pub enum Part {
     /// Wave 2: a row of the queue, and its cancel button, by the row.
     Queue(usize),
     Cancel(usize),
+    /// Round 32 (spec 33): the «Сеть» button on the title line.
+    NetMode,
+    /// Round 32: a row of the «Сеть» page, by its place on the page.
+    NetRow(usize),
 }
 
 /// The part at `at`, in window pixels, in the taking or the limits mode.
@@ -156,9 +161,28 @@ pub fn part_at(at: [f32; 2]) -> Option<Part> {
     part_in(at, false)
 }
 
+/// Round 32 (spec 33): the part at `at` while the «Сеть» page is shown: its button, the page
+/// buttons (they turn the page's pages), the modes' buttons (they leave it) and its rows; the
+/// tabs, the search and the sockets do nothing there.
+pub fn part_net(at: [f32; 2]) -> Option<Part> {
+    [
+        (network::NET_MODE, Part::NetMode),
+        (PREV, Part::Prev),
+        (NEXT, Part::Next),
+        (ORDER_MODE, Part::OrderMode),
+        (LIMIT_MODE, Part::LimitMode),
+    ]
+    .into_iter()
+    .find_map(|(r, p)| inside(r, at).then_some(p))
+    .or_else(|| network::row_at(at).map(Part::NetRow))
+}
+
 /// The part at `at`; `orders` for the orders mode, whose row under the grid and line under the
 /// status have parts of their own.
 pub fn part_in(at: [f32; 2], orders: bool) -> Option<Part> {
+    if inside(network::NET_MODE, at) {
+        return Some(Part::NetMode);
+    }
     if let Some(i) = TABS.iter().position(|&r| inside(r, at)) {
         return Some(Part::Tab(Tab::ALL[i]));
     }
@@ -734,6 +758,32 @@ mod tests {
         assert!(book[0] + book[2] <= slot_frame(cell(0))[0]);
         // The window fits a 1280×720 screen at GUI scale 3.
         const { assert!(HEIGHT <= 240.0) };
+    }
+
+    #[test]
+    fn the_network_page_has_its_button_and_its_rows() {
+        // Round 32 (spec 33): the «Сеть» button answers in every mode.
+        let button = [175.0, 8.0];
+        assert_eq!(part_at(button), Some(Part::NetMode));
+        assert_eq!(part_in(button, true), Some(Part::NetMode));
+        assert_eq!(part_net(button), Some(Part::NetMode));
+        // On the page: the page buttons and the modes' buttons stay, the rows take the grid's,
+        // the row under it's and the status's places.
+        assert_eq!(part_net([113.0, 34.0]), Some(Part::Prev));
+        assert_eq!(part_net([160.0, 34.0]), Some(Part::Next));
+        assert_eq!(part_net([80.0, 34.0]), Some(Part::OrderMode));
+        assert_eq!(part_net([180.0, 34.0]), Some(Part::LimitMode));
+        assert_eq!(part_net([27.0, 46.0]), Some(Part::NetRow(0)));
+        assert_eq!(part_net([150.0, 100.0]), Some(Part::NetRow(5)));
+        assert_eq!(part_net([100.0, 120.0]), Some(Part::NetRow(7)));
+        assert_eq!(part_net([100.0, 141.0]), Some(Part::NetRow(9)));
+        // The tabs, the search and the sockets do nothing there; nor does the inventory.
+        assert_eq!(part_net([10.0, 20.0]), None);
+        assert_eq!(part_net([20.0, 34.0]), None);
+        assert_eq!(part_net([4.0, 50.0]), None);
+        assert_eq!(part_net([30.0, 160.0]), None);
+        // The title keeps its name clear of the button.
+        const { assert!(network::NET_MODE[0] > TITLE[0] + 100.0) };
     }
 
     #[test]

@@ -19,6 +19,8 @@ pub mod cells;
 pub mod filter;
 pub mod keys;
 pub mod modules;
+// Round 32 (spec 33): the terminal's «Сеть» page.
+pub mod network;
 pub mod tablet;
 pub mod terminal;
 pub mod view;

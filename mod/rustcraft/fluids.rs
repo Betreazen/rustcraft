@@ -1044,6 +1044,54 @@ pub(super) fn group_at(
         .find(|g| g.blocks.contains(&pos))
 }
 
+/// Round 32 (spec 33): what the fluid nets over `housings` reach, for the terminal's «Сеть» page
+/// (rustcraft_terminal_net): each tank group behind one of their joints, once, and every other
+/// block behind one; each with whether its joints there take into it and give from it.
+#[derive(Default)]
+pub(super) struct Lane {
+    pub tanks: Vec<(TankGroup, (bool, bool))>,
+    pub ends: Vec<(Pos, (bool, bool))>,
+}
+
+/// The fluid nets whose housings meet `housings`, as the last rescan built their joints, with the
+/// tank groups as their block entities hold them now.
+pub(super) fn lane_of(game: &Game<'_>, level: &LevelNet, housings: &BTreeSet<Pos>, tuning: &Tuning) -> Lane {
+    let firsts: BTreeSet<Pos> = level
+        .topology
+        .nets
+        .iter()
+        .filter(|n| n.kind == ChannelKind::Fluid && !n.housings.is_disjoint(housings))
+        .filter_map(|n| n.housings.first().copied())
+        .collect();
+    let mut modes: BTreeMap<Pos, (bool, bool)> = BTreeMap::new();
+    for net in level.fluids.nets.iter().filter(|n| firsts.contains(&n.key.1)) {
+        for j in &net.joints {
+            let m = modes.entry(j.block).or_default();
+            m.0 |= j.mode.takes();
+            m.1 |= j.mode.gives();
+        }
+    }
+    if modes.is_empty() {
+        return Lane::default();
+    }
+    let mut tanks = Vec::new();
+    let mut in_tanks: BTreeSet<Pos> = BTreeSet::new();
+    for g in read_groups(game, &level.fluids.tanks, tuning.tank_buckets * BUCKET) {
+        let Some(m) = g
+            .blocks
+            .iter()
+            .filter_map(|b| modes.get(b).copied())
+            .reduce(|a, b| (a.0 | b.0, a.1 | b.1))
+        else {
+            continue;
+        };
+        in_tanks.extend(g.blocks.iter().copied());
+        tanks.push((g, m));
+    }
+    let ends = modes.into_iter().filter(|(p, _)| !in_tanks.contains(p)).collect();
+    Lane { tanks, ends }
+}
+
 /// Round 31 (FL5, FL6; slice 15, O12): the fluid stock (mB by fluid) an order of the storage
 /// `owner` (its id and anchor) can draw on, with the mixers `mixers` on its line: what the
 /// storage's cells hold; the tank groups `stock_tanks_near` finds, each once; and the water in the

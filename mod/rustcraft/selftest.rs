@@ -498,6 +498,14 @@ impl Bench for GameBench<'_, '_> {
         .flatten()
     }
 
+    // Round 32 (spec 33): the terminal's «Сеть» page, as the server builds it for an ask.
+    fn net_page(&self, pos: Pos) -> Option<rustcraft_rules::storage::network::NetPage> {
+        let game = &*self.game;
+        server::with_level(DIMENSION, |l| {
+            crate::game::rustcraft_terminal_net::build(game, DIMENSION, l, pos)
+        })
+    }
+
     fn no_lane(&self, pos: Pos) -> Option<String> {
         self.with_level(|l| l.fluids.no_lane(pos, l.ticks).map(str::to_owned))
             .flatten()

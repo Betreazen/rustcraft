@@ -298,6 +298,15 @@ file = "crates/horizon-client/src/game.rs"
 name = "rustcraft_tablet"
 source = "tablet.rs"
 
+# Round 32 (spec 33): the «Сеть» page of the terminal and the tablet
+# (rustcraft_rules::storage::network): the client asks for it while it is shown, the level's tick
+# answers from the magistral's state.
+[[module]]
+id = "terminal_net"
+file = "crates/horizon-client/src/game.rs"
+name = "rustcraft_terminal_net"
+source = "terminal_net.rs"
+
 # Slice 18 (stream 5): the holo-projector's plan by two corners, its turn, «В руку», the ghost; the
 # building machine from the storage (rustcraft_rules::utility::plan).
 [[module]]

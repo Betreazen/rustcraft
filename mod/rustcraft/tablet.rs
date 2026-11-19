@@ -73,6 +73,12 @@ fn state() -> MutexGuard<'static, State> {
     STATE.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
+/// Round 32 (spec 33): the level and the storage of a player's open tablet window, for its
+/// «Сеть» page (rustcraft_terminal_net).
+pub(super) fn session_of(uuid: u128) -> Option<(String, u32)> {
+    state().sessions.get(&uuid).map(|s| (s.dimension.clone(), s.storage))
+}
+
 /// `native_use_item`: a right click with the tablet opens it at the next tick of the level.
 pub(super) fn on_use_item(game: &mut Game<'_>, stack: &ItemStack, claimed: &mut bool) {
     if *claimed || &*stack.item != TABLET {
