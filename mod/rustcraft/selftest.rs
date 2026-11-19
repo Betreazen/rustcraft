@@ -214,6 +214,19 @@ fn through_nbt(c: &Compound) -> Result<Compound, String> {
     }
 }
 
+/// A stack as the self-test reads it: `item xCOUNT`, its own name in quotes, its (stored)
+/// enchantments `id level`.
+fn stack_text(s: &ItemStack) -> String {
+    let mut out = format!("{} x{}", s.item, s.count);
+    if let Some(name) = s.custom_name() {
+        out.push_str(&format!(" {name:?}"));
+    }
+    for (id, level) in s.enchantments().iter().chain(s.stored_enchantments()) {
+        out.push_str(&format!(" {id} {level}"));
+    }
+    out
+}
+
 impl GameBench<'_, '_> {
     fn with_level<R>(&self, f: impl FnOnce(&server::LevelNet) -> R) -> Option<R> {
         server::with_level(DIMENSION, |level| f(level))
@@ -1153,19 +1166,15 @@ impl Bench for GameBench<'_, '_> {
     }
 
     fn stored_stacks(&self, pos: Pos) -> Vec<String> {
-        storage::stored_stacks_at(DIMENSION, pos)
-            .into_iter()
-            .map(|s| {
-                let mut out = format!("{} x{}", s.item, s.count);
-                if let Some(name) = s.custom_name() {
-                    out.push_str(&format!(" {name:?}"));
-                }
-                for (id, level) in s.enchantments().iter().chain(s.stored_enchantments()) {
-                    out.push_str(&format!(" {id} {level}"));
-                }
-                out
-            })
-            .collect()
+        storage::stored_stacks_at(DIMENSION, pos).iter().map(stack_text).collect()
+    }
+
+    // 0.21 (spec 48): the enchanting machine's slots with their enchantments.
+    fn slot_stacks(&self, pos: Pos) -> Vec<Option<String>> {
+        self.game
+            .native_mod_block_entity(pos)
+            .map(|e| e.items.iter().map(|s| s.as_ref().filter(|s| s.count > 0).map(stack_text)).collect())
+            .unwrap_or_default()
     }
 
     // ---- Slice 18, wave 2: rail, workers, base and gear ----

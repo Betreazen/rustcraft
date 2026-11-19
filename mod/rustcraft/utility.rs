@@ -338,6 +338,14 @@ pub(super) fn paced(game: &Game<'_>, pos: Pos, u: Util) -> (u64, f64) {
     tiered::in_mode(ticks, cost, mode)
 }
 
+/// 0.21 (spec 48, EW11): its buffer (size, the most it fills a second) for its step now: at least
+/// one step, filling as fast as its steps spend (the enchanter's 960 E step in «Форсаж» never fit
+/// its 600 E buffer and stood on «Нет энергии»).
+pub(super) fn buffer_of(game: &Game<'_>, pos: Pos, u: Util) -> (f64, f64) {
+    let (ticks, cost) = paced(game, pos, u);
+    rules::sized_buffer(u, ticks, cost)
+}
+
 pub(super) fn show(game: &mut Game<'_>, dimension: &str, pos: Pos, shown: Shown) {
     anim::show_on(game, pos, shown.working());
     // Slice 18 (guide `charger`, `charge_plate`): they glow while they charge: their furnace
@@ -469,7 +477,11 @@ pub(super) fn tick(game: &mut Game<'_>, dimension: &str, level: &LevelNet, t: &T
             Util::Kitchen => cook(game, dimension, level, pos, cost, t),
             Util::Brewer => brew(game, dimension, pos, cost),
             Util::XpTank => xp_tank_shown(game, pos),
-            Util::Enchanter => enchant(game, dimension, level, pos, cost, t),
+            // 0.21 (spec 48, EW10): the lapis it lacks from the storage of its net first.
+            Util::Enchanter => {
+                crate::game::rustcraft_enchanter::restock(game, dimension, level, pos);
+                enchant(game, dimension, level, pos, cost, t)
+            }
             Util::Archeo => brush(game, pos, cost),
             Util::Fishery | Util::Feeder | Util::Shearer | Util::Apiary => {
                 farm::step(game, dimension, level, pos, u, cost, now, t)
@@ -1844,16 +1856,6 @@ fn xp_press(game: &mut Game<'_>, entity: &mut ModBlockEntity, i: usize) {
     }
 }
 
-const ENCHANT_LEVEL_KEY: &str = "enchant_level";
-
-/// The enchanting level the machine's window chose (30 until one is chosen).
-fn enchant_level(game: &Game<'_>, pos: Pos) -> u32 {
-    game.native_mod_block_entity(pos)
-        .map(|e| read_i64(&e.nbt, ENCHANT_LEVEL_KEY))
-        .filter(|l| *l > 0)
-        .map_or(xp::LEVEL_MAX, |l| (l as u32).clamp(xp::LEVEL_MIN, xp::LEVEL_MAX))
-}
-
 fn enchant(game: &mut Game<'_>, dimension: &str, net: &LevelNet, pos: Pos, cost: f64, t: &Tuning) -> Shown {
     let slots = items(game, pos);
     let Some(mut item) = slots.first().cloned().flatten() else {
@@ -1874,30 +1876,26 @@ fn enchant(game: &mut Game<'_>, dimension: &str, net: &LevelNet, pos: Pos, cost:
         let g = &*game;
         xp_net::reach(&world, pos, xp_net::Way::Draw, &|p| xp_of(g, p))
     };
-    // Slice 18: the level the player chose, 1–30; its price by tens.
-    let level = enchant_level(game, pos);
-    let need = xp::enchant_cost(level);
-    let tier = need as usize - 1;
+    // 0.21 (spec 48): the window's choice at the level the player chose (1–30, its price by tens):
+    // one of the table's three offers at the machine's seed, or +1 to an enchantment the item has;
+    // an enchanted item or book gets what it lacks (rustcraft_enchanter).
+    let job = match crate::game::rustcraft_enchanter::job(game, pos, &item) {
+        Ok(job) => job,
+        Err(why) => return Shown::Blocked(why),
+    };
+    let need = job.lapis;
     let lapis = slots.get(1).cloned().flatten().map_or(0, |s| s.count);
     if lapis < need {
         return Shown::Blocked("enchant_no_lapis");
     }
-    let points = xp::enchant_points(level, need);
-    // «В конденсаторе не меньше уровней, чем уровень чар»: `xp::enough_for`, over all it reaches.
-    let moves = match with_xp_budget(dimension, net, t, |budget| xp_net::draw(points, xp::total(level), &stores, budget)) {
+    // «В конденсаторе не меньше уровней, чем уровень чар»: `xp::enough_for`, over all it reaches
+    // (spec 44); 0.21 (spec 48): the job's own price (a raise's, none for a removal).
+    let moves = match with_xp_budget(dimension, net, t, |budget| xp_net::draw(job.points, job.need_points, &stores, budget)) {
         Ok(moves) => moves,
         Err(xp_net::Short::Slow) => return Shown::Blocked("enchant_xp_slow"),
         Err(_) => return Shown::Blocked("enchant_no_xp"),
     };
-    let seed = (random() * f64::from(i32::MAX)) as i32;
-    let e = &game.stations().enchantments;
-    let offers = horizon_client::stations::enchant_offers(e, game.items(), seed, 15, Some(&item));
-    if offers.costs.iter().all(|c| *c <= 0) {
-        return Shown::Blocked("enchant_not_enchantable");
-    }
-    let Some(enchanted) = horizon_client::stations::apply_enchantment(e, game.items(), seed, tier, level as i32, &item) else {
-        return Shown::Blocked("enchant_not_enchantable");
-    };
+    let enchanted = job.result;
     if !fits(game, pos, 2..3, std::slice::from_ref(&enchanted)) {
         return Shown::Blocked("output_full");
     }
@@ -1914,9 +1912,10 @@ fn enchant(game: &mut Game<'_>, dimension: &str, net: &LevelNet, pos: Pos, cost:
             take_one(items, 1);
         }
     });
+    crate::game::rustcraft_enchanter::done(game, pos, &enchanted);
     put(game, pos, 2..3, enchanted);
     if let Some(o) = owner(game, pos) {
-        base::report(Report::Counted { kind: "enchant", owner: o, count: need });
+        base::report(Report::Counted { kind: "enchant", owner: o, count: job.report });
     }
     Shown::Working
 }
@@ -2337,14 +2336,16 @@ pub(super) fn sheet(game: &Game<'_>, dimension: &str, level: &LevelNet, pos: Pos
     }
     let spec = u.spec();
     let e = energy(game, pos);
+    // 0.21 (EW11): the buffer as large as a step in its mode.
+    let capacity = buffer_of(game, pos, u).0;
     s.bars.push(Bar {
         label: base::v(&line("rustcraft.util.energy", "Energy", &[])),
         value: base::v(&Text::literal(format!(
             "{} / {} E",
             rustcraft_rules::machines::panel::energy_text(e.floor()),
-            rustcraft_rules::machines::panel::energy_text(spec.buffer)
+            rustcraft_rules::machines::panel::energy_text(capacity)
         ))),
-        share: (e / spec.buffer).clamp(0.0, 1.0),
+        share: (e / capacity).clamp(0.0, 1.0),
         energy: true,
         colour: None,
     });
@@ -2405,6 +2406,10 @@ pub(super) fn sheet(game: &Game<'_>, dimension: &str, level: &LevelNet, pos: Pos
         let now = state().ticks.get(dimension).copied().unwrap_or(0);
         crate::game::rustcraft_mining::vein_sheet(game, pos, now, paced(game, pos, u).0, s);
     }
+    // 0.21 (spec 48): the enchanting machine's work area, toggles and status (rustcraft_enchanter).
+    if u == Util::Enchanter {
+        crate::game::rustcraft_enchanter::sheet(game, dimension, level, pos, s);
+    }
 }
 
 /// Slice 18 (guide `ui.js`): each craft machine's own parts of its window, after the energy bar.
@@ -2446,41 +2451,6 @@ fn craft_sheet(game: &Game<'_>, dimension: &str, level: &LevelNet, pos: Pos, u: 
         }
         Util::Builder => crate::game::rustcraft_projector::builder_sheet(game, pos, s),
         Util::Brewer => brew_sheet(game, pos, s),
-        Util::Enchanter => {
-            let chosen = enchant_level(game, pos);
-            let need = xp::enchant_cost(chosen);
-            let row = line(
-                "rustcraft.util.enchanter.level",
-                "Enchanting level %s · costs %s levels and %s lapis",
-                &[
-                    Text::literal(chosen.to_string()),
-                    Text::literal(need.to_string()),
-                    Text::literal(need.to_string()),
-                ],
-            );
-            if let Some(r) = s.rows.get_mut(1) {
-                *r = base::v(&row);
-            }
-            // 0.21 (spec 44, XC10): the experience it reaches, beside it and over its channel.
-            let t = crate::game::rustcraft_server::tuning();
-            let (tanks, held) = xp_reached(game, level, t, pos, xp_net::Way::Draw);
-            let want = xp::total(chosen);
-            s.bars.push(Bar {
-                label: base::v(&line("rustcraft.util.enchanter.reach", "Experience", &[])),
-                value: base::v(&line(
-                    "rustcraft.util.enchanter.reach_value",
-                    "%s points in condensers: %s (needs %s)",
-                    &[
-                        Text::literal(held.to_string()),
-                        Text::literal(tanks.to_string()),
-                        Text::literal(want.to_string()),
-                    ],
-                )),
-                share: if want == 0 { 1.0 } else { (held as f64 / f64::from(want)).min(1.0) },
-                energy: false,
-                colour: Some(0xFF7C_E05A),
-            });
-        }
         Util::Archeo => {
             // «Расчищает: песок из пустынного храма».
             let block = items(game, pos).first().cloned().flatten();
@@ -2734,13 +2704,8 @@ pub(super) fn on_button(game: &mut Game<'_>, pos: Pos, entity: &mut ModBlockEnti
         Util::Projector => builder::projector_press(game, pos, entity, i),
         Util::Kitchen => kitchen_press(entity, i),
         Util::Brewer => brew_press(entity, i),
-        // A choice: this one on, the rest off.
-        Util::Enchanter => {
-            let now = read_i64(&entity.nbt, ENCHANT_LEVEL_KEY);
-            let now = if now > 0 { now as u32 } else { xp::LEVEL_MAX };
-            let by = xp::LEVEL_STEPS[i];
-            write_i64(&mut entity.nbt, ENCHANT_LEVEL_KEY, i64::from(xp::step_level(now, by)));
-        }
+        // 0.21 (spec 48): the level, the offer or the raise, the view.
+        Util::Enchanter => crate::game::rustcraft_enchanter::press(game, entity, i),
         Util::Vein if modules::count(&modules::read(&base::read_module_items(&entity.nbt)), Module::Stratum) > 0 => {
             let t = rustcraft_rules::utility::vein::stratum_press(&toggles(&entity.nbt), i);
             write_toggles(&mut entity.nbt, &t);

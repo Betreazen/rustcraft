@@ -97,6 +97,8 @@ pub mod s21_tags;
 pub mod s21_recipes;
 // 0.21 (spec 44): experience on the fourth built-in channel.
 pub mod s21_xp;
+// 0.21 (spec 48): the enchanting machine's window, choice, raise and lapis.
+pub mod s21_enchanter;
 
 use std::collections::BTreeMap;
 
@@ -476,6 +478,11 @@ pub trait Bench {
     fn stored_stacks(&self, pos: Pos) -> Vec<String>;
     /// The translation key of what a player looking at the cell or terminal at `pos` reads.
     fn storage_diagnosis(&self, pos: Pos) -> Option<String>;
+    /// 0.21 (spec 48): each slot of the container at `pos` as [`Bench::stored_stacks`] writes a
+    /// stack (with its (stored) enchantments), none for an empty one.
+    fn slot_stacks(&self, _pos: Pos) -> Vec<Option<String>> {
+        Vec::new()
+    }
     /// The int array under `key` in the saved compound of the mod block entity at `pos`.
     fn int_array(&self, pos: Pos, key: &str) -> Vec<i32>;
     /// The long (or int) under `key` in the saved compound of the mod block entity at `pos`.
@@ -856,6 +863,8 @@ pub fn catalog() -> Vec<Build> {
     all.extend(s21_recipes::ALL);
     // 0.21 (spec 44): experience on the fourth built-in channel.
     all.extend(s21_xp::ALL);
+    // 0.21 (spec 48): the enchanting machine's window, choice, raise and lapis.
+    all.extend(s21_enchanter::ALL);
     all
 }
 

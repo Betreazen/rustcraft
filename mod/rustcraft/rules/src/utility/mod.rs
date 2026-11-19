@@ -8,6 +8,8 @@
 pub mod brew;
 pub mod charge;
 pub mod disassembly;
+// 0.21 (spec 48): the enchanting machine's offers, its choice and the raise.
+pub mod enchanting;
 pub mod farm;
 pub mod found;
 pub mod grown;
@@ -140,8 +142,9 @@ impl Util {
             Util::Brewer => s("rustcraft:brewer", 400.0, 16.0, brew::PAGES_MAX + brew::Kind::ALL.len(), 2),
             // Slice 18: six buttons (give 1 / 10 / all, take 1 / 10 / all).
             Util::XpTank => s("rustcraft:xp_tank", 100.0, 4.0, xp::PRESSES.len(), 2),
-            // Slice 18: the level buttons −10, −1, +1, +10.
-            Util::Enchanter => s("rustcraft:enchanter", 600.0, 32.0, xp::LEVEL_STEPS.len(), 2),
+            // Slice 18: the level buttons −10, −1, +1, +10; 0.21 (spec 48): the option rows and
+            // the view switch too, no text rows.
+            Util::Enchanter => s("rustcraft:enchanter", 600.0, 32.0, enchanting::BUTTONS, 0),
             // Slice 18: the table is the block's own place, a line not a choice.
             Util::Archeo => s("rustcraft:archeo", 200.0, 16.0, 0, 2),
             // Slice 18: remember, ghost, forget, turn, mirror, «В руку».
@@ -410,6 +413,17 @@ pub fn paced(u: Util, mode: crate::machines::processor::WorkMode, speed: u32, ec
     (ticks, cost)
 }
 
+/// 0.21 (spec 48, EW11; the owner's journal: the enchanter in «Форсаж» stood on «Нет энергии»
+/// with its buffer full at 600 / 600 E, a step costing 320 × 3 = 960 E): a machine's buffer
+/// (size, the most it fills a second) for a step of `cost` E every `ticks` ticks: it holds at
+/// least one step and fills at least as fast as its steps spend, so a mode or a speed module never
+/// asks more than it can keep.
+pub fn sized_buffer(u: Util, ticks: u64, cost: f64) -> (f64, f64) {
+    let spec = u.spec();
+    let seconds = ticks.max(1) as f64 / 20.0;
+    (spec.buffer.max(cost), spec.draw.max(cost / seconds))
+}
+
 /// What a slice-12 machine shows in its status line.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Shown {
@@ -541,6 +555,27 @@ mod tests {
         ] {
             assert!((per_second(u) - e).abs() < 1e-9, "{u:?}: {} E/s, not {e}", per_second(u));
             assert!(step_energy(u) <= u.spec().buffer, "{u:?}: its buffer holds a step");
+        }
+    }
+
+    #[test]
+    fn a_buffer_holds_a_step_in_every_mode_and_with_speed_modules() {
+        use crate::machines::processor::WorkMode;
+        // The owner's enchanter: 960 E a step in «Форсаж» against a 600 E buffer.
+        let (ticks, cost) = paced(Util::Enchanter, WorkMode::Boost, 0, 0);
+        assert!((cost - 960.0).abs() < 1e-9);
+        let (size, draw) = sized_buffer(Util::Enchanter, ticks, cost);
+        assert!(size >= cost && draw * (ticks as f64 / 20.0) >= cost - 1e-9, "{size} {draw}");
+        // Nothing changes where the step fits.
+        let (ticks, cost) = paced(Util::Enchanter, WorkMode::Normal, 0, 0);
+        assert_eq!(sized_buffer(Util::Enchanter, ticks, cost), (600.0, 32.0));
+        for u in Util::ALL {
+            for mode in WorkMode::ALL {
+                for speed in 0..3 {
+                    let (ticks, cost) = paced(u, mode, speed, 0);
+                    assert!(sized_buffer(u, ticks, cost).0 >= cost, "{u:?} {mode:?} {speed}");
+                }
+            }
         }
     }
 

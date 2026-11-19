@@ -26,9 +26,9 @@ use horizon_client::{hud::HudBatch, mod_api::NativeScreen, text::Text};
 use rustcraft_rules::{
     geom::Pos,
     machines::{
-        panel::{inside, slot_frame},
+        panel::{Rect, inside, slot_frame},
         processor::WorkMode,
-        sheet::{self, CHANNEL, Kind, Layout, Press, Sheet, WIDTH},
+        sheet::{self, CHANNEL, Kind, Layout, Note, Press, Sheet, WIDTH},
         style::{self, colour},
     },
     tuning::Tuning,
@@ -256,7 +256,15 @@ pub(super) fn draw(game: &Game<'_>, block: &str, batch: &mut HudBatch, o: [f32; 
         if i >= usable {
             game.native_fill(batch, kit::at(o, slot_frame(*p)), UNUSED);
         }
+        // 0.21 (spec 48, EW2): what goes into an empty slot, veiled.
+        if let Some(Some(id)) = s.ghosts.get(i) {
+            let at = [o[0] + p[0], o[1] + p[1]];
+            if game.native_item(batch, id, at, 16.0) {
+                game.native_fill(batch, [at[0], at[1], 16.0, 16.0], colour::GHOST);
+            }
+        }
     }
+    notes(game, batch, o, &l, &s);
     lead_row(game, batch, o, &l, &s);
     if let Some(st) = &s.status {
         kit::status_line(game, batch, o, l.status, st.severity(), &read(&st.text));
@@ -352,11 +360,79 @@ fn bars(game: &Game<'_>, batch: &mut HudBatch, o: [f32; 2], l: &Layout, s: &Shee
     }
 }
 
+/// 0.21 (spec 48, EW1): the sheet's short texts where the layout puts them: labels in capitals,
+/// plain text from the left, values in the middle; each cut with «…» to its place.
+fn notes(game: &Game<'_>, batch: &mut HudBatch, o: [f32; 2], l: &Layout, s: &Sheet) {
+    for (v, (r, how)) in s.notes.iter().zip(&l.notes) {
+        if v.is_null() {
+            continue;
+        }
+        let whole = read(v);
+        let y = r[1] + ((r[3] - kit::FONT_HEIGHT) / 2.0).round() + 1.0;
+        match how {
+            Note::Label => {
+                let line = kit::fit(game, &whole.to_uppercase(), r[2]);
+                text(game, batch, &line, o, [r[0], y], LABEL);
+            }
+            Note::Text => {
+                let line = kit::fit(game, &whole, r[2]);
+                text(game, batch, &line, o, [r[0], y], TEXT);
+            }
+            Note::Value => {
+                kit::fills(game, batch, o, &style::well(*r));
+                let line = kit::fit(game, &whole, r[2] - 4.0);
+                kit::centred(game, batch, o, *r, &line, VALUE);
+            }
+        }
+    }
+}
+
+/// 0.21 (spec 48, EW1): a toggle drawn as a text button (`left\tright`: the right part at its
+/// right end): brass while on, sunken and grey while it does nothing, lit under the mouse.
+fn text_toggle(game: &Game<'_>, batch: &mut HudBatch, o: [f32; 2], r: Rect, whole: &str, on: bool, off: bool) {
+    let face = if on {
+        style::raised(r)
+    } else if off {
+        style::well(r)
+    } else {
+        style::button(r)
+    };
+    kit::fills(game, batch, o, &face);
+    let hot = !off && kit::hovered(game, o, r);
+    let colour = match (on, off, hot) {
+        (true, _, _) => kit::TEXT_ON,
+        (false, true, _) => LABEL,
+        (false, false, true) => VALUE,
+        _ => TEXT,
+    };
+    let y = r[1] + ((r[3] - kit::FONT_HEIGHT) / 2.0).round() + 1.0;
+    match whole.split_once('\t') {
+        Some((left, right)) => {
+            let right_w = game.native_text_width(right);
+            let left = kit::fit(game, left, r[2] - right_w - 10.0);
+            text(game, batch, &left, o, [r[0] + 3.0, y], colour);
+            text_right(game, batch, right, o, r[0] + r[2] - 3.0, y, colour);
+        }
+        None => {
+            let line = kit::fit(game, whole, r[2] - 4.0);
+            kit::centred(game, batch, o, r, &line, colour);
+        }
+    }
+    if hot && !on {
+        kit::fills(game, batch, o, &style::outline(r, kit::HOT));
+    }
+}
+
 /// The miner's ore toggles: a raised brass chip with the ore's icon when it is taken, a well with
 /// the icon veiled when it is left. 0.21 (spec 39): the mixer's and the kitchen's recipes alike,
 /// the one it makes now outlined in the «работает» colour.
 fn toggles(game: &Game<'_>, batch: &mut HudBatch, o: [f32; 2], l: &Layout, s: &Sheet) {
-    for (t, r) in s.toggles.iter().zip(&l.toggles) {
+    for (i, (t, r)) in s.toggles.iter().zip(&l.toggles).enumerate() {
+        if let Some(Some(v)) = s.toggle_texts.get(i) {
+            let off = s.toggle_off.get(i).copied().unwrap_or(false);
+            text_toggle(game, batch, o, *r, &read(v), t.on, off);
+            continue;
+        }
         let face = if t.on {
             style::raised(*r)
         } else {
@@ -467,6 +543,29 @@ pub(super) fn tooltip(game: &Game<'_>, block: &str, at: [f32; 2], lines: &mut Ve
             }
             return;
         }
+    }
+    // 0.21 (spec 48, EW2): a note says more under the mouse; an empty slot says what goes in.
+    if let Some(i) = l.notes.iter().position(|(r, _)| inside(*r, at))
+        && let Some(v) = s.notes.get(i).filter(|v| !v.is_null())
+    {
+        lines.push(read(v));
+        for h in s.note_tips.get(i).into_iter().flatten() {
+            hint(lines, read(h));
+        }
+        return;
+    }
+    if let Some(i) = l.slots.iter().position(|p| inside(slot_frame(*p), at))
+        && matches!(s.ghosts.get(i), Some(Some(_)))
+        && let Some(tips) = s.slot_tips.get(i)
+    {
+        for (k, h) in tips.iter().enumerate() {
+            if k == 0 {
+                lines.push(read(h));
+            } else {
+                hint(lines, read(h));
+            }
+        }
+        return;
     }
     let usable = s.usable.map_or(l.slots.len(), usize::from);
     if l.slots

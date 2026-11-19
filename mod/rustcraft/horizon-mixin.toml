@@ -255,6 +255,14 @@ file = "crates/horizon-client/src/game.rs"
 name = "rustcraft_utility"
 source = "utility.rs"
 
+# 0.21 (spec 48): the enchanting machine's choice of offers, the raise, its lapis from the
+# storage and its window's sheet.
+[[module]]
+id = "enchanter"
+file = "crates/horizon-client/src/game.rs"
+name = "rustcraft_enchanter"
+source = "enchanter.rs"
+
 [[module]]
 id = "farm"
 file = "crates/horizon-client/src/game.rs"

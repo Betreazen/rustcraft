@@ -426,7 +426,12 @@ pub(super) fn set_buffer_energy(game: &mut Game<'_>, pos: Pos, energy: f64) -> b
 
 fn read_buffer(game: &Game<'_>, pos: Pos, machine: Machine, tuning: &Tuning) -> Option<BufferHeld> {
     let entity = entity(game, pos)?;
-    let (capacity, charge) = buffer_spec(machine, tuning);
+    // 0.21 (spec 48, EW11): a slice-12 machine's buffer holds a step in its mode and with its
+    // modules (the enchanter in «Форсаж»: 960 E a step, 600 E kept).
+    let (capacity, charge) = match machine {
+        Machine::Util(u) => crate::game::rustcraft_utility::buffer_of(game, pos, u),
+        _ => buffer_spec(machine, tuning),
+    };
     let energy = read_f64(&entity.nbt, BUFFER_KEY).clamp(0.0, capacity);
     let room = (capacity - energy).max(0.0) * tuning.ticks_per_second;
     Some(BufferHeld {

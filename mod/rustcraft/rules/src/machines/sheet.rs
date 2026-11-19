@@ -72,6 +72,8 @@ fn guide_shape(u: crate::utility::Util, s: Shape) -> Shape {
         // of its own over the catch, its wear and the wait beside it; the rows the water and where
         // the catch goes.
         Util::Fishery => Shape { rows: 2, lead: 1, aside: true, ..s },
+        // 0.21 (spec 48): no text rows; its parts are the work area's (EW1).
+        Util::Enchanter => Shape { rows: 0, toggles: crate::utility::enchanting::BUTTONS, enchant: true, ..s },
         _ => s,
     }
 }
@@ -110,6 +112,10 @@ pub struct Shape {
     /// 0.21 (spec 39, RT1): the toggles on the lead row after the work arrow, not on a row of
     /// their own: the mixer's recipes, its ingredients → the arrow → what it makes.
     pub toggles_aside: bool,
+    /// 0.21 (spec 48, EW1): the enchanting machine's work area under the energy bar: its three
+    /// slots one under another with their labels and the condenser's levels on the left; the
+    /// view switch, the level row and four option rows on the right ([`enchant_area`]).
+    pub enchant: bool,
 }
 
 /// 0.21 (spec 39): the mixer's recipe toggles the window has room for after its arrow.
@@ -405,6 +411,25 @@ pub struct Sheet {
     #[serde(default)]
     pub label: Option<Value>,
     pub status: Option<Status>,
+    /// 0.21 (spec 48, EW1): a toggle drawn as a text button: its text (`left\tright` puts the
+    /// right part at the button's right end), by the toggle's index; none keeps its icon.
+    #[serde(default)]
+    pub toggle_texts: Vec<Option<Value>>,
+    /// A toggle that does nothing now (an enchantment at its most), drawn sunken and grey.
+    #[serde(default)]
+    pub toggle_off: Vec<bool>,
+    /// Short texts at the layout's [`Layout::notes`]: the slots' labels, the level, the
+    /// condenser's levels; and what each one's tooltip adds.
+    #[serde(default)]
+    pub notes: Vec<Value>,
+    #[serde(default)]
+    pub note_tips: Vec<Vec<Value>>,
+    /// A veiled icon in each shown slot that is empty (what goes there), by the slot's index.
+    #[serde(default)]
+    pub ghosts: Vec<Option<String>>,
+    /// What an empty shown slot's tooltip says, by the slot's index.
+    #[serde(default)]
+    pub slot_tips: Vec<Vec<Value>>,
 }
 
 pub fn encode(sheet: &Sheet) -> Vec<u8> {
@@ -470,10 +495,78 @@ pub struct Layout {
     pub label_y: Option<f32>,
     /// 0.19.2 (`Shape::aside`): where the label's text starts on the lead row.
     pub label_at: Option<[f32; 2]>,
+    /// 0.21 (`Shape::enchant`): where the sheet's notes go and how each is written.
+    pub notes: Vec<(Rect, Note)>,
     pub status: Rect,
     pub inventory: [f32; 2],
     pub inventory_label_y: f32,
     pub height: f32,
+}
+
+/// How a note is written: a label in the guide's capitals, plain text from the left, or a value
+/// in the middle of its place.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Note {
+    Label,
+    Text,
+    Value,
+}
+
+/// The enchanting machine's notes, in [`Sheet::notes`] order.
+pub mod enchant_notes {
+    /// The labels beside the item, lapis and result slots.
+    pub const ITEM: usize = 0;
+    pub const LAPIS: usize = 1;
+    pub const RESULT: usize = 2;
+    /// «Конденсатор» and its levels under the slots.
+    pub const TANK_LABEL: usize = 3;
+    pub const TANK: usize = 4;
+    /// The level between its −/+ buttons.
+    pub const LEVEL: usize = 5;
+    pub const COUNT: usize = 6;
+}
+
+/// The enchanting machine's work area from `y` (EW1): left, the item, lapis and result slots one
+/// under another, each with its label, and the condenser's levels; right, the view switch
+/// («Новые чары» / «Повысить»), the level row (−10, −1, the level, +1, +10) and four option rows.
+/// Its height.
+fn enchant_area(out: &mut Layout, y: f32) -> f32 {
+    use crate::utility::enchanting::OPTION_ROWS;
+    const RIGHT_X: f32 = 88.0;
+    const SLOT_STEP: f32 = 19.0;
+    const ROW_H: f32 = 12.0;
+    const OPTION_H: f32 = 11.0;
+    const OPTION_STEP: f32 = 12.0;
+    let w = RIGHT - RIGHT_X;
+    out.slots = (0..3).map(|k| [LEFT + 1.0, y + 1.0 + SLOT_STEP * k as f32]).collect();
+    let label_x = LEFT + 20.0;
+    let mut notes: Vec<(Rect, Note)> = (0..3)
+        .map(|k| ([label_x, y + 5.0 + SLOT_STEP * k as f32, RIGHT_X - 2.0 - label_x, 9.0], Note::Text))
+        .collect();
+    notes.push(([LEFT, y + 58.0, RIGHT_X - 2.0 - LEFT, 9.0], Note::Label));
+    notes.push(([LEFT, y + 67.0, RIGHT_X - 2.0 - LEFT, 9.0], Note::Text));
+    // The level row: −10, −1, the level, +1, +10.
+    let r = y + ROW_H + 2.0;
+    let widths = [20.0, 15.0, 0.0, 15.0, 20.0];
+    let middle = w - widths.iter().sum::<f32>() - 2.0 * 4.0;
+    let mut x = RIGHT_X;
+    let mut level = Vec::new();
+    for (i, wi) in widths.into_iter().enumerate() {
+        let wi = if i == 2 { middle } else { wi };
+        if i == 2 {
+            notes.push(([x, r, wi, ROW_H], Note::Value));
+        } else {
+            level.push([x, r, wi, ROW_H]);
+        }
+        x += wi + 2.0;
+    }
+    let options = (0..OPTION_ROWS).map(|k| [RIGHT_X, r + ROW_H + 2.0 + OPTION_STEP * k as f32, w, OPTION_H]);
+    let half = (w - 2.0) / 2.0;
+    let views = [[RIGHT_X, y, half, ROW_H], [RIGHT_X + half + 2.0, y, half, ROW_H]];
+    out.toggles = level.into_iter().chain(options).chain(views).collect();
+    out.notes = notes;
+    let right_end = r + ROW_H + 2.0 + OPTION_STEP * (OPTION_ROWS - 1) as f32 + OPTION_H;
+    (right_end - y).max(76.0) + 1.0
 }
 
 pub fn layout(shape: Shape) -> Layout {
@@ -491,6 +584,7 @@ pub fn layout(shape: Shape) -> Layout {
         preview: Vec::new(),
         label_y: None,
         label_at: None,
+        notes: Vec::new(),
         status: [0.0; 4],
         inventory: [0.0; 2],
         inventory_label_y: 0.0,
@@ -520,6 +614,11 @@ pub fn layout(shape: Shape) -> Layout {
     for _ in 0..shape.bars {
         out.bars.push((y, [LEFT, y + 10.0, RIGHT - LEFT, 6.0]));
         y += BAR_STEP;
+    }
+    if shape.enchant {
+        y += enchant_area(&mut out, y);
+        out.menu_slots = (0..shape.slots).map(|i| out.slots.get(i).copied()).collect();
+        return finish(out, y);
     }
     let shown = shape.shown_range();
     // 0.21 (spec 46): the slots right of the toggles, on their row, centred on it.
@@ -576,6 +675,11 @@ pub fn layout(shape: Shape) -> Layout {
     out.menu_slots = (0..shape.slots)
         .map(|i| shown.contains(&i).then(|| out.slots[i - shown.start]))
         .collect();
+    finish(out, y)
+}
+
+/// The status line from `y`, then the inventory.
+fn finish(mut out: Layout, mut y: f32) -> Layout {
     out.status = [LEFT, y, RIGHT - LEFT, STATUS_H];
     y += STATUS_H + 2.0;
     out.inventory_label_y = y;
@@ -752,8 +856,43 @@ mod tests {
         out.extend(l.preview.iter().map(|p| slot_frame(*p)));
         out.extend(l.label_y.map(|y| [LEFT, y, RIGHT - LEFT, ROW - 1.0]));
         out.extend(l.label_at.map(|[x, y]| [x, y, RIGHT - x, ROW - 1.0]));
+        out.extend(l.notes.iter().map(|(r, _)| *r));
         out.push(l.status);
         out
+    }
+
+    #[test]
+    fn the_enchanters_window_has_labelled_slots_a_level_row_and_four_option_rows() {
+        use crate::utility::{Util, enchanting};
+        let shape = Kind::Util(Util::Enchanter).shape();
+        assert!(shape.enchant && shape.sockets && shape.mode && shape.rows == 0);
+        let l = layout(shape);
+        assert!(l.height <= MAX_HEIGHT, "{}", l.height);
+        assert_eq!(l.slots.len(), 3);
+        assert!(l.menu_slots.iter().all(Option::is_some));
+        assert_eq!(l.toggles.len(), enchanting::BUTTONS);
+        assert_eq!(l.notes.len(), enchant_notes::COUNT);
+        // The slots one under another, each with its label to the right on its own line.
+        for k in 0..3 {
+            let slot = slot_frame(l.slots[k]);
+            let (note, _) = l.notes[k];
+            assert!(note[0] >= slot[0] + slot[2] && note[1] >= slot[1] && note[1] + note[3] <= slot[1] + slot[3]);
+        }
+        assert!(l.slots[1][1] > l.slots[0][1] + 16.0 && l.slots[2][1] > l.slots[1][1] + 16.0);
+        // The level between −1 and +1, on one row with the four steps.
+        let (level, how) = l.notes[enchant_notes::LEVEL];
+        assert_eq!(how, Note::Value);
+        assert!(l.toggles[1][0] < level[0] && l.toggles[2][0] > level[0] + level[2]);
+        assert!(level[2] >= 36.0, "«ур. 30» fits: {}", level[2]);
+        // The option rows wide enough for «Лучшее: Острота IV», under the level row.
+        for r in &l.toggles[enchanting::OPTION_BUTTONS] {
+            assert!(r[2] >= 110.0 && r[1] > level[1]);
+        }
+        // A click names the button.
+        let o = l.toggles[enchanting::OPTION_BUTTONS.start + 2];
+        assert_eq!(press_at(&l, [o[0] + 50.0, o[1] + 5.0]), Some(Press::Toggle(6)));
+        let v = l.toggles[enchanting::VIEW_RAISE];
+        assert_eq!(press_at(&l, [v[0] + 2.0, v[1] + 2.0]), Some(Press::Toggle(enchanting::VIEW_RAISE)));
     }
 
     fn overlap(a: Rect, b: Rect) -> bool {
