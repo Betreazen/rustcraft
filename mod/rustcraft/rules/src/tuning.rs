@@ -16,7 +16,8 @@ pub struct Tuning {
     /// second (spec 19, O4: «ингредиенты приходят по магистрали»).
     pub item_ride_speed: [f64; 4],
     pub fluid_buckets_per_second: [f64; 4],
-    /// M13: how many fluids a fluid channel of each tier carries at once.
+    /// M13: how many fluids a fluid channel of each tier carries at once. Round 31 (FL1): any
+    /// number (`net::fluids::ANY_KINDS`).
     pub fluid_kinds: [usize; 4],
     /// E2: the E a second an energy channel of each tier lets through.
     pub energy_per_second: [f64; 4],
@@ -46,6 +47,9 @@ pub struct Tuning {
     pub crafter_pages: usize,
     /// What one tank block holds, in buckets (spec 10, item 11: «бак 16 вёдер»).
     pub tank_buckets: u64,
+    /// Round 31 (FL4, proposal): what each cell of a storage holds of each fluid, in buckets,
+    /// before its stack module multiplies it.
+    pub storage_cell_buckets: u64,
     /// The pump: ticks it takes to pump a bucket on full energy (round 15: tier 1 takes a bucket
     /// every 10 seconds), and its draw (spec 10, item 11: «насос 4 Е/с»).
     pub pump_ticks: f64,
@@ -260,7 +264,7 @@ impl Default for Tuning {
             item_per_second: [4.0, 16.0, 64.0, 256.0],
             item_ride_speed: [4.0, 8.0, 16.0, 32.0],
             fluid_buckets_per_second: [1.0, 4.0, 16.0, 64.0],
-            fluid_kinds: [1, 2, 4, 8],
+            fluid_kinds: [crate::net::fluids::ANY_KINDS; 4],
             energy_per_second: [32.0, 128.0, 512.0, 2048.0],
             ticks_per_second: 20.0,
             crystal_output: 4.0,
@@ -275,6 +279,7 @@ impl Default for Tuning {
             crafter_energy: 8.0,
             crafter_pages: 1,
             tank_buckets: 16,
+            storage_cell_buckets: 16,
             pump_ticks: 200.0,
             pump_energy: 4.0,
             rail_speed: [8.0, 14.0, 22.0, 32.0],

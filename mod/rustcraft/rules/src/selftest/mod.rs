@@ -19,6 +19,8 @@ pub mod debug;
 pub mod energy;
 pub mod expect;
 pub mod fluids;
+// Round 31: the smart fluid line and the storage's fluids.
+pub mod fluids20;
 pub mod handbook;
 pub mod magistral;
 pub mod miners;
@@ -508,6 +510,14 @@ pub trait Bench {
         let _ = args;
         Err("no diagnostics command on this bench".into())
     }
+
+    // ---- Round 31, the fluids stream ----
+    /// The storage the cell or terminal at `pos` belongs to holds `amount` mB of `fluid` in its
+    /// cells (FL4), whatever its room.
+    fn set_storage_fluid(&mut self, pos: Pos, fluid: &str, amount: u64) -> Result<(), String> {
+        let _ = (pos, fluid, amount);
+        Err("no storage fluids on this bench".into())
+    }
 }
 
 /// A mob as the self-test reads it.
@@ -744,6 +754,8 @@ pub fn catalog() -> Vec<Build> {
     all.extend(w2_machine::ALL);
     // The diagnostics command and the event journal.
     all.extend(debug::ALL);
+    // Round 31: the smart fluid line and the storage's fluids.
+    all.extend(fluids20::ALL);
     all
 }
 

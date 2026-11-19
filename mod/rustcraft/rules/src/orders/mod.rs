@@ -12,9 +12,11 @@
 //! item channel (slice 17).
 //!
 //! O12: fluids are keys of their own (`fluid_key`), counted in buckets. The mixer's recipes take
-//! items and water and make a fluid; the fluid the line's tanks and mixers hold is the stock of
-//! it. The storage keeps no fluid: an order for one is done when the mixer has made it, and the
-//! fluid nets carry it on.
+//! items and water and make a fluid. Round 31 (spec 29, FL5, FL6): the storage keeps fluids in its
+//! cells, and its stock of a fluid is what they hold and what the tanks on its fluid line hold
+//! (with the water the line's mixers can draw on); an order takes its fluid from there. An order
+//! for a fluid is done when the mixer has made it, and the fluid nets carry it on. The kitchen's
+//! copy of a recipe with a milk bucket takes milk from the stock instead (FL7).
 
 use std::collections::BTreeMap;
 
@@ -59,24 +61,47 @@ pub fn furnace_inputs(alternatives: Vec<ItemKey>, crushed: &std::collections::BT
 }
 
 /// Slice 18: the kitchen's copy of a crafting recipe whose result it cooks (the autocrafter keeps
-/// its own): an order runs on whichever of the two the line has.
+/// its own): an order runs on whichever of the two the line has. Round 31 (FL7): the kitchen
+/// takes a milk bucket's worth of milk from the fluid line instead of the bucket, so its copy
+/// takes either, the one the stock has more of.
 pub fn kitchen_copy(r: &PlanRecipe, kitchen_dishes: &[&str]) -> Option<PlanRecipe> {
-    (r.machine == KINDS[0] && kitchen_dishes.contains(&r.output.0.as_str())).then(|| PlanRecipe {
+    if r.machine != KINDS[0] || !kitchen_dishes.contains(&r.output.0.as_str()) {
+        return None;
+    }
+    let inputs = r
+        .inputs
+        .iter()
+        .map(|(alts, n)| {
+            let mut alts = alts.clone();
+            if alts.iter().any(|a| a == MILK_BUCKET) {
+                alts.push(fluid_key(MILK));
+            }
+            (alts, *n)
+        })
+        .collect();
+    Some(PlanRecipe {
         machine: KINDS[5].into(),
+        inputs,
         ..r.clone()
     })
 }
 
+/// The milk bucket of the game's recipes, and the milk the kitchen takes for it (FL7).
+const MILK_BUCKET: &str = "minecraft:milk_bucket";
+const MILK: &str = "rustcraft:milk";
+
 /// O12: a fluid's key starts with this, so no item id (`namespace:path`) is one.
 pub const FLUID_PREFIX: &str = "fluid:";
-/// The fluids an order can name, in the order the terminal's list numbers them.
-pub const FLUIDS: [&str; 6] = [
+/// The fluids an order can name, in the order the terminal's list numbers them. Round 31: milk
+/// last, so the numbers before it stay.
+pub const FLUIDS: [&str; 7] = [
     "minecraft:water",
     "minecraft:lava",
     "rustcraft:solution",
     "rustcraft:accelerator",
     "rustcraft:economizer",
     "rustcraft:enricher",
+    "rustcraft:milk",
 ];
 /// The terminal's list names fluid `k` of FLUIDS by this number plus `k`: past every item of
 /// the item table, and short of a press's «no item» (0xFFFF).
@@ -493,6 +518,28 @@ mod tests {
         assert_eq!(p.steps[0].machine, "crafter");
     }
 
+    #[test]
+    fn the_kitchen_takes_milk_from_the_storage_for_a_milk_bucket() {
+        // Round 31, FL7: the cake's three milk buckets as three buckets of milk from the stock.
+        let cake = r(
+            "crafter",
+            &[("minecraft:milk_bucket", 3), ("minecraft:sugar", 2), ("minecraft:egg", 1), ("minecraft:wheat", 3)],
+            ("minecraft:cake", 1),
+        );
+        let k = kitchen_copy(&cake, &["minecraft:cake"]).unwrap();
+        assert_eq!(k.inputs[0].0, vec!["minecraft:milk_bucket".to_owned(), fluid_key(MILK)]);
+        let stock = BTreeMap::from([
+            (fluid_key(MILK), 5),
+            ("minecraft:sugar".to_owned(), 2),
+            ("minecraft:egg".to_owned(), 1),
+            ("minecraft:wheat".to_owned(), 3),
+        ]);
+        let p = plan("minecraft:cake", 1, &stock, &[k], &["kitchen"]);
+        assert!(p.ready(), "{p:?}");
+        assert_eq!(p.reserved[&fluid_key(MILK)], 3);
+        assert!(!p.steps[0].items().iter().any(|(i, _)| i.contains("milk")));
+    }
+
     fn r(machine: &str, inputs: &[(&str, u32)], output: (&str, u32)) -> PlanRecipe {
         PlanRecipe::simple(machine, inputs, output)
     }
@@ -895,6 +942,7 @@ mod tests {
             assert_eq!(fluid_number(f).and_then(fluid_of_number), Some(f));
         }
         assert_eq!(fluid_number("minecraft:milk"), None);
+        assert_eq!(fluid_number("rustcraft:milk"), Some(FLUID_NUMBERS + 6));
         assert_eq!(fluid_of_number(812), None);
         assert!(FLUID_NUMBERS + (FLUIDS.len() as u16) < 0xFFFF);
     }

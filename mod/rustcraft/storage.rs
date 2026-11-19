@@ -32,6 +32,15 @@
 // and jobs as rustcraft_rules::orders::saved's strings, handed back to rustcraft_orders on load.
 // The list also carries the queue of orders and, with the book, the items it can make
 // (rustcraft_rules::storage::wire).
+//
+// Round 31 (spec 29, FL4–FL6): the cells hold fluids too, in millibuckets beside the items in the
+// same record (`fluids`), each cell a share of each fluid (`Tuning::storage_cell_buckets`) that
+// the stack module multiplies. The storage is a store of the fluid nets its cells or terminals
+// touch (rustcraft_fluids reads and writes its fluids each move), and the tanks on those nets
+// count as its stock too: rustcraft_fluids hands their fluids over after each move
+// (`set_line_fluids`), not saved. The terminal lists each fluid by its number past the item
+// table (rustcraft_rules::orders::FLUID_NUMBERS) in whole buckets, its own and its line's; its
+// limit and «держать N» go by the fluid's key, in buckets. A fluid is not taken out by hand.
 use crate::game::{
     Game,
     rustcraft_content::{self as content, item_number, item_of_number},
@@ -50,7 +59,7 @@ use horizon_client::save;
 use horizon_world::nbt::{self, Compound, JavaString, Tag};
 use rustcraft_rules::{
     geom::Pos,
-    net::{items::ItemKey, stock::NetStore},
+    net::{fluids::BUCKET, items::ItemKey, stock::NetStore},
     storage::{
         self, Limit, Shape, Store, cells, keys, modules as sockets,
         terminal::{self as term, Press, Take},
@@ -93,6 +102,9 @@ struct LevelStorage {
     /// Each storage's orders, queue and jobs, as rustcraft_orders last handed them
     /// (rustcraft_rules::orders::saved's strings).
     orders: BTreeMap<u32, Vec<String>>,
+    /// Round 31 (FL5): what the tanks on each storage's fluid nets hold, mB by fluid, as
+    /// rustcraft_fluids last handed it over. Not saved: the next move counts it again.
+    line_fluids: HashMap<u32, BTreeMap<String, u64>>,
     /// Changed since the attachment was last written.
     dirty: bool,
     ticks: u64,
@@ -173,7 +185,8 @@ fn long(n: u64) -> Tag {
 }
 
 /// `{next, stores: [{id, items: [{k, n}], limits: [{k, max, destroy}], keep: [{k, n}],
-/// orders: [string]}]}`; `orders` only for a storage that has some.
+/// fluids: [{k, n}], orders: [string]}]}`; `orders` only for a storage that has some, `fluids`
+/// (round 31, mB) only for one that holds any.
 fn encode_saved(saved: &Saved) -> Result<Compound, AttachmentError> {
     let stores = saved
         .stores
@@ -206,6 +219,14 @@ fn encode_saved(saved: &Saved) -> Result<Compound, AttachmentError> {
                 ("limits", Tag::List(limits)),
                 ("keep", Tag::List(keep)),
             ];
+            if !store.fluids.is_empty() {
+                let fluids = store
+                    .fluids
+                    .iter()
+                    .map(|(k, &n)| Tag::compound([("k", string(k)), ("n", long(n))]))
+                    .collect();
+                entry.push(("fluids", Tag::List(fluids)));
+            }
             if let Some(orders) = saved.orders.get(id).filter(|o| !o.is_empty()) {
                 entry.push((
                     "orders",
@@ -288,6 +309,14 @@ fn decode_saved(data: &Compound) -> Result<Saved, AttachmentError> {
                 && n > 0
             {
                 store.keep.insert(k, n);
+            }
+        }
+        // Round 31's fluids (absent from a record of v0.19 or older).
+        for fluid in compounds(field(entry, "fluids")) {
+            if let (Some(k), Some(n)) = (as_string(field(fluid, "k")), as_u64(field(fluid, "n")))
+                && n > 0
+            {
+                store.fluids.insert(k, n);
             }
         }
         // Slice 15's orders (absent from a record of v0.15.0 or older).
@@ -665,6 +694,138 @@ pub(super) fn stock(
     .flatten()
 }
 
+// ---- Round 31: the fluids of the storage (FL4–FL6) ----
+
+/// The storage standing at `anchor` on a fluid net: its id and its fluid part
+/// (`Store::fluid_part`); none while it does not work (S8).
+pub(super) fn fluid_store(dimension: &str, anchor: Pos) -> Option<(u32, Store)> {
+    with_level(dimension, |level| {
+        let id = level.at_anchor(anchor).filter(|&id| level.works(id))?;
+        Some((id, level.stores.get(&id)?.fluid_part()))
+    })
+    .flatten()
+}
+
+/// What a fluid move did to the storage `id`: the change from `before` to `after` (both fluid
+/// parts) laid onto its record, so nothing else that changed it meanwhile is lost.
+pub(super) fn apply_fluids(dimension: &str, id: u32, before: &Store, after: &Store) {
+    if before.fluids == after.fluids {
+        return;
+    }
+    with_level(dimension, |level| {
+        let Some(store) = level.stores.get_mut(&id) else {
+            return;
+        };
+        let names: BTreeSet<&String> = before.fluids.keys().chain(after.fluids.keys()).collect();
+        for fluid in names {
+            let (was, now) = (before.fluid(fluid), after.fluid(fluid));
+            if now > was {
+                *store.fluids.entry(fluid.clone()).or_insert(0) += now - was;
+            } else if was > now {
+                store.take_fluid(fluid, was - now);
+            }
+        }
+        level.changed(id);
+    });
+}
+
+/// The mB of each fluid the cells of the storage `id` hold (none while it does not work).
+pub(super) fn own_fluids(dimension: &str, id: u32) -> BTreeMap<String, u64> {
+    with_level(dimension, |level| {
+        level
+            .works(id)
+            .then(|| level.stores.get(&id).map(|s| s.fluids.clone()))
+            .flatten()
+    })
+    .flatten()
+    .unwrap_or_default()
+}
+
+/// Takes up to `amount` mB of `fluid` out of the cells of the storage `id`: how much.
+pub(super) fn take_fluid(dimension: &str, id: u32, fluid: &str, amount: u64) -> u64 {
+    with_level(dimension, |level| {
+        if !level.works(id) {
+            return 0;
+        }
+        let took = level.stores.get_mut(&id).map_or(0, |s| s.take_fluid(fluid, amount));
+        if took > 0 {
+            level.changed(id);
+        }
+        took
+    })
+    .unwrap_or(0)
+}
+
+/// Puts up to `amount` mB of `fluid` into the cells of the storage `id`: how much it took.
+pub(super) fn put_fluid(dimension: &str, id: u32, fluid: &str, amount: u64, cell_mb: u64) -> u64 {
+    with_level(dimension, |level| {
+        if !level.works(id) {
+            return 0;
+        }
+        let took = level
+            .stores
+            .get_mut(&id)
+            .map_or(0, |s| s.put_fluid(fluid, amount, cell_mb));
+        if took > 0 {
+            level.changed(id);
+        }
+        took
+    })
+    .unwrap_or(0)
+}
+
+/// The self-test: the storage the cell or terminal at `pos` belongs to holds `amount` mB of
+/// `fluid` in its cells, whatever its room.
+pub(super) fn set_fluid_at(dimension: &str, pos: Pos, fluid: &str, amount: u64) -> bool {
+    let Some(id) = storage_id(dimension, pos) else {
+        return false;
+    };
+    with_level(dimension, |level| {
+        let Some(store) = level.stores.get_mut(&id) else {
+            return false;
+        };
+        if amount == 0 {
+            store.fluids.remove(fluid);
+        } else {
+            store.fluids.insert(fluid.to_owned(), amount);
+        }
+        level.changed(id);
+        true
+    })
+    .unwrap_or(false)
+}
+
+/// FL5: what the tanks on the fluid nets of the storage at `anchor` hold now; its terminals'
+/// viewers get the list again when it changed.
+pub(super) fn set_line_fluids(dimension: &str, anchor: Pos, fluids: BTreeMap<String, u64>) {
+    with_level(dimension, |level| {
+        let Some(id) = level.at_anchor(anchor) else {
+            return;
+        };
+        if level.line_fluids.get(&id) != Some(&fluids) {
+            level.line_fluids.insert(id, fluids);
+            *level.versions.entry(id).or_insert(0) += 1;
+        }
+    });
+}
+
+/// FL5: the line's tanks of every storage not at one of `anchors` (no longer on a fluid net)
+/// are forgotten.
+pub(super) fn clear_line_fluids_but(dimension: &str, anchors: &BTreeSet<Pos>) {
+    with_level(dimension, |level| {
+        let gone: Vec<u32> = level
+            .line_fluids
+            .keys()
+            .copied()
+            .filter(|id| level.found.get(id).is_none_or(|f| !anchors.contains(&f.anchor)))
+            .collect();
+        for id in gone {
+            level.line_fluids.remove(&id);
+            *level.versions.entry(id).or_insert(0) += 1;
+        }
+    });
+}
+
 // ---- Items in and out ----
 
 /// The stack a key and a count make: a component key's saved stack with every component back.
@@ -1004,8 +1165,18 @@ fn listing(game: &Game<'_>, dimension: &str, terminal: Pos, id: Option<u32>) -> 
             },
         ));
     }
-    // The most numerous first: a message too small for them all keeps those.
+    // The most numerous first: a message too small for them all keeps those. Round 31: the
+    // fluids before every item, so none of them is cut off.
     lines.sort_by(|a, b| b.0.cmp(&a.0));
+    let line_fluids = id
+        .and_then(|id| with_level(dimension, |level| level.line_fluids.get(&id).cloned()).flatten())
+        .unwrap_or_default();
+    let mut all: Vec<(u64, Line)> = fluid_lines(&store, &line_fluids)
+        .into_iter()
+        .map(|l| (l.count, l))
+        .collect();
+    all.append(&mut lines);
+    let lines = all;
     let view = id.map(|id| orders::view(game, dimension, terminal, id));
     Listing {
         terminal,
@@ -1033,6 +1204,36 @@ fn listing(game: &Game<'_>, dimension: &str, terminal: Pos, id: Option<u32>) -> 
             .filter_map(|i| item_number(game, i).and_then(|n| u16::try_from(n).ok()))
             .collect(),
     }
+}
+
+/// Round 31 (FL5): a line for each fluid the storage knows: its cells' and its line's tanks'
+/// whole buckets, its limit and its «держать N»; a fluid the terminal has no number for is left
+/// out.
+fn fluid_lines(store: &Store, line: &BTreeMap<String, u64>) -> Vec<Line> {
+    use rustcraft_rules::orders::{fluid_key, fluid_number, fluid_of};
+    let mut fluids: BTreeSet<String> = store.fluids.keys().chain(line.keys()).cloned().collect();
+    for key in store.limits.keys().chain(store.keep.keys()) {
+        if let Some(f) = fluid_of(key) {
+            fluids.insert(f.to_owned());
+        }
+    }
+    fluids
+        .into_iter()
+        .filter_map(|fluid| {
+            let item = fluid_number(&fluid)?;
+            let key = fluid_key(&fluid);
+            let mb = store.fluid(&fluid) + line.get(&fluid).copied().unwrap_or(0);
+            let limit = store.limits.get(&key).copied();
+            let keep = store.keep.get(&key).copied().unwrap_or(0);
+            (mb >= BUCKET || limit.is_some() || keep > 0).then_some(Line {
+                item,
+                damage: 0,
+                count: mb / BUCKET,
+                limit,
+                keep,
+            })
+        })
+        .collect()
 }
 
 /// Slice 18: the items in the terminal's sockets, by number.
@@ -1412,10 +1613,11 @@ fn through_record(
         ));
     }
     // A store's cells are counted again by each rescan, not saved.
-    let kept = |s: &Saved| -> Vec<(u32, BTreeMap<ItemKey, u64>, BTreeMap<ItemKey, Limit>)> {
+    type Kept = (u32, BTreeMap<ItemKey, u64>, BTreeMap<ItemKey, Limit>, BTreeMap<String, u64>);
+    let kept = |s: &Saved| -> Vec<Kept> {
         s.stores
             .iter()
-            .map(|(id, st)| (*id, st.items.clone(), st.limits.clone()))
+            .map(|(id, st)| (*id, st.items.clone(), st.limits.clone(), st.fluids.clone()))
             .collect()
     };
     if back.next_id != saved.next_id || kept(&back) != kept(&saved) {
@@ -1447,6 +1649,10 @@ fn key_of_ref(
     storage: u32,
     (number, damage): term::ItemRef,
 ) -> Option<ItemKey> {
+    // Round 31 (FL5): a fluid's line, for its limit and «держать N».
+    if let Some(fluid) = rustcraft_rules::orders::fluid_of_number(number) {
+        return Some(rustcraft_rules::orders::fluid_key(fluid));
+    }
     let item = item_of_number(game, u32::from(number))?;
     if damage & term::VARIANT != 0 {
         let index = damage & !term::VARIANT;
@@ -1489,7 +1695,10 @@ fn take_out(
     take: Take,
     carried: &mut Option<ItemStack>,
 ) {
-    let Some(key) = key_of_ref(game, dimension, storage, item) else {
+    // Round 31: a fluid is not taken out by hand.
+    let Some(key) = key_of_ref(game, dimension, storage, item)
+        .filter(|k| rustcraft_rules::orders::fluid_of(k).is_none())
+    else {
         return;
     };
     let stack_size = max_stack(game, keys::item_of(&key));

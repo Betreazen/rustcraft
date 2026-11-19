@@ -250,6 +250,8 @@ fn id_of(game: &Game<'_>, item: u16) -> Option<&'static str> {
     match fluid_of_number(item) {
         Some("minecraft:water") => Some("minecraft:water_bucket"),
         Some("minecraft:lava") => Some("minecraft:lava_bucket"),
+        // Round 31: the storage lists its milk too.
+        Some("rustcraft:milk") => Some("minecraft:milk_bucket"),
         Some(_) => Some("minecraft:bucket"),
         None => item_of_number(game, u32::from(item)),
     }
