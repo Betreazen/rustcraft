@@ -230,6 +230,13 @@ file = "crates/horizon-client/src/game.rs"
 name = "rustcraft_butcher"
 source = "butcher.rs"
 
+# 0.21 (spec 46): a turret vacuums up its kills' drops into its loot slots for the magistral.
+[[module]]
+id = "turret_loot"
+file = "crates/horizon-client/src/game.rs"
+name = "rustcraft_turret_loot"
+source = "turret_loot.rs"
+
 # Slice 9: the slice-7 and slice-8 blocks' drawn windows (sheets): the server sends each open
 # window what it shows, the client draws it in the «Кузня душ» style.
 [[module]]

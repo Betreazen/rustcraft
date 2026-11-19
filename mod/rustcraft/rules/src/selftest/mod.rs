@@ -73,6 +73,8 @@ pub mod w2_pipe_energy;
 pub mod s20_machines;
 // Round 32 (spec 33): the terminal's «Сеть» page.
 pub mod s21_sides;
+// 0.21 (spec 46): the butcher and the turret pick up loot for the magistral.
+pub mod s21_loot;
 pub mod s21_terminal;
 pub mod s21_upgrade;
 pub mod s21_fishery;
@@ -832,6 +834,8 @@ pub fn catalog() -> Vec<Build> {
     all.extend(s21_sides::ALL);
     // 0.21 (spec 45): the channel items gone, those left turned into their alloy.
     all.extend(s21_channels::ALL);
+    // 0.21 (spec 46): the butcher and the turret pick up loot for the magistral.
+    all.extend(s21_loot::ALL);
     all
 }
 

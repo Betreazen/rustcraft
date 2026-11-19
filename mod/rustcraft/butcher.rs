@@ -10,7 +10,10 @@
 //   Slice 18: its enchantments act: Fire Aspect sets the animal alight before the blow, Looting
 //   adds drops by the animal's table (rustcraft_rules::butcher::looting_bonus).
 // - The drops: once a second the butcher picks up what lies in its pen into its nine slots
-//   (K4), which the net and hoppers take from; what does not fit stays on the ground.
+//   (K4), which the net and hoppers take from; what does not fit stays on the ground. 0.21
+//   (spec 46, LP1–LP3): the farm's products (rustcraft_rules::butcher::PRODUCTS: eggs, feathers,
+//   wool, leather, meat) wherever they lie in its pen, anything else only as its own kills' drops;
+//   a product left on the ground for want of room says so («Добыче некуда»).
 // - The number to keep, one an animal of rustcraft_rules::butcher::ANIMALS: JSON in its saved
 //   compound (`keep`); a press on an animal's toggle in its window steps it (2 to 16, K3).
 // - The radius module doubles its pen (4 → 8 blocks, K1). Slice 18: the kill's experience goes
@@ -34,7 +37,7 @@ use rustcraft_rules::{
     tuning::Tuning,
 };
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     sync::{LazyLock, Mutex, MutexGuard, PoisonError},
 };
 
@@ -52,6 +55,9 @@ struct State {
     shown: HashMap<(String, Pos), Shown>,
     /// 0.19.3: each butcher's recent kills, whose drops alone it picks up.
     kills: HashMap<(String, Pos), Vec<Kill>>,
+    /// 0.21 (LP3): the butchers that left something they take on the ground at their last
+    /// gathering, for want of room in their slots.
+    stuck: HashSet<(String, Pos)>,
 }
 
 static STATE: LazyLock<Mutex<State>> = LazyLock::new(Mutex::default);
@@ -184,26 +190,26 @@ fn keep_tier(game: &mut Game<'_>, pos: Pos) {
     }
 }
 
-/// Picks up the drops of its recent kills in its pen into its drop slots. 0.19.3 (the owner:
-/// «забойщик тоже забирает чужие предметы»): before, it took everything that lay in its pen.
+/// Picks up into its drop slots what lies in its pen and is its to take: the farm's products
+/// anywhere in it, other things only as its recent kills' drops (0.19.3, the owner: «забойщик тоже
+/// забирает чужие предметы»; 0.21, spec 46 LP1–LP3: «забойщик не собирает предметы»). What does
+/// not fit stays on the ground and marks it stuck.
 fn gather(game: &mut Game<'_>, dimension: &str, pos: Pos, t: &Tuning, now: u64) {
+    let key = (dimension.to_owned(), pos);
     let kills = {
         let mut s = state();
-        let Some(kills) = s.kills.get_mut(&(dimension.to_owned(), pos)) else {
-            return;
-        };
-        kills.retain(|k| now.saturating_sub(k.tick) <= rules::KILL_TICKS);
-        kills.clone()
+        match s.kills.get_mut(&key) {
+            Some(kills) => {
+                kills.retain(|k| now.saturating_sub(k.tick) <= rules::KILL_TICKS);
+                kills.clone()
+            }
+            None => Vec::new(),
+        }
     };
-    if kills.is_empty() {
-        return;
-    }
-    let r = radius(game, pos, t);
-    let c = centre(pos);
-    let lo = [c[0] - r, c[1] - 3.0, c[2] - r];
-    let hi = [c[0] + r, c[1] + 3.0, c[2] + r];
+    let (lo, hi) = rules::pen_box(centre(pos), radius(game, pos, t));
+    let mut stuck = false;
     for e in game.native_item_entities(dimension, lo, hi) {
-        if !rules::is_its_drop(&kills, now, e.position, &e.stack.item) {
+        if !rules::picks_up(&kills, now, e.position, &e.stack.item) {
             continue;
         }
         let max = machines::max_stack(game, &e.stack.item);
@@ -217,12 +223,19 @@ fn gather(game: &mut Game<'_>, dimension: &str, pos: Pos, t: &Tuning, now: u64) 
             })
             .flatten();
         let left_count = left.as_ref().map_or(0, |l| l.count);
+        stuck |= left_count > 0;
         if left_count == e.stack.count {
             continue;
         }
         let mut rest = e.stack.clone();
         rest.count = left_count;
         game.native_set_item_entity(dimension, e.id, rest);
+    }
+    let mut s = state();
+    if stuck {
+        s.stuck.insert(key);
+    } else {
+        s.stuck.remove(&key);
     }
 }
 
@@ -371,7 +384,7 @@ fn shown_text(s: &Shown) -> Text {
         ),
         Shown::OutputFull => line(
             "rustcraft.butcher.full",
-            "The drops have nowhere to go",
+            "The drops have nowhere to go: take them from its slots or join it to the magistral",
             &[],
         ),
         Shown::NoEnergy => line("rustcraft.butcher.no_energy", "No energy", &[]),
@@ -386,12 +399,20 @@ fn severity(s: &Shown) -> Severity {
     }
 }
 
+/// What it shows: its last strike's, unless products lie in its pen for want of room (LP3).
+fn displayed(dimension: &str, pos: Pos) -> Option<Shown> {
+    let key = (dimension.to_owned(), pos);
+    let s = state();
+    if s.stuck.contains(&key) {
+        return Some(Shown::OutputFull);
+    }
+    s.shown.get(&key).cloned()
+}
+
 /// What a player looking at it reads (A4).
 pub(super) fn diagnosis(dimension: &str, pos: Pos) -> Text {
-    state()
-        .shown
-        .get(&(dimension.to_owned(), pos))
-        .map_or_else(|| line("rustcraft.butcher.idle", "Butcher", &[]), shown_text)
+    displayed(dimension, pos)
+        .map_or_else(|| line("rustcraft.butcher.idle", "Butcher", &[]), |s| shown_text(&s))
 }
 
 /// Its window: its pen and its sword, a toggle an animal with the number to keep, its slots.
@@ -478,11 +499,7 @@ pub(super) fn sheet(game: &Game<'_>, dimension: &str, pos: Pos, t: &Tuning, s: &
             }
         })
         .collect();
-    let shown = state()
-        .shown
-        .get(&(dimension.to_owned(), pos))
-        .cloned()
-        .unwrap_or(Shown::NothingToCull);
+    let shown = displayed(dimension, pos).unwrap_or(Shown::NothingToCull);
     s.status = Some(SheetStatus {
         severity: severity_code(severity(&shown)),
         text: base::v(&shown_text(&shown)),
@@ -495,9 +512,10 @@ pub(super) fn forget_area(dimension: &str, min: Pos, max: Pos) {
     let mut s = state();
     s.shown.retain(|(d, p), _| d != dimension || !inside(*p));
     s.kills.retain(|(d, p), _| d != dimension || !inside(*p));
+    s.stuck.retain(|(d, p)| d != dimension || !inside(*p));
 }
 
-/// What the self-test reads of a butcher: what it showed last.
+/// What the self-test reads of a butcher: what it shows now.
 pub(super) fn shown(dimension: &str, pos: Pos) -> Option<Shown> {
-    state().shown.get(&(dimension.to_owned(), pos)).cloned()
+    displayed(dimension, pos)
 }

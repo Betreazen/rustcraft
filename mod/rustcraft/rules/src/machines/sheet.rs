@@ -104,6 +104,9 @@ pub struct Shape {
     /// 0.19.2: the sheet's label on the lead row itself, right of its cells, in plain text (the
     /// fishery's rod: its wear and the wait to the next catch beside the rod's own cell).
     pub aside: bool,
+    /// 0.21 (spec 46, LP7): the shown slots on the toggles' row, right of them, instead of rows of
+    /// their own (the turret's loot beside its target chips: the window keeps to 240 pixels).
+    pub beside: bool,
 }
 
 impl Shape {
@@ -183,13 +186,16 @@ impl Kind {
         let sockets = self.holder().is_some_and(|h| h.has_sockets());
         match self {
             // Slice 18 (base and gear): the targets as chips; the support window's players in
-            // range, the one healed and the role's working modules.
+            // range, the one healed and the role's working modules. 0.21 (spec 46): its loot slots
+            // beside the chips.
             Kind::Turret => Shape {
                 sockets,
                 role: true,
                 rows: 5,
                 bars: 1,
                 toggles: 4,
+                slots: crate::turret_loot::LOOT_SLOTS,
+                beside: true,
                 ..Shape::default()
             },
             // Slice 18: its owner and area, then the energy bar.
@@ -503,20 +509,28 @@ pub fn layout(shape: Shape) -> Layout {
         out.bars.push((y, [LEFT, y + 10.0, RIGHT - LEFT, 6.0]));
         y += BAR_STEP;
     }
+    let shown = shape.shown_range();
+    // 0.21 (spec 46): the slots right of the toggles, on their row, centred on it.
+    let beside = shape.beside && shape.toggles > 0;
     if shape.toggles > 0 {
         out.toggles = (0..shape.toggles)
             .map(|i| [LEFT + (TOGGLE + TOGGLE_GAP) * i as f32, y, TOGGLE, TOGGLE])
             .collect();
+        if beside {
+            let frame = LEFT + (TOGGLE + TOGGLE_GAP) * shape.toggles as f32 + 2.0;
+            out.slots = (0..shown.len())
+                .map(|k| [frame + 1.0 + 18.0 * k as f32, y + 2.0])
+                .collect();
+        }
         y += TOGGLE + TOGGLE_GAP;
     }
-    let shown = shape.shown_range();
-    let lead = shape.lead.min(shown.len());
+    let lead = if beside { 0 } else { shape.lead.min(shown.len()) };
     if shape.label {
         out.label_y = Some(y);
         y += ROW;
     }
     if lead > 0 || shape.work {
-        out.slots = (0..lead).map(|k| [LEFT + 1.0 + 18.0 * k as f32, y + 1.0]).collect();
+        out.slots.extend((0..lead).map(|k| [LEFT + 1.0 + 18.0 * k as f32, y + 1.0]));
         let mut x = LEFT + 18.0 * lead as f32 + 4.0;
         if shape.aside {
             out.label_at = Some([x, y + 5.0]);
@@ -528,7 +542,7 @@ pub fn layout(shape: Shape) -> Layout {
         out.preview = (0..shape.preview).map(|k| [x + 1.0 + 18.0 * k as f32, y + 1.0]).collect();
         y += 18.0 + 2.0;
     }
-    let rest = shown.len() - lead;
+    let rest = if beside { 0 } else { shown.len() - lead };
     if rest > 0 {
         out.slots.extend((0..rest).map(|i| {
             [
@@ -769,6 +783,23 @@ mod tests {
         assert_eq!(l.rows.len(), 2);
         let turret = layout(Kind::Turret.shape());
         assert!(turret.role.is_some() && turret.mode.is_empty());
+    }
+
+    #[test]
+    fn the_turrets_loot_slots_sit_beside_its_chips_and_cost_no_height() {
+        // 0.21 (spec 46, LP7).
+        let shape = Kind::Turret.shape();
+        let l = layout(shape);
+        let without = layout(Shape { slots: 0, beside: false, ..shape });
+        assert_eq!(l.height, without.height, "no row of its own");
+        assert_eq!(l.slots.len(), crate::turret_loot::LOOT_SLOTS);
+        assert_eq!(l.menu_slots.iter().flatten().count(), crate::turret_loot::LOOT_SLOTS);
+        let chips = l.toggles.last().copied().unwrap();
+        for s in &l.slots {
+            let f = slot_frame(*s);
+            assert!(f[0] >= chips[0] + chips[2], "right of the chips: {f:?}");
+            assert!(f[1] >= chips[1] && f[1] + f[3] <= chips[1] + chips[3], "on their row: {f:?}");
+        }
     }
 
     #[test]

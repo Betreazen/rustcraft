@@ -10,6 +10,8 @@
 //   Slice 18: the shot that kills is the owner's when they are in the turret's level (an arrow's
 //   damage from their entity), so the game drops the mob's own experience and player-only loot
 //   and Path-of-craft-tree counts their ranged kill itself; no fixed experience or report then.
+//   0.21 (spec 46): the kill's drops are vacuumed into the turret's loot slots for the magistral
+//   (rustcraft_turret_loot), whoever struck the blow.
 // - Effects: the base game's `MobEffectInstance` on the mob, as `/effect give` puts it on one
 //   (game/commands/effects.rs:74-90): poison and SoulsCraft's `soulscraft:bleeding`
 //   when that effect is registered (`horizon_client::brewing::effect`); without SoulsCraft the
@@ -438,6 +440,8 @@ pub(super) fn on_destroy_block(game: &mut Game<'_>, pos: Pos, dimension: &str, c
 
 /// `native_living_death`: a mob a turret hit lately died; its kill is reported at the next tick.
 pub(super) fn on_living_death(entity: u32, kind: &str, at: [f64; 3]) {
+    // 0.21 (spec 46): a turret's kill leaves its drops for the turret to vacuum up.
+    crate::game::rustcraft_turret_loot::died(entity, at);
     let mut s = state();
     if s.hits.contains_key(&entity) {
         s.deaths
@@ -543,6 +547,8 @@ pub(super) fn tick(game: &mut Game<'_>, dimension: &str, level: &LevelNet, t: &T
     for pos in turrets {
         run_turret(game, dimension, pos, now, t);
     }
+    // 0.21 (spec 46): the turrets pick up their kills' drops.
+    crate::game::rustcraft_turret_loot::tick(game, dimension, now);
     // Slice 11: before the deaths, so a slaughter is told the tick the animal died.
     butcher::tick(game, dimension, level, t);
     crate::game::rustcraft_utility::tick(game, dimension, level, t);
@@ -751,6 +757,8 @@ fn attack(
     }
     ts.cooldown = l.interval(t);
     machines::set_buffer_energy(game, pos, energy - cost);
+    // 0.21 (spec 46): its kill's drops are this turret's, whoever owns it.
+    crate::game::rustcraft_turret_loot::hit(dimension, pos, id, now);
     if let Some(owner) = owner {
         state().hits.insert(
             id,
@@ -1953,6 +1961,14 @@ fn turret_sheet(game: &Game<'_>, dimension: &str, pos: Pos, t: &Tuning, s: &mut 
         }
         s.rows.push(v(&l2));
     }
+    // 0.21 (spec 46, LP7): its kills' drops lie on the ground for want of room in its slots.
+    if !support && crate::game::rustcraft_turret_loot::stuck(dimension, pos) {
+        s.rows.push(v(&line(
+            "rustcraft.turret.loot_stuck",
+            "Loot has nowhere to go: take it from its slots or join it to the magistral",
+            &[],
+        )));
+    }
     let e = machines::buffer_energy(game, pos);
     // Wave 2 (#12): a support turret's bar is what it draws (ui.js `energy(24, 24)`).
     if support {
@@ -2485,6 +2501,7 @@ pub(super) fn forget_area(game: &mut Game<'_>, dimension: &str, min: Pos, max: P
     mining::forget_area(dimension, min, max);
     mixer::forget_area(dimension, min, max);
     butcher::forget_area(dimension, min, max);
+    crate::game::rustcraft_turret_loot::forget_area(dimension, min, max);
     crate::game::rustcraft_utility::forget_area(dimension, min, max);
     let mut s = state();
     s.turrets.retain(|(d, p), _| d != dimension || !inside(*p));
