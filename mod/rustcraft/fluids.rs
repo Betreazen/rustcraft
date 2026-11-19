@@ -52,7 +52,7 @@ use rustcraft_rules::{
         pump::{self, Pump, Source, Under, WATER},
     },
     net::{
-        fluids::{self as fluid_net, BUCKET, Endpoint, FluidInventories, FluidKey, FluidNetState},
+        fluids::{self as fluid_net, BUCKET, Endpoint, FluidInventories, FluidKey, FluidNetState, TankPin},
         items::{Joint, Mode},
         joints,
         tanks::{self, TankBlock, TankGroup},
@@ -75,6 +75,8 @@ const WINDOW_EVERY: u64 = 20;
 const RATE_EVERY: u64 = 200;
 const FLUID_KEY: &str = "fluid";
 const AMOUNT_KEY: &str = "amount";
+/// 0.21 (spec 42, FT1): the fluid the tank's group is kept for; empty while free.
+const PIN_KEY: &str = "pin";
 const PROGRESS_KEY: &str = "progress";
 const HELD_FLUID_KEY: &str = "held_fluid";
 const HELD_KEY: &str = "held";
@@ -263,14 +265,21 @@ pub(super) fn rebuild(
 
 // ---- The tanks and the pumps as the fluid tick sees them ----
 
+fn read_string(nbt: &Compound, key: &str) -> Option<String> {
+    match nbt.get(&JavaString::from(key)) {
+        Some(Tag::String(s)) => Some(s.to_string_lossy()).filter(|s| !s.is_empty()),
+        _ => None,
+    }
+}
+
 fn read_tank(game: &Game<'_>, pos: Pos) -> Option<TankBlock> {
     let entity = crate::game::rustcraft_machines::entity(game, pos)?;
     let amount = read_int(&entity.nbt, AMOUNT_KEY).map_or(0, |a| a.max(0) as u64);
-    let fluid = match entity.nbt.get(&JavaString::from(FLUID_KEY)) {
-        Some(Tag::String(s)) => Some(s.to_string_lossy()).filter(|s| !s.is_empty()),
-        _ => None,
-    };
-    Some(TankBlock { fluid, amount })
+    let fluid = read_string(&entity.nbt, FLUID_KEY);
+    // 0.21 (FT6): a tank from before 0.21 has no pin; rustcraft_rules::net::tanks keeps it for
+    // what it holds.
+    let pin = read_string(&entity.nbt, PIN_KEY);
+    Some(TankBlock { fluid, amount, pin })
 }
 
 pub(super) fn write_tank(nbt: &mut Compound, block: &TankBlock) {
@@ -279,6 +288,18 @@ pub(super) fn write_tank(nbt: &mut Compound, block: &TankBlock) {
         Tag::String(JavaString::from(block.fluid.as_deref().unwrap_or(""))),
     );
     write_int(nbt, AMOUNT_KEY, block.amount.min(i32::MAX as u64) as i32);
+    nbt.insert(
+        JavaString::from(PIN_KEY),
+        Tag::String(JavaString::from(block.pin.as_deref().unwrap_or(""))),
+    );
+}
+
+/// The self-test's tank: `amount` of `fluid` in the block at `nbt`, kept for that fluid while it
+/// holds some; emptied, it keeps the pin it had (FT1).
+pub(super) fn set_tank_contents(nbt: &mut Compound, fluid: &str, amount: u64) {
+    let pin = if amount > 0 { Some(fluid.to_owned()) } else { read_string(nbt, PIN_KEY) };
+    let block = TankBlock { fluid: Some(fluid.to_owned()).filter(|_| amount > 0), amount, pin };
+    write_tank(nbt, &block);
 }
 
 fn read_held(nbt: &Compound) -> Option<(FluidKey, u64)> {
@@ -332,6 +353,14 @@ struct Inventories<'a> {
 }
 
 impl FluidInventories for Inventories<'_> {
+    fn pin(&self, block: Pos) -> TankPin {
+        match self.by_anchor.get(&block).map(|&g| &self.groups[g].pin) {
+            Some(Some(f)) => TankPin::For(f.clone()),
+            Some(None) => TankPin::Free,
+            None => TankPin::NotATank,
+        }
+    }
+
     fn endpoint(&self, block: Pos) -> Endpoint {
         if self.storages.contains_key(&block) || self.by_anchor.contains_key(&block) {
             Endpoint::Store
@@ -803,7 +832,7 @@ fn hand_over_line_fluids(
 /// Writes each tank block whose share changed.
 fn write_back(game: &mut Game<'_>, before: &[TankGroup], after: &[TankGroup], per_block: u64) {
     for (b, a) in before.iter().zip(after) {
-        if b.amount == a.amount && b.fluid == a.fluid {
+        if b.amount == a.amount && b.fluid == a.fluid && b.pin == a.pin {
             continue;
         }
         let old: HashMap<Pos, TankBlock> = b.shares(per_block).into_iter().collect();
@@ -845,6 +874,7 @@ fn show_windows(game: &mut Game<'_>, level: &mut LevelNet, groups: &[TankGroup])
         };
         let data = tank_window::encode(&TankPanel {
             fluid: FluidShown::of(g.fluid.as_deref()),
+            pin: FluidShown::of(g.pin.as_deref()),
             amount: g.amount,
             capacity: g.capacity,
             blocks: g.blocks.len() as u32,
@@ -1288,7 +1318,7 @@ fn touching_group(game: &Game<'_>, level: &LevelNet, pos: Pos, fluid: &str, fill
     near.extend(net_reach(level, pos, fill));
     let i = groups.iter().position(|g| {
         g.blocks.iter().any(|b| near.contains(b))
-            && (g.fluid.as_deref() == Some(fluid) || (fill && g.fluid.is_none()))
+            && (g.fluid.as_deref() == Some(fluid) || (fill && g.fluid.is_none() && !g.kept_for_other(fluid)))
     })?;
     Some((groups, i))
 }
@@ -1424,6 +1454,18 @@ pub(super) fn tank_text(game: &Game<'_>, level: &LevelNet, pos: Pos, tuning: &Tu
             &[buckets(g.capacity)],
         ),
     };
+    // 0.21 (FT5): what the empty tank is kept for, or that it is free.
+    if g.fluid.is_none() {
+        text.push(Text::literal(" · "));
+        text.push(match &g.pin {
+            Some(f) => line(
+                "rustcraft.tank.kept_for",
+                "for %s (sneak and click it with the wrench to free it)",
+                &[fluid_name(f)],
+            ),
+            None => line("rustcraft.tank.free", "free: takes the next new fluid", &[]),
+        });
+    }
     if let Some(fluid) = level.fluids.no_lane(g.anchor(), level.ticks) {
         text.push(Text::literal(" · "));
         text.push(no_lane_text(fluid));
@@ -1436,6 +1478,31 @@ pub(super) fn tank_text(game: &Game<'_>, level: &LevelNet, pos: Pos, tuning: &Tu
         ));
     }
     text
+}
+
+/// 0.21 (spec 42, FT4): the sneaking wrench on a tank frees its empty group for any fluid; a tank
+/// that holds a fluid stays kept for it. Tells `player` what happened.
+pub(super) fn wrench_frees_tank(game: &mut Game<'_>, player: u128, dimension: &str, pos: Pos) {
+    let tuning = crate::game::rustcraft_server::tuning();
+    let group = crate::game::rustcraft_server::with_level(dimension, |level| {
+        group_at(game, level, pos, tuning)
+    })
+    .flatten();
+    let text = match group {
+        None => line("rustcraft.tank.no_group", "The tank is not ready yet", &[]),
+        Some(g) => {
+            let mut after = g.clone();
+            if after.free() {
+                write_back(game, &[g], &[after], tuning.tank_buckets * BUCKET);
+                line("rustcraft.tank.freed", "The tank is free: it takes the next new fluid", &[])
+            } else if let Some(f) = &g.fluid {
+                line("rustcraft.tank.free_not_empty", "Empty the tank first: it holds %s", &[fluid_name(f)])
+            } else {
+                line("rustcraft.tank.free_already", "The tank is free already", &[])
+            }
+        }
+    };
+    crate::game::rustcraft_server::tell(game, player, text);
 }
 
 /// Buckets as the guide writes them: «20», «12,8».

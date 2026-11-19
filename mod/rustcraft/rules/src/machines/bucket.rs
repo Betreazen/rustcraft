@@ -62,6 +62,7 @@ mod tests {
             amount,
             capacity: 16 * BUCKET,
             mixed: false,
+            pin: fluid.map(str::to_owned),
         }
     }
 

@@ -60,6 +60,23 @@ pub trait FluidInventories {
     fn at_limit(&self, _block: Pos, _fluid: &str) -> bool {
         false
     }
+    /// 0.21 (FT1–FT3): what the tank group behind the block is kept for; no tank for any other
+    /// block. The inventory keeps a free tank for the first fluid `put` gives it.
+    fn pin(&self, _block: Pos) -> TankPin {
+        TankPin::NotATank
+    }
+}
+
+/// 0.21 (spec 42, FT1–FT3): what a tank group on a fluid net is kept for.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub enum TankPin {
+    /// No tank: a machine, the storage, the trash, a pump. It takes by its room alone.
+    #[default]
+    NotATank,
+    /// A tank that has not held a fluid yet, or was freed with the wrench.
+    Free,
+    /// A tank kept for this fluid, empty or not.
+    For(FluidKey),
 }
 
 /// What a fluid net remembers between ticks.
@@ -131,6 +148,13 @@ pub fn tick(
             let mut surplus = inv.surplus(src.block, &fluid);
             let limited_out = inv.endpoint(src.block) != Endpoint::Store
                 && receivers.iter().any(|&r| inv.at_limit(joints[r].block, &fluid));
+            // 0.21 (FT3): whether a tank of the net that takes this fluid is kept for it; then no
+            // free tank takes it, so each fluid keeps to its own tanks.
+            let kept_for = TankPin::For(fluid.clone());
+            let mut has_home = receivers.iter().any(|&r| {
+                let j = &joints[r];
+                j.block != src.block && j.filter.passes(&fluid) && inv.pin(j.block) == kept_for
+            });
             for &r in &receivers {
                 let dst = &joints[r];
                 if left == 0 || available == 0 {
@@ -140,6 +164,10 @@ pub fn tick(
                     continue;
                 }
                 let role = inv.endpoint(dst.block);
+                let free = inv.pin(dst.block) == TankPin::Free;
+                if free && has_home {
+                    continue;
+                }
                 let asked = dst.filter.passes(&fluid) && !(consumers_only && role != Endpoint::Consumer);
                 let unasked = !asked
                     && role == Endpoint::Trash
@@ -168,6 +196,8 @@ pub fn tick(
                     if unasked {
                         surplus = surplus.saturating_sub(put);
                     }
+                    // FT3: the free tank is kept for this fluid now; no other free one takes it.
+                    has_home |= free;
                 }
             }
             if moved > 0 {
@@ -237,6 +267,8 @@ mod tests {
         roles: HashMap<Pos, Endpoint>,
         /// 0.21: a storage's limit on a fluid, mB.
         limits: HashMap<(Pos, FluidKey), u64>,
+        /// 0.21 (FT1): what each tank is kept for.
+        pins: HashMap<Pos, TankPin>,
     }
 
     impl Tanks {
@@ -271,7 +303,13 @@ mod tests {
             let held: u64 = self.offered(b).iter().filter(|(k, _)| k == f).map(|(_, n)| n).sum();
             self.limits.get(&(b, f.to_owned())).is_some_and(|l| held + self.got(b, f) >= *l)
         }
+        fn pin(&self, b: Pos) -> TankPin {
+            self.pins.get(&b).cloned().unwrap_or_default()
+        }
         fn room_for(&self, b: Pos, f: &str) -> u64 {
+            if matches!(self.pins.get(&b), Some(TankPin::For(p)) if p != f) {
+                return 0;
+            }
             self.room
                 .get(&b)
                 .and_then(|m| m.get(f))
@@ -290,10 +328,16 @@ mod tests {
             amount - left
         }
         fn put(&mut self, b: Pos, f: &str, amount: u64) -> u64 {
+            if self.room_for(b, f) == 0 {
+                return 0;
+            }
             let room = self.room.entry(b).or_default().entry(f.into()).or_insert(0);
             let n = (*room).min(amount);
             *room -= n;
             *self.got.entry(b).or_default().entry(f.into()).or_insert(0) += n;
+            if n > 0 && self.pins.get(&b) == Some(&TankPin::Free) {
+                self.pins.insert(b, TankPin::For(f.into()));
+            }
             n
         }
     }
@@ -554,5 +598,148 @@ mod tests {
         joints[1].filter.items.insert("minecraft:lava".into());
         tick(&joints, 100.0, ANY_KINDS, 20.0, &mut s, &mut t);
         assert_eq!(t.got(TRASH, WATER), 0);
+    }
+
+    // ---- 0.21 (spec 42): one fluid a tank structure (FT1–FT3) ----
+
+    const MILK: &str = "rustcraft:milk";
+    const SOLUTION: &str = "rustcraft:solution";
+    const FLUIDS: [&str; 3] = [WATER, MILK, SOLUTION];
+    /// Three sources (pumps, the shearer, a mixer: plain, giving) at x 10..=12, tanks from x 20.
+    const SOURCE_X: i32 = 10;
+    const TANK_X: i32 = 20;
+
+    /// `sources` of the fluids in FLUIDS, each holding 8 buckets, and `tanks` tank structures on
+    /// their default joint, free and with room for 16 buckets of each fluid.
+    fn pinned_line(sources: usize, tanks: usize) -> (Vec<Joint>, Tanks) {
+        let mut t = Tanks::default();
+        let mut joints = Vec::new();
+        for (i, f) in FLUIDS.iter().take(sources).enumerate() {
+            let x = SOURCE_X + i as i32;
+            t.holds([x, 0, 0], f, 8 * BUCKET);
+            joints.push(joint(x, Mode::From));
+        }
+        for i in 0..tanks {
+            let x = TANK_X + i as i32;
+            t.roles.insert([x, 0, 0], Endpoint::Store);
+            t.pins.insert([x, 0, 0], TankPin::Free);
+            for f in FLUIDS {
+                t.takes([x, 0, 0], f, 16 * BUCKET);
+            }
+            joints.push(joint(x, Mode::Both));
+        }
+        (joints, t)
+    }
+
+    fn tank_at(i: i32) -> Pos {
+        [TANK_X + i, 0, 0]
+    }
+
+    /// The fluids each tank got, in order.
+    fn fluids_in(t: &Tanks, tanks: i32) -> Vec<Vec<&'static str>> {
+        (0..tanks)
+            .map(|i| FLUIDS.into_iter().filter(|f| t.got(tank_at(i), f) > 0).collect())
+            .collect()
+    }
+
+    fn run(joints: &[Joint], t: &mut Tanks, ticks: usize) {
+        let mut s = FluidNetState::default();
+        for _ in 0..ticks {
+            tick(joints, 2.0, ANY_KINDS, 20.0, &mut s, t);
+        }
+    }
+
+    #[test]
+    fn two_free_tanks_take_one_fluid_each() {
+        // FT2, FT3: water and milk on one line with two free tank structures: one each, though
+        // the receivers rotate every tick.
+        let (joints, mut t) = pinned_line(2, 2);
+        run(&joints, &mut t, 100);
+        let got = fluids_in(&t, 2);
+        assert!(got.iter().all(|f| f.len() == 1), "{got:?}");
+        assert_ne!(got[0], got[1]);
+        assert_eq!(t.got(tank_at(0), got[0][0]) + t.got(tank_at(1), got[1][0]), 16 * BUCKET);
+    }
+
+    #[test]
+    fn three_tanks_take_three_fluids() {
+        let (joints, mut t) = pinned_line(3, 3);
+        run(&joints, &mut t, 100);
+        let mut got: Vec<&str> = fluids_in(&t, 3)
+            .into_iter()
+            .map(|f| {
+                assert_eq!(f.len(), 1, "{f:?}");
+                f[0]
+            })
+            .collect();
+        got.sort_unstable();
+        let mut all = FLUIDS.to_vec();
+        all.sort_unstable();
+        assert_eq!(got, all);
+    }
+
+    #[test]
+    fn an_emptied_tank_kept_for_water_takes_no_milk() {
+        // FT1: the water tank drained by the mixer stays the water tank; milk waits at its source
+        // rather than take its place.
+        let (joints, mut t) = pinned_line(0, 1);
+        t.pins.insert(tank_at(0), TankPin::For(WATER.into()));
+        let mut joints = joints;
+        t.holds([SOURCE_X + 1, 0, 0], MILK, 8 * BUCKET);
+        joints.push(joint(SOURCE_X + 1, Mode::From));
+        run(&joints, &mut t, 40);
+        assert_eq!(t.got(tank_at(0), MILK), 0);
+        assert_eq!(t.offered([SOURCE_X + 1, 0, 0])[0].1, 8 * BUCKET);
+    }
+
+    #[test]
+    fn a_free_tank_waits_while_its_fluids_own_tank_is_full() {
+        // FT3: the water tank is full; the free tank does not take the water, and the first new
+        // fluid takes it.
+        let (mut joints, mut t) = pinned_line(1, 2);
+        t.pins.insert(tank_at(0), TankPin::For(WATER.into()));
+        t.takes(tank_at(0), WATER, 0);
+        run(&joints, &mut t, 40);
+        assert_eq!(t.got(tank_at(1), WATER), 0);
+        assert_eq!(t.pin(tank_at(1)), TankPin::Free);
+        t.holds([SOURCE_X + 1, 0, 0], MILK, 8 * BUCKET);
+        joints.push(joint(SOURCE_X + 1, Mode::From));
+        run(&joints, &mut t, 40);
+        assert_eq!(t.pin(tank_at(1)), TankPin::For(MILK.into()));
+        assert_eq!(t.got(tank_at(1), WATER), 0);
+    }
+
+    #[test]
+    fn a_freed_tank_takes_a_fluid_with_no_tank_of_its_own() {
+        // FT4: the empty water tank freed with the wrench takes the solution.
+        let (mut joints, mut t) = pinned_line(0, 1);
+        t.pins.insert(tank_at(0), TankPin::For(WATER.into()));
+        t.holds([SOURCE_X + 2, 0, 0], SOLUTION, 2 * BUCKET);
+        joints.push(joint(SOURCE_X + 2, Mode::From));
+        run(&joints, &mut t, 10);
+        assert_eq!(t.got(tank_at(0), SOLUTION), 0);
+        t.pins.insert(tank_at(0), TankPin::Free);
+        run(&joints, &mut t, 40);
+        assert_eq!(t.got(tank_at(0), SOLUTION), 2 * BUCKET);
+        assert_eq!(t.pin(tank_at(0)), TankPin::For(SOLUTION.into()));
+    }
+
+    #[test]
+    fn a_tank_source_set_to_give_fills_a_free_tank_though_it_is_kept_for_the_fluid_itself() {
+        // FT3: the source is no home for its own fluid: a tank of water set «из блока» fills the
+        // free tank with water.
+        let mut t = Tanks::default();
+        for x in [0, 1] {
+            t.roles.insert([x, 0, 0], Endpoint::Store);
+        }
+        t.pins.insert([0, 0, 0], TankPin::For(WATER.into()));
+        t.pins.insert([1, 0, 0], TankPin::Free);
+        t.holds([0, 0, 0], WATER, 4 * BUCKET);
+        t.takes([0, 0, 0], WATER, 12 * BUCKET);
+        t.takes([1, 0, 0], WATER, 16 * BUCKET);
+        let mut joints = vec![joint(0, Mode::From), joint(1, Mode::Both)];
+        joints.push(Joint { face: Face::YPos, ..joint(0, Mode::Into) });
+        run(&joints, &mut t, 40);
+        assert_eq!(t.got([1, 0, 0], WATER), 4 * BUCKET);
     }
 }

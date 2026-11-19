@@ -39,7 +39,7 @@ use rustcraft_rules::{
     net::{
         migrate::OldSlots,
         settings::{HousingJoints, JointSetting, Record},
-        tanks::{TankBlock, TankGroup},
+        tanks::TankGroup,
     },
     selftest::{self, Area, Bench, MobView, Slot, StorageView, run::Run},
     storage::{keys, terminal::LimitChange},
@@ -394,11 +394,8 @@ impl Bench for GameBench<'_, '_> {
     }
 
     fn set_tank(&mut self, pos: Pos, fluid: &str, amount: u64) -> Result<(), String> {
-        let block = TankBlock {
-            fluid: Some(fluid.to_owned()),
-            amount,
-        };
-        self.change_entity(pos, |e| fluids::write_tank(&mut e.nbt, &block))
+        let fluid = fluid.to_owned();
+        self.change_entity(pos, move |e| fluids::set_tank_contents(&mut e.nbt, &fluid, amount))
     }
 
     fn set_station_energy(&mut self, pos: Pos, energy: f64) -> Result<(), String> {

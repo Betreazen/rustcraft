@@ -418,6 +418,17 @@ pub(super) fn on_use_item_on(
         crate::game::rustcraft_utility::lift_with_wrench(game, player.uuid, &player.dimension, pos);
         return;
     }
+    // 0.21 (spec 42, FT4): the sneaking wrench on an empty tank frees it for any fluid.
+    if !*claimed
+        && item == content::WRENCH
+        && game.native_block(pos) == content::TANK
+        && let Some(player) = acting(game)
+        && player.sneaking
+    {
+        *claimed = true;
+        fluids::wrench_frees_tank(game, player.uuid, &player.dimension, pos);
+        return;
+    }
     // Slice 12: the facade on a housing or a node; the wrench pairs portal docks.
     if !*claimed
         && let Some(player) = acting(game)

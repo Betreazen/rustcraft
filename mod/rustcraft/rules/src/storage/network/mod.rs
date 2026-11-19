@@ -229,6 +229,9 @@ pub struct TankLine {
     pub capacity: u64,
     pub blocks: u16,
     pub joint: JointUse,
+    /// 0.21 (spec 42, FT5): the fluid the tank is kept for, the one it holds while it holds
+    /// some; none while it is free.
+    pub pin: Option<String>,
 }
 
 /// The fluid sources and consumers of one kind on the lane (pumps, mixers, the kitchen…).
@@ -477,7 +480,8 @@ pub fn pages(rows: &[Row]) -> Vec<Range<usize>> {
 
 // ---- The message ----
 
-const VERSION: u8 = 1;
+/// 0.21 (spec 42): 2, with the empty tanks' pins.
+const VERSION: u8 = 2;
 /// The lists a message carries at most; the page says how many tanks there are in all.
 pub const MAX_MACHINES: usize = 48;
 pub const MAX_TANKS: usize = 96;
@@ -549,6 +553,10 @@ pub fn encode(page: &NetPage) -> Vec<u8> {
             out.extend(c.to_le_bytes());
         }
         put_str(&mut out, t.fluid.as_deref().unwrap_or(""));
+        // FT5: a tank that holds a fluid is kept for it; an empty one says its pin.
+        if t.fluid.is_none() {
+            put_str(&mut out, t.pin.as_deref().unwrap_or(""));
+        }
         out.extend(t.amount.to_le_bytes());
         out.extend(t.capacity.to_le_bytes());
         out.extend(t.blocks.to_le_bytes());
@@ -656,9 +664,14 @@ pub fn decode(bytes: &[u8]) -> Option<NetPage> {
         .map(|_| {
             let pos = r.pos()?;
             let fluid = Some(r.str()?).filter(|f| !f.is_empty());
+            let pin = match &fluid {
+                Some(f) => Some(f.clone()),
+                None => Some(r.str()?).filter(|f| !f.is_empty()),
+            };
             Some(TankLine {
                 pos,
                 fluid,
+                pin,
                 amount: r.u64()?,
                 capacity: r.u64()?,
                 blocks: r.u16()?,

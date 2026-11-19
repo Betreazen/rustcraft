@@ -36,6 +36,8 @@ const OTHER: u32 = 0xFF59D38C;
 const ACCELERATOR: u32 = 0xFFF5D547;
 const ECONOMIZER: u32 = 0xFFE39A2E;
 const ENRICHER: u32 = 0xFFB65FD8;
+/// 0.21: milk, off-white.
+const MILK: u32 = 0xFFF1EEE4;
 
 fn screen(height: f32, inventory: [f32; 2]) -> NativeScreen {
     NativeScreen {
@@ -85,6 +87,7 @@ fn fluid_name(f: FluidShown) -> String {
         FluidShown::Accelerator => tr("rustcraft.fluid.accelerator.name", "Accelerator"),
         FluidShown::Economizer => tr("rustcraft.fluid.economizer.name", "Economizer"),
         FluidShown::Enricher => tr("rustcraft.fluid.enricher.name", "Enricher"),
+        FluidShown::Milk => tr("rustcraft.fluid.milk.name", "Milk"),
     }
 }
 
@@ -95,6 +98,7 @@ fn fluid_colour(f: FluidShown) -> u32 {
         FluidShown::Accelerator => ACCELERATOR,
         FluidShown::Economizer => ECONOMIZER,
         FluidShown::Enricher => ENRICHER,
+        FluidShown::Milk => MILK,
         _ => WATER,
     }
 }
@@ -183,7 +187,15 @@ pub(super) fn draw_tank(game: &Game<'_>, data: &[i32], batch: &mut HudBatch, o: 
             );
             status_line(game, batch, o, tw::STATUS, Severity::Warn, &s);
         }
-        Note::None => {}
+        // 0.21 (spec 42, FT5): what the tank is kept for, or that it is free.
+        Note::None => {
+            let s = if p.pin == FluidShown::None {
+                tr("rustcraft.tank.free.short", "Tank is free: it takes the next new fluid")
+            } else {
+                tr_with("rustcraft.tank.kept_for.short", "Tank for: %s", &[fluid_name(p.pin)])
+            };
+            status_line(game, batch, o, tw::STATUS, Severity::Ok, &s);
+        }
     }
     kit::inventory(game, batch, o, tw::INVENTORY, tw::INVENTORY_LABEL_Y);
 }

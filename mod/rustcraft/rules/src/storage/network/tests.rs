@@ -46,6 +46,7 @@ fn page() -> NetPage {
                 capacity: 16_000,
                 blocks: 1,
                 joint: JointUse::Both,
+                pin: Some("minecraft:water".to_owned()),
             },
             TankLine {
                 pos: [13, 64, -4],
@@ -54,6 +55,8 @@ fn page() -> NetPage {
                 capacity: 32_000,
                 blocks: 2,
                 joint: JointUse::Off,
+                // 0.21 (FT5): empty, kept for milk.
+                pin: Some("rustcraft:milk".to_owned()),
             },
         ],
         tank_count: 2,
@@ -98,6 +101,7 @@ fn a_huge_page_fits_one_message_and_says_how_many_tanks_there_are() {
             capacity: 2,
             blocks: 1,
             joint: JointUse::Takes,
+            pin: None,
         })
         .collect();
     p.tank_count = 1000;

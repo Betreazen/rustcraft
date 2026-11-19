@@ -85,6 +85,8 @@ pub mod s21_orders;
 pub mod s21_rods;
 // 0.21 (spec 45): the channel items gone, those left turned into their alloy.
 pub mod s21_channels;
+// 0.21 (spec 42): one fluid a tank structure.
+pub mod s21_tanks;
 
 use std::collections::BTreeMap;
 
@@ -832,6 +834,8 @@ pub fn catalog() -> Vec<Build> {
     all.extend(s21_sides::ALL);
     // 0.21 (spec 45): the channel items gone, those left turned into their alloy.
     all.extend(s21_channels::ALL);
+    // 0.21 (spec 42): one fluid a tank structure.
+    all.extend(s21_tanks::ALL);
     all
 }
 

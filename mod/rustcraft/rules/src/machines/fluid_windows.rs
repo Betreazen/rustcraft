@@ -46,6 +46,8 @@ pub enum FluidShown {
     Accelerator,
     Economizer,
     Enricher,
+    /// 0.21 (spec 42): the shearer's milk, named in the window rather than «жидкость».
+    Milk,
 }
 
 impl FluidShown {
@@ -58,6 +60,7 @@ impl FluidShown {
             Some(crate::machines::catalyst::ACCELERATOR) => FluidShown::Accelerator,
             Some(crate::machines::catalyst::ECONOMIZER) => FluidShown::Economizer,
             Some(crate::machines::catalyst::ENRICHER) => FluidShown::Enricher,
+            Some(crate::utility::kitchen::MILK) => FluidShown::Milk,
             Some(_) => FluidShown::Other,
         }
     }
@@ -72,6 +75,7 @@ impl FluidShown {
             FluidShown::Accelerator => 5,
             FluidShown::Economizer => 6,
             FluidShown::Enricher => 7,
+            FluidShown::Milk => 8,
         }
     }
 
@@ -84,6 +88,7 @@ impl FluidShown {
             5 => FluidShown::Accelerator,
             6 => FluidShown::Economizer,
             7 => FluidShown::Enricher,
+            8 => FluidShown::Milk,
             _ => FluidShown::None,
         }
     }
@@ -134,6 +139,8 @@ pub mod tank {
         pub coming: f64,
         pub going: f64,
         pub note: Note,
+        /// 0.21 (FT5): the fluid the tank is kept for; `None` while it is free.
+        pub pin: FluidShown,
     }
 
     pub fn encode(p: &TankPanel) -> Vec<i32> {
@@ -149,7 +156,7 @@ pub mod tank {
             scaled(p.coming, FLOW_SCALE),
             scaled(p.going, FLOW_SCALE),
             p.note.code(),
-            0,
+            p.pin.code(),
         ]
     }
 
@@ -162,6 +169,7 @@ pub mod tank {
             coming: f64::from(at(data, 6)) / FLOW_SCALE,
             going: f64::from(at(data, 7)) / FLOW_SCALE,
             note: Note::from_code(at(data, 8)),
+            pin: FluidShown::from_code(at(data, 9)),
         }
     }
 
@@ -311,6 +319,7 @@ mod tests {
             coming: 0.1,
             going: 1.0,
             note: tank::Note::NoLane,
+            pin: FluidShown::Milk,
         };
         let data = tank::encode(&p);
         assert_eq!(data.len(), tank::DATA_SLOTS);

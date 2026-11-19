@@ -311,6 +311,7 @@ fn lane(
             capacity: g.capacity,
             blocks: u16::try_from(g.blocks.len()).unwrap_or(u16::MAX),
             joint: JointUse::of(*takes, *gives),
+            pin: g.pin.clone(),
         })
         .collect();
     tanks.sort_by_key(|t| t.pos);
@@ -452,6 +453,16 @@ fn fluid_name(fluid: Option<&str>) -> String {
     }
 }
 
+/// 0.21 (spec 42, FT5): what a tank holds, or for an empty one what it is kept for: «Пусто, для:
+/// вода», «Пусто, свободен».
+fn tank_name(t: &TankLine) -> String {
+    match (&t.fluid, &t.pin) {
+        (Some(f), _) => fluid_name(Some(f.as_str())),
+        (None, Some(p)) => tr_with("rustcraft.netpage.tank_kept_for", "Empty, for: %s", &[fluid_name(Some(p.as_str()))]),
+        (None, None) => tr("rustcraft.netpage.tank_free", "Empty, free"),
+    }
+}
+
 fn section_name(s: Section) -> String {
     match s {
         Section::Magistral => tr("rustcraft.netpage.magistral", "Magistral"),
@@ -504,7 +515,7 @@ fn coords(p: Pos) -> String {
 fn tank_text(t: &TankLine) -> String {
     let mut s = format!(
         "{} {}/{}",
-        fluid_name(t.fluid.as_deref()),
+        tank_name(t),
         fluids::bucket_text(t.amount),
         fluids::bucket_text(t.capacity)
     );
@@ -737,7 +748,7 @@ pub(super) fn row_tooltip(page: Option<&NetPage>, index: usize, i: usize, lines:
                 "rustcraft.netpage.tank_holds",
                 "%s: %s of %s buckets, %s blocks",
                 &[
-                    fluid_name(t.fluid.as_deref()),
+                    tank_name(t),
                     fluids::bucket_text(t.amount),
                     fluids::bucket_text(t.capacity),
                     t.blocks.to_string(),
