@@ -1,9 +1,10 @@
 // The joint window (M7, the guide's `wrench` window): the wrench clicked on a housing (or on a
 // block beside one, rustcraft_transport::on_right_click_block) opens a page per face of the
-// housing that is a joint, with a row per slot: the channel, its direction, its filter (a white
-// or black list of up to three items) and its priority. rustcraft_rules::net::joint_window says
-// what each cell shows and what a click does; this module turns cells into item stacks and keeps
-// the settings in the housing's block entity (`joints`, rustcraft_rules::net::settings::Record).
+// housing that is a joint, with a row per channel (round 31: its three built-in channels, items,
+// fluid and energy): the channel, its direction, its filter (a white or black list of up to three
+// items) and its priority. rustcraft_rules::net::joint_window says what each cell shows and what
+// a click does; this module turns cells into item stacks and keeps the settings in the housing's
+// block entity (`joints`, rustcraft_rules::net::settings::Record).
 //
 // The housing copies the chorus plant, which opens no menu when used: a block's own menu opens
 // only for templates whose use opens one (SRC/crates/horizon-world/src/level/interact.rs:
@@ -40,7 +41,7 @@ use rustcraft_rules::{
         joint_window::{self, Action, Cell, Page, Row, Unused},
         joints::ENERGY_DEFAULT,
         settings::{HousingJoints, JointSetting, Record},
-        topology::{ChannelKind, Housing, SLOTS},
+        topology::{ChannelKind, SLOTS},
     },
 };
 use std::{
@@ -98,7 +99,7 @@ struct Windows {
     opening: Vec<Opening>,
     sessions: HashMap<u128, Session>,
     clicks: Vec<Click>,
-    /// Each player's «Скопировать»: one face's four slots.
+    /// Each player's «Скопировать»: one face's channels.
     clipboard: HashMap<u128, [Option<JointSetting>; SLOTS]>,
 }
 
@@ -112,15 +113,20 @@ fn windows() -> MutexGuard<'static, Windows> {
 
 /// The housing's joints' settings as its block entity keeps them.
 pub(super) fn read_joints(nbt: &Compound) -> HousingJoints {
+    HousingJoints::from_records(&read_records(nbt))
+}
+
+/// The records of the housing's joints as saved, a slot past the third too (round 31: a housing
+/// saved by 0.19 had four slots, rustcraft_rules::net::migrate moves their settings).
+pub(super) fn read_records(nbt: &Compound) -> Vec<Record> {
     let Some(Tag::List(list)) = nbt.get(&JavaString::from(JOINTS_KEY)) else {
-        return HousingJoints::default();
+        return Vec::new();
     };
     let byte = |c: &Compound, k: &str| match c.get(&JavaString::from(k)) {
         Some(Tag::Byte(b)) => Some(*b as u8),
         _ => None,
     };
-    let records: Vec<Record> = list
-        .iter()
+    list.iter()
         .filter_map(|tag| {
             let Tag::Compound(c) = tag else {
                 return None;
@@ -148,19 +154,22 @@ pub(super) fn read_joints(nbt: &Compound) -> HousingJoints {
                 items,
             })
         })
-        .collect();
-    HousingJoints::from_records(&records)
+        .collect()
 }
 
 pub(super) fn write_joints(nbt: &mut Compound, joints: &HousingJoints) {
+    write_records(nbt, &joints.to_records());
+}
+
+/// The records of the housing's joints written as saved; none clears them.
+pub(super) fn write_records(nbt: &mut Compound, records: &[Record]) {
     let key = JavaString::from(JOINTS_KEY);
-    let records = joints.to_records();
     if records.is_empty() {
         nbt.remove(&key);
         return;
     }
     let list = records
-        .into_iter()
+        .iter()
         .map(|r| {
             Tag::compound([
                 ("face", Tag::Byte(r.face as i8)),
@@ -409,7 +418,6 @@ struct FaceBlock {
 
 /// The housing as the window needs it, read fresh from the level.
 struct Context {
-    slots: Housing,
     joints: HousingJoints,
     faces: [FaceBlock; 6],
 }
@@ -419,7 +427,6 @@ fn context(game: &mut Game<'_>, dimension: &str, housing: Pos) -> Option<Context
         return None;
     }
     let entity = crate::game::rustcraft_machines::entity(game, housing)?;
-    let slots = server::read_slots(&entity.nbt);
     let joints = read_joints(&entity.nbt);
     let saved = transport::legacy_modes(game);
     let game = &*game;
@@ -446,11 +453,7 @@ fn context(game: &mut Game<'_>, dimension: &str, housing: Pos) -> Option<Context
             fluid,
         }
     });
-    Some(Context {
-        slots,
-        joints,
-        faces,
-    })
+    Some(Context { joints, faces })
 }
 
 fn face_block(ctx: &Context, face: Face) -> &FaceBlock {
@@ -473,7 +476,8 @@ fn default_for(kind: Option<ChannelKind>, f: &FaceBlock) -> Mode {
 
 fn page(ctx: &Context, face: Face, armed: Option<usize>, clipboard: bool) -> Page {
     let f = face_block(ctx, face);
-    let kinds: [Option<ChannelKind>; SLOTS] = ctx.slots.slots.map(|c| c.map(|c| c.kind));
+    // Round 31: every housing has the three channels, each kind in its own slot.
+    let kinds: [Option<ChannelKind>; SLOTS] = ChannelKind::ALL.map(Some);
     Page {
         joints: ctx.faces.each_ref().map(is_joint),
         selected: face,
@@ -598,8 +602,8 @@ fn answer(game: &mut Game<'_>, dimension: &str, level: &mut LevelNet, c: Click) 
             }
         }
         Action::Copy => {
-            let copied =
-                std::array::from_fn(|slot| ctx.slots.slots[slot].map(|_| p.settings[slot].clone()));
+            // Round 31: every slot has its channel, so every row is copied.
+            let copied = std::array::from_fn(|slot| Some(p.settings[slot].clone()));
             windows().clipboard.insert(c.uuid, copied);
         }
         Action::Paste => {

@@ -1,7 +1,8 @@
 //! The joint window (M7, the guide's `wrench` window): one page per face of a housing that is a
-//! joint, a row per slot of the housing with its channel, direction, filter and priority. The
-//! game shows it as a chest of six rows (a server menu, which every client can show): the top row
-//! picks the face, rows 1–4 are the four slots, the bottom row holds the hint and copy/paste.
+//! joint, a row per channel of the housing with its direction, filter and priority. The game shows
+//! it as a chest of six rows (a server menu, which every client can show): the top row picks the
+//! face, rows 1–3 are the three built-in channels (round 31: items, fluid, energy), the bottom row
+//! holds the hint and copy/paste.
 //! No slot of it holds an item the player can take: a filter cell shows an item, and an item is
 //! added by clicking an empty cell, then the item in the player's own inventory below.
 //!
@@ -31,7 +32,7 @@ const PASTE: usize = CELLS - 1;
 /// Why a row's cell does nothing.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Unused {
-    /// The slot has no channel.
+    /// The slot has no channel (no housing since round 31; kept for a page built without one).
     Empty,
     /// A filter or a priority on an energy or fluid channel: only items have them.
     NotItems,
@@ -309,24 +310,10 @@ mod tests {
         Page {
             joints,
             selected: Face::YPos,
-            rows: [
-                Row {
-                    kind: Some(ChannelKind::Item),
-                    here: true,
-                },
-                Row {
-                    kind: Some(ChannelKind::Energy),
-                    here: true,
-                },
-                Row {
-                    kind: None,
-                    here: false,
-                },
-                Row {
-                    kind: Some(ChannelKind::Item),
-                    here: false,
-                },
-            ],
+            rows: ChannelKind::ALL.map(|kind| Row {
+                kind: Some(kind),
+                here: true,
+            }),
             settings: std::array::from_fn(|_| JointSetting::of_mode(Mode::Into)),
             armed: None,
             clipboard: false,
@@ -435,7 +422,6 @@ mod tests {
     fn a_fluid_row_has_a_filter_and_a_priority() {
         // s18/pipe, guide `ch_fluid`/`wrench`: direction, filter and priority for each channel.
         let mut p = page();
-        p.rows[1].kind = Some(ChannelKind::Fluid);
         let cells = cells(&p);
         let fluid = &cells[2 * COLUMNS..3 * COLUMNS];
         assert!(matches!(fluid[LIST], Cell::List { slot: 1, .. }));
@@ -450,10 +436,14 @@ mod tests {
 
     #[test]
     fn energy_empty_and_unreachable_rows_say_why_they_do_little() {
-        let p = page();
+        let mut p = page();
+        // Round 31: the rows are the built-in channels in slot order, energy last.
+        p.rows[0].here = false;
+        p.rows[1].kind = None;
         let cells = cells(&p);
-        let energy = &cells[2 * COLUMNS..3 * COLUMNS];
-        assert!(matches!(energy[DIRECTION], Cell::Direction { slot: 1, .. }));
+        let energy = &cells[3 * COLUMNS..4 * COLUMNS];
+        assert_eq!(energy[0], Cell::Channel { slot: 2, kind: Some(ChannelKind::Energy) });
+        assert!(matches!(energy[DIRECTION], Cell::Direction { slot: 2, .. }));
         assert!(matches!(
             energy[LIST],
             Cell::Unused {
@@ -461,7 +451,7 @@ mod tests {
                 ..
             }
         ));
-        let empty = &cells[3 * COLUMNS..4 * COLUMNS];
+        let empty = &cells[2 * COLUMNS..3 * COLUMNS];
         assert!(matches!(empty[0], Cell::Channel { kind: None, .. }));
         assert!(matches!(
             empty[DIRECTION],
@@ -470,7 +460,7 @@ mod tests {
                 ..
             }
         ));
-        let far = &cells[4 * COLUMNS..5 * COLUMNS];
+        let far = &cells[COLUMNS..2 * COLUMNS];
         assert!(matches!(
             far[DIRECTION],
             Cell::Unused {
@@ -478,7 +468,9 @@ mod tests {
                 ..
             }
         ));
-        assert_eq!(click(&p, 3 * COLUMNS + DIRECTION, false), Action::None);
+        assert_eq!(click(&p, 2 * COLUMNS + DIRECTION, false), Action::None);
+        // The row under the last channel is blank.
+        assert!(cells[4 * COLUMNS..5 * COLUMNS].iter().all(|c| *c == Cell::Blank));
     }
 
     #[test]

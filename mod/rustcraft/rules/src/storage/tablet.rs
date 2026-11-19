@@ -166,17 +166,16 @@ pub fn shown_count(count: u64, max_stack: u32) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::net::topology::{Channel, Housing, Layout, Node, analyse};
+    use crate::net::topology::{Housing, Layout, Node, analyse};
     use crate::tuning::Tuning;
     use std::collections::BTreeMap;
 
-    /// A tier-1 node at the origin and `n` item housings along x after it.
+    /// A tier-1 node at the origin and `n` housings along x after it.
     fn line(n: i32) -> Topology {
         let mut layout = Layout::default();
         layout.nodes.insert([0, 0, 0], Node { tier: 1 });
         for x in 1..=n {
-            let channel = Some(Channel { kind: ChannelKind::Item, tier: 1 });
-            layout.housings.insert([x, 0, 0], Housing { slots: [channel, None, None, None] });
+            layout.housings.insert([x, 0, 0], Housing::default());
         }
         analyse(&layout, &Tuning::default())
     }
@@ -201,11 +200,10 @@ mod tests {
     #[test]
     fn the_nearest_node_wins() {
         let mut layout = Layout::default();
-        let channel = Some(Channel { kind: ChannelKind::Item, tier: 1 });
         for (node, x0) in [([0, 0, 0], 1), ([100, 0, 0], 101)] {
             layout.nodes.insert(node, Node { tier: 1 });
             for x in x0..x0 + 3 {
-                layout.housings.insert([x, 0, 0], Housing { slots: [channel, None, None, None] });
+                layout.housings.insert([x, 0, 0], Housing::default());
             }
         }
         let t = analyse(&layout, &Tuning::default());

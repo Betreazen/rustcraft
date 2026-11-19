@@ -7,6 +7,11 @@
 //   content mod's loot table gives a broken node its own tier's item.
 //   The tiers are rustcraft_rules::net::node_tier until stream 3's `rustcraft_rules::tiers` is
 //   merged.
+// - Round 31: the housing in tiers 1–4 (`rustcraft:housing`, `rustcraft:housing_2..4`,
+//   rustcraft_rules::housing::TIERS), its three channels built in. A housing item of a higher tier
+//   placed sets its `tier` once it stands (`housing_placed`: answering the placement state would
+//   lose the sides the game joins it by), and a click with one on a placed housing of a lower tier
+//   sets the tier in place, as the node's.
 use crate::game::{
     Game,
     rustcraft_content as content,
@@ -45,8 +50,8 @@ pub(super) fn state_for_placement(
     }
 }
 
-/// `native_use_item_on`, before everything else: a node of a higher tier clicked on a node takes
-/// its place (U2).
+/// `native_use_item_on`, before everything else: a node or a housing of a higher tier clicked on
+/// one of its kind takes its place (U2).
 pub(super) fn on_use_item_on(game: &mut Game<'_>, stack: &ItemStack, pos: Pos, claimed: &mut bool) {
     // The sneaking wrench lifts a machine with its contents (guide `wrench`).
     if !*claimed
@@ -56,6 +61,10 @@ pub(super) fn on_use_item_on(game: &mut Game<'_>, stack: &ItemStack, pos: Pos, c
         && lift_to_player(game, &player, pos)
     {
         *claimed = true;
+        return;
+    }
+    if !*claimed && game.native_block(pos) == content::HOUSING {
+        upgrade_housing(game, stack, pos, claimed);
         return;
     }
     if *claimed || game.native_block(pos) != content::NODE {
@@ -95,6 +104,57 @@ pub(super) fn on_use_item_on(game: &mut Game<'_>, stack: &ItemStack, pos: Pos, c
         &[Text::literal(held.to_string()), Text::literal(back.to_string())],
     );
     server::tell(game, player.uuid, text);
+}
+
+/// Round 31 (U2): a housing of a higher tier clicked on the housing at `pos` sets its tier in
+/// place, its block entity (its joints' settings and facade) staying; the old tier's item comes
+/// back. A housing of a tier not higher, or a sneaking click, is placed beside it as any block.
+fn upgrade_housing(game: &mut Game<'_>, stack: &ItemStack, pos: Pos, claimed: &mut bool) {
+    use rustcraft_rules::housing;
+    let Some(held) = housing::TIERS.tier_of(&stack.item) else {
+        return;
+    };
+    let Some(player) = crate::game::rustcraft_server::acting(game) else {
+        return;
+    };
+    let placed = server::housing_at(game, pos).tier;
+    if player.sneaking || housing::swap(placed, held).is_none() {
+        return;
+    }
+    *claimed = true;
+    if !game.native_set_block_property(pos, content::TIER, &held.to_string()) {
+        crate::game::rustcraft_debug::journal_warn!("rustcraft: the housing at {pos:?} did not take tier {held}");
+        return;
+    }
+    if player.game_mode != CREATIVE {
+        game.native_take_items(&stack.item, 1);
+        let old = housing::item_of_tier(placed);
+        if game.native_give_items(&old, 1) == 0 {
+            server::drop_one(game, &player.dimension, pos, &old);
+        }
+    }
+    server::mark_level_stale(&player.dimension);
+    let text = server::line(
+        "rustcraft.housing.swapped",
+        "Housing of tier %s took the place of tier %s",
+        &[Text::literal(held.to_string()), Text::literal(placed.to_string())],
+    );
+    server::tell(game, player.uuid, text);
+}
+
+/// `native_place_block`: a housing placed by the item of a higher tier takes that tier. Its
+/// placement state is the game's own, which joins it to its neighbours (`state_for_placement`
+/// leaves the housing alone).
+pub(super) fn housing_placed(game: &mut Game<'_>, stack: &ItemStack, pos: Pos) {
+    let Some(tier) = rustcraft_rules::housing::TIERS.tier_of(&stack.item) else {
+        return;
+    };
+    if tier <= 1 || game.native_block(pos) != content::HOUSING {
+        return;
+    }
+    if !game.native_set_block_property(pos, content::TIER, &tier.to_string()) {
+        crate::game::rustcraft_debug::journal_warn!("rustcraft: the housing placed at {pos:?} did not take tier {tier}");
+    }
 }
 
 /// The node at `pos` raised to tier `held` in place; the tier it had, or none when `held` is
@@ -149,13 +209,13 @@ pub(super) fn facade_items(game: &Game<'_>, pos: Pos) -> Vec<String> {
 }
 
 /// The sneaking wrench on an open housing (guide `facade`: «следующий клик — сам корпус»): the
-/// housing comes off as an item, its channels with it; what has no room drops.
+/// housing comes off as its tier's item; what has no room drops.
 pub(super) fn lift_housing(game: &mut Game<'_>, player: &NativeServerPlayer, pos: Pos) {
     let Some(mut items) = take_housing(game, &player.dimension, pos) else {
         return;
     };
     if player.game_mode == CREATIVE {
-        items.retain(|i| i != content::HOUSING);
+        items.retain(|i| rustcraft_rules::housing::TIERS.tier_of(i).is_none());
     }
     for item in &items {
         if game.native_give_items(item, 1) == 0 {
@@ -167,20 +227,22 @@ pub(super) fn lift_housing(game: &mut Game<'_>, player: &NativeServerPlayer, pos
     server::tell(game, player.uuid, text);
 }
 
-/// The housing at `pos` taken out of the world: the items it gives back (itself, its facade and
-/// the block of its look, its channels); none when nothing was taken.
+/// The housing at `pos` taken out of the world: the items it gives back (its tier's item, its
+/// facade and the block of its look); none when nothing was taken.
 fn take_housing(game: &mut Game<'_>, dimension: &str, pos: Pos) -> Option<Vec<String>> {
     if game.native_block(pos) != content::HOUSING {
         return None;
     }
     let entity = game.native_mod_block_entity(pos)?;
-    let held = server::read_slots(&entity.nbt);
+    // Round 31: a housing of 0.19 not yet read again still holds the channels set into it.
+    let old = server::old_slots(&entity.nbt);
     let air = game.native_default_state("minecraft:air")?;
-    let mut items = vec![content::HOUSING.to_owned()];
+    let tier = server::housing_at(game, pos).tier;
+    let mut items = vec![rustcraft_rules::housing::item_of_tier(tier)];
     items.extend(facade_items(game, pos));
     items.extend(
-        held.slots
-            .into_iter()
+        old.into_iter()
+            .flatten()
             .flatten()
             .map(|c| content::channel_item(c.kind, c.tier).to_owned()),
     );
@@ -421,43 +483,35 @@ fn lift_to_player(game: &mut Game<'_>, player: &NativeServerPlayer, pos: Pos) ->
     true
 }
 
-// ---- The housing on the client: channel strips, bottlenecks, see-through facades ----
+// ---- The housing on the client: bottlenecks, see-through facades ----
 //
-// Guide `housing`: «сквозь окошки корпуса видно, какие каналы стоят». Clients get each housing's
-// slots and its bottleneck mask in its update tag; its block entity draws one tinted strip a
-// channel (standalone models, API 151) and, while the local player holds the wrench, a red frame
-// round a housing whose channel holds its net back (rustcraft_rules::net::bottleneck) and no
-// facade over any housing or node (F5: rustcraft_builder::draw_facade asks `wrench_in_hand`).
-// A housing with a bottleneck and every facade are drawn each frame, not kept, so the wrench
-// shows its change at once.
+// Guide `housing`: «сквозь окошки корпуса видно его каналы». Round 31: the three channels are
+// built in, so the housing's block model shows them, along its line, and its tier on its collars
+// (the content mod's housing blockstate): a client sees them as soon as it has the block, with no
+// block entity data. Clients get each housing's bottleneck mark in its update tag; while the local
+// player holds the wrench, its block entity draws a red frame round a housing whose tier holds its
+// net back (rustcraft_rules::net::bottleneck) and no facade over any housing or node (F5:
+// rustcraft_builder::draw_facade asks `wrench_in_hand`). A housing with a bottleneck and every
+// facade are drawn each frame, not kept, so the wrench shows its change at once.
 
-/// The housing's saved compound keeps its bottleneck mask under this key.
+/// The housing's saved compound keeps its bottleneck mark under this key.
 const WEAK_KEY: &str = "weak";
-const SLOTS_KEY: &str = "slots";
-const STRIPS: [&str; 4] = [
-    "rustcraft:block/housing_strip_0",
-    "rustcraft:block/housing_strip_1",
-    "rustcraft:block/housing_strip_2",
-    "rustcraft:block/housing_strip_3",
-];
 const WEAK_MODEL: &str = "rustcraft:block/housing_weak";
 const WEAK_TINT: u32 = 0xFF3030;
 
-/// `native_standalone_models`: the strips and the bottleneck frame.
+/// `native_standalone_models`: the bottleneck frame.
 pub(super) fn standalone_models(models: &mut Vec<String>) {
-    for m in STRIPS.iter().chain(std::iter::once(&WEAK_MODEL)) {
-        if !models.iter().any(|x| x == m) {
-            models.push((*m).to_owned());
-        }
+    if !models.iter().any(|x| x == WEAK_MODEL) {
+        models.push(WEAK_MODEL.to_owned());
     }
 }
 
-/// `native_block_entity_update_tag`: a housing's slots and bottleneck mask go to clients.
+/// `native_block_entity_update_tag`: a housing's bottleneck mark goes to clients.
 pub(super) fn update_tag(entity: &horizon_client::containers::ModBlockEntity, tag: &mut Option<Compound>) {
     if entity.id != content::HOUSING {
         return;
     }
-    for key in [SLOTS_KEY, WEAK_KEY] {
+    for key in [WEAK_KEY] {
         if let Some(v) = entity.nbt.get(&JavaString::from(key)) {
             tag.get_or_insert_with(Compound::new)
                 .insert(JavaString::from(key), v.clone());
@@ -484,18 +538,12 @@ pub(super) fn wrench_in_hand(game: &Game<'_>) -> bool {
     game.native_held().is_some_and(|(item, _, _)| item == content::WRENCH)
 }
 
-/// On a client: a housing's strips and, with the wrench in hand, its bottleneck frame.
+/// On a client: the items riding a housing and, with the wrench in hand, its bottleneck frame.
 pub(super) fn draw_housing(
     game: &Game<'_>,
     entity: &horizon_client::containers::ModBlockEntity,
     draw: &mut crate::game::native_block_entity_draw::BlockEntityDraw,
 ) {
-    let held = server::read_slots(&entity.nbt);
-    for (i, slot) in held.slots.iter().enumerate() {
-        if let Some(c) = slot {
-            game.native_draw_model(draw, STRIPS[i], rustcraft_rules::net::bottleneck::strip_colour(c.kind));
-        }
-    }
     // Slice 18 (s18-last): an order's items riding it move each frame: nothing kept meanwhile.
     let riding = crate::game::rustcraft_orders::draw_riding(game, entity, draw);
     // Wave 2: and the plain flow of its item nets (M5).
@@ -519,12 +567,12 @@ pub(super) fn draw_housing(
     }
 }
 
-/// After a rescan: each housing's bottleneck mask written where it changed, and sent to clients.
+/// After a rescan: each housing's bottleneck mark written where it changed, and sent to clients.
 pub(super) fn mark_weak(game: &mut Game<'_>, level: &server::LevelNet) {
-    let weak = rustcraft_rules::net::bottleneck::weak_slots(&level.topology, &level.layout);
+    let weak = rustcraft_rules::net::bottleneck::weak_housings(&level.topology, &level.layout);
     let housings: Vec<Pos> = level.layout.housings.keys().copied().collect();
     for pos in housings {
-        let want = weak.get(&pos).copied().unwrap_or(0);
+        let want = u8::from(weak.contains(&pos));
         let Some(entity) = game.native_mod_block_entity(pos) else {
             continue;
         };
@@ -546,12 +594,12 @@ pub(super) fn mark_weak(game: &mut Game<'_>, level: &server::LevelNet) {
     }
 }
 
-// ---- Channels of a housing lost without a player (explosion, /setblock) ----
+// ---- What a housing lost without a player leaves (explosion, /setblock) ----
 //
-// A housing a player breaks gives its channels back at once (rustcraft_server::on_destroy_block),
+// A housing a player breaks gives its facade back at once (rustcraft_server::on_destroy_block),
 // one the wrench lifts too; one that goes another way (an explosion, a command, another mod) is
-// found gone at the next rescan, and its channels drop where it stood. A housing in an unloaded
-// chunk is not gone.
+// found gone at the next rescan, and its facade and the block of its look drop where it stood. A
+// housing in an unloaded chunk is not gone. Round 31: its channels are built in, so none drops.
 
 static HANDLED: LazyLock<Mutex<BTreeSet<(String, Pos)>>> = LazyLock::new(Mutex::default);
 
@@ -582,7 +630,7 @@ fn handled() -> MutexGuard<'static, BTreeSet<(String, Pos)>> {
     HANDLED.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
-/// A housing at `pos` broken by a player or lifted: its channels are already dealt with.
+/// A housing at `pos` broken by a player or lifted: what it held is already dealt with.
 pub(super) fn housing_handled(dimension: &str, pos: Pos) {
     handled().insert((dimension.to_owned(), pos));
 }
@@ -600,7 +648,7 @@ pub(super) fn cleared(dimension: &str, min: Pos, max: Pos) {
     }
 }
 
-/// After a rescan: the housings of `before` that are gone from a loaded chunk drop their channels.
+/// After a rescan: the housings of `before` that are gone from a loaded chunk drop their facades.
 pub(super) fn drop_lost(
     game: &mut Game<'_>,
     dimension: &str,
@@ -610,7 +658,7 @@ pub(super) fn drop_lost(
     let mut lost = Vec::new();
     {
         let mut h = handled();
-        for (pos, housing) in before {
+        for pos in before.keys() {
             if now.housings.contains_key(pos) {
                 continue;
             }
@@ -621,15 +669,12 @@ pub(super) fn drop_lost(
             if !game.world.chunks.contains_key(&chunk) || game.native_block(*pos) == content::HOUSING {
                 continue;
             }
-            lost.push((*pos, *housing));
+            lost.push(*pos);
         }
         h.retain(|(d, _)| d != dimension);
     }
-    for (pos, housing) in lost {
-        for c in housing.slots.into_iter().flatten() {
-            server::drop_one(game, dimension, pos, content::channel_item(c.kind, c.tier));
-        }
-        // Wave 2: and its facade and the block of its look (guide `facade`).
+    for pos in lost {
+        // Wave 2: its facade and the block of its look (guide `facade`).
         let covered = facades().remove(&(dimension.to_owned(), pos)).unwrap_or_default();
         for item in covered {
             server::drop_one(game, dimension, pos, &item);

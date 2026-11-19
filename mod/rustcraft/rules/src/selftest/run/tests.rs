@@ -6,7 +6,6 @@ use crate::machines::processor::Shown;
 use crate::monorail::{Network, Trip, TripError};
 use crate::net::settings::JointSetting;
 use crate::net::tanks::TankGroup;
-use crate::net::topology::Channel;
 use crate::selftest::{Area, Slot, StorageView};
 use crate::storage::terminal::LimitChange;
 use crate::tuning::Tuning;
@@ -57,9 +56,6 @@ impl Bench for Fake {
     }
     fn insert(&mut self, _: Pos, _: &str, count: u32) -> Result<u32, String> {
         Ok(count)
-    }
-    fn set_channels(&mut self, _: Pos, _: [Option<Channel>; 4]) -> Result<(), String> {
-        Ok(())
     }
     fn set_joint(&mut self, _: Pos, _: Face, _: usize, _: JointSetting) -> Result<(), String> {
         Ok(())

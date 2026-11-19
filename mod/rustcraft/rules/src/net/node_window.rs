@@ -274,17 +274,13 @@ pub fn origin(size: [f32; 2]) -> [f32; 2] {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::net::topology::{Channel, Housing, Node, analyse};
-
-    fn item() -> Option<Channel> {
-        Some(Channel { kind: ChannelKind::Item, tier: 1 })
-    }
+    use crate::net::topology::{Housing, Node, analyse};
 
     /// A node at the origin, `west` housings to its west and `east` to its east, and `up` above.
     fn cross(tier: u8, west: i32, east: i32, up: i32) -> Layout {
         let mut l = Layout::default();
         l.nodes.insert([0, 0, 0], Node { tier });
-        let h = Housing { slots: [item(), None, None, None] };
+        let h = Housing::default();
         for x in 1..=west {
             l.housings.insert([-x, 0, 0], h);
         }

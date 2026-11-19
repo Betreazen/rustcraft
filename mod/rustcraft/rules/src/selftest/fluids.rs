@@ -3,7 +3,7 @@
 //! one fluid at a time and names the other on its source, a tier-2 one carries both (M13).
 
 use super::energy::CRYSTAL;
-use super::magistral::{channel, line};
+use super::magistral::line;
 use super::{Bench, Build, Scenario, at, expect, near, plot_area, same};
 use crate::geom::{Face, Pos};
 use crate::machines::pump::{LAVA, WATER};
@@ -11,7 +11,6 @@ use crate::net::fluids::BUCKET;
 use crate::net::items::Mode;
 use crate::net::settings::JointSetting;
 use crate::net::tanks::TankGroup;
-use crate::net::topology::ChannelKind;
 use crate::tuning::Tuning;
 
 pub const ALL: [Build; 5] = [
@@ -147,13 +146,7 @@ fn pump_drains_lava(o: Pos, t: &Tuning) -> Scenario {
 
 /// Water and lava tanks giving into one fluid net with two empty tanks to fill.
 fn two_sources(b: &mut dyn Bench, o: Pos, tier: u8) -> Result<(), String> {
-    line(
-        b,
-        o,
-        1,
-        6,
-        [channel(ChannelKind::Fluid, tier), None, None, None],
-    )?;
+    line(b, o, 1, 6, tier)?;
     for (k, fluid) in [(1, WATER), (3, LAVA)] {
         let tank = at(o, [k, 0, -1]);
         b.place(tank, TANK, &[])?;
@@ -161,7 +154,7 @@ fn two_sources(b: &mut dyn Bench, o: Pos, tier: u8) -> Result<(), String> {
         b.set_joint(
             at(o, [k, 0, 0]),
             Face::ZNeg,
-            0,
+            crate::net::topology::FLUID_SLOT,
             JointSetting::of_mode(Mode::From),
         )?;
     }

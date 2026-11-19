@@ -96,14 +96,7 @@ impl HousingJoints {
         next
     }
 
-    /// The housing without any setting of `slot`: its channel was taken out.
-    pub fn without_slot(&self, slot: usize) -> HousingJoints {
-        let mut next = self.clone();
-        next.settings.retain(|(_, s), _| *s != slot);
-        next
-    }
-
-    /// The four slots' settings of one face, for «Скопировать».
+    /// The slots' settings of one face, for «Скопировать».
     pub fn face(&self, face: Face) -> [Option<JointSetting>; SLOTS] {
         std::array::from_fn(|slot| self.get(face, slot).cloned())
     }
@@ -138,7 +131,8 @@ impl HousingJoints {
 
     /// What `to_records` wrote. A record with an unknown face, slot or mode is dropped, so a
     /// damaged save loses one joint's settings, not the housing's; numbers past the limits are
-    /// brought back inside them.
+    /// brought back inside them. (A housing saved before round 31 is read by `net::migrate`
+    /// first: its records may name a fourth slot.)
     pub fn from_records(records: &[Record]) -> HousingJoints {
         let settings = records
             .iter()
@@ -256,22 +250,11 @@ mod tests {
     }
 
     #[test]
-    fn taking_a_channel_out_forgets_its_slot_on_every_face() {
-        let h = HousingJoints::default()
-            .with(Face::XNeg, 1, into())
-            .with(Face::YPos, 1, into())
-            .with(Face::YPos, 0, into());
-        let left = h.without_slot(1);
-        assert_eq!(left.settings.len(), 1);
-        assert!(left.get(Face::YPos, 0).is_some());
-    }
-
-    #[test]
     fn settings_survive_a_save_and_bad_records_are_dropped() {
         let h = HousingJoints::default()
             .with(
                 Face::ZPos,
-                3,
+                2,
                 into()
                     .apply(&Edit::AddItem("minecraft:raw_iron".into()))
                     .apply(&Edit::ToggleList)
@@ -286,7 +269,7 @@ mod tests {
             ..records[0].clone()
         });
         bad.push(Record {
-            slot: 4,
+            slot: SLOTS as u8,
             ..records[0].clone()
         });
         bad.push(Record {

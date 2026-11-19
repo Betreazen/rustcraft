@@ -570,8 +570,7 @@ fn grown_block_reaches_the_archeology_table(o: Pos, t: &Tuning) -> Scenario {
     // sand unloads at a dock; the dock gives it to the magistral, whose housing feeds an
     // archaeology table (not beside the dock, so only the magistral can bring it). The table
     // brushes it and, the block being grown, tells Path-of-craft-tree no `brush`.
-    use super::magistral::{channel, place_node};
-    use crate::net::topology::ChannelKind;
+    use super::magistral::place_node;
     use crate::utility::grown;
     const SUSPICIOUS: &str = "minecraft:suspicious_sand";
     let n = t.worker_hold as u32;
@@ -589,7 +588,6 @@ fn grown_block_reaches_the_archeology_table(o: Pos, t: &Tuning) -> Scenario {
             b.place(dock, DOCK_UNLOAD, &[])?;
             place_node(b, node, 1)?;
             b.place(housing, "rustcraft:housing", &[])?;
-            b.set_channels(housing, [channel(ChannelKind::Item, 1), None, None, None])?;
             b.place(table, "rustcraft:archeo", &[])?;
             b.set_owner(table, owner, 1)?;
             b.set_buffer(table, 1000.0)?;

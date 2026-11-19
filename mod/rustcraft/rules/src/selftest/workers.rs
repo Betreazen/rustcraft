@@ -4,11 +4,10 @@
 //! charge dock (W4.b); with no dock on its rails it stops and says so (W4.c). The saw's and the
 //! reaper's breaks are reported to Path-of-craft-tree (X1, the contract's `break`).
 
-use super::magistral::{channel, place_node};
+use super::magistral::place_node;
 use super::{Bench, Build, Memo, Scenario, at, base, count_of, plot_area, same};
 use crate::geom::{Face, Pos};
 use crate::monorail::shape;
-use crate::net::topology::ChannelKind;
 use crate::tuning::Tuning;
 use crate::worker::{Errand, Note, Tool};
 
@@ -661,7 +660,6 @@ fn unloads_into_a_chest_by_the_magistral(o: Pos, t: &Tuning) -> Scenario {
             b.place(dock, DOCK_UNLOAD, &[])?;
             place_node(b, node, 1)?;
             b.place(housing, HOUSING, &[])?;
-            b.set_channels(housing, [channel(ChannelKind::Item, 1), None, None, None])?;
             b.place(chest, "minecraft:chest", &[])?;
             Ok(())
         },

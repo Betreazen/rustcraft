@@ -127,17 +127,16 @@ mod tests {
 
     #[test]
     fn an_extra_terminal_on_the_net_shows_the_storage() {
-        // S6: housings x 1..=10 with an item channel; cells beside housing 10, a terminal beside
-        // housing 2; another net's housing far off.
-        use crate::net::topology::{Channel, ChannelKind, Housing, Layout, Node, analyse};
+        // S6: housings x 1..=10; cells beside housing 10, a terminal beside housing 2; another
+        // net's housing far off.
+        use crate::net::topology::{Housing, Layout, Node, analyse};
         let mut layout = Layout::default();
         layout.nodes.insert([0, 0, 0], Node { tier: 1 });
-        let item = Some(Channel { kind: ChannelKind::Item, tier: 1 });
         for x in 1..=10 {
-            layout.housings.insert([x, 0, 0], Housing { slots: [item, None, None, None] });
+            layout.housings.insert([x, 0, 0], Housing::default());
         }
         layout.nodes.insert([50, 0, 0], Node { tier: 1 });
-        layout.housings.insert([51, 0, 0], Housing { slots: [item, None, None, None] });
+        layout.housings.insert([51, 0, 0], Housing::default());
         let t = analyse(&layout, &crate::tuning::Tuning::default());
         let storages = BTreeMap::from([(4, vec![[10, 1, 0], [11, 1, 0]])]);
         assert_eq!(terminal_on_net([2, 1, 0], &storages, &t), Some(4));

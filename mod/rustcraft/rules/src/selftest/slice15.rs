@@ -8,12 +8,11 @@
 //! - A cancelled order gives the autocrafter's unused ingredients back to the storage (O7).
 //! - «Держать 2» makes the storage order pistons until it holds 2 (O14).
 
-use super::magistral::{channel, line};
+use super::magistral::line;
 use super::transport::{chest, fill, joint};
 use super::{Bench, Build, Scenario, at, count_of, plot_area, same};
 use crate::geom::Pos;
 use crate::net::items::Mode;
-use crate::net::topology::ChannelKind;
 use crate::orders::queue::Wait;
 use crate::storage::terminal::{self, Press};
 use crate::tuning::Tuning;
@@ -55,16 +54,10 @@ pub(super) fn furnace_at(o: Pos) -> Pos {
     at(o, [5, 0, -1])
 }
 
-/// A node of tier 3, five housings with an item channel, a chest «из блока» at housing 1, and a
+/// A node of tier 3, five housings of tier 2, a chest «из блока» at housing 1, and a
 /// storage of four cells with a terminal at housings 3 to 5; the chest holds `parts`.
 pub(super) fn build(b: &mut dyn Bench, o: Pos, parts: &[(&str, u32)]) -> Result<(), String> {
-    line(
-        b,
-        o,
-        SMART,
-        5,
-        [channel(ChannelKind::Item, 2), None, None, None],
-    )?;
+    line(b, o, SMART, 5, 2)?;
     b.place(chest(o, 1), "minecraft:chest", &[])?;
     joint(b, o, 1, Mode::From, 0)?;
     for c in [[3, 0, 1], [4, 0, 1], [3, 0, 2], [4, 0, 2]] {

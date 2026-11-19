@@ -6,14 +6,13 @@
 //! `crate::power` on `Tuning`; a panel's from the time and rain the world has at that moment, so
 //! the scenario changes neither for the other mods.
 
-use super::magistral::{channel, line};
+use super::magistral::line;
 use super::{Bench, Build, Scenario, at, expect, near, plot_area, same};
 use crate::geom::{Face, Pos};
 use crate::machines::processor::Shown as Machine;
 use crate::modules::Module;
 use crate::net::items::Mode;
 use crate::net::settings::JointSetting;
-use crate::net::topology::ChannelKind;
 use crate::power::{self as rules, Form, PowerView, Shown};
 use crate::tuning::Tuning;
 
@@ -72,13 +71,7 @@ fn solar_by_daylight(o: Pos, t: &Tuning) -> Scenario {
     let t2 = t.clone();
     Scenario::new("power_solar_panels_by_daylight", plot_area(o))
         .then("three panels on a housing, one under stone", move |b, _| {
-            line(
-                b,
-                o,
-                1,
-                2,
-                [channel(ChannelKind::Energy, 1), None, None, None],
-            )?;
+            line(b, o, 1, 2, 1)?;
             for p in panels {
                 b.place(p, SOLAR, &[])?;
             }
@@ -199,19 +192,13 @@ fn lava_through_a_channel(o: Pos, _: &Tuning) -> Scenario {
         .then(
             "a tank and the generator on a fluid channel",
             move |b, _| {
-                line(
-                    b,
-                    o,
-                    1,
-                    2,
-                    [channel(ChannelKind::Fluid, 1), None, None, None],
-                )?;
+                line(b, o, 1, 2, 1)?;
                 b.place(tank, TANK, &[])?;
                 b.set_tank(tank, rules::LAVA, 1000)?;
                 b.set_joint(
                     at(o, [1, 0, 0]),
                     Face::ZPos,
-                    0,
+                    crate::net::topology::FLUID_SLOT,
                     JointSetting::of_mode(Mode::From),
                 )?;
                 b.place(generator, LAVA_GEN, &[])

@@ -593,12 +593,13 @@ pub(super) fn on_right_click_block(
         Some((pos, Face::from_normal(face)))
     } else {
         server::with_level(&player.dimension, |level| {
+            // Round 31: every housing has its channels built in, so any housing beside it.
             Face::ALL.into_iter().find_map(|f| {
                 let housing = step(pos, f);
-                let held = level.layout.housings.get(&housing)?;
-                held.slots
-                    .iter()
-                    .any(Option::is_some)
+                level
+                    .layout
+                    .housings
+                    .contains_key(&housing)
                     .then_some((housing, Some(f.opposite())))
             })
         })

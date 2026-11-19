@@ -198,7 +198,7 @@ pub fn decode(ints: &[i32], items: &[ItemKey]) -> Vec<(ItemKey, Span)> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::net::topology::{Channel, ChannelKind, Housing, Node};
+    use crate::net::topology::{Housing, Node};
     use crate::orders::ship::{Leg, Route};
     use crate::tuning::Tuning;
 
@@ -206,17 +206,8 @@ mod tests {
 
     fn layout(xs: &[i32], nodes: &[i32]) -> Layout {
         let mut l = Layout::default();
-        let channel = Some(Channel {
-            kind: ChannelKind::Item,
-            tier: 2,
-        });
         for &x in xs {
-            l.housings.insert(
-                [x, 0, 0],
-                Housing {
-                    slots: [channel, None, None, None],
-                },
-            );
+            l.housings.insert([x, 0, 0], Housing::new(2));
         }
         for &x in nodes {
             l.nodes.insert([x, 0, 0], Node { tier: 3 });

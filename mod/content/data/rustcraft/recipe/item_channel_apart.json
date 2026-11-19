@@ -1,0 +1,12 @@
+{
+  "type": "minecraft:crafting_shapeless",
+  "category": "misc",
+  "ingredients": [
+    "rustcraft:item_channel",
+    "rustcraft:item_channel"
+  ],
+  "result": {
+    "id": "rustcraft:coppersteel",
+    "count": 1
+  }
+}

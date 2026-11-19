@@ -11,8 +11,9 @@ COLORS = {
     **family('node', NODE), 'glow_lens': '#7af0ff',
     **family('station', STATION), 'hazard': '#ffcf5a', 'screen': shade('#ffcf5a', -0.55), 'glow_screen': '#ffcf5a',
     'pipe': '#5d6470', 'pipe_light': '#8a919d', 'pipe_dark': '#3a3f49',
-    # Channel strips of a housing, recoloured by the guide after the four slots.
-    'glow_tint_0': '#15171c', 'glow_tint_1': '#15171c', 'glow_tint_2': '#15171c', 'glow_tint_3': '#15171c',
+    # Channel strips of a housing: items, fluid, energy (round 31: built in, the guide's colours of
+    # the channels, docs/showcase/js/models.js `CH_COLOR`).
+    'glow_tint_0': '#ffa53c', 'glow_tint_1': '#4c9bf5', 'glow_tint_2': '#ffe14a',
     **family('capsule', CAPSULE), 'capsule_top': '#cfeaf5', 'glow_window': '#8fd8f0', 'glow_headlight': '#fff3a8',
     **family('chassis', CHASSIS), 'glow_status': '#59d38c',
     **{'tool_' + k: c for k, c in TOOLS.items()}, **{'tool_' + k + '_dark': shade(c, -0.3) for k, c in TOOLS.items()},
@@ -99,10 +100,12 @@ def station(m):
     m.box('glow_lamp', 6.5, 6.5, 16, 3, 3, 1.5)
 
 
-# A housing is 6 pixels across. Its four channel strips run inside, 1 pixel thick, placed as four
-# queens on a 4 x 4 board, so every strip shows between the others from every side.
-ROW = (6, 7, 8, 9)
-QUEEN = (1, 3, 0, 2)
+# A housing is 6 pixels across. Its three channel strips run inside along its line, 1 pixel thick,
+# each in its own lane on the diagonal of the cross-section: every strip shows between the others
+# from every side, and strips along two axes meet only where they are the same channel.
+LANE = (6, 7.5, 9)
+# The corners of the centre's cage, where the tier's caps sit: a quarter pixel out of the beams.
+CAPS = (4.75, 10.25)
 
 
 def along(axis, start, length, a, b, size=1):
@@ -116,15 +119,25 @@ def along(axis, start, length, a, b, size=1):
 
 
 def pipe(m):
-    # The centre: a cage of twelve beams around the four channels, lighter on top.
+    # Round 31: the three channels are built in: items, fluid and energy (slots 0, 1, 2, the
+    # strips glow_tint_0..2). The centre: a cage of twelve beams, lighter on top, with a cap in the
+    # colour of the housing's tier on each corner, set a quarter pixel out so no face of it lies
+    # on a beam's.
     for a in (5, 10):
         for b in (5, 10):
             edge = 'pipe_light' if b == 10 else 'pipe_dark'
             m.box(edge, *along('x', 5, 6, a, b))
             m.box(edge, *along('y', 6, 4, a, b))
             m.box('pipe', *along('z', 6, 4, a, b))
-    for k in range(4):
-        m.box('glow_tint_%d' % k, ROW[k], ROW[k], ROW[QUEEN[k]], 1, 1, 1)
+    for x in CAPS:
+        for y in CAPS:
+            for z in CAPS:
+                m.box('tint', x, y, z, 1, 1, 1)
+    # The channels across the centre, one part an axis: the guide and the game show those of the
+    # axes the housing is joined along, and those along x when it is joined along none.
+    for axis in 'xyz':
+        for k, lane in enumerate(LANE):
+            m.box('glow_tint_%d' % k, *along(axis, 5, 6, lane, lane), part='ch_' + axis)
     # An arm to every side, one part each; the guide shows the arms to connected sides only.
     for axis in 'xyz':
         for sign, start in (('-', 0), ('+', 11)):
@@ -133,10 +146,10 @@ def pipe(m):
                 for b in (5, 10):
                     edge = 'pipe' if axis == 'z' else 'pipe_light' if b == 10 else 'pipe_dark'
                     m.box(edge, *along(axis, start, 5, a, b), part=arm)
-            for k in range(4):
-                m.box('glow_tint_%d' % k, *along(axis, start, 5, ROW[k], ROW[QUEEN[k]]), part=arm)
-            # A collar where the arm meets the next block.
-            m.box('pipe', *along(axis, 0 if start == 0 else 15, 1, 4.75, 4.75, 6.5), part=arm)
+            for k, lane in enumerate(LANE):
+                m.box('glow_tint_%d' % k, *along(axis, start, 5, lane, lane), part=arm)
+            # A collar where the arm meets the next block, in the colour of the tier.
+            m.box('tint', *along(axis, 0 if start == 0 else 15, 1, 4.75, 4.75, 6.5), part='collar_' + arm)
 
 
 # The halves in the order of quarter turns about the block centre: quarter n takes x+ to HALVES[n].

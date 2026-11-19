@@ -23,7 +23,7 @@ use crate::game::{
     rustcraft_machines::{self as machines, SMELTING, slot_of},
     rustcraft_mining as mining, rustcraft_mixer as mixer, rustcraft_monorail as monorail,
     rustcraft_power as power,
-    rustcraft_server::{self as server, read_slots, write_slots},
+    rustcraft_server::{self as server, old_slots, write_old_slots},
     rustcraft_storage as storage, rustcraft_window as window, rustcraft_workers as workers,
 };
 use crate::mod_api::NativeCommand;
@@ -37,9 +37,9 @@ use rustcraft_rules::{
     modules::Module,
     monorail::{Network, Trip, TripError},
     net::{
-        settings::JointSetting,
+        migrate::OldSlots,
+        settings::{HousingJoints, JointSetting, Record},
         tanks::{TankBlock, TankGroup},
-        topology::{Channel, Housing},
     },
     selftest::{self, Area, Bench, MobView, Slot, StorageView, run::Run},
     storage::{keys, terminal::LimitChange},
@@ -327,8 +327,28 @@ impl Bench for GameBench<'_, '_> {
         Ok(went)
     }
 
-    fn set_channels(&mut self, pos: Pos, slots: [Option<Channel>; 4]) -> Result<(), String> {
-        self.change_entity(pos, |e| write_slots(&mut e.nbt, &Housing { slots }))
+    fn set_old_housing(
+        &mut self,
+        pos: Pos,
+        slots: OldSlots,
+        joints: &[(Face, usize, JointSetting)],
+    ) -> Result<(), String> {
+        // Round 31: as 0.19 wrote it: the four slots' bytes and a record per face and old slot.
+        let records: Vec<Record> = joints
+            .iter()
+            .map(|(face, slot, s)| Record {
+                face: face.index(),
+                slot: *slot as u8,
+                mode: s.mode.code(),
+                allow_only: s.filter.allow_only,
+                priority: s.priority,
+                items: s.filter.items.iter().cloned().collect(),
+            })
+            .collect();
+        self.change_entity(pos, |e| {
+            write_old_slots(&mut e.nbt, &slots);
+            window::write_records(&mut e.nbt, &records);
+        })
     }
 
     fn set_joint(
@@ -436,6 +456,12 @@ impl Bench for GameBench<'_, '_> {
             .flatten()
     }
 
+    fn housing_joints(&self, pos: Pos) -> Option<HousingJoints> {
+        self.game
+            .native_mod_block_entity(pos)
+            .map(|e| window::read_joints(&e.nbt))
+    }
+
     fn shown(&self, pos: Pos) -> Option<Shown> {
         self.with_level(|l| l.power.status.get(&pos).map(|s| s.shown))
             .flatten()
@@ -525,12 +551,9 @@ impl Bench for GameBench<'_, '_> {
             .native_mod_block_entity(pos)
             .ok_or_else(|| format!("no mod block entity at {pos:?}"))?;
         let back = through_nbt(&entity.nbt)?;
-        if read_slots(&back) != read_slots(&entity.nbt) {
-            return Err(format!(
-                "slots {:?} came back as {:?}",
-                read_slots(&entity.nbt),
-                read_slots(&back)
-            ));
+        // Round 31: a housing of now keeps no old slots, before the save or after it.
+        if let Some(old) = old_slots(&entity.nbt).or_else(|| old_slots(&back)) {
+            return Err(format!("old slots {old:?} in the housing"));
         }
         let (kept, read) = (window::read_joints(&entity.nbt), window::read_joints(&back));
         if read != kept || kept.settings.is_empty() {
@@ -985,6 +1008,7 @@ impl Bench for GameBench<'_, '_> {
             Some(item) => take_got(item).ok_or_else(|| format!("no {item} from an earlier click"))?,
             None => ItemStack::new(held, 1),
         };
+        let held_item = stack.item.to_string();
         let n = face.offset().map(f64::from);
         let centre = pos.map(|c| f64::from(c) + 0.5);
         let point: [f64; 3] = std::array::from_fn(|k| centre[k] + 0.5 * n[k]);
@@ -1014,8 +1038,14 @@ impl Bench for GameBench<'_, '_> {
             game.native_use_as_player(stack, eye, yaw, pitch, target, sneaking)
         })
         .ok_or("the fake player could not act")?;
-        let ids = used.other.iter().map(|s| s.item.to_string()).collect();
+        let mut ids: Vec<String> = used.other.iter().map(|s| s.item.to_string()).collect();
         got().extend(used.other);
+        // Round 31: a stack in the hand that is not what it held was given too (a housing of a
+        // higher tier swapped in place leaves the old tier in the hand it emptied).
+        if let Some(hand) = used.held.filter(|h| h.item.to_string() != held_item) {
+            ids.insert(0, hand.item.to_string());
+            got().push(hand);
+        }
         Ok(ids)
     }
 

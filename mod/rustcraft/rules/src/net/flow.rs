@@ -126,7 +126,7 @@ mod tests {
         let mut layout = Layout::default();
         layout.nodes.insert([0, 0, 0], Node { tier: 1 });
         for x in 1..=3 {
-            layout.housings.insert([x, 0, 0], Housing { slots: [None; 4] });
+            layout.housings.insert([x, 0, 0], Housing::default());
         }
         let path = [([1, 0, 0], 0), ([2, 0, 0], 1), ([3, 0, 0], 2)];
         let s = spans(&layout, &path, [1, 0, -1], [3, 0, -1], 1000);
@@ -139,7 +139,7 @@ mod tests {
         // A long line: the items of earlier seconds are still on their way.
         let long: Vec<(Pos, u32)> = (1..=12).map(|x| ([x, 0, 0], x as u32 - 1)).collect();
         for x in 4..=12 {
-            layout.housings.insert([x, 0, 0], Housing { slots: [None; 4] });
+            layout.housings.insert([x, 0, 0], Housing::default());
         }
         let s = spans(&layout, &long, [1, 0, -1], [12, 0, -1], 1000);
         assert!(s.iter().any(|(p, sp)| *p == [12, 0, 0] && sp.t0 < 1000 + EVERY), "one set off before is near the end");

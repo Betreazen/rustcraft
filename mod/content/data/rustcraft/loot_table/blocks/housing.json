@@ -2,8 +2,53 @@
   "type": "minecraft:block",
   "pools": [
     {
-      "condition": { "type": "minecraft:survives_explosion" },
-      "entries": [{ "type": "minecraft:item", "name": "rustcraft:housing" }],
+      "condition": {
+        "type": "minecraft:survives_explosion"
+      },
+      "entries": [
+        {
+          "type": "minecraft:alternatives",
+          "children": [
+            {
+              "type": "minecraft:item",
+              "name": "rustcraft:housing_2",
+              "condition": {
+                "type": "minecraft:match_block",
+                "blocks": "rustcraft:housing",
+                "state": {
+                  "tier": "2"
+                }
+              }
+            },
+            {
+              "type": "minecraft:item",
+              "name": "rustcraft:housing_3",
+              "condition": {
+                "type": "minecraft:match_block",
+                "blocks": "rustcraft:housing",
+                "state": {
+                  "tier": "3"
+                }
+              }
+            },
+            {
+              "type": "minecraft:item",
+              "name": "rustcraft:housing_4",
+              "condition": {
+                "type": "minecraft:match_block",
+                "blocks": "rustcraft:housing",
+                "state": {
+                  "tier": "4"
+                }
+              }
+            },
+            {
+              "type": "minecraft:item",
+              "name": "rustcraft:housing"
+            }
+          ]
+        }
+      ],
       "rolls": 1
     }
   ],
