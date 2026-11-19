@@ -14,7 +14,7 @@ pub const WINDOWS: &[(&str, &[Widget])] = &[
         Widget::Status { tone: 1 },
     ]),
     ("wrench", &[
-        Widget::Chips { on: &[true, true, true], note: false },
+        Widget::Chips { on: &[true, true], note: false },
         Widget::Chips { on: &[false, false], note: false },
     ]),
     ("structure", &[

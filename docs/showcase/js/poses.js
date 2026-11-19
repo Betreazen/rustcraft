@@ -79,13 +79,17 @@
   P.anchor = (o, t) => ({ glow: o.on ? 0.1 + 0.3 * pulse(t, 3) : 0 });
 
   // ---- trunk and transport
-  // Housing: an arm to every connected side, four channel strips coloured by the slots.
+  // Housing (round 31): an arm and its collar to every connected side; the three built-in channels
+  // (items, fluid, energy) run across the centre along the axes it is connected along, along x
+  // when it is connected along none; the collars and the corner caps wear the tier's colour.
   const ARMS = ['x-', 'x+', 'y-', 'y+', 'z-', 'z+'];
   P.pipe = (o) => {
-    const ch = ((o.ch || '') + '----').slice(0, 4), con = o.con || '';
+    const con = o.con || '';
     const parts = {};
-    for (const a of ARMS) if (!con.includes(a)) parts[a] = HIDE;
-    return { glow: o.bad ? 0 : 0.12, dim: o.bad ? 0.45 : 0, tints: { 0: CH[ch[0]], 1: CH[ch[1]], 2: CH[ch[2]], 3: CH[ch[3]] }, parts };
+    for (const a of ARMS) if (!con.includes(a)) { parts[a] = HIDE; parts['collar_' + a] = HIDE; }
+    const axes = ['x', 'y', 'z'].filter((ax) => con.includes(ax + '-') || con.includes(ax + '+'));
+    for (const ax of ['x', 'y', 'z']) if (!(axes.includes(ax) || (!axes.length && ax === 'x'))) parts['ch_' + ax] = HIDE;
+    return { glow: o.bad ? 0 : 0.12, dim: o.bad ? 0.45 : 0, tint: TIER[o.tier || 1], tints: { 0: CH.i, 1: CH.f, 2: CH.e }, parts };
   };
 
   // Monorail: the model is a floor rail with a half to every side. On the ceiling it is turned
