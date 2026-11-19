@@ -222,33 +222,9 @@ pub fn harvest(has_bottle: bool) -> (&'static str, u32) {
     }
 }
 
-/// Wave 2 (guide `fishery`: «каждой станции нужен свой участок воды 5×5»): whether the station
-/// at `me` shares its 5 × 5 with one of `others` (the level's other stations) that keeps it: their
-/// patches overlap at the same height and the other comes first in block order. So of two
-/// stations on one patch one fishes and the other says why it does not.
-pub fn water_taken(me: crate::geom::Pos, others: &[crate::geom::Pos]) -> bool {
-    others.iter().any(|o| {
-        *o != me
-            && o[1] == me[1]
-            && (o[0] - me[0]).abs() < WATER_SIDE
-            && (o[2] - me[2]).abs() < WATER_SIDE
-            && *o < me
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn two_stations_on_one_patch_one_fishes() {
-        let a = [0, 64, 0];
-        let b = [3, 64, 2];
-        assert!(!water_taken(a, &[a, b]), "the first keeps it");
-        assert!(water_taken(b, &[a, b]), "the second shares it");
-        assert!(!water_taken([5, 64, 0], &[a]), "five apart: patches of their own");
-        assert!(!water_taken([2, 70, 0], &[a]), "another height");
-    }
 
     #[test]
     fn the_window_chooses_honey_or_combs() {

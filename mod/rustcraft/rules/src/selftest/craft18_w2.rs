@@ -14,7 +14,7 @@
 //! - A portal dock sends a tank's water (behind a joint that gives) to its pair, which unloads it
 //!   into the tank it touches.
 
-use super::craft18::{basin, socket, status_key, storage_on_a_net};
+use super::craft18::{socket, status_key, storage_on_a_net};
 use crate::storage::modules::{SOCKET_STACK, STACK_MODULES};
 use super::{Build, Scenario, at, plot_area, same};
 use crate::geom::Pos;
@@ -60,25 +60,32 @@ fn terminal_takes_the_crystallite_stack_module(o: Pos, _: &Tuning) -> Scenario {
         })
 }
 
+/// 0.21 (owner 2026-11-19: stations close together must not block each other): four stations
+/// side by side over one long pond, each with the 5 × 5 of water under it, all fish.
 fn two_fisheries_on_one_patch(o: Pos, _: &Tuning) -> Scenario {
-    let first = at(o, [4, 3, 0]);
-    // Its 5 × 5 overlaps the first one's, but it stands outside the first one's water.
-    let second = at(o, [7, 3, 0]);
-    Scenario::new("w2_two_fisheries_on_one_patch", plot_area(o))
-        .then("two stations with energy and rods on one basin", move |b, _| {
-            basin(b, o)?;
-            for p in [first, second] {
+    let stations = [at(o, [4, 3, 0]), at(o, [5, 3, 0]), at(o, [6, 3, 0]), at(o, [7, 3, 0])];
+    Scenario::new("fishery21_side_by_side_all_fish", plot_area(o))
+        .then("a pond 8 by 5, 2 deep, and four stations side by side over it", move |b, _| {
+            for x in 1..=10 {
+                for z in -3..=3 {
+                    b.place(at(o, [x, 0, z]), "minecraft:stone", &[])?;
+                    for y in 1..=2 {
+                        let inside = (2..=9).contains(&x) && (-2..=2).contains(&z);
+                        b.place(at(o, [x, y, z]), if inside { "minecraft:water" } else { "minecraft:stone" }, &[])?;
+                    }
+                }
+            }
+            for p in stations {
                 b.place(p, "rustcraft:fishery", &[])?;
                 b.set_buffer(p, 200.0)?;
                 same("rod in", b.insert(p, "minecraft:fishing_rod", 1)?, 1)?;
             }
             Ok(())
         })
-        .until("the second says the water is another station's", 100, move |b, _| {
-            Ok(status_key(b, second) == "rustcraft.util.fish_shared")
-        })
-        .check("the first fishes", move |b, _| {
-            same("first", status_key(b, first), "rustcraft.util.working".to_owned())
+        .until("every station fishes", 100, move |b, _| {
+            Ok(stations
+                .iter()
+                .all(|p| status_key(b, *p) == "rustcraft.util.working"))
         })
 }
 

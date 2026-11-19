@@ -65,16 +65,9 @@ pub(super) fn step(game: &mut Game<'_>, dimension: &str, level: &LevelNet, pos: 
         Util::Fishery => {
             // 0.19.2 (guide `fishery`: «Улов уходит в магистраль или в сундук вплотную»).
             push_catch(game, dimension, pos);
-            // Wave 2: a patch of water a station.
-            let others: Vec<Pos> = level
-                .machines
-                .iter()
-                .filter(|(_, m)| **m == crate::game::rustcraft_content::Machine::Util(Util::Fishery))
-                .map(|(p, _)| *p)
-                .collect();
-            if rules::water_taken(pos, &others) {
-                return Shown::Blocked("fish_shared");
-            }
+            // 0.21 (owner 2026-11-19: «если несколько рыболовных станций так близко находятся,
+            // они не блокируют работу друг друга»): stations side by side share their water; wave
+            // 2's patch a station is gone, as the magistral's body over the water went in 0.18.4.
             fish(game, dimension, pos, cost, now)
         }
         Util::Feeder => feed(game, pos, cost),
@@ -109,6 +102,12 @@ fn depths(game: &Game<'_>, pos: Pos) -> Vec<i32> {
 fn is_line(block: &str) -> bool {
     use crate::game::rustcraft_content::{HOUSING, NODE};
     block == HOUSING || block == NODE
+}
+
+/// 0.21: another fishing station (of any tier: one block with its `tier`) beside the station
+/// over the water closes none of its sky.
+fn is_station(block: &str) -> bool {
+    block == rustcraft_rules::utility::Util::Fishery.spec().block
 }
 
 /// 0.18.4: the cells of the 5 × 5 (in `depths`' order) the magistral passes over, at the
@@ -161,6 +160,7 @@ fn sky_closed(game: &Game<'_>, pos: Pos) -> bool {
                 filled.push(
                     !matches!(b.as_str(), "minecraft:air" | "minecraft:cave_air" | "minecraft:void_air")
                         && !is_line(&b)
+                        && !is_station(&b)
                         && !(touches(dx, dy, dz) && holds_items(&b)),
                 );
             }
