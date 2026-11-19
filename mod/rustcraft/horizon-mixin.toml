@@ -267,6 +267,13 @@ file = "crates/horizon-client/src/game.rs"
 name = "rustcraft_trips"
 source = "trips.rs"
 
+# 0.21 (spec 38): fishing stations take rods from the storage and order new ones.
+[[module]]
+id = "fish_rods"
+file = "crates/horizon-client/src/game.rs"
+name = "rustcraft_fish_rods"
+source = "fish_rods.rs"
+
 # 0.20 (round 31): Path-of-craft-tree's summary of each owner (`pct:summary`) speeds up the
 # owner's machines by branch.
 [[module]]

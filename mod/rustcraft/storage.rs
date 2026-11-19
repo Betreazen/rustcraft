@@ -1997,6 +1997,24 @@ pub(super) fn stored_count(dimension: &str, id: u32, key: &str) -> u64 {
     .unwrap_or(0)
 }
 
+/// 0.21 (spec 38, FR1): every key of `item` the storage `id` holds, with its count (none while it
+/// does not work): a fishing station picks the least worn rod among them.
+pub(super) fn stored_keys_of(dimension: &str, id: u32, item: &str) -> Vec<(ItemKey, u64)> {
+    with_level(dimension, |level| {
+        level.works(id).then(|| {
+            level.stores.get(&id).map_or_else(Vec::new, |s| {
+                s.items
+                    .iter()
+                    .filter(|(k, n)| **n > 0 && keys::item_of(k) == item)
+                    .map(|(k, n)| (k.clone(), *n))
+                    .collect()
+            })
+        })
+    })
+    .flatten()
+    .unwrap_or_default()
+}
+
 /// Up to `count` of `key` from the storage `id` into the inventory of `player`; what does not
 /// fit stays in the storage. How many went.
 pub(super) fn give_from(game: &mut Game<'_>, dimension: &str, id: u32, key: &str, count: u32, player: u128) -> u32 {
