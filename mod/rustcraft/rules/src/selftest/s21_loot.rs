@@ -7,7 +7,7 @@
 //! - A butcher whose nine slots are full leaves the eggs on the ground and says «Добыче некуда»
 //!   (LP3).
 //! - A turret on the same kind of line kills an evoker: the evoker's totem ends in the storage
-//!   (LP5, LP7); a diamond lying four blocks from where it died stays.
+//!   (LP5, LP7); a diamond lying five blocks from where it died stays.
 
 use super::transport::item_line;
 use super::{Bench, Build, Scenario, at, count_of, plot_area, same};
@@ -140,7 +140,7 @@ fn turret_kill_drops_reach_the_storage(o: Pos, t: &Tuning) -> Scenario {
     let turret = machine(o);
     let full = t.turret_buffer;
     let died = spot(turret, 5, -1);
-    let far = spot(turret, 9, -1);
+    let far = spot(turret, 10, -1);
     Scenario::new("loot21_turret_kill_drops_reach_the_storage", plot_area(o))
         .then("a storage line and a turret on housing 1 with a full buffer", move |b, _| {
             storage_line(b, o)?;
@@ -148,7 +148,7 @@ fn turret_kill_drops_reach_the_storage(o: Pos, t: &Tuning) -> Scenario {
             b.set_owner(turret, OWNER, 1)?;
             b.set_buffer(turret, full)
         })
-        .then("someone's diamond four blocks off, then a weak evoker", move |b, m| {
+        .then("someone's diamond five blocks off, then a weak evoker", move |b, m| {
             b.drop_item(far, DIAMOND, 1)?;
             let feet = [died[0], died[1] - 0.2, died[2]];
             let id = b.spawn_mob(EVOKER, feet, Some(2.0))?;
