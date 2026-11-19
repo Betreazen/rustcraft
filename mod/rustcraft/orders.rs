@@ -78,7 +78,7 @@ use rustcraft_rules::{
     orders::{
         KINDS, PlanRecipe, Step, fluid_key, fluid_number, fluid_of,
         held::{self, Held},
-        queue::{FreeMachine, Job, Order, Queue, SMART_TIER, Wait, runs_that_fit},
+        queue::{FreeMachine, Job, Order, Queue, SMART_TIER, Wait, job_end, runs_that_fit},
         ride,
         saved::{self, Record, SavedJob, SavedPage},
         ship::{self, Leg, Route, Shipment},
@@ -1298,23 +1298,30 @@ fn take_back(
     }
 }
 
-/// Whether a machine has none of the job's items left in its inputs (wave 2: the kitchen's hidden
-/// input cells too, which a stack or capacity module fills from its slots).
-fn inputs_spent(game: &Game<'_>, machine: Machine, job: &Job) -> bool {
+/// What a machine still holds of each of the job's items: its inputs and its hidden cells (wave
+/// 2: the kitchen's, which a stack or capacity module fills from its slots; 0.21: the queue cells
+/// of the other machines' modules too). None when the machine is gone.
+fn job_items_left(game: &Game<'_>, machine: Machine, job: &Job) -> Option<BTreeMap<ItemKey, u64>> {
     let (inputs, _) = slots_of(machine);
-    let hidden: Vec<Slot> = match machine {
-        Machine::Util(rustcraft_rules::utility::Util::Kitchen) => game
-            .native_mod_block_entity(job.machine)
-            .map(|e| crate::game::rustcraft_utility::read_json(&e.nbt, crate::game::rustcraft_utility::KITCHEN_CELLS_KEY))
-            .unwrap_or_default(),
-        _ => Vec::new(),
+    let key = match machine {
+        Machine::Util(rustcraft_rules::utility::Util::Kitchen) => crate::game::rustcraft_utility::KITCHEN_CELLS_KEY,
+        _ => machines::QUEUE_KEY,
     };
-    read_slots(game, job.machine, inputs).is_none_or(|slots| {
+    let hidden: Vec<Slot> = game
+        .native_mod_block_entity(job.machine)
+        .map(|e| crate::game::rustcraft_utility::read_json(&e.nbt, key))
+        .unwrap_or_default();
+    let slots = read_slots(game, job.machine, inputs)?;
+    Some(
         job.step
             .items()
             .iter()
-            .all(|(item, _)| slots::count_in(&slots, item) + slots::count_in(&hidden, item) == 0)
-    })
+            .map(|(item, _)| {
+                let n = slots::count_in(&slots, item) + slots::count_in(&hidden, item);
+                (item.clone(), u64::from(n))
+            })
+            .collect(),
+    )
 }
 
 // ---- Shipments arriving ----
@@ -1450,6 +1457,28 @@ fn arrive(
                 land(game, dimension, state, &live, &s, from, Some(own));
             }
             Leg::Back { from } => land(game, dimension, state, &live, &s, from, None),
+        }
+    }
+    // 0.21 (spec 36, OD4): a job that ends because its items no longer fit leaves its machine
+    // free: what an earlier shipment of it already put in goes back to the storage, and an
+    // autocrafter's temporary page goes, instead of keeping the machine from every later order.
+    if !failed.is_empty() {
+        let anchors: BTreeMap<u32, Pos> = storage::level_storages(dimension)
+            .into_iter()
+            .map(|(id, anchor, _)| (id, anchor))
+            .collect();
+        for r in jobs.iter().filter(|r| failed.contains(&(r.storage, r.job.order, r.job.machine))) {
+            let Some(machine) = level.machines.get(&r.job.machine).copied() else {
+                continue;
+            };
+            let mut way = Way {
+                storage: r.storage,
+                order: r.job.order,
+                route: route_of(level, anchors.get(&r.storage).copied(), r.job.machine),
+                ships: &mut kept,
+            };
+            take_back(game, dimension, &mut way, machine, &r.job, u32::MAX);
+            level.temp_pages.remove(&r.job.machine);
         }
     }
     jobs.retain(|r| !failed.contains(&(r.storage, r.job.order, r.job.machine)));
@@ -1725,9 +1754,20 @@ fn follow_jobs(
             }
             continue;
         }
-        let done = match machine {
-            Machine::Crafter => level.temp_pages.get(&pos).map(|t| t.owed == 0),
-            _ => Some(inputs_spent(game, machine, &r.job)),
+        // 0.21 (spec 36, OD2): a machine's job ends once it holds less than a whole run of the
+        // job's items, not only when it holds none: what is left (an item the line or a hopper
+        // put in, a run's part that never came) goes back to the storage below, so the machine
+        // is free for the next order instead of held by the job for good. None: the runs done;
+        // `leftover`: something of the job's items is left in the machine.
+        let (done, leftover) = match machine {
+            Machine::Crafter => (level.temp_pages.get(&pos).map(|t| (t.owed == 0).then_some(r.job.runs)), false),
+            _ => match job_items_left(game, machine, &r.job) {
+                None => (Some(Some(r.job.runs)), false),
+                Some(left) => (
+                    Some(job_end(&r.job.step.items(), r.job.runs, &left)),
+                    left.values().any(|n| *n > 0),
+                ),
+            },
         };
         let mut way = Way {
             storage: r.storage,
@@ -1755,13 +1795,16 @@ fn follow_jobs(
         match done {
             // A temporary page that is gone without its crafts: the level was read anew.
             None => {}
-            Some(true) => {
+            Some(Some(runs)) => {
                 if let Some(q) = state.queues.get_mut(&r.storage) {
-                    q.finished(&r.job, r.job.runs);
+                    q.finished(&r.job, runs);
+                }
+                if leftover {
+                    take_back(game, dimension, &mut way, machine, &r.job, u32::MAX);
                 }
                 level.temp_pages.remove(&pos);
             }
-            Some(false) => kept.push(r),
+            Some(None) => kept.push(r),
         }
     }
     *jobs = kept;

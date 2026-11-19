@@ -439,6 +439,37 @@ impl Queue {
     }
 }
 
+/// 0.21 (spec 36, OD2): whether a job on a machine (not the autocrafter, whose page counts its
+/// crafts) has ended, given `left`, what the machine still holds of each of the job's `items`
+/// (each with how many one run takes) in its inputs and hidden cells. None while it holds a whole
+/// run of them: it still works. Else the runs to count as done: all of them when nothing is left;
+/// with something left, only the runs whose every item was spent, so a final item is never
+/// counted made that was not.
+///
+/// The owner (0.20): the line pushed gold into the alloy smelters after their sparksteel runs,
+/// so «none of its items left» never came, the jobs held both smelters for 22 minutes and every
+/// other order waited «занято: сплавщик».
+pub fn job_end(items: &[(ItemKey, u32)], runs: u32, left: &BTreeMap<ItemKey, u64>) -> Option<u32> {
+    let left_of = |item: &str| left.get(item).copied().unwrap_or(0);
+    let whole_run = !items.is_empty()
+        && items
+            .iter()
+            .all(|(item, n)| left_of(item) >= u64::from((*n).max(1)));
+    if whole_run {
+        return None;
+    }
+    let spent = items
+        .iter()
+        .map(|(item, n)| {
+            let n = u64::from((*n).max(1));
+            let given = n * u64::from(runs);
+            (given - left_of(item).min(given)) / n
+        })
+        .min()
+        .unwrap_or(u64::from(runs));
+    Some(u32::try_from(spent).unwrap_or(runs))
+}
+
 /// `stock` less what `taken` names, never below zero.
 fn take_all(stock: &mut BTreeMap<ItemKey, u64>, taken: &BTreeMap<ItemKey, u64>) {
     for (item, n) in taken {
@@ -917,5 +948,176 @@ mod tests {
         assert_eq!(q.orders[0].made, BTreeMap::from([(IRON.to_string(), 1)]));
         q.started_with(&half, &BTreeMap::new());
         assert!(q.orders[0].made.is_empty());
+    }
+
+    // ---- 0.21, spec 36: orders without a deadlock ----
+
+    const COPPER: &str = "minecraft:copper_ingot";
+    const GOLD: &str = "minecraft:gold_ingot";
+    const REDSTONE: &str = "minecraft:redstone";
+    const DIAMOND: &str = "minecraft:diamond";
+    const SHARD: &str = "rc:crystal_shard";
+    const COPPERSTEEL: &str = "rc:coppersteel";
+    const SPARKSTEEL: &str = "rc:sparksteel";
+    const CRYSTALLITE: &str = "rc:crystallite";
+    const BATTERY: &str = "rc:battery";
+    const GUARD: &str = "rc:module_guard";
+
+    /// The owner's chain as the content's recipes have it: coppersteel in the autocrafter,
+    /// sparksteel and crystallite in the alloy smelter, then the autocrafter.
+    fn alloy_book() -> Vec<PlanRecipe> {
+        vec![
+            PlanRecipe::simple("crafter", &[(COPPER, 1), (IRON, 1)], (COPPERSTEEL, 2)),
+            PlanRecipe::simple("alloy", &[(COPPERSTEEL, 2), (GOLD, 1), (REDSTONE, 1)], (SPARKSTEEL, 2)),
+            PlanRecipe::simple("alloy", &[(SPARKSTEEL, 2), (DIAMOND, 1), (SHARD, 2)], (CRYSTALLITE, 2)),
+            PlanRecipe::simple("crafter", &[(SPARKSTEEL, 4), (REDSTONE, 4), (SHARD, 1)], (BATTERY, 1)),
+            PlanRecipe::simple("crafter", &[(CRYSTALLITE, 4), (IRON, 4), (SHARD, 1)], (GUARD, 1)),
+        ]
+    }
+
+    /// The owner's storage in small: plenty of copper, iron, gold, redstone, diamonds and shards,
+    /// and `coppersteel` coppersteel.
+    fn raw_stock(coppersteel: u64) -> BTreeMap<ItemKey, u64> {
+        [
+            (COPPER, 64),
+            (IRON, 64),
+            (GOLD, 64),
+            (REDSTONE, 64),
+            (DIAMOND, 16),
+            (SHARD, 32),
+            (COPPERSTEEL, coppersteel),
+        ]
+        .iter()
+        .filter(|(_, n)| *n > 0)
+        .map(|(i, n)| (i.to_string(), *n))
+        .collect()
+    }
+
+    fn alloy_line() -> Vec<FreeMachine> {
+        vec![
+            machine(1, "crafter"),
+            machine(2, "crafter"),
+            machine(3, "alloy"),
+            machine(4, "alloy"),
+        ]
+    }
+
+    #[test]
+    fn a_job_ends_when_its_machine_holds_less_than_a_run() {
+        // OD2: the owner's alloy smelter ran its sparksteel, and the line pushed one more gold
+        // in: the job has ended. A stray item of its own kinds makes the count careful: only the
+        // runs whose every item was spent count (an order makes a run more rather than less).
+        let items = vec![(COPPERSTEEL.to_string(), 2), (GOLD.to_string(), 1), (REDSTONE.to_string(), 1)];
+        let left = |pairs: &[(&str, u64)]| -> BTreeMap<ItemKey, u64> {
+            pairs.iter().map(|(i, n)| (i.to_string(), *n)).collect()
+        };
+        assert_eq!(job_end(&items, 1, &left(&[(GOLD, 1)])), Some(0));
+        assert_eq!(job_end(&items, 3, &left(&[(GOLD, 1)])), Some(2));
+        assert_eq!(job_end(&items, 2, &left(&[])), Some(2), "nothing left: every run is done");
+        // A whole run still in: it works.
+        assert_eq!(job_end(&items, 2, &left(&[(COPPERSTEEL, 2), (GOLD, 1), (REDSTONE, 1)])), None);
+        // Its items never all came (no redstone): the job ends, and no run counts as made.
+        assert_eq!(job_end(&items, 2, &left(&[(COPPERSTEEL, 4), (GOLD, 2)])), Some(0));
+        // One of two runs made, the other's coppersteel and gold left without redstone.
+        assert_eq!(job_end(&items, 2, &left(&[(COPPERSTEEL, 2), (GOLD, 1)])), Some(1));
+    }
+
+    #[test]
+    fn concurrent_orders_each_make_the_coppersteel_they_lack_and_start_only_ready_steps() {
+        // OD1, OD3: no coppersteel in the storage, two orders whose chains need it. Each plans
+        // the autocrafter's coppersteel; no step whose inputs a step still has to make starts, so
+        // nothing of a later step leaves the storage before it can run.
+        let mut q = Queue::default();
+        let battery = q.add(BATTERY, 1, false).unwrap();
+        let guard = q.add(GUARD, 1, false).unwrap();
+        let jobs = q.round(
+            &raw_stock(0),
+            &alloy_book(),
+            &["crafter", "alloy"],
+            &alloy_line(),
+            &idle,
+            &mut |_, _, w| w,
+        );
+        assert!(!jobs.is_empty());
+        assert!(jobs.iter().all(|j| j.step.output.0 == COPPERSTEEL), "{jobs:?}");
+        for id in [battery, guard] {
+            let o = q.orders.iter().find(|o| o.id == id).unwrap();
+            assert_eq!(o.chain[0].1, COPPERSTEEL, "{:?}", o.chain);
+            assert!(!o.reserved.contains_key(COPPERSTEEL), "{:?}", o.reserved);
+            assert!(matches!(o.wait, Wait::Running | Wait::Busy(_)), "{:?}", o.wait);
+        }
+    }
+
+    #[test]
+    fn coppersteel_set_aside_for_an_earlier_order_makes_a_later_one_plan_its_own() {
+        // OD3: the storage's 4 coppersteel are the battery's; the guard makes its own from copper.
+        let mut q = Queue::default();
+        q.add(BATTERY, 1, false);
+        q.add(GUARD, 1, false);
+        q.round(&raw_stock(4), &alloy_book(), &["crafter", "alloy"], &[], &idle, &mut |_, _, w| w);
+        assert_eq!(q.orders[0].reserved.get(COPPERSTEEL), Some(&4));
+        assert_eq!(q.orders[1].chain[0].1, COPPERSTEEL);
+        assert!(matches!(q.orders[1].wait, Wait::Busy(_)), "{:?}", q.orders[1].wait);
+    }
+
+    #[test]
+    fn concurrent_orders_through_two_alloy_smelters_all_finish() {
+        // OD1–OD3, the owner's case in small: three orders whose chains share coppersteel and
+        // the two alloy smelters. A machine runs its job within the round; its products wait at
+        // it for the order (O11). Every order finishes, and the storage's coppersteel never runs
+        // out under one of them.
+        let mut q = Queue::default();
+        q.add(BATTERY, 2, false);
+        q.add(GUARD, 1, false);
+        q.add(CRYSTALLITE, 2, false);
+        let mut stock = raw_stock(0);
+        let mut held: BTreeMap<u16, BTreeMap<ItemKey, u64>> = BTreeMap::new();
+        let mut made: BTreeMap<ItemKey, u64> = BTreeMap::new();
+        for _ in 0..40 {
+            if q.orders.is_empty() {
+                break;
+            }
+            let jobs = q.round_with(
+                &stock,
+                &held,
+                &alloy_book(),
+                &["crafter", "alloy"],
+                &alloy_line(),
+                &idle,
+                &mut |_, _, w| w,
+            );
+            for job in &jobs {
+                let own = held.entry(job.order).or_default();
+                let mut from_held = BTreeMap::new();
+                for (item, n) in &job.step.inputs {
+                    let want = u64::from(*n) * u64::from(job.runs);
+                    let h = own.get(item).copied().unwrap_or(0).min(want);
+                    if h > 0 {
+                        *own.get_mut(item).unwrap() -= h;
+                        from_held.insert(item.clone(), h);
+                    }
+                    if want > h {
+                        let s = stock.get_mut(item).expect("a started job's items are in the storage");
+                        assert!(*s >= want - h, "{item}: {s} < {}", want - h);
+                        *s -= want - h;
+                    }
+                }
+                own.retain(|_, n| *n > 0);
+                q.started_with(job, &from_held);
+                let out = u64::from(job.step.output.1) * u64::from(job.runs);
+                let item = &q.orders.iter().find(|o| o.id == job.order).unwrap().item;
+                if *item == job.step.output.0 {
+                    *made.entry(item.clone()).or_insert(0) += out;
+                    q.finished(job, job.runs);
+                } else {
+                    *own.entry(job.step.output.0.clone()).or_insert(0) += out;
+                }
+            }
+            q.remove_done();
+        }
+        assert!(q.orders.is_empty(), "orders left: {:?}", q.orders);
+        assert_eq!(made[BATTERY], 2);
+        assert_eq!(made[GUARD], 1);
+        assert_eq!(made[CRYSTALLITE], 2);
     }
 }

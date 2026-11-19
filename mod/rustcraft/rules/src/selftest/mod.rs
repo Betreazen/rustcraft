@@ -76,6 +76,8 @@ pub mod s21_terminal;
 pub mod s21_upgrade;
 // 0.21 (round 32): the storage's surplus and the wrench on the trash.
 pub mod s21_surplus;
+// 0.21 (spec 36): orders without a deadlock.
+pub mod s21_orders;
 
 use std::collections::BTreeMap;
 
@@ -813,6 +815,8 @@ pub fn catalog() -> Vec<Build> {
     all.extend(s21_upgrade::ALL);
     // 0.21 (round 32): the storage's surplus and the wrench on the trash.
     all.extend(s21_surplus::ALL);
+    // 0.21 (spec 36): orders without a deadlock.
+    all.extend(s21_orders::ALL);
     all
 }
 
