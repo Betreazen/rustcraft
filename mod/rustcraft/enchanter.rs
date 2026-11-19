@@ -164,7 +164,17 @@ pub(super) fn job(game: &Game<'_>, pos: Pos, item: &ItemStack) -> Result<Job, &'
     }
     let lists = offers(game, &st, item);
     let levels = lists.clone().map(|l| as_levels(&l));
-    let pick = if st.pick == Pick::Raise { Pick::Best } else { st.pick };
+    if st.pick == Pick::Remove
+        && let Some(id) = &st.raise
+        && let Some(rest) = enchanting::remove(&have(item), id)
+    {
+        if game.stations().enchantments.is_curse(id) {
+            return Err("enchant_curse_stays");
+        }
+        return Ok(remove_job(item, rest));
+    }
+    // EW8, EW15: a raise or a removal the item has nothing for: «Лучшее».
+    let pick = if matches!(st.pick, Pick::Raise | Pick::Remove) { Pick::Best } else { st.pick };
     let k = enchanting::chosen(pick, &levels).ok_or("enchant_not_enchantable")?;
     let mut result = if &*item.item == BOOK { item.transmute(ENCHANTED_BOOK, 1) } else { item.clone() };
     for (id, l) in &lists[k] {
@@ -195,6 +205,22 @@ fn raise_job(game: &Game<'_>, item: &ItemStack, id: &str, level: u32) -> Job {
     }
 }
 
+/// EW15: the item without one enchantment, for a lapis and no experience; a book left with none
+/// is a plain book again.
+fn remove_job(item: &ItemStack, rest: Levels) -> Job {
+    let rest: Vec<(Arc<str>, u32)> = rest.into_iter().map(|(id, l)| (Arc::from(id.as_str()), l)).collect();
+    let result = if &*item.item == ENCHANTED_BOOK && rest.is_empty() {
+        let mut plain = item.clone();
+        plain.set_crafting_enchantments(Vec::new());
+        plain.transmute(BOOK, 1)
+    } else {
+        let mut out = item.clone();
+        out.set_crafting_enchantments(rest);
+        out
+    };
+    Job { result, lapis: enchanting::REMOVE_LAPIS, need_points: 0, points: 0, report: 0 }
+}
+
 /// After an enchanting: a new seed (EW5), and what was made.
 pub(super) fn done(game: &mut Game<'_>, pos: Pos, made: &ItemStack) {
     let old = settings(game, pos).seed;
@@ -221,6 +247,14 @@ pub(super) fn press(game: &Game<'_>, entity: &mut ModBlockEntity, i: usize) {
             let rows = enchanting::raise_rows(&have(&item), |id| max_of(game, id));
             if let Some(row) = rows.get(k).filter(|r| !r.at_max()) {
                 write_i64(&mut entity.nbt, PICK_KEY, Pick::Raise.code());
+                entity.nbt.insert(JavaString::from(RAISE_KEY), Tag::String(JavaString::from(row.id.as_str())));
+            }
+        }
+        Some(Action::RemoveRow(k)) => {
+            let Some(item) = entity.items.first().cloned().flatten() else { return };
+            let rows = enchanting::raise_rows(&have(&item), |id| max_of(game, id));
+            if let Some(row) = rows.get(k).filter(|r| !game.stations().enchantments.is_curse(&r.id)) {
+                write_i64(&mut entity.nbt, PICK_KEY, Pick::Remove.code());
                 entity.nbt.insert(JavaString::from(RAISE_KEY), Tag::String(JavaString::from(row.id.as_str())));
             }
         }
@@ -324,10 +358,12 @@ struct Button {
     hint: Text,
     on: bool,
     off: bool,
+    /// Not drawn, and not pressed (a «×» in «Новые», or with no enchantment beside it).
+    hidden: bool,
 }
 
 fn button(text: Text, name: Text, hint: Text, on: bool, off: bool) -> Button {
-    Button { text, name, hint, on, off }
+    Button { text, name, hint, on, off, hidden: false }
 }
 
 /// What the window's sheet shows for the enchanting machine at `pos` (EW1–EW3, EW8, EW12).
@@ -431,12 +467,12 @@ pub(super) fn sheet(game: &Game<'_>, dimension: &str, level: &LevelNet, pos: Pos
         .iter()
         .map(|b| Toggle { icon: String::new(), name: base::v(&b.name), on: b.on, active: false, hint: base::v(&b.hint) })
         .collect();
-    s.toggle_texts = buttons.iter().map(|b| Some(base::v(&b.text))).collect();
+    s.toggle_texts = buttons.iter().map(|b| Some(if b.hidden { Value::Null } else { base::v(&b.text) })).collect();
     s.toggle_off = buttons.iter().map(|b| b.off).collect();
     s.status = Some(status(game, dimension, pos, &st, item.as_ref(), tank, need_points, lapis, to_storage));
 }
 
-/// The ten buttons: the level steps, the option rows, the view switch.
+/// The fourteen buttons: the level steps, the option rows, the view switch, the «×» of the rows.
 fn buttons(game: &Game<'_>, st: &Settings, item: Option<&ItemStack>) -> Vec<Button> {
     let raise_view = st.view == View::Raise;
     let mut out: Vec<Button> = ["−10", "−1", "+1", "+10"]
@@ -444,7 +480,7 @@ fn buttons(game: &Game<'_>, st: &Settings, item: Option<&ItemStack>) -> Vec<Butt
         .zip(["minus10", "minus1", "plus1", "plus10"])
         .map(|(t, k)| {
             let hint = if raise_view {
-                line("rustcraft.util.enchanter.level_unused", "«Raise» needs no level", &[])
+                line("rustcraft.util.enchanter.level_unused", "«Its own» needs no level", &[])
             } else {
                 line("rustcraft.util.enchanter.hint", "Click: the enchanting level (1–30)", &[])
             };
@@ -464,13 +500,49 @@ fn buttons(game: &Game<'_>, st: &Settings, item: Option<&ItemStack>) -> Vec<Butt
         false,
     ));
     out.push(button(
-        line("rustcraft.util.enchanter.view_raise", "Raise", &[]),
-        line("rustcraft.util.enchanter.view_raise_name", "Raise an enchantment", &[]),
-        line("rustcraft.util.enchanter.view_raise_hint", "+1 level to one the item has, for more lapis and levels", &[]),
+        line("rustcraft.util.enchanter.view_raise", "Its own", &[]),
+        line("rustcraft.util.enchanter.view_raise_name", "Its own enchantments", &[]),
+        line(
+            "rustcraft.util.enchanter.view_raise_hint",
+            "+1 level to one the item has for more lapis and levels, or «×» to take one off",
+            &[],
+        ),
         raise_view,
         false,
     ));
+    out.extend(remove_buttons(game, st, item, raise_view));
     out
+}
+
+/// EW15: the «×» beside each row of «Свои чары»: takes that enchantment off for a lapis.
+fn remove_buttons(game: &Game<'_>, st: &Settings, item: Option<&ItemStack>, shown: bool) -> Vec<Button> {
+    let rows = item.map_or_else(Vec::new, |i| enchanting::raise_rows(&have(i), |id| max_of(game, id)));
+    (0..OPTION_ROWS)
+        .map(|k| {
+            let Some(r) = rows.get(k).filter(|_| shown) else {
+                return Button { hidden: true, ..button(lit(""), lit(""), lit(""), false, true) };
+            };
+            let name = ench_name(game, &r.id, r.level);
+            let curse = game.stations().enchantments.is_curse(&r.id);
+            let hint = if curse {
+                line("rustcraft.util.enchanter.remove_curse", "A curse does not come off", &[])
+            } else {
+                line(
+                    "rustcraft.util.enchanter.remove_hint",
+                    "Takes %s off for %s lapis, no experience; a book with none left is a plain book",
+                    &[name.clone(), lit(enchanting::REMOVE_LAPIS)],
+                )
+            };
+            let chosen = st.pick == Pick::Remove && st.raise.as_deref() == Some(r.id.as_str());
+            button(
+                lit("×"),
+                line("rustcraft.util.enchanter.remove_name", "Take off %s", &[name]),
+                hint,
+                chosen,
+                curse,
+            )
+        })
+        .collect()
 }
 
 fn offer_buttons(game: &Game<'_>, st: &Settings, item: Option<&ItemStack>) -> Vec<Button> {

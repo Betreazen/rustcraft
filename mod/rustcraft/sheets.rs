@@ -429,6 +429,10 @@ fn text_toggle(game: &Game<'_>, batch: &mut HudBatch, o: [f32; 2], r: Rect, whol
 fn toggles(game: &Game<'_>, batch: &mut HudBatch, o: [f32; 2], l: &Layout, s: &Sheet) {
     for (i, (t, r)) in s.toggles.iter().zip(&l.toggles).enumerate() {
         if let Some(Some(v)) = s.toggle_texts.get(i) {
+            // A hidden text button (the enchanter's «×» while it shows its offers).
+            if v.is_null() {
+                continue;
+            }
             let off = s.toggle_off.get(i).copied().unwrap_or(false);
             text_toggle(game, batch, o, *r, &read(v), t.on, off);
             continue;
@@ -517,6 +521,9 @@ pub(super) fn tooltip(game: &Game<'_>, block: &str, at: [f32; 2], lines: &mut Ve
         .toggles
         .iter()
         .zip(&l.toggles)
+        .enumerate()
+        .filter(|(i, _)| !matches!(s.toggle_texts.get(*i), Some(Some(v)) if v.is_null()))
+        .map(|(_, p)| p)
         .find(|(_, r)| inside(**r, at))
     {
         lines.push(read(&t.name));

@@ -1169,6 +1169,15 @@ impl Bench for GameBench<'_, '_> {
         storage::stored_stacks_at(DIMENSION, pos).iter().map(stack_text).collect()
     }
 
+    fn anvil_snbt(&mut self, left: &str, right: &str) -> Result<Option<String>, String> {
+        let read = |s: &str| -> Result<ItemStack, String> {
+            let (tag, _) = horizon_world::nbt::parse_snbt(s)?;
+            horizon_client::save::item_from_nbt(&tag).ok_or_else(|| format!("no item in {s}"))
+        };
+        let (l, r) = (read(left)?, read(right)?);
+        Ok(crate::game::rustcraft_gear::anvil_stacks_for_selftest(self.game, &l, &r).as_ref().map(stack_text))
+    }
+
     // 0.21 (spec 48): the enchanting machine's slots with their enchantments.
     fn slot_stacks(&self, pos: Pos) -> Vec<Option<String>> {
         self.game

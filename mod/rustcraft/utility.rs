@@ -1877,8 +1877,8 @@ fn enchant(game: &mut Game<'_>, dimension: &str, net: &LevelNet, pos: Pos, cost:
         xp_net::reach(&world, pos, xp_net::Way::Draw, &|p| xp_of(g, p))
     };
     // 0.21 (spec 48): the window's choice at the level the player chose (1–30, its price by tens):
-    // one of the table's three offers at the machine's seed, or +1 to an enchantment the item has;
-    // an enchanted item or book gets what it lacks (rustcraft_enchanter).
+    // one of the table's three offers at the machine's seed, +1 to an enchantment the item has or
+    // one taken off; an enchanted item or book gets what it lacks (rustcraft_enchanter).
     let job = match crate::game::rustcraft_enchanter::job(game, pos, &item) {
         Ok(job) => job,
         Err(why) => return Shown::Blocked(why),
@@ -1914,7 +1914,10 @@ fn enchant(game: &mut Game<'_>, dimension: &str, net: &LevelNet, pos: Pos, cost:
     });
     crate::game::rustcraft_enchanter::done(game, pos, &enchanted);
     put(game, pos, 2..3, enchanted);
-    if let Some(o) = owner(game, pos) {
+    // 0.21 (EW15): taking an enchantment off is no enchanting.
+    if job.report > 0
+        && let Some(o) = owner(game, pos)
+    {
         base::report(Report::Counted { kind: "enchant", owner: o, count: job.report });
     }
     Shown::Working

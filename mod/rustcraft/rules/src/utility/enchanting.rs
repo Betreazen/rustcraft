@@ -8,7 +8,9 @@
 //! seed stays while nothing is enchanted and is drawn anew after each enchanting, as the table's.
 //!
 //! An item or book that already has enchantments gets the ones it lacks and that go with what it
-//! has (EW6). «Повысить» raises one of its enchantments a level for an anvil-like price (EW7).
+//! has (EW6). «Свои чары» raises one of its enchantments a level for an anvil-like price (EW7)
+//! or takes one off for a lapis (EW15); [`anvil_level`] keeps a level above the most at the anvil
+//! (EW16).
 //! The bundle (rustcraft_enchanter) asks the game for the lists; this module chooses, prices and
 //! maps the window's presses.
 
@@ -20,12 +22,15 @@ pub type Levels = Vec<(String, u32)>;
 /// The window's option rows: «Лучшее» and the three offers, or up to four enchantments to raise.
 pub const OPTION_ROWS: usize = 4;
 /// The machine's buttons, in its window's order: the four level steps (−10, −1, +1, +10), the
-/// four option rows, the two views.
+/// four option rows, the two views, the four «×» beside the option rows (only in «Свои чары»).
 pub const LEVEL_BUTTONS: std::ops::Range<usize> = 0..4;
 pub const OPTION_BUTTONS: std::ops::Range<usize> = 4..8;
 pub const VIEW_NEW: usize = 8;
 pub const VIEW_RAISE: usize = 9;
-pub const BUTTONS: usize = 10;
+pub const REMOVE_BUTTONS: std::ops::Range<usize> = 10..14;
+pub const BUTTONS: usize = 14;
+/// EW15: what taking an enchantment off costs: one lapis, no experience.
+pub const REMOVE_LAPIS: u32 = 1;
 
 /// What the machine does with the next item.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
@@ -37,6 +42,8 @@ pub enum Pick {
     Offer(usize),
     /// One level more of the enchantment the block entity names (`RAISE_KEY`).
     Raise,
+    /// 0.21 (EW15): that enchantment taken off.
+    Remove,
 }
 
 impl Pick {
@@ -46,6 +53,7 @@ impl Pick {
             Pick::Best => 0,
             Pick::Offer(k) => 1 + k.min(2) as i64,
             Pick::Raise => 4,
+            Pick::Remove => 5,
         }
     }
 
@@ -53,6 +61,7 @@ impl Pick {
         match code {
             1..=3 => Pick::Offer((code - 1) as usize),
             4 => Pick::Raise,
+            5 => Pick::Remove,
             _ => Pick::Best,
         }
     }
@@ -87,8 +96,10 @@ pub enum Action {
     /// The level by this many (only in «Новые чары»).
     Step(i32),
     Pick(Pick),
-    /// Raise the enchantment of option row `k` of «Повысить».
+    /// Raise the enchantment of option row `k` of «Свои чары».
     RaiseRow(usize),
+    /// Take off the enchantment of option row `k` of «Свои чары» (its «×»).
+    RemoveRow(usize),
     Show(View),
 }
 
@@ -103,6 +114,9 @@ pub fn press(i: usize, view: View) -> Option<Action> {
             (View::New, k) => Action::Pick(Pick::Offer(k - 1)),
             (View::Raise, k) => Action::RaiseRow(k),
         });
+    }
+    if REMOVE_BUTTONS.contains(&i) {
+        return (view == View::Raise).then(|| Action::RemoveRow(i - REMOVE_BUTTONS.start));
     }
     match i {
         VIEW_NEW => Some(Action::Show(View::New)),
@@ -130,7 +144,7 @@ pub fn chosen(pick: Pick, offers: &[Levels; 3]) -> Option<usize> {
     match pick {
         Pick::Offer(k) if offers.get(k).is_some_and(|l| !l.is_empty()) => Some(k),
         Pick::Offer(_) | Pick::Best => best(offers),
-        Pick::Raise => None,
+        Pick::Raise | Pick::Remove => None,
     }
 }
 
@@ -231,6 +245,21 @@ pub fn lapis_to_take(has_item: bool, held: u32, price: u32, max: u32) -> u32 {
     (price - held).min(max.saturating_sub(held))
 }
 
+/// EW15: an item's enchantments without `id`, none when it does not have it.
+pub fn remove(have: &[(String, u32)], id: &str) -> Option<Levels> {
+    have.iter().any(|(e, _)| e == id).then(|| have.iter().filter(|(e, _)| e != id).cloned().collect())
+}
+
+/// EW16 (the owner: «+1 уровень к максимальному на наковальне не работает»): the level the anvil
+/// gives an enchantment that `left` has at `l` and `right` at `r` (0 for none) when the game's
+/// anvil made `vanilla` of it (the game caps at the enchantment's most). Different levels keep
+/// the higher, even above the most (a book of Efficiency VI from the skill tree); equal levels go
+/// one up only up to the most, as the game's, so two books above it never climb further.
+pub fn anvil_level(l: u32, r: u32, vanilla: u32) -> u32 {
+    let wanted = if l == r { l } else { l.max(r) };
+    vanilla.max(wanted)
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RaiseRefusal {
     /// The item does not have it: it is enchanted as «Лучшее» instead.
@@ -269,7 +298,8 @@ mod tests {
         assert_eq!(chosen(Pick::Offer(1), &offers), Some(2), "nothing in row 1 for this item");
         assert_eq!(chosen(Pick::Best, &offers), Some(2));
         assert_eq!(chosen(Pick::Raise, &offers), None);
-        for p in [Pick::Best, Pick::Offer(0), Pick::Offer(2), Pick::Raise] {
+        assert_eq!(chosen(Pick::Remove, &offers), None);
+        for p in [Pick::Best, Pick::Offer(0), Pick::Offer(2), Pick::Raise, Pick::Remove] {
             assert_eq!(Pick::of(p.code()), p);
         }
         assert_eq!(Pick::of(99), Pick::Best);
@@ -287,6 +317,8 @@ mod tests {
         assert_eq!(press(VIEW_RAISE, View::New), Some(Action::Show(View::Raise)));
         assert_eq!(press(VIEW_NEW, View::Raise), Some(Action::Show(View::New)));
         assert_eq!(press(BUTTONS, View::New), None);
+        assert_eq!(press(REMOVE_BUTTONS.start + 1, View::Raise), Some(Action::RemoveRow(1)));
+        assert_eq!(press(REMOVE_BUTTONS.start, View::New), None, "no «×» among the offers");
         // The level steps, kept in 1..=30.
         let mut level = xp::LEVEL_MAX;
         for i in [0, 0, 0, 1] {
@@ -330,6 +362,28 @@ mod tests {
         assert_eq!(lapis_to_take(true, 3, 3, 64), 0);
         assert_eq!(lapis_to_take(false, 0, 3, 64), 0, "an idle machine keeps no lapis (0.21 intake)");
         assert_eq!(lapis_to_take(true, 62, 70, 64), 2, "never past a stack");
+    }
+
+    #[test]
+    fn an_enchantment_comes_off_and_the_rest_stay() {
+        let have = list(&[("minecraft:sharpness", 4), ("minecraft:looting", 2)]);
+        assert_eq!(remove(&have, "minecraft:sharpness"), Some(list(&[("minecraft:looting", 2)])));
+        assert_eq!(remove(&list(&[("minecraft:mending", 1)]), "minecraft:mending"), Some(Vec::new()));
+        assert_eq!(remove(&have, "minecraft:smite"), None);
+        assert_eq!(REMOVE_LAPIS, 1);
+    }
+
+    #[test]
+    fn the_anvil_keeps_a_level_above_the_most() {
+        // The owner: a book of Efficiency VI on a pickaxe of Efficiency V gave V.
+        assert_eq!(anvil_level(5, 6, 5), 6);
+        assert_eq!(anvil_level(6, 5, 5), 6);
+        assert_eq!(anvil_level(6, 0, 5), 6, "a pickaxe of VI with a book of another enchantment");
+        // Equal levels: one up to the most, as the game's, never past it.
+        assert_eq!(anvil_level(4, 4, 5), 5);
+        assert_eq!(anvil_level(5, 5, 5), 5);
+        assert_eq!(anvil_level(6, 6, 5), 6);
+        assert_eq!(anvil_level(2, 3, 3), 3);
     }
 
     #[test]

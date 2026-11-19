@@ -560,10 +560,14 @@ fn enchant_area(out: &mut Layout, y: f32) -> f32 {
         }
         x += wi + 2.0;
     }
-    let options = (0..OPTION_ROWS).map(|k| [RIGHT_X, r + ROW_H + 2.0 + OPTION_STEP * k as f32, w, OPTION_H]);
+    // Each option row leaves room at its right end for its «×» (EW15).
+    const CROSS_W: f32 = 11.0;
+    let row_y = |k: usize| r + ROW_H + 2.0 + OPTION_STEP * k as f32;
+    let options = (0..OPTION_ROWS).map(|k| [RIGHT_X, row_y(k), w - CROSS_W - 2.0, OPTION_H]);
+    let crosses = (0..OPTION_ROWS).map(|k| [RIGHT - CROSS_W, row_y(k), CROSS_W, OPTION_H]);
     let half = (w - 2.0) / 2.0;
     let views = [[RIGHT_X, y, half, ROW_H], [RIGHT_X + half + 2.0, y, half, ROW_H]];
-    out.toggles = level.into_iter().chain(options).chain(views).collect();
+    out.toggles = level.into_iter().chain(options).chain(views).chain(crosses).collect();
     out.notes = notes;
     let right_end = r + ROW_H + 2.0 + OPTION_STEP * (OPTION_ROWS - 1) as f32 + OPTION_H;
     (right_end - y).max(76.0) + 1.0
@@ -885,8 +889,9 @@ mod tests {
         assert!(l.toggles[1][0] < level[0] && l.toggles[2][0] > level[0] + level[2]);
         assert!(level[2] >= 36.0, "«ур. 30» fits: {}", level[2]);
         // The option rows wide enough for «Лучшее: Острота IV», under the level row.
-        for r in &l.toggles[enchanting::OPTION_BUTTONS] {
-            assert!(r[2] >= 110.0 && r[1] > level[1]);
+        for (r, x) in l.toggles[enchanting::OPTION_BUTTONS].iter().zip(&l.toggles[enchanting::REMOVE_BUTTONS]) {
+            assert!(r[2] >= 104.0 && r[1] > level[1]);
+            assert!(x[1] == r[1] && x[0] > r[0] + r[2], "the «×» right of its row");
         }
         // A click names the button.
         let o = l.toggles[enchanting::OPTION_BUTTONS.start + 2];

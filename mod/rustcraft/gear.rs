@@ -370,7 +370,10 @@ pub(super) fn on_anvil_update(
         *output = None;
         return;
     }
-    let Some(book) = Book::of(&right.item) else { return };
+    let Some(book) = Book::of(&right.item) else {
+        keep_above_max(left, right, output);
+        return;
+    };
     let level = book_level(right);
     if Book::of(&left.item) == Some(book) {
         let new = e::combine(book_level(left), level);
@@ -406,6 +409,38 @@ pub(super) fn on_anvil_update(
     *output = Some(out);
     *xp_cost = e::cost(new);
     *material_cost = 1;
+}
+
+/// 0.21 (spec 48, EW16; the owner: «+1 уровень к максимальному на наковальне не работает, пишется
+/// всё равно что будет 5 уровень»): the game's anvil caps every enchantment of its result at the
+/// enchantment's most, so a book of Efficiency VI (Path-of-craft-tree's «выше максимума») on a
+/// pickaxe of Efficiency V gave V. The result keeps the higher level of the two; equal levels still
+/// go one up only to the most (rustcraft_rules::utility::enchanting::anvil_level).
+fn keep_above_max(left: &ItemStack, right: &ItemStack, output: &mut Option<ItemStack>) {
+    let Some(out) = output.as_mut() else { return };
+    let level_of = |s: &ItemStack, id: &str| s.crafting_enchantments().iter().find(|(e, _)| &**e == id).map_or(0, |(_, l)| *l);
+    let mut levels = out.crafting_enchantments().to_vec();
+    let mut changed = false;
+    for (id, now) in &mut levels {
+        let keep = rustcraft_rules::utility::enchanting::anvil_level(level_of(left, id), level_of(right, id), *now);
+        if keep > *now {
+            *now = keep;
+            changed = true;
+        }
+    }
+    if changed {
+        out.set_crafting_enchantments(levels);
+    }
+}
+
+/// The self-test: what the anvil makes of `left` and `right` (the game's result, then the mod's),
+/// written as the self-test writes a stack.
+pub(super) fn anvil_stacks_for_selftest(game: &Game<'_>, left: &ItemStack, right: &ItemStack) -> Option<ItemStack> {
+    let vanilla =
+        horizon_client::stations::anvil_result(&game.stations().enchantments, game.items(), Some(left), Some(right), None, "", false);
+    let (mut output, mut xp, mut material) = (vanilla.result, vanilla.cost, vanilla.repair_item_count_cost as i32);
+    on_anvil_update(left, Some(right), &mut output, &mut xp, &mut material);
+    output
 }
 
 /// The `minecraft:custom_model_data` of a lit blade or shield: its first flag (the item model's

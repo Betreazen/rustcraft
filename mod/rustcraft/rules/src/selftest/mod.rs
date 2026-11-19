@@ -483,6 +483,11 @@ pub trait Bench {
     fn slot_stacks(&self, _pos: Pos) -> Vec<Option<String>> {
         Vec::new()
     }
+    /// 0.21 (spec 48, EW16): what the anvil makes of two stacks written as SNBT (the game's result,
+    /// then the mod's), as `slot_stacks` writes a stack; none when it makes nothing.
+    fn anvil_snbt(&mut self, _left: &str, _right: &str) -> Result<Option<String>, String> {
+        Err("this bench has no anvil".into())
+    }
     /// The int array under `key` in the saved compound of the mod block entity at `pos`.
     fn int_array(&self, pos: Pos, key: &str) -> Vec<i32>;
     /// The long (or int) under `key` in the saved compound of the mod block entity at `pos`.

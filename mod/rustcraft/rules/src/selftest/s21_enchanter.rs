@@ -7,7 +7,11 @@
 //! - «Форсаж» with its buffer full: it enchants (in 0.20 the step cost 960 E, the buffer held 600).
 //! - On a storage's line with no lapis in its slot: it takes the lapis it needs from the storage,
 //!   and its window says the result goes to the storage.
-//! - «Повысить»: a sword with Sharpness II comes out with Sharpness III.
+//! - «Свои чары»: a sword with Sharpness II comes out with Sharpness III.
+//! - «×»: a book of Sharpness III and Unbreaking II comes out with Unbreaking II alone, for a lapis;
+//!   a book whose only enchantment comes off is a plain book.
+//! - The anvil keeps a level above the most: a book of Efficiency VI on a pickaxe of Efficiency V
+//!   gives VI; two of IV give V; two of VI stay VI.
 
 use super::slice15::{build, held, terminal_at};
 use super::transport::{chest, fill};
@@ -16,15 +20,18 @@ use crate::geom::Pos;
 use crate::machines::processor::WorkMode;
 use crate::machines::sheet::{Press, enchant_notes};
 use crate::tuning::Tuning;
-use crate::utility::enchanting::{OPTION_BUTTONS, VIEW_RAISE};
+use crate::utility::enchanting::{OPTION_BUTTONS, REMOVE_BUTTONS, VIEW_RAISE};
 use serde_json::Value;
 
-pub const ALL: [Build; 5] = [
+pub const ALL: [Build; 8] = [
     enchanter21_book_comes_out_enchanted,
     enchanter21_second_offer_gives_its_enchantments,
     enchanter21_boost_works_on_a_full_buffer,
     enchanter21_takes_lapis_from_the_storage,
     enchanter21_raises_an_enchantment,
+    enchanter21_takes_an_enchantment_off_a_book,
+    enchanter21_a_book_with_none_left_is_plain,
+    enchanter21_anvil_keeps_a_level_above_the_most,
 ];
 
 const ENCHANTER: &str = "rustcraft:enchanter";
@@ -227,4 +234,69 @@ fn enchanter21_raises_an_enchantment(o: Pos, _: &Tuning) -> Scenario {
             }
             same("lapis", count_of(&b.items(p), LAPIS), 0)
         })
+}
+
+/// The row of «Свои чары» that names `id`.
+fn row_of(b: &dyn Bench, p: Pos, id: &str) -> Result<usize, String> {
+    let s = b.sheet(p).ok_or("no sheet")?;
+    (0..4)
+        .find(|k| {
+            let mut ids = Vec::new();
+            named(&s.toggles[OPTION_BUTTONS.start + k].name, &mut ids);
+            ids.iter().any(|i| i == id)
+        })
+        .ok_or_else(|| format!("no row of «Свои чары» names {id}"))
+}
+
+/// A machine with the book `snbt` and a lapis; «Свои чары», the «×» of `id`, then the energy.
+fn take_off(b: &mut dyn Bench, p: Pos, snbt: &str, id: &str) -> Result<(), String> {
+    machine(b, p, 0.0)?;
+    same("the book in", b.insert_snbt(p, snbt)?, 1)?;
+    b.put(p, 1, LAPIS, 1)?;
+    b.press(p, Press::Toggle(VIEW_RAISE).id(), None)?;
+    let k = row_of(b, p, id)?;
+    b.press(p, Press::Toggle(REMOVE_BUTTONS.start + k).id(), None)?;
+    same("the pick", b.long(p, "enchant_pick"), 5)?;
+    b.set_buffer(p, 600.0)
+}
+
+fn enchanter21_takes_an_enchantment_off_a_book(o: Pos, _: &Tuning) -> Scenario {
+    const TWO: &str = r#"{id:"minecraft:enchanted_book",count:1,components:{"minecraft:stored_enchantments":{"minecraft:sharpness":3,"minecraft:unbreaking":2}}}"#;
+    let p = at(o, [3, 1, 0]);
+    Scenario::new("enchanter21_takes_an_enchantment_off_a_book", plot_area(o))
+        .then("a book of Sharpness III and Unbreaking II, «×» on Sharpness", move |b, _| take_off(b, p, TWO, "minecraft:sharpness"))
+        .until("the book comes out", LIMIT, move |b, _| Ok(result(b, p).is_some()))
+        .check("with Unbreaking II alone, the lapis spent", move |b, _| {
+            same("the book", result(b, p), Some(format!("{ENCHANTED_BOOK} x1 minecraft:unbreaking 2")))?;
+            same("lapis", count_of(&b.items(p), LAPIS), 0)
+        })
+}
+
+fn enchanter21_a_book_with_none_left_is_plain(o: Pos, _: &Tuning) -> Scenario {
+    const ONE: &str = r#"{id:"minecraft:enchanted_book",count:1,components:{"minecraft:stored_enchantments":{"minecraft:smite":2}}}"#;
+    let p = at(o, [3, 1, 0]);
+    Scenario::new("enchanter21_a_book_with_none_left_is_plain", plot_area(o))
+        .then("a book of Smite II, «×» on Smite", move |b, _| take_off(b, p, ONE, "minecraft:smite"))
+        .until("a plain book comes out", LIMIT, move |b, _| Ok(result(b, p) == Some(format!("{BOOK} x1"))))
+}
+
+fn enchanter21_anvil_keeps_a_level_above_the_most(o: Pos, _: &Tuning) -> Scenario {
+    fn pick(level: u32) -> String {
+        format!(r#"{{id:"minecraft:diamond_pickaxe",count:1,components:{{"minecraft:enchantments":{{"minecraft:efficiency":{level}}}}}}}"#)
+    }
+    fn book(level: u32) -> String {
+        format!(r#"{{id:"minecraft:enchanted_book",count:1,components:{{"minecraft:stored_enchantments":{{"minecraft:efficiency":{level}}}}}}}"#)
+    }
+    Scenario::new("enchanter21_anvil_keeps_a_level_above_the_most", plot_area(o)).check(
+        "Efficiency VI on V gives VI, IV and IV give V, VI and VI stay VI",
+        move |b, _| {
+            for (left, right, want) in [(5, 6, 6), (6, 5, 6), (4, 4, 5), (6, 6, 6)] {
+                let made = b.anvil_snbt(&pick(left), &book(right))?.ok_or_else(|| format!("the anvil made nothing of {left} and {right}"))?;
+                if !made.contains(&format!("minecraft:efficiency {want}")) {
+                    return Err(format!("{left} and {right}: {made}, not Efficiency {want}"));
+                }
+            }
+            Ok(())
+        },
+    )
 }
