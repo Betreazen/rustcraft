@@ -1066,6 +1066,7 @@
   "rustcraft.util.enchanter.done_storage": "Enchanted: %s → storage",
   "rustcraft.util.enchanter.done": "Enchanted: %s — take it below",
   "rustcraft.util.enchanter.working": "Enchanting: %s",
+  "rustcraft.util.enchanter.waiting": "Starts on its next step: %s",
   "rustcraft.util.enchanter.no_lapis_storage": "Needs %s lapis: none in the storage",
   "rustcraft.util.enchanter.no_lapis": "Needs %s lapis in the middle slot",
   "rustcraft.util.enchanter.no_xp": "Too few levels: %s of %s in the condenser",

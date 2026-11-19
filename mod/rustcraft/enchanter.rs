@@ -588,6 +588,10 @@ fn status(
             }
         }
         (Shown::Working, Some(i)) => (Severity::Ok, line("rustcraft.util.enchanter.working", "Enchanting: %s", &[item_name(&i.item)])),
+        // An item put in since its last step: it starts on the next one.
+        (Shown::Idle("enchant_empty"), Some(i)) => {
+            (Severity::Ok, line("rustcraft.util.enchanter.waiting", "Starts on its next step: %s", &[item_name(&i.item)]))
+        }
         (Shown::Blocked("enchant_no_lapis"), _) if to_storage => (
             Severity::Bad,
             line("rustcraft.util.enchanter.no_lapis_storage", "Needs %s lapis: none in the storage", &[lit(lapis)]),

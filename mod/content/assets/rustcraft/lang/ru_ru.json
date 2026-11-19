@@ -1066,6 +1066,7 @@
   "rustcraft.util.enchanter.done_storage": "Зачаровано: %s → склад",
   "rustcraft.util.enchanter.done": "Зачаровано: %s — заберите внизу",
   "rustcraft.util.enchanter.working": "Зачаровывает: %s",
+  "rustcraft.util.enchanter.waiting": "Начнёт на следующем шаге: %s",
   "rustcraft.util.enchanter.no_lapis_storage": "Нужно %s лазурита: на складе нет",
   "rustcraft.util.enchanter.no_lapis": "Положите %s лазурита в средний слот",
   "rustcraft.util.enchanter.no_xp": "Мало опыта: в конденсаторе %s ур. из %s",
