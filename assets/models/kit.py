@@ -27,6 +27,8 @@ COLORS = {
     # Recoloured by the guide: the tier of a node, rail or machine stripe.
     'tint': '#c57f52', 'tint_light': shade('#c57f52', 0.28), 'tint_dark': shade('#c57f52', -0.38),
     'glow_lamp': AMBER, 'led_red': '#e0564a', 'led_green': '#59d38c', 'led_yellow': '#ffd24a',
+    # 0.21 (spec 40): the light that runs up the side walls of a working machine.
+    'glow_run': '#62ff9a',
     'glow_crystal': '#56dbe2', 'glow_crystal_light': '#b8f6fa', 'glow_crystal_mid': '#8eeaf0', 'glow_crystal_deep': '#3fb8c0',
 }
 
@@ -99,6 +101,38 @@ def face_box(m, mat, face, a, b, w, h, inset=0.0, depth=0.5, part='body'):
     at[across[0]], size[across[0]] = a, w
     at[across[1]], size[across[1]] = b, h
     m.box(mat, *at, *size, part=part)
+
+
+# 0.21 (spec 40, SA1): the status slot on the side walls. A dark slot on the corner post at the
+# y- end of every face (the post of the usual shell, 0..1.5) and, as the part `run`, a green light
+# that runs up it while the block works (anim_mc RUN). The slot stands from inside the post to 0.13
+# out of the face and the light 0.1 further: past the face's frames, clear of the connectors, and
+# off the quarter-pixel grid, so none of their faces lies in a plane of the machine's, a
+# connector's or a neighbour's (zfight.rs). What shows in the slot stays 0.15 inside it at each
+# end, so its top and bottom never meet the slot's.
+SLOT_X, SLOT_DEPTH, SLOT_Y, SLOT_W = 15.9, 0.23, 0.2, 1.1
+SLOT_Z, SLOT_H = 2.6, 10.8
+RUN_LEN = 2.5
+# How far the light runs: from just over the slot's floor to as far under its top.
+RUN_TRAVEL = SLOT_H - 0.3 - RUN_LEN
+# The tallest bar the slot holds (the cell's fill, full).
+SLOT_BAR = SLOT_H - 0.3
+
+
+def status_slot(m):
+    """The dark slot on every side face; what shows in it is a part (`run`, or the cell's fill)."""
+    m.box('black', SLOT_X, SLOT_Y, SLOT_Z, SLOT_DEPTH, SLOT_W, SLOT_H, ring=True)
+
+
+def in_slot(m, mat, h, part):
+    """A glowing bar in the slot of every side face, `h` pixels tall from just over its floor."""
+    m.box(mat, SLOT_X + 0.05, SLOT_Y + 0.15, SLOT_Z + 0.15, SLOT_DEPTH + 0.05, SLOT_W - 0.3, h, part=part, ring=True)
+
+
+def runner(m):
+    """The status slot and its running light (part `run`)."""
+    status_slot(m)
+    in_slot(m, 'glow_run', RUN_LEN, 'run')
 
 
 def port(m, rim, centre, z=16.25):

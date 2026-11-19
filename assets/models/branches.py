@@ -5,7 +5,7 @@ archaeology table, holo projector, building machine; and the butcher (spec 23).
 Every machine wears the tier stripe (part tier) somewhere on its top, as the other machines do; the
 guide shows it above the first tier. Moving parts are named in the pose of each block in
 docs/showcase/js/poses.js; fills are parts level_*, stretched upright from their bottom."""
-from kit import family, frame, linked, panel, shade, shell, tier
+from kit import family, frame, linked, panel, runner, shade, shell, tier
 
 FEED, MILK, HONEY, BREW, XP, HOLO = '#d9b44a', '#f4f1ea', '#ffb32a', '#c05ad8', '#7cfc5a', '#5ae6ff'
 COLORS = {
@@ -176,7 +176,9 @@ def feeder(m):
     m.box('case_light', 0, 0, 7.5, 16, 1.5, 0.25, ring=True)
     stripe(m, 1.5, 0, 7.75, 13, 1.5)
     m.box('black', 3.5, -0.2, 3, 9, 0.2, 2, ring=True)
-    m.box('glow_feeder', 4, -0.4, 3.5, 8, 0.25, 1, ring=True)
+    # 0.21 (spec 40, SA4): the lamp is a part that blinks while the feeder feeds; standing, the
+    # dark strip behind it shows.
+    m.box('glow_feeder', 4, -0.4, 3.5, 8, 0.25, 1, ring=True, part='lamp')
     m.box('feed', 1.5, 1.5, 2, 13, 13, 4.5, part='level_feed')
     m.box('feed_light', 1.5, 1.5, 6.5, 13, 13, 0.5, part='level_feed')
     # The hopper: a column, then a funnel widening up to an open top with grain and a stirrer.
@@ -285,6 +287,8 @@ def brewer(m):
     m.box('glow_brew_top', 1.75, 1.75, 13.75, 12.5, 12.5, 0.5, part='level_brew')
     for x, y, s in ((4, 5, 1.25), (9, 10, 1.5), (11, 4, 1), (6, 11, 1), (8, 7, 0.75)):
         m.box('glow_brew_top', x, y, 14, s, s, 0.75, part='bubbles')
+    # 0.21 (spec 40): the bubbles are hidden by the walls; the status light runs up the sides.
+    runner(m)
 
 
 def xp_tank(m):

@@ -2,7 +2,7 @@
 portal dock."""
 import math
 
-from kit import FACES, face_box, family, frame, linked, panel, shade, shell, tier
+from kit import FACES, face_box, family, frame, linked, panel, runner, shade, shell, tier
 
 NODE, STATION, CAPSULE, CHASSIS, TANK = '#3d4658', '#4a5568', '#e6e8ee', '#e2bd55', '#9fb4c2'
 TOOLS = {'saw': '#d8dce4', 'reaper': '#8fd35a', 'hold': '#a8793f', 'grab': '#ffa53c', 'bore': '#9aa3b2', 'gun': '#e0564a',
@@ -387,6 +387,8 @@ def pdock(m):
     for a in (0, 60, 120):
         m.box('glow_portal', 4.5, 7.5, 16.5, 7, 1, 0.3, part='vortex', tilt=('Z', a), pivot=(8, 8, 16.5))
     m.box('glow_portal_light', 7, 7, 16.55, 2, 2, 0.5, part='vortex', tilt=('Z', 45), pivot=(8, 8, 16.5))
+    # 0.21 (spec 40): the vortex always turns, as in the guide; the status light says it sends.
+    runner(m)
 
 
 # The station, the tank and the portal dock take the magistral's connectors (round 31, kit.links).

@@ -3,7 +3,7 @@ generators, battery, charge plate.
 
 Sources a housing can join (crystal, windmill, solar panel) carry a connector part link_<side> on
 every side a housing can touch; the guide shows the connectors of the linked sides only."""
-from kit import SIDES, family, firebox, frame, linked, panel, shade, shell, tier
+from kit import SIDES, family, firebox, frame, linked, panel, runner, shade, shell, tier
 
 LAVA, CHARGE, CELLS = '#ff6a1f', '#59d38c', '#3f6fd9'
 COLORS = {
@@ -101,10 +101,12 @@ def turbine(m):
     # Flaps: three slanted blades in every opening. The current passes between them.
     for y in (5, 8, 11):
         m.box('steel', 15.6, y - 1.5, 2, 0.8, 3, 10, tilt=('Z', 32), ring=True)
-    # The rotor behind them.
-    m.box('gun', 6, 6, 2, 4, 4, 11)
-    m.box('glow_water', 3, 7.5, 4, 10, 1, 7)
-    m.box('glow_water', 7.5, 3, 4, 1, 10, 7)
+    # The rotor behind them. 0.21 (spec 40, SA5): it is a part that turns while the turbine gives
+    # energy, seen between the flaps from every side.
+    m.pivot('rotor', 8, 8, 2)
+    m.box('gun', 6, 6, 2, 4, 4, 11, part='rotor')
+    m.box('glow_water', 3, 7.5, 4, 10, 1, 7, part='rotor')
+    m.box('glow_water', 7.5, 3, 4, 1, 10, 7, part='rotor')
     m.box('water_dark', 5, 5, 3, 6, 6, 1)
 
 
@@ -194,6 +196,8 @@ def gen_lava(m):
     m.box('glow_lava', 4, 4, 16.3, 8, 8, 0.3)
     for x in (5, 8, 11):
         m.box('lavagen_light', x - 0.5, 3, 16.5, 1, 10, 0.4)
+    # 0.21 (spec 40): the lava glows whether it burns or not; the status light says it does.
+    runner(m)
 
 
 def battery(m):

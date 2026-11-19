@@ -17,7 +17,7 @@ use horizon_world::{
     nbt::{Compound, JavaString, Tag},
     registry::BlockStateId,
 };
-use rustcraft_rules::anim::{self, Off, Shown, Step, parts::PARTS};
+use rustcraft_rules::anim::{self, Shown, Step, parts::PARTS};
 
 pub(super) const ON_KEY: &str = "anim_on";
 pub(super) const LEVEL_KEY: &str = "anim_lv";
@@ -170,7 +170,9 @@ pub(super) fn draw(
     draw.push();
     draw.rotate_about([0.0, 1.0, 0.0], facing_degrees(game, state), [0.5, 0.5, 0.5]);
     for (i, p) in anim::parts_of(block) {
-        moving |= shown.on || matches!(p.off, Off::Always);
+        // 0.21 (spec 40, SA6): only parts that change with the time keep the drawing fresh: a
+        // working cell's fill and lamp are drawn once.
+        moving |= anim::animates(p, shown.on);
         let Some(steps) = anim::pose(i, &shown, t) else {
             continue;
         };
@@ -197,7 +199,9 @@ pub(super) fn draw(
         draw.pop();
     }
     draw.pop();
-    if !moving {
+    // The terminal draws its storage's missing cells where the world has air, read each frame
+    // (rustcraft_storage::draw_holes): it is never kept.
+    if !moving && block != "rustcraft:terminal" {
         draw.keep();
     }
     true

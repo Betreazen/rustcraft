@@ -58,6 +58,7 @@ use horizon_core::geometry::Direction;
 use horizon_client::save;
 use horizon_world::nbt::{self, Compound, JavaString, Tag};
 use rustcraft_rules::{
+    anim::{self, Shown},
     geom::Pos,
     net::{fluids::BUCKET, items::ItemKey, stock::NetStore},
     storage::{
@@ -79,6 +80,9 @@ const ID_KEY: &str = "storage";
 const NO_BOOK: orders::Refusal = ("rustcraft.orders.no_book", "No recipe book in the terminal");
 /// How often, in level ticks, the server sends changed lists to the terminals' viewers.
 const SEND_EVERY: u64 = 5;
+/// 0.21 (spec 40, SA2): how often, in level ticks, the cells and terminals show their storage's
+/// state on their sides.
+const SIDES_EVERY: u64 = 20;
 
 /// One storage as the last rescan found it.
 struct Found {
@@ -108,6 +112,9 @@ struct LevelStorage {
     /// Changed since the attachment was last written.
     dirty: bool,
     ticks: u64,
+    /// 0.21 (spec 40, SA2): what each cell and terminal was last told to show, so a block entity
+    /// is written only when it changes. Emptied by each rescan: a cell put back starts blank.
+    sides: HashMap<Pos, Shown>,
 }
 
 impl LevelStorage {
@@ -449,6 +456,7 @@ pub(super) fn rescan(
         .collect();
     level.found = found;
     level.cell_of = cell_of;
+    level.sides.clear();
     // Wave 2: and the cells sticking out of the box (a protrusion), drawn over the cell.
     let holes: Vec<(Pos, Vec<Pos>, Vec<Pos>)> = level
         .terminals
@@ -1062,11 +1070,14 @@ pub(super) fn between_storages(
 /// changed lists sent to the players who have a terminal of this level open.
 pub(super) fn tick(game: &mut Game<'_>, dimension: &str) {
     save(game, dimension);
-    let send = with_level(dimension, |level| {
+    let (send, sides) = with_level(dimension, |level| {
         level.ticks += 1;
-        level.ticks.is_multiple_of(SEND_EVERY)
+        (level.ticks.is_multiple_of(SEND_EVERY), level.ticks.is_multiple_of(SIDES_EVERY))
     })
-    .unwrap_or(false);
+    .unwrap_or((false, false));
+    if sides {
+        show_sides(game, dimension);
+    }
     if !send {
         return;
     }
@@ -1098,6 +1109,47 @@ pub(super) fn tick(game: &mut Game<'_>, dimension: &str) {
         if let Some(v) = storages().viewers.get_mut(&uuid) {
             v.sent = Some((id, version, orders_revision));
         }
+    }
+}
+
+/// 0.21 (spec 40, SA2): each cell shows its storage's fill and, with the terminals, whether it
+/// works (rustcraft_rules::anim::storage_shown); clients draw them on the blocks' sides
+/// (rustcraft_anim). Only the blocks whose state changed are written.
+fn show_sides(game: &mut Game<'_>, dimension: &str) {
+    let stack = |k: &str| max_stack(game, keys::item_of(k));
+    let due: Vec<(Pos, Shown)> = with_level(dimension, |level| {
+        let mut all = Vec::new();
+        for (id, f) in &level.found {
+            let shown = level.stores.get(id).map_or_else(Shown::default, |s| {
+                anim::storage_shown(level.works(*id), s.used_slots(&stack), s.total_slots())
+            });
+            all.extend(f.cells.iter().map(|&c| (c, shown)));
+            let terminal = Shown { level: 0, ..shown };
+            all.extend(
+                level
+                    .terminals
+                    .iter()
+                    .filter(|(_, s)| **s == Some(*id))
+                    .map(|(&t, _)| (t, terminal)),
+            );
+        }
+        // A terminal that touches no cell stands.
+        all.extend(
+            level
+                .terminals
+                .iter()
+                .filter(|(_, s)| s.is_none())
+                .map(|(&t, _)| (t, Shown::default())),
+        );
+        all.retain(|(p, s)| level.sides.get(p) != Some(s));
+        for (p, s) in &all {
+            level.sides.insert(*p, *s);
+        }
+        all
+    })
+    .unwrap_or_default();
+    for (pos, shown) in due {
+        crate::game::rustcraft_anim::show(game, pos, shown);
     }
 }
 

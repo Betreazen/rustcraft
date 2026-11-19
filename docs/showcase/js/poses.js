@@ -49,6 +49,9 @@
   const pulse = (t, speed) => 0.5 + 0.5 * Math.sin(t * (speed || 4));
   const flicker = (t) => 0.5 + 0.3 * Math.sin(t * 13) + 0.2 * Math.sin(t * 7.3);
   const px = (n) => n / 16;
+  // 0.21 (spec 40): the status light on the side walls (part run, assets/models/kit.py runner)
+  // runs up its slot, 8 pixels once a 1.25 s, while the block works; standing, it is gone.
+  const run = (on, t) => (on ? { move: [0, 0, px(8) * ((t * 0.8) % 1)] } : HIDE);
 
   // A machine above the first tier wears a stripe in the colour of its alloy, as the boxes do.
   function machine(o, pose) {
@@ -70,7 +73,7 @@
       parts: { rotor_x: { axis: 'x', angle: a }, rotor_y: { axis: 'y', angle: a }, rotor_z: { axis: 'z', angle: a } },
     };
   };
-  P.turbine = (o, t) => ({ glow: o.on ? 0.1 + 0.25 * pulse(t, 5) : 0 });
+  P.turbine = (o, t) => ({ glow: o.on ? 0.1 + 0.25 * pulse(t, 5) : 0, parts: o.on ? { rotor: { axis: 'z', angle: t * 6 } } : {} });
   // Recoil: a barrel that fires kicks back along itself. It aims by the aim prop (see above).
   const recoil = (t, length) => ({ move: [-px(length) * Math.max(0, Math.sin(t * 9)), 0, 0] });
   // A turret in support mode (support: true) does not fire: its eye glows slow and steady.
@@ -183,26 +186,33 @@
     if (!c) return { parts: { level_fluid: HIDE } };
     return { glow: o.fluid === 'water' ? 0 : 0.06 + 0.1 * pulse(t, 2), tint: c, tints: { top: shade(c, 0.3) }, level: 0.75 };
   };
-  P.pdock = (o, t) => machine(o, { glow: 0.1 + 0.12 * pulse(t, 2), parts: { vortex: { axis: 'z', angle: t * 3 } } });
+  P.pdock = (o, t) => machine(o, { glow: 0.1 + 0.12 * pulse(t, 2), parts: { vortex: { axis: 'z', angle: t * 3 }, run: run(true, t) } });
 
   // ---- machines
   const fire = (o, t) =>
     machine(o, o.on ? { glow: 0.06 + 0.16 * flicker(t), parts: { flame: { move: [0, 0, px(0.5) * Math.sin(t * 17)] } } } : { parts: { fire: HIDE, flame: HIDE } });
   P.furnace = fire;
   P.alloy = fire;
-  P.crusher = (o, t) => machine(o, { parts: o.on ? { roll_a: { axis: 'x', angle: -t * 5 }, roll_b: { axis: 'x', angle: t * 5 } } : {} });
+  P.crusher = (o, t) =>
+    machine(o, { parts: o.on ? { roll_a: { axis: 'x', angle: -t * 5 }, roll_b: { axis: 'x', angle: t * 5 }, run: run(true, t) } : { run: HIDE } });
   // The lamps on the top light one after another, then all go out and start again.
   P.crafter = (o, t) => {
     const lit = o.on ? Math.floor(t * 4) % 11 : 0, parts = {};
     for (let i = lit; i < 9; i++) parts['lit' + i] = HIDE;
     return machine(o, { glow: o.on ? 0.2 : 0, parts });
   };
-  P.mixer = (o, t) => machine(o, { glow: o.on ? 0.08 + 0.12 * pulse(t, 3) : 0, parts: o.on ? { stirrer: { axis: 'z', angle: t * 4 } } : {} });
+  P.mixer = (o, t) =>
+    machine(o, { glow: o.on ? 0.08 + 0.12 * pulse(t, 3) : 0, parts: o.on ? { stirrer: { axis: 'z', angle: t * 4 }, run: run(true, t) } : { run: HIDE } });
   P.charger = (o, t) => machine(o, { glow: o.on ? 0.1 + 0.18 * pulse(t, 6) : 0 });
-  P.placer = (o, t) => machine(o, { glow: o.on ? 0.15 + 0.2 * pulse(t, 6) : 0, parts: { piston: { move: [o.on ? px(4) * (0.5 - 0.5 * Math.cos(t * 3)) : 0, 0, 0] } } });
+  P.placer = (o, t) =>
+    machine(o, { glow: o.on ? 0.15 + 0.2 * pulse(t, 6) : 0, parts: { piston: { move: [o.on ? px(4) * (0.5 - 0.5 * Math.cos(t * 3)) : 0, 0, 0] }, run: run(o.on, t) } });
   // The drill looks to x+ as modelled; facing: 'x-' turns it round, as when it faces a placer.
   P.breaker = (o, t) =>
-    machine(o, { glow: o.on ? 0.15 + 0.2 * pulse(t, 6) : 0, turn: o.facing === 'x-' ? [['z', Math.PI]] : [], parts: o.on ? { drill: { axis: 'x', angle: t * 14 } } : {} });
+    machine(o, {
+      glow: o.on ? 0.15 + 0.2 * pulse(t, 6) : 0,
+      turn: o.facing === 'x-' ? [['z', Math.PI]] : [],
+      parts: o.on ? { drill: { axis: 'x', angle: t * 14 }, run: run(true, t) } : { run: HIDE },
+    });
   P.pump = (o, t) => machine(o, { glow: o.on ? 0.1 + 0.15 * pulse(t, 5) : 0, parts: { plunger: { move: [0, 0, o.on ? px(-1 + 2.25 * pulse(t, 4)) : 0] } } });
   P.miner = (o, t) =>
     machine(o, { glow: o.on ? 0.06 + 0.12 * pulse(t, 6) : 0, parts: o.on ? { scanner: { axis: 'z', angle: t * 2.5 }, drill: { axis: 'z', angle: t * 12 } } : {} });
@@ -224,7 +234,7 @@
 
   // ---- energy
   P.gen_fuel = fire;
-  P.gen_lava = (o, t) => machine(o, { glow: o.on ? 0.08 + 0.18 * pulse(t, 2.5) : 0 });
+  P.gen_lava = (o, t) => machine(o, { glow: o.on ? 0.08 + 0.18 * pulse(t, 2.5) : 0, parts: { run: run(o.on, t) } });
   // The charge bar is level_charge; without a level prop it shows 0.6.
   P.battery = (o, t) => machine(o, { glow: o.on ? 0.12 + 0.15 * pulse(t, 3) : 0.05, level: 0.6 });
   // A solar panel lets light through (it casts no shadow in the game), so it is drawn see-through.
@@ -237,8 +247,12 @@
   P.geode = (o, t) => ({ glow: 0.08 + 0.06 * pulse(t, 2) });
 
   // ---- storage, docks and the rest
-  P.cell = (o, t) => ({ glow: 0.15 + 0.1 * pulse(t, 1.5) });
-  P.terminal = (o, t) => machine(o, { glow: 0.1 + 0.08 * pulse(t, 2) });
+  // 0.21 (spec 40): a cell shows its storage's fill in its side slots (level_fill, half without a
+  // level prop) and its green lamp while the storage works (off: false makes it stand); the
+  // terminal's lines scroll up while it works and are gone while it stands.
+  P.cell = (o, t) => ({ glow: 0.15 + 0.1 * pulse(t, 1.5), level: 0.5, parts: o.off ? { lamp: HIDE } : {} });
+  P.terminal = (o, t) =>
+    machine(o, { glow: 0.1 + 0.08 * pulse(t, 2), parts: { screen: o.off ? HIDE : { move: [0, 0, px(2) * ((t * 0.6) % 1)] } } });
   // A light runs along the three arrows.
   const dock = (o, t) => {
     const lit = Math.floor(t * 3) % 3, parts = {};
@@ -284,7 +298,13 @@
     });
   };
   // Feeder: the stirrer in the hopper turns; the grain in the trough is level_feed.
-  P.feeder = (o, t) => machine(o, { glow: o.on ? 0.12 + 0.15 * pulse(t, 3) : 0, level: 0.7, parts: o.on ? { auger: { axis: 'z', angle: t * 3 } } : {} });
+  // 0.21 (spec 40): its side lamp blinks while it feeds and is dark while it stands.
+  P.feeder = (o, t) =>
+    machine(o, {
+      glow: o.on ? 0.12 + 0.15 * pulse(t, 3) : 0,
+      level: 0.7,
+      parts: o.on ? { auger: { axis: 'z', angle: t * 3 }, lamp: Math.sin(t * 6) > -0.3 ? {} : HIDE } : { lamp: HIDE },
+    });
   // Shearer-milker: the arm swings to and fro and its shears snip; the milk is level_milk.
   P.shearer = (o, t) => {
     const cut = o.on ? 0.3 * pulse(t, 10) : 0;
@@ -301,7 +321,7 @@
   P.brewer = (o, t) => {
     const fill = o.level != null ? Math.max(0, Math.min(1, o.level)) : 0.7;
     const bubbles = o.on && fill > 0.05 ? { move: [0, 0, px(3) * (fill - 1) + px(0.6) * pulse(t, 6)] } : HIDE;
-    return machine(o, { glow: o.on ? 0.12 + 0.15 * pulse(t, 3) : 0.04, level: 0.7, parts: { bubbles } });
+    return machine(o, { glow: o.on ? 0.12 + 0.15 * pulse(t, 3) : 0.04, level: 0.7, parts: { bubbles, run: run(o.on, t) } });
   };
   // Experience condenser: the fluid is level_xp; the orb over it turns and floats while on.
   P.xp_tank = (o, t) =>

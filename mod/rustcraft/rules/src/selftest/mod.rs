@@ -72,6 +72,7 @@ pub mod w2_pipe_energy;
 // 0.20 (round 31): the machines stream.
 pub mod s20_machines;
 // Round 32 (spec 33): the terminal's «Сеть» page.
+pub mod s21_sides;
 pub mod s21_terminal;
 pub mod s21_upgrade;
 pub mod s21_fishery;
@@ -825,6 +826,8 @@ pub fn catalog() -> Vec<Build> {
     all.extend(s21_orders::ALL);
     // 0.21 (spec 38): rods from the storage, and orders for them.
     all.extend(s21_rods::ALL);
+    // 0.21 (spec 40): the side walls show whether a block works.
+    all.extend(s21_sides::ALL);
     all
 }
 

@@ -1,11 +1,11 @@
 """Storage, worker docks and the rest: storage cell, terminal, docks, alloy block, crystal seed,
 zipline anchor, turret, base anchor."""
-from kit import family, linked, panel, shade, shell, tier
+from kit import SLOT_BAR, family, in_slot, linked, panel, shade, shell, status_slot, tier
 
 VIOLET, TERM = '#c58aff', '#5ad1e6'
 COLORS = {
     **family('cell', '#59616e'), 'drawer': shade('#59616e', -0.1), 'handle': '#c9a45a', 'glow_cell_lamp': '#59d38c',
-    'term_screen': shade(TERM, -0.55), 'glow_term': TERM,
+    'term_screen': shade(TERM, -0.55), 'glow_term': TERM, 'glow_fill': '#7fd8ff',
     'glow_unload': '#ffa53c', 'unload_dark': shade('#ffa53c', -0.6),
     'glow_load': '#4c9bf5', 'load_dark': shade('#4c9bf5', -0.6),
     'glow_coil': '#ffe14a', 'coil_dark': shade('#ffe14a', -0.35),
@@ -25,7 +25,14 @@ def cell(m):
         # The handles reach past the face: off the planes of a housing's collar (round 31).
         panel(m, 'handle', 6, z + 1.7, 4, 0.5, depth=0.6)
     panel(m, 'black', 12.5, 7.25, 1.5, 1.5)
-    panel(m, 'glow_cell_lamp', 12.75, 7.5, 1, 1, depth=0.45)
+    # 0.21 (spec 40, SA2): the lamp is a part, green while the storage works; standing, the dull
+    # red lamp under it shows. It is a little larger than the red one, so their sides never meet.
+    panel(m, 'led_red', 12.75, 7.5, 1, 1, depth=0.4)
+    panel(m, 'glow_cell_lamp', 12.65, 7.4, 1.2, 1.2, depth=0.45, part='lamp')
+    # The storage's fill in the status slot of every face: the part level_fill, stretched up by
+    # the share of the storage's slots in use (every cell of a storage shows the same).
+    status_slot(m)
+    in_slot(m, 'glow_fill', SLOT_BAR, 'level_fill')
 
 
 def terminal(m):
@@ -34,8 +41,11 @@ def terminal(m):
     # A screen on the faces: two lines of the storage list and three status lamps under it.
     panel(m, 'black', 2.5, 5, 11, 8.5)
     panel(m, 'term_screen', 3, 5.5, 10, 7.5, depth=0.35)
-    for y, z, w in ((3.75, 10.5, 6), (3.75, 8.5, 8), (3.75, 6.5, 4.5)):
-        panel(m, 'glow_term', y, z, w, 1, depth=0.45)
+    # 0.21 (spec 40, SA2): the lines are the part screen: they scroll up while the terminal's
+    # storage works and are gone while it stands, the screen dark. A line climbs two pixels, one
+    # line's step, and starts again, so they seem to run on; the top one stays under the frame.
+    for y, z, w in ((3.75, 10, 6), (3.75, 8, 8), (3.75, 6, 4.5)):
+        panel(m, 'glow_term', y, z, w, 1, depth=0.45, part='screen')
     for y, led in ((4, 'led_red'), (6, 'led_green'), (8, 'led_yellow')):
         panel(m, led, y, 3, 1, 1, depth=0.4)
     m.box('black', 4, 4, 16.25, 8, 8, 0.25)

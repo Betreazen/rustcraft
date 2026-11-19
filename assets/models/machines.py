@@ -1,6 +1,6 @@
 """Machines: furnace, crusher, crafter, alloy smelter, mixer, charger, placer, breaker, pump, miner, vein,
 utilizer (trash) and disintegrator (spec 25)."""
-from kit import family, firebox, frame, linked, panel, port, shade, shell, tier
+from kit import family, firebox, frame, linked, panel, port, runner, shade, shell, tier
 
 FIRE, ALLOY, SOL = '#ff9a3c', '#8a5645', '#59d38c'
 COLORS = {
@@ -49,20 +49,27 @@ def crusher(m):
             m.box('steel_mid', 2.5, y - 1.5, 11.25, 11, 3, 3, part=part, tilt=('X', a), pivot=(8, y, 12.75))
         for a in (0, 60, 120):
             m.box('steel', 2.75, y - 0.4, 10.4, 10.5, 0.8, 4.7, part=part, tilt=('X', a), pivot=(8, y, 12.75))
+    # 0.21 (spec 40): the rollers are hidden by the walls; the status light runs up the sides.
+    runner(m)
 
 
 def crafter(m):
     shell(m)
     tier(m)
-    # A 3 x 3 grid on the faces and on the top; on the top every cell has a lamp of its own.
+    # A 3 x 3 grid on the faces and on the top; every cell has a lamp of its own. 0.21 (spec 40,
+    # SA3): the lamps of a face's grid are the same parts as the top's, so they light one by one
+    # with them, from the bottom row up, at no extra cost. A lamp stands 0.55 out of the body,
+    # off the planes of the grid, the connector and a neighbour.
     for i in range(3):
         for j in range(3):
+            lit = 'lit%d' % (3 * j + i)
             panel(m, 'black', 3 + 3.5 * i, 3 + 3.5 * j, 3, 3)
             panel(m, 'grid_dim', 4 + 3.5 * i, 4 + 3.5 * j, 1, 1, depth=0.4)
+            panel(m, 'glow_grid', 3.75 + 3.5 * i, 3.75 + 3.5 * j, 1.5, 1.5, depth=0.55, part=lit)
             x, y = 3 + 3.5 * i, 3 + 3.5 * j
             m.box('black', x, y, 16.25, 3, 3, 0.35)
             m.box('grid_dim', x + 1, y + 1, 16.6, 1, 1, 0.15)
-            m.box('glow_grid', x + 0.75, y + 0.75, 16.6, 1.5, 1.5, 0.3, part='lit%d' % (3 * j + i))
+            m.box('glow_grid', x + 0.75, y + 0.75, 16.6, 1.5, 1.5, 0.3, part=lit)
 
 
 def alloy(m):
@@ -94,6 +101,8 @@ def mixer(m):
     m.box('steel', 7.5, 7.5, 12, 1, 1, 4.5, part='stirrer')
     for a in (0, 90):
         m.box('steel', 3, 7.25, 12.75, 10, 1.5, 1.25, part='stirrer', tilt=('Z', a), pivot=(8, 8, 12.75))
+    # 0.21 (spec 40): the stirrer is hidden by the walls; the status light runs up the sides.
+    runner(m)
 
 
 def charger(m):
@@ -124,11 +133,13 @@ def placer(m):
 
 
 def status(m, led, mat):
-    """A status panel on the three sides other than the front (x+); its lamp lights while the block works."""
+    """A status panel on the three sides other than the front (x+). 0.21 (spec 40): the piston or
+    the drill shows on the front only, so the status light runs up all four sides while it works."""
     for quarter in (1, 2, 3):
         m.box('black', 15.5, 4, 6, 0.25, 8, 4, quarter=quarter)
         m.box(led, 15.5, 10, 8, 0.4, 1, 1, quarter=quarter)
         m.box(mat, 15.5, 5, 7, 0.4, 4, 0.75, quarter=quarter)
+    runner(m)
 
 
 def breaker(m):

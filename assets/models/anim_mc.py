@@ -21,6 +21,8 @@ threshold) while sin(freq t) > threshold (sparks). 'level' parts stretch upright
 by the level; 'carry' rides on another part, taking its moves after its own.
 """
 
+import kit
+
 LIN, SIN, POS, PULSE, COS01, SAW, CHOP, LEVEL = 'lin', 'sin', 'pos', 'pulse', 'cos01', 'saw', 'chop', 'level'
 
 
@@ -53,16 +55,21 @@ def flame(amp, freq):
 
 FIRE = {'on': [], 'off': 'hide'}
 
+# 0.21 (spec 40, SA1): the status light on the side walls (kit.runner): it runs up its slot once a
+# 1.25 s while the block works and is gone while it stands. One part for the four sides.
+RUN_SPEED = 0.8
+RUN = {'on': [wave_move(Z, kit.RUN_TRAVEL, SAW, RUN_SPEED)], 'off': 'hide'}
+
 ANIM = {
     'furnace': {'fire': FIRE, 'flame': flame(0.5, 17)},
     'alloy': {'fire': FIRE, 'flame': flame(0.5, 17)},
     'gen_fuel': {'fire': FIRE, 'flame': flame(0.5, 17)},
     'trash': {'fire': FIRE, 'flame': flame(0.75, 15)},
-    'crusher': {'roll_a': {'on': [spin('x', -5)], 'off': 'rest'}, 'roll_b': {'on': [spin('x', 5)], 'off': 'rest'}},
+    'crusher': {'roll_a': {'on': [spin('x', -5)], 'off': 'rest'}, 'roll_b': {'on': [spin('x', 5)], 'off': 'rest'}, 'run': RUN},
     'crafter': dict(('lit%d' % i, {'on': [], 'off': 'hide', 'show': ('below', 4, 11, i)}) for i in range(9)),
-    'mixer': {'stirrer': {'on': [spin('z', 4)], 'off': 'rest'}},
-    'placer': {'piston': {'on': [wave_move(X, 4, COS01, 3)], 'off': 'rest'}},
-    'breaker': {'drill': {'on': [spin('x', 14)], 'off': 'rest'}},
+    'mixer': {'stirrer': {'on': [spin('z', 4)], 'off': 'rest'}, 'run': RUN},
+    'placer': {'piston': {'on': [wave_move(X, 4, COS01, 3)], 'off': 'rest'}, 'run': RUN},
+    'breaker': {'drill': {'on': [spin('x', 14)], 'off': 'rest'}, 'run': RUN},
     'pump': {'plunger': {'on': [wave_move(Z, 2.25, PULSE, 4, base=-1)], 'off': 'rest'}},
     'miner': {'scanner': {'on': [spin('z', 2.5)], 'off': 'rest'}, 'drill': {'on': [spin('z', 12)], 'off': 'rest'}},
     'disintegrator': {
@@ -78,7 +85,13 @@ ANIM = {
     'tank': {'level_fluid': {'on': [], 'off': 'rest', 'level': True, 'tinted': True}},
     'dock_unload': dict(('lit%d' % i, {'on': [], 'off': 'always', 'show': ('eq', 3, 3, i)}) for i in range(3)),
     'dock_load': dict(('lit%d' % i, {'on': [], 'off': 'always', 'show': ('eq', 3, 3, i)}) for i in range(3)),
-    'pdock': {'vortex': {'on': [spin('z', 3)], 'off': 'always'}},
+    'pdock': {'vortex': {'on': [spin('z', 3)], 'off': 'always'}, 'run': RUN},
+    # 0.21 (spec 40): the lava generator's light; the turbine's rotor between its flaps (SA5).
+    'gen_lava': {'run': RUN},
+    'turbine': {'rotor': {'on': [spin('z', 6)], 'off': 'rest'}},
+    # SA2: the storage's cell shows its fill and a lamp while it works; the terminal's lines scroll.
+    'cell': {'level_fill': {'on': [], 'off': 'rest', 'level': True}, 'lamp': {'on': [], 'off': 'hide'}},
+    'terminal': {'screen': {'on': [wave_move(Z, 2, SAW, 0.6)], 'off': 'hide'}},
     'turret': {'aim_pitch': {'on': [wave_move((-1, 0, 0), 1, POS, 9)], 'off': 'rest', 'carry': 'aim_yaw'},
                'aim_yaw': {'on': [], 'off': 'rest'}},
     'repair': {
@@ -94,7 +107,9 @@ ANIM = {
         'winch': {'on': [wave_rot('y', 3, COS01, 1.2)], 'off': 'rest'},
         'line': {'on': [wave_move(Z, -3.5, COS01, 1.2), wave_move(Z, 0.3, SIN, 5)], 'off': 'rest'},
     },
-    'feeder': {'auger': {'on': [spin('z', 3)], 'off': 'rest'}, 'level_feed': {'on': [], 'off': 'rest', 'level': True}},
+    'feeder': {'auger': {'on': [spin('z', 3)], 'off': 'rest'}, 'level_feed': {'on': [], 'off': 'rest', 'level': True},
+               # SA4: its side lamp blinks while it feeds.
+               'lamp': {'on': [], 'off': 'hide', 'show': ('sin', 6, -0.3)}},
     'shearer': {
         'arm': {'on': [wave_rot('z', 0.55, SIN, 1.5)], 'off': 'rest'},
         'blade_a': {'on': [wave_rot('x', -0.3, PULSE, 10)], 'off': 'rest', 'carry': 'arm'},
@@ -108,6 +123,7 @@ ANIM = {
     'brewer': {
         'bubbles': {'on': [wave_move(Z, 3, LEVEL, 0, base=-3), wave_move(Z, 0.6, PULSE, 6)], 'off': 'hide'},
         'level_brew': {'on': [], 'off': 'rest', 'level': True},
+        'run': RUN,
     },
     'xp_tank': {
         'orb': {'on': [spin('z', 1.5), wave_move(Z, 0.75, SIN, 2.5)], 'off': 'rest'},

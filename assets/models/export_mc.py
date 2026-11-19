@@ -373,17 +373,19 @@ REST_ONLY = {'capsule': ['body', 'below'], 'worker': ['body', 'below']}
 # Parts the guide moves (turns, slides, stretches or swaps) while the block works: in the game
 # they need a block-entity renderer; here they stand still in their rest place.
 MOVING = {
-    'node_hub': 'rotor_x rotor_y rotor_z', 'pdock': 'vortex', 'tank': 'level_fluid',
+    'node_hub': 'rotor_x rotor_y rotor_z', 'pdock': 'vortex run', 'tank': 'level_fluid',
     'capsule': 'whole model turns to its heading', 'worker': 'whole model turns; tools aim, slide, spin',
-    'furnace': 'flame', 'alloy': 'flame', 'gen_fuel': 'flame', 'trash': 'flame', 'crusher': 'roll_a roll_b',
-    'crafter': 'lit0..lit8 (lamps in turn)', 'mixer': 'stirrer', 'placer': 'piston', 'breaker': 'drill',
+    'furnace': 'flame', 'alloy': 'flame', 'gen_fuel': 'flame', 'trash': 'flame', 'crusher': 'roll_a roll_b run',
+    'crafter': 'lit0..lit8 (lamps in turn, top and sides)', 'mixer': 'stirrer run', 'placer': 'piston run', 'breaker': 'drill run',
     'pump': 'plunger', 'miner': 'scanner drill', 'vein': 'core', 'disintegrator': 'cutter half_a half_b',
     'windmill': 'rotor', 'battery': 'level_charge', 'dock_unload': 'lit0..lit2 (lamps in turn)',
     'dock_load': 'lit0..lit2 (lamps in turn)', 'seed': 'stage0..stage2 (by state)', 'zipanchor': 'roller',
     'turret': 'aim_yaw aim_pitch', 'repair': 'wheel clamp sparks', 'kitchen': 'lid steam', 'fishery': 'winch line',
-    'feeder': 'auger level_feed', 'shearer': 'arm blade_a blade_b level_milk', 'apiary': 'bees level_honey',
-    'brewer': 'bubbles level_brew', 'xp_tank': 'orb level_xp', 'enchanter': 'book page_l page_r ring',
+    'feeder': 'auger level_feed lamp', 'shearer': 'arm blade_a blade_b level_milk', 'apiary': 'bees level_honey',
+    'brewer': 'bubbles level_brew run', 'xp_tank': 'orb level_xp', 'enchanter': 'book page_l page_r ring',
     'archeo': 'brush', 'projector': 'holo', 'builder': 'bridge head', 'butcher': 'arm',
+    # 0.21 (spec 40): the side walls.
+    'gen_lava': 'run', 'turbine': 'rotor', 'cell': 'level_fill lamp', 'terminal': 'screen',
 }
 
 
