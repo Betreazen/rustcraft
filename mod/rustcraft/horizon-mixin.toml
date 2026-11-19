@@ -374,6 +374,13 @@ file = "crates/horizon-client/src/game.rs"
 name = "rustcraft_node_window"
 source = "node_window.rs"
 
+# Round 31: the machines' connectors on the sides housings touch (rustcraft_rules::connectors).
+[[module]]
+id = "connectors"
+file = "crates/horizon-client/src/game.rs"
+name = "rustcraft_connectors"
+source = "connectors.rs"
+
 # s18/pipe: the joint window drawn as the guide's table (the client half; rustcraft_window serves it).
 [[module]]
 id = "joint_screen"

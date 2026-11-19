@@ -1,6 +1,6 @@
 """Storage, worker docks and the rest: storage cell, terminal, docks, alloy block, crystal seed,
 zipline anchor, turret, base anchor."""
-from kit import family, panel, shade, shell, tier
+from kit import family, linked, panel, shade, shell, tier
 
 VIOLET, TERM = '#c58aff', '#5ad1e6'
 COLORS = {
@@ -22,7 +22,8 @@ def cell(m):
     for z in (3, 9):
         panel(m, 'cell_dark', 2, z, 12, 4)
         panel(m, 'drawer', 3, z + 1, 10, 2, depth=0.4)
-        panel(m, 'handle', 6, z + 1.75, 4, 0.5, depth=0.6)
+        # The handles reach past the face: off the planes of a housing's collar (round 31).
+        panel(m, 'handle', 6, z + 1.7, 4, 0.5, depth=0.6)
     panel(m, 'black', 12.5, 7.25, 1.5, 1.5)
     panel(m, 'glow_cell_lamp', 12.75, 7.5, 1, 1, depth=0.45)
 
@@ -66,7 +67,7 @@ def dock_charge(m):
         panel(m, 'coil_dark', 3, z - 0.5, 10, 0.5, depth=0.4)
         panel(m, 'glow_coil', 3, z, 10, 1.5, depth=0.6)
     m.box('steel_mid', 3, 3, 16.25, 10, 10, 0.5)
-    m.box('glow_coil', 6, 6, 16.75, 4, 4, 0.25)
+    m.box('glow_coil', 6, 6, 16.75, 4, 4, 0.2)
 
 
 def alloyblock(m):
@@ -97,7 +98,7 @@ def seed(m):
             pivot = (x + size / 2, y + size / 2, 0.5)
             m.box('glow_crystal', x, y, 0.5, size, size, height, part=part, tilt=tilt, pivot=pivot)
             m.box('glow_crystal_light', x + 0.5, y + 0.5, 0.5 + height, size - 1, size - 1, 1, part=part, tilt=tilt, pivot=pivot)
-            m.box('glow_crystal_deep', x + size - 0.3, y + 0.5, 0.5, 0.5, 1, height * 0.6, part=part, tilt=tilt, pivot=pivot)
+            m.box('glow_crystal_deep', x + size - 0.3, y + 0.5, 0.6, 0.5, 1, height * 0.6 - 0.1, part=part, tilt=tilt, pivot=pivot)
 
 
 def zipanchor(m):
@@ -119,7 +120,7 @@ def turret(m):
     # The base stays put.
     m.box('case_dark', 1, 1, 0, 14, 14, 2)
     m.box('case', 2, 2, 2, 12, 12, 3)
-    m.box('case_light', 2, 2, 4.5, 2, 2, 1, ring=True)
+    m.box('case_light', 2.25, 2.25, 4.5, 1.75, 1.75, 1, ring=True)
     m.box('black', 4.5, 2.5, 5, 7, 1, 0.25, ring=True)
     m.box('steel_dark', 5, 5, 5, 6, 6, 1.5)
     # The head turns to the aim about the vertical axis of the block: armour, a sensor eye and
@@ -131,7 +132,7 @@ def turret(m):
     m.box('plate_dark', 5, 11.5, 7.5, 5, 1, 3, part=head)
     m.box('plate_dark', 2.5, 6, 7.5, 1.5, 4, 3, part=head)
     m.box('steel_mid', 5.5, 6, 11.5, 4, 4, 0.6, part=head)
-    m.box('glow_eye', 12, 5.25, 10, 0.4, 1.5, 1, part=head)
+    m.box('glow_eye', 12, 5.25, 10, 0.4, 1.5, 0.9, part=head)
     for y in (5.75, 9.5):
         m.box('plate_dark', 11.5, y, 8, 2.5, 0.75, 3, part=head)
     # The barrel tilts to the aim on the head and points to x+.
@@ -139,7 +140,7 @@ def turret(m):
     m.pivot(barrel, 13, 8, 9.5)
     m.box('steel_dark', 12, 6.5, 8, 2, 3, 3, part=barrel)
     m.box('gun', 14, 7.25, 8.75, 4.5, 1.5, 1.5, part=barrel)
-    m.box('black', 18.5, 7, 8.5, 1, 2, 2, part=barrel)
+    m.box('black', 18.5, 6.95, 8.45, 1, 2.1, 2.1, part=barrel)
 
 
 def anchor(m):
@@ -148,7 +149,8 @@ def anchor(m):
     m.box('anchor', 1, 1, 3, 14, 14, 1)
     m.box('anchor', 0, 0, 3, 3, 3, 10, ring=True)
     m.box('anchor', 0, 0, 13, 16, 16, 3)
-    m.box('anchor_light', 0, 0, 15.5, 3, 3, 0.75, ring=True)
+    # Caps on the pillars, on the top slab and a quarter pixel in from its edges (round 31).
+    m.box('anchor_light', 0.25, 0.25, 16, 2.75, 2.75, 0.25, ring=True)
     # A glowing square ring in every opening and one more on the top.
     m.box('glow_ring', 14.5, 3, 12, 1, 10, 1, ring=True)
     m.box('glow_ring', 14.5, 3, 4, 1, 10, 1, ring=True)
@@ -162,7 +164,10 @@ def anchor(m):
     m.box('glow_core_light', 6.75, 6.75, 11.5, 2.5, 2.5, 0.75, tilt=('Z', 45))
 
 
+# The storage's blocks, the docks, the turret and the base anchor take the magistral's connectors
+# (round 31, kit.links).
 MODELS = {
-    'cell': cell, 'terminal': terminal, 'dock_unload': dock('glow_unload', 'unload_dark'), 'dock_load': dock('glow_load', 'load_dark'),
-    'dock_charge': dock_charge, 'alloyblock': alloyblock, 'seed': seed, 'zipanchor': zipanchor, 'turret': turret, 'anchor': anchor,
+    'cell': linked(cell), 'terminal': linked(terminal), 'dock_unload': linked(dock('glow_unload', 'unload_dark')),
+    'dock_load': linked(dock('glow_load', 'load_dark')), 'dock_charge': linked(dock_charge), 'alloyblock': alloyblock,
+    'seed': seed, 'zipanchor': zipanchor, 'turret': linked(turret), 'anchor': linked(anchor),
 }

@@ -709,6 +709,15 @@ fn rescan(game: &mut Game<'_>, dimension: &str, level: &mut LevelNet) {
         &TUNING,
     );
     power::rescan(level);
+    // Round 31: the machines', tanks', terminals' and cells' connectors on the sides housings touch.
+    let linked: Vec<Pos> = level
+        .machines
+        .iter()
+        .filter(|(_, m)| rustcraft_rules::connectors::has(m.block()))
+        .map(|(p, _)| *p)
+        .chain(found.cells.iter().chain(&found.terminals).chain(&found.tanks).copied())
+        .collect();
+    crate::game::rustcraft_connectors::update(game, &level.layout, linked);
     transport::rebuild(game, dimension, level, &TUNING);
     // s18/pipe: the wrench's bottlenecks, told to clients.
     crate::game::rustcraft_pipe18::mark_weak(game, level);

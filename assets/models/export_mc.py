@@ -428,6 +428,16 @@ def model_json(textures, els, parent=None, render_type=None):
     return text
 
 
+# Block models and textures other tools write, which flush() leaves alone: the gear seen on players
+# (tools/gen_worn_models.py) and the tier stripes (tools/tiers.py). Round 31: the housing's
+# bottleneck mark is made here (housing_weak) and its channel strips are gone (built into its model).
+FOREIGN = ('worn_*', 'tier_stripe_*')
+# Files gear_mc would write that other tools write over: the energy blade's and shield's items go
+# dark without charge (tools/gen_gear_dark.py), the scout compass turns its needle
+# (tools/gen_scout_compass.py).
+FOREIGN_FILES = ('items/blade_?.json', 'items/eshield_?.json', 'items/scout_compass.json')
+
+
 class Writer:
     def __init__(self):
         self.files = {}
@@ -443,12 +453,16 @@ class Writer:
             self.image('textures/block/%s.png' % name, rows)
 
     def flush(self):
-        # Everything in models/block and textures/block is made here; drop what is no longer made.
+        # Everything in models/block and textures/block is made here but what other tools make
+        # (FOREIGN); drop what is no longer made.
         for folder, ext in (('models/block', '.json'), ('textures/block', '.png')):
             for old in (ASSETS / folder).glob('*' + ext):
-                if '%s/%s' % (folder, old.name) not in self.files:
+                foreign = any(fnmatch.fnmatchcase(old.stem, p) for p in FOREIGN)
+                if '%s/%s' % (folder, old.name) not in self.files and not foreign:
                     old.unlink()
         for rel, data in sorted(self.files.items()):
+            if any(fnmatch.fnmatchcase(rel, p) for p in FOREIGN_FILES):
+                continue
             path = ASSETS / rel
             path.parent.mkdir(parents=True, exist_ok=True)
             if not path.exists() or path.read_bytes() != data:
@@ -564,23 +578,53 @@ FACING_Y = {'north': 0, 'east': 90, 'south': 180, 'west': 270}
 
 
 def machine_states(out):
-    """Blockstates of the crystal, the cell and the machines, whose models come from staged() below."""
-    for single in ('crystal', 'cell'):
-        out.text('blockstates/%s.json' % single,
-                 '{\n  "variants": {\n    "": {"model": "rustcraft:block/%s"}\n  }\n}\n' % single)
+    """Blockstates of the crystal, the cell and the machines, whose models come from staged() below.
+    Round 31: a block with connectors is a multipart, its body by `facing` and the connector of
+    each side whose property is true, unturned (rustcraft_rules::connectors)."""
+    out.text('blockstates/crystal.json', '{\n  "variants": {\n    "": {"model": "rustcraft:block/crystal"}\n  }\n}\n')
+    out.text('blockstates/cell.json', multipart([{'apply': {'model': 'rustcraft:block/cell'}}] + link_parts('cell')))
     # The pump, the terminal, the tank and the station copy the furnace too, for a menu on use;
     # since slice 9 so do the slice-7 and slice-8 blocks but the solar panel (SLICE7_BLOCKS).
     furnaces = ('furnace', 'crusher', 'gen_fuel', 'alloy', 'crafter', 'pump', 'terminal', 'tank', 'station')
     for machine in furnaces + tuple(b for b in SLICE7_PANELS if b not in SLICE7_BLOCKS) + SLICE12_BLOCKS:
-        variants = []
         model_name = BLOCK_MODEL.get(machine, machine)
+        parts = []
         for facing, y in FACING_Y.items():
-            for lit in ('false', 'true'):
-                model = {'model': 'rustcraft:block/' + model_name}
-                if y:
-                    model['y'] = y
-                variants.append('    %s: %s' % (json.dumps('facing=%s,lit=%s' % (facing, lit)), json.dumps(model)))
-        out.text('blockstates/%s.json' % machine, '{\n  "variants": {\n%s\n  }\n}\n' % ',\n'.join(variants))
+            model = {'model': 'rustcraft:block/' + model_name}
+            if y:
+                model['y'] = y
+            parts.append({'when': {'facing': facing}, 'apply': model})
+        out.text('blockstates/%s.json' % machine, multipart(parts + link_parts(model_name)))
+
+
+# Round 31: the sides a machine shows a connector on, as its state properties name them, and the
+# model side of each (rustcraft_rules::connectors::FACES; no connector below).
+LINK_PROPS = (('north', 'y-'), ('east', 'x+'), ('south', 'y+'), ('west', 'x-'), ('up', 'z+'))
+# Models whose connectors the block entity draws instead (rustcraft_power, slice 18).
+LINKED = ('crystal', 'windmill', 'solar')
+
+
+def has_links(model_name):
+    """Whether a model takes the magistral's connectors through its blockstate."""
+    if model_name in LINKED:
+        return False
+    for section in BLOCK_SECTIONS:
+        if model_name in section.MODELS:
+            return any(b[0] == 'link_z+' for b in read(section.MODELS[model_name], model_name))
+    return False
+
+
+def link_parts(model_name):
+    """The blockstate parts of a model's connectors, none for a model without them."""
+    if not has_links(model_name):
+        return []
+    return [{'when': {prop: 'true'}, 'apply': {'model': 'rustcraft:block/%s__link_%s' % (model_name, prop)}}
+            for prop, _ in LINK_PROPS]
+
+
+def multipart(parts):
+    """A multipart blockstate, one part to a line."""
+    return '{\n  "multipart": [\n%s\n  ]\n}\n' % ',\n'.join('    ' + json.dumps(p) for p in parts)
 
 
 # Slice 12: the last blocks copy the furnace as the machines do; the portal dock's model is `pdock`.
@@ -779,10 +823,13 @@ def rail_halves_shown(mask):
 def rail_rise(m):
     """The piece of a floor rail up the wall at its x+ side (rustcraft_rules::monorail::shape
     `Rise`): the rail's section stood on end against that wall, from the floor to the top of the
-    cell, where the wall rail's lower half meets it, with a tie halfway up."""
-    m.box('steel_dark', 15.5, 6.5, 0, 0.5, 3, 16, part='rise')
-    m.box('tint', 14.25, 7, 0, 1.25, 2, 16, part='rise')
-    m.box('tint_light', 14, 7, 0, 0.25, 2, 16, part='rise')
+    cell, where the wall rail's lower half meets it, with a tie halfway up. Round 31: it stands on
+    the floor rail instead of reaching through it, its foot runs round the tie and its light edge
+    is as narrow as the rails' light tops, so no two of their faces share a plane (z-fighting)."""
+    m.box('steel_dark', 15.5, 6.5, 2, 0.5, 3, 5.25, part='rise')
+    m.box('steel_dark', 15.5, 6.5, 8.75, 0.5, 3, 7.25, part='rise')
+    m.box('tint', 14.25, 7, 2, 1.25, 2, 14, part='rise')
+    m.box('tint_light', 14, 7.05, 2, 0.25, 1.9, 14, part='rise')
     m.box('steel_mid', 15.25, 5, 7.25, 0.75, 6, 1.5, part='rise')
 
 
@@ -983,7 +1030,6 @@ def items(out):
 
 # The model's sides (energy.py's link_<side>, z up, y south) as the game's faces.
 LINK_FACES = {'x-': 'west', 'x+': 'east', 'y-': 'north', 'y+': 'south', 'z-': 'down', 'z+': 'up'}
-LINKED = ('crystal', 'windmill', 'solar')
 # Every face tinted, so the client's tint sets how bright it glows: the crystal's pulse
 # (P.crystal), a structure lit with solution and dim without (P.crystalblock).
 LIT = ('crystal', 'crystalblock')
@@ -994,8 +1040,9 @@ STAGED = {'seed': 3}
 def energy_parts(out, name, every, skin, stats):
     """Slice 18: the housing connectors link_<side> of the crystal, the windmill and the solar
     panel, each a standalone model `<name>__link_<face>` the client draws on the sides a housing
-    touches; and the seed's stages `seed_<n>`, its blockstate's models by `stage`."""
-    if name in LINKED:
+    touches (round 31: and of every machine, which its blockstate shows); and the seed's stages
+    `seed_<n>`, its blockstate's models by `stage`."""
+    if any(b[0].startswith('link_') for b in every):
         for side, face in LINK_FACES.items():
             boxes = [b for b in every if b[0] == 'link_' + side]
             if boxes:

@@ -1,5 +1,10 @@
 {
-  "variants": {
-    "": {"model": "rustcraft:block/cell"}
-  }
+  "multipart": [
+    {"apply": {"model": "rustcraft:block/cell"}},
+    {"when": {"north": "true"}, "apply": {"model": "rustcraft:block/cell__link_north"}},
+    {"when": {"east": "true"}, "apply": {"model": "rustcraft:block/cell__link_east"}},
+    {"when": {"south": "true"}, "apply": {"model": "rustcraft:block/cell__link_south"}},
+    {"when": {"west": "true"}, "apply": {"model": "rustcraft:block/cell__link_west"}},
+    {"when": {"up": "true"}, "apply": {"model": "rustcraft:block/cell__link_up"}}
+  ]
 }

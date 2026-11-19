@@ -138,10 +138,13 @@ def stripes():
             CONTENT / f"assets/rustcraft/models/block/tier_stripe_{tier}.json",
             {
                 "textures": {"stripe": tex, "particle": tex},
+                # A quarter pixel in from the sides and the floor of the block in front, which
+                # the stripe reaches into: a block there hides those faces instead of sharing
+                # their planes (round 31, z-fighting).
                 "elements": [
                     {
-                        "from": [0, 0, -0.5],
-                        "to": [16, 2.5, 0],
+                        "from": [0.25, 0.25, -0.5],
+                        "to": [15.75, 2.5, 0],
                         "faces": {
                             "north": face([0, 0, 16, 2.5]),
                             "east": face([0, 0, 0.5, 2.5]),
