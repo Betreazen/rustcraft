@@ -35,6 +35,10 @@ pub enum Endpoint {
     /// Takes the fluid it works on, from stores too: a mixer's water, a crystal structure's
     /// solution, a lava generator's lava.
     Consumer,
+    /// 0.21 (round 32, SP8): the trash. It takes by its joint's filter, and a storage's surplus
+    /// with no filter: what the storage holds over its limit, and what no store keeps of a fluid
+    /// a storage of the net holds its limit of.
+    Trash,
 }
 
 /// The tanks and machines behind the joints of a fluid net.
@@ -47,6 +51,14 @@ pub trait FluidInventories {
     /// The block's role on a smart line (FL2); plain unless the bundle says otherwise.
     fn endpoint(&self, _block: Pos) -> Endpoint {
         Endpoint::Plain
+    }
+    /// 0.21 (SP8): the mB of `fluid` a storage holds over its limit; 0 for any other block.
+    fn surplus(&self, _block: Pos, _fluid: &str) -> u64 {
+        0
+    }
+    /// 0.21 (SP8): a storage limits `fluid` and holds its limit.
+    fn at_limit(&self, _block: Pos, _fluid: &str) -> bool {
+        false
     }
 }
 
@@ -114,18 +126,30 @@ pub fn tick(
             let mut available = (*lane + 1e-9).floor() as u64;
             let mut moved = 0u64;
             let mut left = amount;
+            // 0.21 (SP8): what a storage gives over its limit, and whether what another source
+            // gives is surplus (a storage of the net holds its limit): a trash takes it unasked.
+            let mut surplus = inv.surplus(src.block, &fluid);
+            let limited_out = inv.endpoint(src.block) != Endpoint::Store
+                && receivers.iter().any(|&r| inv.at_limit(joints[r].block, &fluid));
             for &r in &receivers {
                 let dst = &joints[r];
                 if left == 0 || available == 0 {
                     break;
                 }
-                if dst.block == src.block || !dst.filter.passes(&fluid) {
+                if dst.block == src.block {
                     continue;
                 }
-                if consumers_only && inv.endpoint(dst.block) != Endpoint::Consumer {
+                let role = inv.endpoint(dst.block);
+                let asked = dst.filter.passes(&fluid) && !(consumers_only && role != Endpoint::Consumer);
+                let unasked = !asked
+                    && role == Endpoint::Trash
+                    && !(!dst.filter.allow_only && dst.filter.items.contains(&fluid))
+                    && (surplus > 0 || limited_out);
+                if !asked && !unasked {
                     continue;
                 }
-                let want = left.min(available).min(inv.room_for(dst.block, &fluid));
+                let cap = if unasked && surplus > 0 { surplus } else { left };
+                let want = left.min(cap).min(available).min(inv.room_for(dst.block, &fluid));
                 if want == 0 {
                     continue;
                 }
@@ -141,6 +165,9 @@ pub fn tick(
                     left -= put;
                     available -= put;
                     moved += put;
+                    if unasked {
+                        surplus = surplus.saturating_sub(put);
+                    }
                 }
             }
             if moved > 0 {
@@ -208,6 +235,8 @@ mod tests {
         room: HashMap<Pos, HashMap<FluidKey, u64>>,
         got: HashMap<Pos, HashMap<FluidKey, u64>>,
         roles: HashMap<Pos, Endpoint>,
+        /// 0.21: a storage's limit on a fluid, mB.
+        limits: HashMap<(Pos, FluidKey), u64>,
     }
 
     impl Tanks {
@@ -232,6 +261,15 @@ mod tests {
         }
         fn endpoint(&self, b: Pos) -> Endpoint {
             self.roles.get(&b).copied().unwrap_or_default()
+        }
+        fn surplus(&self, b: Pos, f: &str) -> u64 {
+            let held: u64 = self.offered(b).iter().filter(|(k, _)| k == f).map(|(_, n)| n).sum();
+            let got = self.got(b, f);
+            self.limits.get(&(b, f.to_owned())).map_or(0, |l| (held + got).saturating_sub(*l))
+        }
+        fn at_limit(&self, b: Pos, f: &str) -> bool {
+            let held: u64 = self.offered(b).iter().filter(|(k, _)| k == f).map(|(_, n)| n).sum();
+            self.limits.get(&(b, f.to_owned())).is_some_and(|l| held + self.got(b, f) >= *l)
         }
         fn room_for(&self, b: Pos, f: &str) -> u64 {
             self.room
@@ -447,5 +485,74 @@ mod tests {
             tick(&joints, 1.0, ANY_KINDS, 20.0, &mut s, &mut t);
         }
         assert_eq!(t.got(MIXER, "minecraft:water"), BUCKET);
+    }
+
+    // ---- 0.21 (round 32): a storage's fluid surplus goes to the trash (SP8) ----
+
+    const TRASH: Pos = [6, 0, 0];
+    const PUMP: Pos = [7, 0, 0];
+    const WATER: &str = "minecraft:water";
+
+    /// A storage on its default joint, a trash with its placed joint (an empty allow list at the
+    /// lowest priority) and a pump on one fluid net.
+    fn trash_line() -> (Vec<Joint>, Tanks) {
+        let mut t = Tanks::default();
+        t.roles.insert(STORE_A, Endpoint::Store);
+        t.roles.insert(TRASH, Endpoint::Trash);
+        let placed = crate::machines::tiered::trash_joint();
+        let trash = Joint { filter: placed.filter, priority: placed.priority, ..joint(6, placed.mode) };
+        (vec![joint(3, Mode::Both), trash, joint(7, Mode::From)], t)
+    }
+
+    #[test]
+    fn water_over_the_storage_limit_burns_in_a_trash_with_no_filter() {
+        // SP8: the limit lowered to 3 buckets under the 5 the cells hold: 2 buckets burn.
+        let (joints, mut t) = trash_line();
+        t.holds(STORE_A, WATER, 5 * BUCKET);
+        t.limits.insert((STORE_A, WATER.into()), 3 * BUCKET);
+        t.takes(TRASH, WATER, 64 * BUCKET);
+        let mut s = FluidNetState::default();
+        for _ in 0..10 {
+            tick(&joints, 100.0, ANY_KINDS, 20.0, &mut s, &mut t);
+        }
+        assert_eq!(t.got(TRASH, WATER), 2 * BUCKET);
+        assert_eq!(t.offered(STORE_A)[0].1, 3 * BUCKET);
+    }
+
+    #[test]
+    fn a_pumps_water_past_the_limit_burns_and_under_it_never() {
+        // SP8: the storage is at its limit, the pump's water goes to the trash; with room under
+        // the limit the storage takes it and the trash gets none.
+        let (joints, mut t) = trash_line();
+        t.holds(PUMP, WATER, BUCKET);
+        t.holds(STORE_A, WATER, 3 * BUCKET);
+        t.limits.insert((STORE_A, WATER.into()), 3 * BUCKET);
+        t.takes(TRASH, WATER, 64 * BUCKET);
+        let mut s = FluidNetState::default();
+        tick(&joints, 100.0, ANY_KINDS, 20.0, &mut s, &mut t);
+        assert_eq!(t.got(TRASH, WATER), BUCKET);
+        let (joints, mut t) = trash_line();
+        t.holds(PUMP, WATER, BUCKET);
+        t.limits.insert((STORE_A, WATER.into()), 3 * BUCKET);
+        t.takes(STORE_A, WATER, 3 * BUCKET);
+        t.takes(TRASH, WATER, 64 * BUCKET);
+        tick(&joints, 100.0, ANY_KINDS, 20.0, &mut s, &mut t);
+        assert_eq!(t.got(STORE_A, WATER), BUCKET);
+        assert_eq!(t.got(TRASH, WATER), 0);
+    }
+
+    #[test]
+    fn a_storage_without_a_limit_keeps_its_water_from_the_trash() {
+        // SP4: no limit, no surplus: the trash with no filter takes nothing; a lava filter on it
+        // still burns no water.
+        let (mut joints, mut t) = trash_line();
+        t.holds(STORE_A, WATER, 5 * BUCKET);
+        t.holds(PUMP, WATER, BUCKET);
+        t.takes(TRASH, WATER, 64 * BUCKET);
+        let mut s = FluidNetState::default();
+        tick(&joints, 100.0, ANY_KINDS, 20.0, &mut s, &mut t);
+        joints[1].filter.items.insert("minecraft:lava".into());
+        tick(&joints, 100.0, ANY_KINDS, 20.0, &mut s, &mut t);
+        assert_eq!(t.got(TRASH, WATER), 0);
     }
 }

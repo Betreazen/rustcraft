@@ -47,7 +47,8 @@ use rustcraft_rules::{
     net::{
         items::{self, Joint, JointNote, Mode, NetState, Transfer},
         joints,
-        stock::{self, Stock, StockSlot, Stocks},
+        stock::{self, SinkStock, Stock, StockSlot, Stocks},
+        surplus::Sink,
         topology::{ChannelKind, Layout, pipe_length},
     },
     orders::ship::{self, NetKey, Route},
@@ -109,6 +110,9 @@ pub struct Transport {
     /// `reserved_ticks` ticks.
     reserved: HashMap<NetKey, u64>,
     reserved_ticks: u32,
+    /// 0.21 (round 32): the trashes and disintegrators on an item net where a storage limits some
+    /// item: they take its surplus with no filter (rustcraft_rules::net::surplus).
+    pub surplus_sinks: BTreeSet<Pos>,
 }
 
 impl Transport {
@@ -389,9 +393,11 @@ pub(super) fn tick(game: &mut Game<'_>, dimension: &str, level: &mut LevelNet, t
         nets,
         states,
         full_until,
+        surplus_sinks,
         ..
     } = transport;
     full_until.retain(|_, until| *until > now);
+    let mut sinks_now = BTreeSet::new();
     for (net, &per_second) in nets.iter().zip(&rates) {
         if net.joints.len() < 2 {
             continue;
@@ -406,6 +412,8 @@ pub(super) fn tick(game: &mut Game<'_>, dimension: &str, level: &mut LevelNet, t
             state,
             &mut stocks,
         );
+        sinks_now.extend(stocks.sinks.keys().copied());
+        admit_surplus(game, &stocks.sinks, &result.transfers);
         apply(game, dimension, &net.joints, &stores, &result.transfers);
         // Wave 2: the moves drawn in the housings (rustcraft_pipe18::show_flow, M5).
         crate::game::rustcraft_pipe18::moved(dimension, net.key, &result.transfers);
@@ -415,6 +423,73 @@ pub(super) fn tick(game: &mut Game<'_>, dimension: &str, level: &mut LevelNet, t
             }
         }
     }
+    *surplus_sinks = sinks_now;
+}
+
+/// 0.21 (round 32): what a trash of `sinks` gets this move goes past its slot rule, which knows
+/// only its joints' filters (rustcraft_utility::admit_surplus); the disintegrator's rule takes
+/// what it takes apart anyway.
+fn admit_surplus(game: &mut Game<'_>, sinks: &HashMap<Pos, SinkStock>, transfers: &[Transfer]) {
+    let mut into: BTreeMap<Pos, BTreeSet<String>> = BTreeMap::new();
+    for t in transfers {
+        if sinks.get(&t.to).is_some_and(|s| s.kind == Sink::Trash) {
+            into.entry(t.to).or_default().insert(keys::item_of(&t.item).to_owned());
+        }
+    }
+    for (pos, items) in into {
+        crate::game::rustcraft_utility::admit_surplus(game, pos, &items);
+    }
+}
+
+/// 0.21 (round 32, rustcraft_rules::net::surplus): the disintegrators and trashes behind
+/// `joints` as sinks of the surplus of the items a storage of the net limits; none while no
+/// storage there limits an item. A disintegrator takes what its slot takes and it takes apart now
+/// (no charged item, DS4), a trash any of them.
+fn sinks(
+    game: &Game<'_>,
+    joints: &[Joint],
+    machines: &BTreeMap<Pos, Machine>,
+    stores: &HashMap<Pos, stock::NetStore>,
+    tuning: &Tuning,
+) -> HashMap<Pos, SinkStock> {
+    use rustcraft_rules::utility::Util;
+    let limited: BTreeSet<&String> = stores
+        .values()
+        .filter(|s| s.works)
+        .flat_map(|s| s.store.limits.keys())
+        .filter(|k| rustcraft_rules::orders::fluid_of(k).is_none())
+        .collect();
+    let mut out = HashMap::new();
+    if limited.is_empty() {
+        return out;
+    }
+    for j in joints {
+        if out.contains_key(&j.block) {
+            continue;
+        }
+        let (kind, takes) = match machines.get(&j.block) {
+            Some(Machine::Util(Util::Trash)) => (Sink::Trash, limited.iter().map(|k| (*k).clone()).collect()),
+            Some(m @ Machine::Util(Util::Disintegrator)) => {
+                let (Some(entity), Some(&slot)) =
+                    (crate::game::rustcraft_machines::entity(game, j.block), m.inputs().first())
+                else {
+                    continue;
+                };
+                let takes = limited
+                    .iter()
+                    .filter(|k| {
+                        slot_takes(&entity, slot, keys::item_of(k), tuning)
+                            && !crate::game::rustcraft_utility::charged_key(game, k)
+                    })
+                    .map(|k| (*k).clone())
+                    .collect();
+                (Sink::Disintegrator, takes)
+            }
+            _ => continue,
+        };
+        out.insert(j.block, SinkStock { kind, takes });
+    }
+    out
 }
 
 /// One slot a joint reaches: its number, what it holds, whether the net may take it.
@@ -533,6 +608,8 @@ fn snapshot(
             .map_or(stock::DEFAULT_STACK, |info| info.max_stack);
         stocks.max_stack.insert(item, stack);
     }
+    // 0.21 (round 32): the disintegrators and trashes as sinks of the storages' surplus.
+    stocks.sinks = sinks(game, joints, machines, &stocks.stores, tuning);
     stocks
 }
 
@@ -605,38 +682,50 @@ pub(super) fn on_right_click_block(
     if player.sneaking {
         return;
     }
+    let block = game.native_block(pos);
+    // 0.21 (round 32, SP9; the owner: «писало что на стыке настроить нужно, но его меню вообще не
+    // открывалось»): the trash and the disintegrator do what their joint says, and they cover the
+    // face of the housing that looks at them, so the wrench opens that joint and turns them only
+    // with no housing beside them.
+    let joint_first = rustcraft_rules::net::wrench::opens_joint(&block);
     // s18/pipe (guide `wrench`): a click on a machine turns it; the joint window opens on a housing.
-    if let Some(facing) = crate::game::rustcraft_pipe18::rotate_machine(game, pos) {
-        *canceled = true;
-        let text = server::line(
-            "rustcraft.wrench.turned",
-            "Turned: faces %s",
-            &[server::line(&format!("rustcraft.facing.{facing}"), facing, &[])],
-        );
-        server::tell(game, player.uuid, text);
+    if !joint_first && turn(game, player.uuid, pos, canceled) {
         return;
     }
-    let target = if game.native_block(pos) == content::HOUSING {
+    let target = if block == content::HOUSING {
         Some((pos, Face::from_normal(face)))
     } else {
         server::with_level(&player.dimension, |level| {
             // Round 31: every housing has its channels built in, so any housing beside it.
-            Face::ALL.into_iter().find_map(|f| {
-                let housing = step(pos, f);
-                level
-                    .layout
-                    .housings
-                    .contains_key(&housing)
-                    .then_some((housing, Some(f.opposite())))
-            })
+            rustcraft_rules::net::wrench::joint_beside(pos, |h| level.layout.housings.contains_key(&h))
+                .map(|(housing, toward)| (housing, Some(toward)))
         })
         .flatten()
     };
     let Some((housing, preferred)) = target else {
+        if joint_first {
+            turn(game, player.uuid, pos, canceled);
+        }
         return;
     };
     *canceled = true;
     window::request_open(player.uuid, &player.dimension, housing, preferred);
+}
+
+/// The wrench turns the machine at `pos` and tells `player` how it faces now; false when it is
+/// no machine the wrench turns.
+fn turn(game: &mut Game<'_>, player: u128, pos: Pos, canceled: &mut bool) -> bool {
+    let Some(facing) = crate::game::rustcraft_pipe18::rotate_machine(game, pos) else {
+        return false;
+    };
+    *canceled = true;
+    let text = server::line(
+        "rustcraft.wrench.turned",
+        "Turned: faces %s",
+        &[server::line(&format!("rustcraft.facing.{facing}"), facing, &[])],
+    );
+    server::tell(game, player, text);
+    true
 }
 
 /// A vanilla container broken: its slice-2 mode goes with it.

@@ -64,7 +64,7 @@ use rustcraft_rules::{
     },
 };
 use std::{
-    collections::{BTreeMap, HashMap},
+    collections::{BTreeMap, BTreeSet, HashMap},
     path::PathBuf,
     sync::{LazyLock, Mutex, MutexGuard, PoisonError},
 };
@@ -457,7 +457,7 @@ pub(super) fn tick(game: &mut Game<'_>, dimension: &str, level: &LevelNet, t: &T
             continue;
         }
         let shown = match u {
-            Util::Trash => trash(game, pos, t),
+            Util::Trash => trash(game, level, pos, t),
             Util::Disintegrator => disintegrate(game, pos, cost),
             Util::Charger => charge_slots(game, dimension, pos, every),
             Util::ChargePlate => plate(game, dimension, pos, every),
@@ -525,10 +525,12 @@ fn owner(game: &Game<'_>, pos: Pos) -> Option<u128> {
 /// UT7: what the trash burns a step on the first tier.
 const TRASH_BATCH: u32 = 8;
 
-fn trash(game: &mut Game<'_>, pos: Pos, _t: &Tuning) -> Shown {
+fn trash(game: &mut Game<'_>, level: &LevelNet, pos: Pos, _t: &Tuning) -> Shown {
     // Slice 18, wave 2 (guide `trash`): its joints' filters decide what it takes and burns; it
     // keeps a copy for its slot rule (`trash_filters`, asked without the world).
     let filters = joint_filters(game, pos);
+    // 0.21 (round 32): and a storage's surplus on its nets, with no filter (`admit_surplus`).
+    let admitted = machines::entity(game, pos).map(|e| trash_surplus(&e)).unwrap_or_default();
     let json = tiered::filters_to_json(&filters);
     let kept = machines::entity(game, pos).and_then(|e| match e.nbt.get(&JavaString::from(TRASH_FILTERS_KEY)) {
         Some(Tag::String(s)) => Some(s.to_string_lossy()),
@@ -540,7 +542,9 @@ fn trash(game: &mut Game<'_>, pos: Pos, _t: &Tuning) -> Shown {
         });
     }
     retire_filter_cells(game, pos);
-    if !filters.iter().any(|f| !f.allow_only || !f.items.is_empty()) {
+    let filter_set = filters.iter().any(|f| !f.allow_only || !f.items.is_empty());
+    // 0.21: with no filter it waits for the surplus of a storage that limits items on its nets.
+    if !filter_set && !takes_surplus(level, pos) && admitted.is_empty() {
         return Shown::Blocked("trash_no_filter");
     }
     let slots = items(game, pos);
@@ -552,7 +556,7 @@ fn trash(game: &mut Game<'_>, pos: Pos, _t: &Tuning) -> Shown {
     let mut waiting = false;
     for slot in TRASH_BURN {
         let Some(Some(s)) = slots.get(slot) else { continue };
-        if !tiered::trash_passes(&filters, &s.item) {
+        if !tiered::trash_passes(&filters, &s.item) && !admitted.contains(&*s.item) {
             continue;
         }
         waiting = true;
@@ -575,6 +579,7 @@ fn trash(game: &mut Game<'_>, pos: Pos, _t: &Tuning) -> Shown {
             break;
         }
     }
+    keep_admitted(game, pos, &admitted);
     if burned > 0 {
         Shown::Working
     } else if waiting {
@@ -595,6 +600,79 @@ pub(super) fn trash_filters(entity: &ModBlockEntity) -> Vec<rustcraft_rules::net
         Some(Tag::String(s)) => tiered::filters_from_json(&s.to_string_lossy()),
         _ => Vec::new(),
     }
+}
+
+/// 0.21 (round 32): the block entity key of the items the trash took as a storage's surplus and
+/// still holds (a JSON list of item ids): its slot rule and its burning let them through with no
+/// filter.
+const TRASH_SURPLUS_KEY: &str = "trash_sp";
+
+/// 0.21: whether a storage on one of the trash's nets limits something, so it takes the surplus
+/// with no filter (rustcraft_rules::net::surplus).
+fn takes_surplus(level: &LevelNet, pos: Pos) -> bool {
+    level.transport.surplus_sinks.contains(&pos) || level.fluids.surplus_sinks.contains(&pos)
+}
+
+/// 0.21: what the trash `entity` took as a storage's surplus and still holds (`admit_surplus`).
+pub(super) fn trash_surplus(entity: &ModBlockEntity) -> BTreeSet<String> {
+    match entity.nbt.get(&JavaString::from(TRASH_SURPLUS_KEY)) {
+        Some(Tag::String(s)) => serde_json::from_str(&s.to_string_lossy()).unwrap_or_default(),
+        _ => BTreeSet::new(),
+    }
+}
+
+/// 0.21: the item net brings the trash at `pos` `items` as a storage's surplus this move: its
+/// slot rule lets them in, and what it still holds of those it took before.
+pub(super) fn admit_surplus(game: &mut Game<'_>, pos: Pos, items: &BTreeSet<String>) {
+    let Some(entity) = machines::entity(game, pos) else {
+        return;
+    };
+    let before = trash_surplus(&entity);
+    let mut now = still_held(&entity, &before);
+    now.extend(items.iter().cloned());
+    if now != before {
+        write_trash_surplus(game, pos, &now);
+    }
+}
+
+/// 0.21: after a step the trash lets in no more of what it burnt all of.
+fn keep_admitted(game: &mut Game<'_>, pos: Pos, admitted: &BTreeSet<String>) {
+    if admitted.is_empty() {
+        return;
+    }
+    let Some(entity) = machines::entity(game, pos) else {
+        return;
+    };
+    let before = trash_surplus(&entity);
+    let now = still_held(&entity, &before);
+    if now != before {
+        write_trash_surplus(game, pos, &now);
+    }
+}
+
+/// The items of `admitted` the trash `entity` still holds in the cells it burns from.
+fn still_held(entity: &ModBlockEntity, admitted: &BTreeSet<String>) -> BTreeSet<String> {
+    entity
+        .items
+        .iter()
+        .skip(TRASH_BURN.start)
+        .take(TRASH_BURN.len())
+        .flatten()
+        .filter(|s| s.count > 0 && admitted.contains(&*s.item))
+        .map(|s| s.item.to_string())
+        .collect()
+}
+
+fn write_trash_surplus(game: &mut Game<'_>, pos: Pos, items: &BTreeSet<String>) {
+    let json = serde_json::to_string(items).unwrap_or_default();
+    game.native_with_mod_block_entity(pos, |e| {
+        let key = JavaString::from(TRASH_SURPLUS_KEY);
+        if items.is_empty() {
+            e.nbt.remove(&key);
+        } else {
+            e.nbt.insert(key, Tag::String(JavaString::from(json.as_str())));
+        }
+    });
 }
 
 /// Slice 18, wave 2: its old filter cells are hidden now; what a world saved in them moves to the
@@ -699,6 +777,13 @@ pub(super) fn crafting_recipes(game: &Game<'_>) -> Vec<disassembly::Recipe> {
 
 fn charged(game: &Game<'_>, s: &ItemStack) -> bool {
     battery_of(game, s).is_some_and(|b| b.charge > 0.0)
+}
+
+/// 0.21 (round 32): whether the stack a storage's `key` names is a charged item of the mod, which
+/// the disintegrator does not take apart now (DS4): such surplus goes to the trash.
+pub(super) fn charged_key(game: &Game<'_>, key: &str) -> bool {
+    rustcraft_rules::storage::keys::payload(key).is_some()
+        && charged(game, &crate::game::rustcraft_storage::stored_stack(key, 1))
 }
 
 fn disintegrate(game: &mut Game<'_>, pos: Pos, cost: f64) -> Shown {
@@ -1988,7 +2073,7 @@ pub(super) fn sheet(game: &Game<'_>, dimension: &str, level: &LevelNet, pos: Pos
         energy: true,
         colour: None,
     });
-    sheet_extras(game, dimension, pos, u, s);
+    sheet_extras(game, dimension, level, pos, u, s);
     // Slice 18, stream 5: the craft machines' own rows.
     craft_sheet(game, dimension, level, pos, u, s);
     let on = toggles_at(game, pos, spec.toggles);
@@ -2503,9 +2588,9 @@ fn step_share(dimension: &str, pos: Pos, every: u64) -> f64 {
 }
 
 /// The rows the guide's windows add (`ui.js` trash, disintegrator) and the charger's charge bar.
-fn sheet_extras(game: &Game<'_>, dimension: &str, pos: Pos, u: Util, s: &mut Sheet) {
+fn sheet_extras(game: &Game<'_>, dimension: &str, level: &LevelNet, pos: Pos, u: Util, s: &mut Sheet) {
     match u {
-        Util::Trash => trash_sheet(game, dimension, pos, s),
+        Util::Trash => trash_sheet(game, dimension, pos, takes_surplus(level, pos), s),
         Util::Disintegrator => disintegrator_sheet(game, dimension, pos, s),
         Util::Charger => charger_sheet(game, pos, s),
         _ => {}
@@ -2514,7 +2599,7 @@ fn sheet_extras(game: &Game<'_>, dimension: &str, pos: Pos, u: Util, s: &mut She
 
 /// Slice 18, wave 2 (`ui.js` trash): «Фильтр стыка», «Приоритет», «Сгорело за минуту», the
 /// throughput; the fluid bar over the energy bar; «Сгорает сейчас» and the arrow of its batch.
-fn trash_sheet(game: &Game<'_>, dimension: &str, pos: Pos, s: &mut Sheet) {
+fn trash_sheet(game: &Game<'_>, dimension: &str, pos: Pos, surplus: bool, s: &mut Sheet) {
     let lit = |s: String| Text::literal(s);
     let t = crate::game::rustcraft_server::tuning();
     let tier = crate::game::rustcraft_tiers::tier_at(game, pos);
@@ -2522,6 +2607,8 @@ fn trash_sheet(game: &Game<'_>, dimension: &str, pos: Pos, s: &mut Sheet) {
     let (rate, _) = tiered::trash_rate(tier, &base::modules_at(game, pos), mode, t);
     let (filters, priority) = trash_joints(game, pos);
     let filter = match filters.first() {
+        // 0.21 (round 32): with a storage that limits items on its nets it takes their surplus.
+        None if surplus => line("rustcraft.util.trash.filter_surplus", "Joint filter\tnone: the storage's surplus only", &[]),
         None => line("rustcraft.util.trash.filter_none", "Joint filter: none (set it with the wrench)", &[]),
         Some((allow, _)) => {
             let all: Vec<String> = filters.iter().flat_map(|(_, i)| i.iter().cloned()).collect();
@@ -2565,12 +2652,12 @@ fn trash_sheet(game: &Game<'_>, dimension: &str, pos: Pos, s: &mut Sheet) {
     s.hints = vec![
         vec![base::v(&line(
             "rustcraft.util.trash.filter_hint",
-            "Set it on its joint with the wrench; with none it takes nothing",
+            "Set it on its joint with the wrench; with none it takes only the storage's surplus",
             &[],
         ))],
         vec![base::v(&line(
             "rustcraft.util.trash.priority_hint",
-            "Only what no storage or machine took comes to it",
+            "The storage's surplus over its limits, and what no storage or machine took",
             &[],
         ))],
         Vec::new(),
@@ -2688,6 +2775,12 @@ fn disintegrator_sheet(game: &Game<'_>, dimension: &str, pos: Pos, s: &mut Sheet
             &[lit(format!("{percent}%"))],
         )),
         base::v(&line("rustcraft.util.disintegrator.kept", "Kept: %s", &[kept_text])),
+        // 0.21 (round 32): what it takes from the magistral by itself.
+        base::v(&line(
+            "rustcraft.util.disintegrator.intake",
+            "From the line\twhat its joint's allow list names, and the storage's surplus",
+            &[],
+        )),
     ];
     s.hints = vec![
         vec![
@@ -2701,6 +2794,11 @@ fn disintegrator_sheet(game: &Game<'_>, dimension: &str, pos: Pos, s: &mut Sheet
         vec![base::v(&line(
             "rustcraft.util.disintegrator.kept_hint",
             "Fractions wait inside until they make a whole item",
+            &[],
+        ))],
+        vec![base::v(&line(
+            "rustcraft.util.disintegrator.intake_hint",
+            "With no filter it takes only the storage's surplus: what is over its limit",
             &[],
         ))],
     ];

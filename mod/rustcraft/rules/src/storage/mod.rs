@@ -19,6 +19,8 @@ pub mod cells;
 pub mod filter;
 pub mod keys;
 pub mod modules;
+// 0.21 (round 32): the surplus over the limits.
+pub mod surplus;
 pub mod tablet;
 pub mod terminal;
 pub mod view;

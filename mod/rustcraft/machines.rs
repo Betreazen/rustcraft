@@ -1144,8 +1144,10 @@ pub(super) fn slot_takes(
             // copy of them (a hopper above it puts nothing else).
             if u == rustcraft_rules::utility::Util::Trash {
                 let filters = crate::game::rustcraft_utility::trash_filters(entity);
+                // 0.21 (round 32): and what the net brings it as a storage's surplus.
                 return u.slots().inputs.contains(&slot)
-                    && rustcraft_rules::machines::tiered::trash_passes(&filters, item);
+                    && (rustcraft_rules::machines::tiered::trash_passes(&filters, item)
+                        || crate::game::rustcraft_utility::trash_surplus(entity).contains(item));
             }
             u.takes(slot, item, &filter) && util_wants(u, entity, slot, item)
         }

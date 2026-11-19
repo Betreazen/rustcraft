@@ -69,6 +69,8 @@ pub mod s18_w2_rail_gear;
 pub mod w2_pipe_energy;
 // 0.20 (round 31): the machines stream.
 pub mod s20_machines;
+// 0.21 (round 32): the storage's surplus and the wrench on the trash.
+pub mod s21_surplus;
 
 use std::collections::BTreeMap;
 
@@ -530,6 +532,14 @@ pub trait Bench {
         let _ = (owner, summary);
         Err("no tree summaries on this bench".into())
     }
+
+    // ---- 0.21 (round 32): the wrench on the trash and the disintegrator ----
+    /// The face of the housing at `housing` whose joint window a wrench click asked for lately;
+    /// none when no click asked for its window.
+    fn joint_asked(&self, housing: Pos) -> Option<crate::geom::Face> {
+        let _ = housing;
+        None
+    }
 }
 
 /// A mob as the self-test reads it.
@@ -772,6 +782,8 @@ pub fn catalog() -> Vec<Build> {
     all.extend(s20_machines::ALL);
     // Round 31, the models stream: the machines' connectors.
     all.extend(connectors::ALL);
+    // 0.21 (round 32): the storage's surplus and the wrench on the trash.
+    all.extend(s21_surplus::ALL);
     all
 }
 
