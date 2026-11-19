@@ -524,6 +524,37 @@ mod tests {
     }
 
     #[test]
+    fn vanilla_enchantment_books_take_the_blade_and_the_armour() {
+        // 0.21 (owner 2026-11-19: «не могу через наковальню и книгу на энергоклинок навесить
+        // зачарование»): the anvil and the enchanting table ask the item tags the game's
+        // enchantments name (sharpness: #enchantable/sharp_weapon from #swords; protection:
+        // #enchantable/armor from #head_armor and the rest), not the vanilla item a piece copies.
+        let tags = [
+            ("swords", include_str!("../../../../content/data/minecraft/tags/item/swords.json")),
+            ("head_armor", include_str!("../../../../content/data/minecraft/tags/item/head_armor.json")),
+            ("chest_armor", include_str!("../../../../content/data/minecraft/tags/item/chest_armor.json")),
+            ("leg_armor", include_str!("../../../../content/data/minecraft/tags/item/leg_armor.json")),
+            ("foot_armor", include_str!("../../../../content/data/minecraft/tags/item/foot_armor.json")),
+        ];
+        for (name, text) in tags {
+            let v: serde_json::Value = serde_json::from_str(text).expect(name);
+            assert_eq!(v["replace"], serde_json::Value::Bool(false), "{name} must add to the game's tag");
+        }
+        let has = |tag: &str, item: &str| tags.iter().any(|(n, t)| *n == tag && t.contains(&format!("\"{item}\"")));
+        for g in Gear::all() {
+            let tag = match g.kind {
+                Kind::Blade => "swords",
+                Kind::Armor(Piece::Helmet) => "head_armor",
+                Kind::Armor(Piece::Chestplate) => "chest_armor",
+                Kind::Armor(Piece::Leggings) => "leg_armor",
+                Kind::Armor(Piece::Boots) => "foot_armor",
+                _ => continue,
+            };
+            assert!(has(tag, &g.item()), "{} not in #minecraft:{tag}", g.item());
+        }
+    }
+
+    #[test]
     fn a_blade_and_a_shield_go_dark_without_charge() {
         let blade = Gear { kind: Kind::Blade, tier: 2 };
         assert_eq!(lit(blade, &Held { charge: 25.0, ..Held::default() }), Some(true));
