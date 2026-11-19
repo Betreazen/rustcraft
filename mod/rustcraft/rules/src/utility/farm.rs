@@ -108,6 +108,38 @@ pub fn herd_full(animals: &[Fed], foods: &[String]) -> bool {
     })
 }
 
+/// 0.21 (round 32): the food the feeder can use now: what the kinds round it eat that it may feed,
+/// a pair of adults under the herd's limit or a baby; sorted, each once. The magistral brings it
+/// only these (`feeder_net_takes`). Before, it took any feed, and the wheat, carrots and seeds
+/// that rode to the storage sat in a feeder whose animals eat none of them.
+pub fn eaten_now(animals: &[Fed]) -> Vec<&'static str> {
+    let mut out: Vec<&'static str> = crate::butcher::ANIMALS
+        .iter()
+        .filter(|kind| {
+            let of_kind = || animals.iter().filter(|a| a.animal.kind == **kind);
+            let adults = of_kind().filter(|a| !a.animal.baby).count();
+            (2..HERD_MAX).contains(&adults) || of_kind().any(|a| a.animal.baby)
+        })
+        .flat_map(|kind| food_of(kind).iter().copied())
+        .collect();
+    out.sort_unstable();
+    out.dedup();
+    out
+}
+
+/// 0.21: whether the magistral brings the feeder `item`: food its animals eat now (`eaten`, its
+/// last look round, `eaten_now`). A hopper and a hand still give it any feed (`is_feed`).
+pub fn feeder_net_takes(eaten: &[String], item: &str) -> bool {
+    eaten.iter().any(|e| e == item)
+}
+
+/// 0.21 (round 32): whether the apiary collector takes glass bottles from the magistral: only
+/// while its window chooses honey (`choice` 0, `harvest_of`); for combs it needs none, and
+/// before it kept the bottles that rode to the storage.
+pub fn apiary_takes_bottles(choice: usize) -> bool {
+    choice != 1
+}
+
 /// Heads of each kind round the feeder, adults and babies, kinds with none left out (guide: «в
 /// окне видно, сколько голов каждого вида рядом»).
 pub fn heads(animals: &[Fed]) -> Vec<(&'static str, usize)> {
@@ -292,6 +324,45 @@ mod tests {
         assert!(pair_to_feed(&one_ready, &wheat).is_none());
         let full: Vec<Fed> = (0..16).map(|i| fed(i, "minecraft:cow", true)).collect();
         assert!(pair_to_feed(&full, &wheat).is_none(), "K7: 16 heads at most");
+    }
+
+    #[test]
+    fn the_magistral_brings_the_feeder_the_food_of_its_animals_only() {
+        // 0.21: a feeder by cows took the carrots and seeds that rode to the storage.
+        let cows = [fed(1, "minecraft:cow", true), fed(2, "minecraft:cow", false)];
+        assert_eq!(eaten_now(&cows), vec!["minecraft:wheat"]);
+        let eaten: Vec<String> = eaten_now(&cows).into_iter().map(str::to_owned).collect();
+        assert!(feeder_net_takes(&eaten, "minecraft:wheat"));
+        for item in ["minecraft:carrot", "minecraft:wheat_seeds", "minecraft:potato"] {
+            assert!(!feeder_net_takes(&eaten, item), "{item}");
+            assert!(is_feed(item), "{item}: a hopper still gives it");
+        }
+        // One cow is no pair: nothing to feed it yet; a calf eats.
+        assert!(eaten_now(&cows[..1]).is_empty());
+        let mut calf = fed(3, "minecraft:cow", true);
+        calf.animal.baby = true;
+        assert_eq!(eaten_now(&[calf]), vec!["minecraft:wheat"]);
+        // A full herd is bred no more.
+        let full: Vec<Fed> = (0..HERD_MAX as u32).map(|i| fed(i, "minecraft:cow", true)).collect();
+        assert!(eaten_now(&full).is_empty());
+        // Pigs and chickens: their foods, each once and sorted.
+        let farm = [
+            fed(1, "minecraft:pig", true),
+            fed(2, "minecraft:pig", true),
+            fed(3, "minecraft:chicken", true),
+            fed(4, "minecraft:chicken", true),
+        ];
+        let foods = eaten_now(&farm);
+        assert!(foods.contains(&"minecraft:carrot") && foods.contains(&"minecraft:wheat_seeds"));
+        assert!(!foods.contains(&"minecraft:wheat"));
+        assert!(foods.windows(2).all(|w| w[0] < w[1]));
+        assert!(eaten_now(&[]).is_empty());
+    }
+
+    #[test]
+    fn the_apiary_takes_bottles_only_for_honey() {
+        assert!(apiary_takes_bottles(0));
+        assert!(!apiary_takes_bottles(1), "combs need no bottle");
     }
 
     #[test]

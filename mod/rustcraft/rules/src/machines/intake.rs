@@ -79,9 +79,36 @@ pub fn disintegrator_net_takes(filters: &[Filter], item: &str) -> bool {
 }
 
 /// The enchanting machine's item slot from the magistral: books, and what a joint's allow list
-/// names; a tool or armour on its way to the storage (a repaired rod) rides on.
-pub fn enchanter_net_takes(filters: &[Filter], item: &str) -> bool {
-    item == "minecraft:book" || named(filters, item)
+/// names; a tool or armour on its way to the storage (a repaired rod) rides on. 0.21 (round 32):
+/// only into an empty cell (`cell_empty`): it enchants one item a step, and a stack of books
+/// waiting for experience is no longer the storage's.
+pub fn enchanter_net_takes(filters: &[Filter], item: &str, cell_empty: bool) -> bool {
+    cell_empty && (item == "minecraft:book" || named(filters, item))
+}
+
+/// 0.21 (round 32): the enchanting machine's lapis cell from the magistral: lapis only while its
+/// item cell holds something to enchant (`has_item`). Before, an idle machine kept a stack of the
+/// lapis that rode to the storage.
+pub fn enchanter_lapis_net_takes(has_item: bool) -> bool {
+    has_item
+}
+
+/// 0.21 (round 32; the owner: «теперь все машины знают, что они должны забирать?»): the alloy
+/// smelter's and the mixer's ingredient cells from the magistral: only what the allow list of a
+/// joint to the machine names, as the disintegrator (IN5). They choose no recipe, so before they
+/// took every ingredient of every recipe: the gold, redstone, diamonds and shards, the dust, bone
+/// meal and sugar that rode to the storage, and sat on them waiting for the rest of a recipe.
+/// A machine that holds anything is no free machine for an order, so the orders stalled. An order
+/// brings their ingredients itself; a hopper and a hand still give them any ingredient.
+pub fn recipe_net_takes(filters: &[Filter], item: &str) -> bool {
+    named(filters, item)
+}
+
+/// 0.21 (round 32): the portal dock from the magistral: only what the allow list of a joint to it
+/// names. Before, on its default joint it took a share of everything that rode to the storage and
+/// sent it to the other world. A cargo worker, a hopper and a hand still give it anything.
+pub fn portal_dock_net_takes(filters: &[Filter], item: &str) -> bool {
+    named(filters, item)
 }
 
 #[cfg(test)]
@@ -137,9 +164,45 @@ mod tests {
         assert!(!disintegrator_net_takes(std::slice::from_ref(&open), "minecraft:chest"), "no setting names nothing");
         assert!(disintegrator_net_takes(&[open.clone(), names.clone()], "minecraft:chest"));
         assert!(!disintegrator_net_takes(std::slice::from_ref(&names), "minecraft:piston"));
-        assert!(enchanter_net_takes(&[], "minecraft:book"));
-        assert!(!enchanter_net_takes(&[open], "minecraft:fishing_rod"), "a repaired rod rides on");
+        assert!(enchanter_net_takes(&[], "minecraft:book", true));
+        assert!(!enchanter_net_takes(&[open], "minecraft:fishing_rod", true), "a repaired rod rides on");
         let rods = Filter { allow_only: true, items: ["minecraft:fishing_rod".to_owned()].into() };
-        assert!(enchanter_net_takes(&[rods], "minecraft:fishing_rod"));
+        assert!(enchanter_net_takes(&[rods], "minecraft:fishing_rod", true));
+    }
+
+    #[test]
+    fn the_enchanter_takes_books_into_an_empty_cell_and_lapis_for_them() {
+        // 0.21: a stack of books in its cell waited for experience, and enchanted all at once.
+        assert!(!enchanter_net_takes(&[], "minecraft:book", false));
+        assert!(enchanter_net_takes(&[], "minecraft:book", true));
+        assert!(!enchanter_lapis_net_takes(false), "an idle machine keeps no lapis");
+        assert!(enchanter_lapis_net_takes(true));
+    }
+
+    #[test]
+    fn recipe_machines_take_only_what_a_joint_names() {
+        // 0.21: the alloy smelter took the gold and redstone that rode to the storage and waited
+        // for coppersteel; the mixer took the dust the furnace was to smelt.
+        let open = Filter::default();
+        for item in ["minecraft:gold_ingot", "minecraft:redstone", "rustcraft:dust_gold", "minecraft:bone_meal"] {
+            assert!(!recipe_net_takes(&[], item), "{item}");
+            assert!(!recipe_net_takes(std::slice::from_ref(&open), item), "{item}: no setting names nothing");
+        }
+        let named_list = Filter {
+            allow_only: true,
+            items: ["rustcraft:coppersteel".to_owned(), "minecraft:gold_ingot".to_owned()].into(),
+        };
+        assert!(recipe_net_takes(&[open.clone(), named_list.clone()], "minecraft:gold_ingot"));
+        assert!(!recipe_net_takes(std::slice::from_ref(&named_list), "minecraft:redstone"));
+        let deny = Filter { allow_only: false, items: ["minecraft:redstone".to_owned()].into() };
+        assert!(!recipe_net_takes(&[deny], "minecraft:gold_ingot"), "a deny list names nothing");
+    }
+
+    #[test]
+    fn the_portal_dock_sends_only_what_a_joint_names() {
+        let open = Filter::default();
+        assert!(!portal_dock_net_takes(std::slice::from_ref(&open), "minecraft:cobblestone"));
+        let cobble = Filter { allow_only: true, items: ["minecraft:cobblestone".to_owned()].into() };
+        assert!(portal_dock_net_takes(&[open, cobble], "minecraft:cobblestone"));
     }
 }

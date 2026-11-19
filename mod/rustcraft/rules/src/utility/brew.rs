@@ -118,6 +118,13 @@ pub fn pages_take(pages: &[Page], usable: usize, item: &str) -> bool {
     pages.iter().take(usable).any(|p| chain(*p).contains(&item))
 }
 
+/// 0.21 (round 32): whether a vat whose first `usable` pages are `pages` brews at all: a page with
+/// an effect. Only then does the magistral bring it bottles and blaze powder; before, a vat with
+/// no page kept the potions and the powder that rode to the storage and never brewed them.
+pub fn brews(pages: &[Page], usable: usize) -> bool {
+    pages.iter().take(usable).any(|p| !chain(*p).is_empty())
+}
+
 /// Whether `item` is an ingredient of some page's chain.
 pub fn is_ingredient(item: &str) -> bool {
     item == WART
@@ -161,6 +168,17 @@ mod tests {
         assert!(!pages_take(&pages, 1, "minecraft:glowstone_dust"));
         assert!(!pages_take(&[Page::default()], 1, WART), "an empty page brews nothing");
         assert!(!pages_take(&pages, 0, "minecraft:sugar"), "no usable page");
+    }
+
+    #[test]
+    fn a_vat_without_a_page_takes_no_bottles_or_powder() {
+        // 0.21: a vat with no page kept the potions and blaze powder that rode to the storage.
+        let swiftness = EFFECTS.iter().position(|(_, i)| *i == "minecraft:sugar").expect("swiftness");
+        let set = [Page::default(), Page { effect: Some(swiftness), kind: Kind::Long }];
+        assert!(!brews(&[Page::default(); PAGES_MAX], PAGES_MAX));
+        assert!(!brews(&set, 1), "its page with an effect is past the usable ones");
+        assert!(brews(&set, 2));
+        assert!(!brews(&[Page { effect: Some(EFFECTS.len()), kind: Kind::Normal }], 1), "no such effect");
     }
 
     #[test]

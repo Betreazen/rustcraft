@@ -1057,6 +1057,33 @@ pub(super) fn brew_takes(entity: &ModBlockEntity, item: &str) -> bool {
     brew::pages_take(&brew_pages(&entity.nbt), brew::pages(capacity_of(entity)), item)
 }
 
+/// 0.21 (round 32): whether the vat `entity` brews at all, a usable page with an effect: only
+/// then does the magistral bring it bottles and blaze powder (rustcraft_rules::utility::brew::brews).
+pub(super) fn brews(entity: &ModBlockEntity) -> bool {
+    use rustcraft_rules::utility::brew;
+    brew::brews(&brew_pages(&entity.nbt), brew::pages(capacity_of(entity)))
+}
+
+/// 0.21 (round 32): whether the apiary collector `entity` takes glass bottles from the magistral:
+/// while its window chooses honey, as its step reads the choice (rustcraft_farm::honey).
+pub(super) fn apiary_takes_bottles(entity: &ModBlockEntity) -> bool {
+    let choice = toggles(&entity.nbt)
+        .iter()
+        .take(Util::Apiary.spec().toggles)
+        .position(|t| *t)
+        .unwrap_or(0);
+    rules::farm::apiary_takes_bottles(choice)
+}
+
+/// 0.21 (round 32): what the magistral brings the vein `entity`: the rock it grows from now, as
+/// its step chooses it (`grow`; rustcraft_rules::utility::vein::net_takes).
+pub(super) fn vein_takes(entity: &ModBlockEntity, item: &str) -> bool {
+    let stratum = modules::count(&modules::read(&base::read_module_items(&entity.nbt)), Module::Stratum) > 0;
+    let mut picked = toggles(&entity.nbt);
+    picked.resize(Util::Vein.spec().toggles, false);
+    rules::vein::net_takes(stratum, &picked, item)
+}
+
 fn capacity_of(entity: &ModBlockEntity) -> u32 {
     module_items(entity).iter().filter(|i| i.as_str() == CAPACITY).count() as u32
 }
@@ -1529,9 +1556,13 @@ fn enchant_level(game: &Game<'_>, pos: Pos) -> u32 {
 
 fn enchant(game: &mut Game<'_>, pos: Pos, cost: f64) -> Shown {
     let slots = items(game, pos);
-    let Some(item) = slots.first().cloned().flatten() else {
+    let Some(mut item) = slots.first().cloned().flatten() else {
         return Shown::Idle("enchant_empty");
     };
+    // 0.21 (round 32): one item a step, as the enchanting table. Before, a stack of books from the
+    // magistral went whole: all of it enchanted for one price, or, the enchanted books stacking to
+    // one, it never fit the output and the machine kept the stack.
+    item.count = 1;
     let Some(tank) = neighbour_of(game, pos, Util::XpTank.spec().block) else {
         return Shown::Blocked("enchant_no_tank");
     };
@@ -1567,7 +1598,7 @@ fn enchant(game: &mut Game<'_>, pos: Pos, cost: f64) -> Shown {
         set_xp(&mut t.nbt, now.saturating_sub(points));
     });
     with_items(game, pos, |items| {
-        items[0] = None;
+        take_one(items, 0);
         for _ in 0..need {
             take_one(items, 1);
         }

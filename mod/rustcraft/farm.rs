@@ -19,7 +19,7 @@ use crate::game::{
     rustcraft_transport as transport,
     rustcraft_utility::{self as util, fits, items, put, spend, take_one, with_items},
 };
-use horizon_client::{items::ItemStack, text::Text};
+use horizon_client::{containers::ModBlockEntity, items::ItemStack, text::Text};
 use rustcraft_rules::{
     butcher::Animal,
     geom::{Face, Pos, step as step_to},
@@ -523,7 +523,29 @@ pub(super) fn feeder_row(game: &Game<'_>, pos: Pos) -> Text {
     )
 }
 
+/// 0.21 (round 32): the block entity key under which a feeder keeps the food its animals eat now
+/// (rustcraft_rules::utility::farm::eaten_now, a JSON list), for the magistral's moves.
+const EATEN_KEY: &str = "feeder_eaten";
+
+/// 0.21 (round 32): the food the magistral brings the feeder `entity`: what its animals ate at its
+/// last look round (`feed`, every step); none before its first.
+pub(super) fn eaten(entity: &ModBlockEntity) -> Vec<String> {
+    util::read_json(&entity.nbt, EATEN_KEY)
+}
+
+/// Writes what the animals round the feeder at `pos` eat now, when it changed.
+fn remember_eaten(game: &mut Game<'_>, pos: Pos, animals: &[rules::Fed]) {
+    let now: Vec<String> = rules::eaten_now(animals).into_iter().map(str::to_owned).collect();
+    if game.native_mod_block_entity(pos).is_some_and(|e| eaten(&e) == now) {
+        return;
+    }
+    game.native_with_mod_block_entity(pos, |e| util::write_json(&mut e.nbt, EATEN_KEY, &now));
+}
+
 fn feed(game: &mut Game<'_>, pos: Pos, cost: f64) -> Shown {
+    // 0.21: the animals first, so an empty feeder also knows what to take from the magistral.
+    let animals = fed_round(game, pos);
+    remember_eaten(game, pos, &animals);
     let slots = items(game, pos);
     let foods: Vec<String> = slots.iter().flatten().filter(|s| s.count > 0).map(|s| s.item.to_string()).collect();
     let food_count: u32 = slots.iter().flatten().map(|s| s.count).sum();
@@ -531,7 +553,6 @@ fn feed(game: &mut Game<'_>, pos: Pos, cost: f64) -> Shown {
     if foods.is_empty() {
         return Shown::Idle("feed_empty");
     }
-    let animals = fed_round(game, pos);
     let Some((a, b, food)) = rules::pair_to_feed(&animals, &foods) else {
         // Slice 18: no pair: a baby eats, and grows faster.
         if let Some((baby, food)) = rules::baby_to_feed(&animals, &foods) {

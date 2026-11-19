@@ -57,6 +57,19 @@ pub fn takes(
         .any(|d| ingredients.get(*d).is_some_and(|set| set.contains(item)))
 }
 
+/// 0.21 (round 32): what the magistral brings a kitchen: the ingredients of its own `usable`
+/// pages only. An order cooking a dish brings that dish's ingredients itself; before, while any
+/// order cooked a cake, every kitchen took the sugar, eggs and wheat that rode to the storage and
+/// kept them, and its order's job did not end while its inputs held its items.
+pub fn net_takes(
+    pages: &[Option<usize>],
+    usable: usize,
+    ingredients: &[std::collections::BTreeSet<String>],
+    item: &str,
+) -> bool {
+    takes(pages, usable, ingredients, &[], item)
+}
+
 /// How many buckets of milk a recipe's ingredients ask for.
 pub fn milk_buckets(need: &[(String, u32)]) -> u32 {
     need.iter().filter(|(i, _)| i == MILK_BUCKET).map(|(_, n)| *n).sum()
@@ -137,6 +150,19 @@ mod tests {
         assert!(!takes(&pages, 4, &ingredients, &[], "minecraft:raw_iron"), "the owner's ore");
         assert!(!takes(&[None; 4], 4, &ingredients, &[], "minecraft:wheat"), "no page, no order");
         assert!(takes(&[None; 4], 1, &ingredients, &[1], "minecraft:cocoa_beans"), "an order's dish");
+    }
+
+    #[test]
+    fn the_magistral_brings_only_its_pages_ingredients() {
+        // 0.21: while an order cooked cookies, a kitchen with no page took the cocoa and wheat
+        // that rode to the storage; the order brings its own.
+        let set = |items: &[&str]| items.iter().map(|i| (*i).to_owned()).collect::<std::collections::BTreeSet<_>>();
+        let ingredients = vec![set(&["minecraft:wheat"]), set(&["minecraft:wheat", "minecraft:cocoa_beans"])];
+        assert!(!net_takes(&[None; 4], 4, &ingredients, "minecraft:cocoa_beans"));
+        assert!(!net_takes(&[None; 4], 4, &ingredients, "minecraft:wheat"));
+        let bread = [Some(0), None, None, None];
+        assert!(net_takes(&bread, 1, &ingredients, "minecraft:wheat"));
+        assert!(!net_takes(&bread, 1, &ingredients, "minecraft:cocoa_beans"));
     }
 
     #[test]

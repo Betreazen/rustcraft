@@ -1204,6 +1204,9 @@ pub(super) fn net_takes(
         Some(Machine::Furnace) => intake::furnace_takes(item, true, net.kept_raw),
         Some(Machine::Generator) => intake::net_fuel(item, true),
         Some(Machine::Alloy) if slot == content::ALLOY_FUEL => intake::net_fuel(item, true),
+        // 0.21 (round 32): the smelter's and the mixer's ingredients only by a joint's allow list;
+        // orders bring their own.
+        Some(Machine::Alloy | Machine::Mixer) => intake::recipe_net_takes(net.filters, item),
         Some(Machine::Placer) => {
             let held: Vec<&str> = (0..content::BLOCK_SLOTS)
                 .filter_map(|i| entity.items.get(i).and_then(Option::as_ref))
@@ -1213,13 +1216,37 @@ pub(super) fn net_takes(
             intake::placer_net_takes(&held, item)
         }
         Some(Machine::Util(Util::Disintegrator)) => intake::disintegrator_net_takes(net.filters, item),
-        Some(Machine::Util(Util::Enchanter)) if slot == 0 => intake::enchanter_net_takes(net.filters, item),
+        Some(Machine::Util(Util::Enchanter)) if slot == 0 => {
+            intake::enchanter_net_takes(net.filters, item, holds_none(entity, 0))
+        }
+        // 0.21 (round 32): lapis only for something to enchant.
+        Some(Machine::Util(Util::Enchanter)) => intake::enchanter_lapis_net_takes(!holds_none(entity, 0)),
         Some(Machine::Util(Util::Brewer)) if rustcraft_rules::utility::BREW_INGREDIENTS.contains(&slot) => {
             crate::game::rustcraft_utility::brew_takes(entity, item)
         }
+        // 0.21 (round 32): bottles and blaze powder only for a vat with a page to brew.
+        Some(Machine::Util(Util::Brewer)) => crate::game::rustcraft_utility::brews(entity),
         Some(Machine::Util(Util::Builder)) => net.plan.contains(item),
+        // 0.21 (round 32): the kitchen its pages' ingredients only (orders bring their own), the
+        // feeder its animals' food, the apiary bottles for honey, the vein the rock it grows from,
+        // the portal dock what a joint names.
+        Some(Machine::Util(Util::Kitchen)) => {
+            let (pages, usable) = crate::game::rustcraft_utility::kitchen_page_rule(entity);
+            rustcraft_rules::utility::kitchen::net_takes(&pages, usable, &accepts().cooking, item)
+        }
+        Some(Machine::Util(Util::Feeder)) => {
+            rustcraft_rules::utility::farm::feeder_net_takes(&crate::game::rustcraft_farm::eaten(entity), item)
+        }
+        Some(Machine::Util(Util::Apiary)) => crate::game::rustcraft_utility::apiary_takes_bottles(entity),
+        Some(Machine::Util(Util::Vein)) => crate::game::rustcraft_utility::vein_takes(entity, item),
+        Some(Machine::Util(Util::PortalDock)) => intake::portal_dock_net_takes(net.filters, item),
         _ => true,
     }
+}
+
+/// Whether slot `slot` of `entity` holds nothing.
+fn holds_none(entity: &ModBlockEntity, slot: usize) -> bool {
+    entity.items.get(slot).and_then(Option::as_ref).is_none_or(|s| s.count == 0)
 }
 
 /// 0.18.5: what a slice-12 machine wants beyond its slot rule. Before, the kitchen, the charger,

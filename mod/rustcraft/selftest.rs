@@ -1096,6 +1096,14 @@ impl Bench for GameBench<'_, '_> {
         }
     }
 
+    fn set_long(&mut self, pos: Pos, key: &str, value: i64) -> Result<(), String> {
+        self.game
+            .native_with_mod_block_entity(pos, |e| {
+                e.nbt.insert(horizon_world::nbt::JavaString::from(key), Tag::Long(value));
+            })
+            .ok_or_else(|| format!("no mod block entity at {pos:?}"))
+    }
+
     fn menu_data(&self, pos: Pos) -> Vec<i32> {
         self.game
             .native_mod_block_entity(pos)

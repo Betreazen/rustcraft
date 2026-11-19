@@ -112,6 +112,18 @@ pub fn is_stone(rock: &str) -> bool {
     is_rock(rock) && stratum(rock).is_none()
 }
 
+/// 0.21 (round 32): what the magistral brings the vein: the rock it grows from now, stone
+/// without the stratum module, with it the rock its window chose (`toggles`). Before, it took
+/// sand and gravel it never used without the module, and stone it never used with it. A hopper
+/// and a hand still give it any rock (`is_rock`).
+pub fn net_takes(stratum: bool, toggles: &[bool], item: &str) -> bool {
+    if stratum {
+        item == stratum_rock(stratum_choice(toggles).0)
+    } else {
+        is_stone(item)
+    }
+}
+
 /// The ore a draw `r` (0..1) gives with `rare` rarity modules.
 pub fn ore(r: f64, rare: u32) -> &'static str {
     let k = 2f64.powi(rare.min(4) as i32);
@@ -141,6 +153,25 @@ pub fn cells() -> Vec<[i32; 3]> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_magistral_brings_the_vein_the_rock_it_grows_from() {
+        // 0.21: without the stratum module it kept the sand and gravel that rode to the storage.
+        for stone in ["minecraft:cobblestone", "minecraft:stone", "minecraft:deepslate"] {
+            assert!(net_takes(false, &[], stone), "{stone}");
+            assert!(!net_takes(true, &[], stone), "{stone}: the stratum grows from sand or gravel");
+        }
+        for rock in STRATUM_ROCKS {
+            assert!(!net_takes(false, &[], rock), "{rock}");
+            assert!(is_rock(rock), "{rock}: a hopper still gives it");
+        }
+        assert!(net_takes(true, &[], "minecraft:sand"), "sand is the first choice");
+        assert!(!net_takes(true, &[], "minecraft:gravel"));
+        let gravel = stratum_press(&[], 1);
+        assert!(net_takes(true, &gravel, "minecraft:gravel"));
+        assert!(!net_takes(true, &gravel, "minecraft:sand"));
+        assert!(!net_takes(false, &[], "minecraft:dirt"));
+    }
 
     #[test]
     fn the_stratum_window_chooses_a_rock_and_a_table() {

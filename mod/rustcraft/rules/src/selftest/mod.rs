@@ -33,6 +33,8 @@ pub mod orders2;
 // s18/pipe
 pub mod pipe18;
 pub mod rest;
+// 0.21 (round 32): what the machines take from the magistral.
+pub mod s21_intake;
 pub mod run;
 pub mod s18_energy;
 pub mod slice10;
@@ -446,6 +448,11 @@ pub trait Bench {
     fn int_array(&self, pos: Pos, key: &str) -> Vec<i32>;
     /// The long (or int) under `key` in the saved compound of the mod block entity at `pos`.
     fn long(&self, pos: Pos, key: &str) -> i64;
+    /// 0.21: writes `value` as a long under `key` in the saved compound of the mod block entity at
+    /// `pos` (a condenser's experience).
+    fn set_long(&mut self, _pos: Pos, _key: &str, _value: i64) -> Result<(), String> {
+        Err("this bench writes no longs".into())
+    }
     // Slice 18, cross-stream agent.
     /// The data slots the mod block entity at `pos` sends its window.
     fn menu_data(&self, _pos: Pos) -> Vec<i32> {
@@ -772,6 +779,8 @@ pub fn catalog() -> Vec<Build> {
     all.extend(s20_machines::ALL);
     // Round 31, the models stream: the machines' connectors.
     all.extend(connectors::ALL);
+    // 0.21 (round 32): what the machines take from the magistral.
+    all.extend(s21_intake::ALL);
     all
 }
 
