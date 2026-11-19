@@ -47,6 +47,13 @@ fn every_item_of_the_content_mod_has_a_description_in_both_languages() {
         let words = lang(code);
         let lookup = |k: &str| words.get(k).cloned();
         for item in &items {
+            // 0.21 (spec 45): the old channel items keep their models but have no page and so no
+            // description; the mod turns them into their alloy wherever it sees them.
+            if crate::net::old_channels::is_old_channel(item) {
+                assert!(pages_of(item).is_empty(), "{item} has a page");
+                assert!(lines(item, &lookup).is_empty(), "{code}: {item} has a tooltip");
+                continue;
+            }
             let pages = pages_of(item);
             assert!(!pages.is_empty(), "{item} has no page");
             let want: usize = pages.iter().map(|p| 1 + stats_of(p.id).len()).sum();
