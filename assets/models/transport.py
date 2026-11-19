@@ -12,8 +12,9 @@ COLORS = {
     **family('station', STATION), 'hazard': '#ffcf5a', 'screen': shade('#ffcf5a', -0.55), 'glow_screen': '#ffcf5a',
     'pipe': '#5d6470', 'pipe_light': '#8a919d', 'pipe_dark': '#3a3f49',
     # Channel strips of a housing: items, fluid, energy (round 31: built in, the guide's colours of
-    # the channels, docs/showcase/js/models.js `CH_COLOR`).
-    'glow_tint_0': '#ffa53c', 'glow_tint_1': '#4c9bf5', 'glow_tint_2': '#ffe14a',
+    # the channels, docs/showcase/js/models.js `CH_COLOR`) and, 0.21 (spec 44), experience in green,
+    # the condenser's bar colour.
+    'glow_tint_0': '#ffa53c', 'glow_tint_1': '#4c9bf5', 'glow_tint_2': '#ffe14a', 'glow_tint_3': '#7ce05a',
     **family('capsule', CAPSULE), 'capsule_top': '#cfeaf5', 'glow_window': '#8fd8f0', 'glow_headlight': '#fff3a8',
     **family('chassis', CHASSIS), 'glow_status': '#59d38c',
     **{'tool_' + k: c for k, c in TOOLS.items()}, **{'tool_' + k + '_dark': shade(c, -0.3) for k, c in TOOLS.items()},
@@ -102,10 +103,14 @@ def station(m):
     m.box('glow_lamp', 6.5, 6.5, 15.75, 3, 3, 1.75)
 
 
-# A housing is 6 pixels across. Its three channel strips run inside along its line, 1 pixel thick,
+# A housing is 6 pixels across. Its four channel strips run inside along its line, 0.88 pixel thick,
 # each in its own lane on the diagonal of the cross-section: every strip shows between the others
-# from every side, and strips along two axes meet only where they are the same channel.
-LANE = (6, 7.5, 9)
+# from every side, and strips along two axes meet only where they are the same channel. 0.21 (spec
+# 44): the fourth, experience, took the gaps of the three; the strips' sides sit at .06 and .94 of a
+# pixel, which no other model uses, so none lies in the plane of a machine part poking into the
+# housing's cell (the kitchen's lid, the shearer's arm) or of the next strip.
+LANE = (6.06, 7.06, 8.06, 9.06)
+STRIP = 0.88
 # The corners of the centre's cage, where the tier's caps sit: a quarter pixel out of the beams.
 CAPS = (4.75, 10.25)
 
@@ -121,8 +126,8 @@ def along(axis, start, length, a, b, size=1):
 
 
 def pipe(m):
-    # Round 31: the three channels are built in: items, fluid and energy (slots 0, 1, 2, the
-    # strips glow_tint_0..2). The centre: a cage of twelve beams, lighter on top, with a cap in the
+    # Round 31: the channels are built in: items, fluid and energy (slots 0, 1, 2, the strips
+    # glow_tint_0..2); 0.21: and experience (slot 3, glow_tint_3, green). The centre: a cage of twelve beams, lighter on top, with a cap in the
     # colour of the housing's tier on each corner, set a quarter pixel out so no face of it lies
     # on a beam's.
     for a in (5, 10):
@@ -138,7 +143,7 @@ def pipe(m):
     # The channels across the centre of a housing joined to nothing: along x. A joined housing
     # shows them in its arms.
     for k, lane in enumerate(LANE):
-        m.box('glow_tint_%d' % k, *along('x', 5, 6, lane, lane), part='ch_x')
+        m.box('glow_tint_%d' % k, *along('x', 5, 6, lane, lane, STRIP), part='ch_x')
     # An arm to every side, one part each; the guide shows the arms to connected sides only.
     for axis in 'xyz':
         for sign, start in (('-', 0), ('+', 11)):
@@ -152,8 +157,8 @@ def pipe(m):
             # line's channels follow its arms, whichever way it turns: no arm tells the line's axis
             # (an arm to a machine is a joint, round 31 models stream).
             for k, lane in enumerate(LANE):
-                lo, hi = (0, lane + 1) if sign == '-' else (lane, 16)
-                m.box('glow_tint_%d' % k, *along(axis, lo, hi - lo, lane, lane), part=arm)
+                lo, hi = (0, lane + STRIP) if sign == '-' else (lane, 16)
+                m.box('glow_tint_%d' % k, *along(axis, lo, hi - lo, lane, lane, STRIP), part=arm)
             # A collar where the arm meets the next block, in the colour of the tier.
             m.box('tint', *along(axis, 0 if start == 0 else 15, 1, 4.75, 4.75, 6.5), part='collar_' + arm)
 

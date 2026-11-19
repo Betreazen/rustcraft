@@ -55,7 +55,7 @@ const run = (f) => vm.runInContext(fs.readFileSync(path.join(dir, f), 'utf8'), c
 run('engine.js');
 const RC = ctx.RC;
 RC.TIER_COLOR = ['', '#c57f52', '#e2bd55', '#69d2d8', '#a184f2'];
-RC.CH_COLOR = { i: '#ffa53c', f: '#4c9bf5', e: '#ffe14a', '-': '#15171c' };
+RC.CH_COLOR = { i: '#ffa53c', f: '#4c9bf5', e: '#ffe14a', x: '#7ce05a', '-': '#15171c' };
 for (const f of ['data.js', 'info.js', 'scenes.js']) run(f);
 const stepTime = (st) => Math.max(st.dur || 5, 3 + st.text.length / 14);
 const KEEP = ['tier', 'tool', 'color', 'on', 'face'];

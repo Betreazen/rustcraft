@@ -11,7 +11,7 @@
 
   const CASE = '#6b7380';
   const TIER = (RC.TIER_COLOR = ['', '#c57f52', '#e2bd55', '#69d2d8', '#a184f2']);
-  const CH = (RC.CH_COLOR = { i: '#ffa53c', f: '#4c9bf5', e: '#ffe14a', '-': '#15171c' });
+  const CH = (RC.CH_COLOR = { i: '#ffa53c', f: '#4c9bf5', e: '#ffe14a', x: '#7ce05a', '-': '#15171c' });
 
   // ---- environment
   // Blocks of the base game wear the game's own textures when local/mc-assets.js is there (mc:
