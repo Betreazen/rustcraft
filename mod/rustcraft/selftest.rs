@@ -455,6 +455,15 @@ impl Bench for GameBench<'_, '_> {
         })
     }
 
+    // Round 31, the fluids stream.
+    fn set_storage_fluid(&mut self, pos: Pos, fluid: &str, amount: u64) -> Result<(), String> {
+        if storage::set_fluid_at(DIMENSION, pos, fluid, amount) {
+            Ok(())
+        } else {
+            Err(format!("no storage at {pos:?}"))
+        }
+    }
+
     fn tank(&self, pos: Pos) -> Option<TankGroup> {
         let game = &*self.game;
         server::with_level(DIMENSION, |l| {

@@ -17,6 +17,17 @@
 // lane left is named on its source: «В канале нет места для новой жидкости». The tanks' own fluid
 // helpers (`native_block_entity_fluids`) are not used: the mod is the only one that fills these
 // tanks, and a group shares one level over many blocks, which the engine's per-block tanks do not.
+//
+// Round 31 (spec 28, FL1–FL8): one channel carries any number of fluids (the tuning sets no cap),
+// and the nets are smart: each block behind a joint has a role (rustcraft_rules::net::fluids::
+// Endpoint). Tanks and the storage are stores, on their default joint «both ways»: they take what
+// sources give beyond what consumers want, and give to consumers only (a mixer's water, a crystal
+// structure's solution, a lava generator's lava), never to one another. The storage is one joint
+// at its anchor for all its cells and terminals, as on the item nets; its fluids live in its
+// record (rustcraft_storage), read before each move and the change written back after. After each
+// move the fluids of the tanks on each storage's nets go to rustcraft_storage, which counts them
+// as its stock (FL5). An order's water, the kitchen's milk and the shearer's milk reach the
+// storage's cells as they reach tanks (FL6, FL7).
 use crate::game::{
     Game,
     rustcraft_content::{self as content, Machine},
@@ -24,6 +35,7 @@ use crate::game::{
     rustcraft_mixer::{self as mixer, Tanks as MixerTanks},
     rustcraft_power::{self as power, Sink},
     rustcraft_server::{LevelNet, line},
+    rustcraft_storage as storage,
 };
 use horizon_client::text::Text;
 use horizon_world::nbt::{Compound, JavaString, Tag};
@@ -40,12 +52,13 @@ use rustcraft_rules::{
         pump::{self, Pump, Source, Under, WATER},
     },
     net::{
-        fluids::{self as fluid_net, BUCKET, FluidInventories, FluidKey, FluidNetState},
+        fluids::{self as fluid_net, BUCKET, Endpoint, FluidInventories, FluidKey, FluidNetState},
         items::{Joint, Mode},
         joints,
         tanks::{self, TankBlock, TankGroup},
         topology::ChannelKind,
     },
+    storage::Store,
     tuning::Tuning,
 };
 use std::collections::{BTreeMap, BTreeSet, HashMap};
@@ -65,8 +78,10 @@ const AMOUNT_KEY: &str = "amount";
 const PROGRESS_KEY: &str = "progress";
 const HELD_FLUID_KEY: &str = "held_fluid";
 const HELD_KEY: &str = "held";
-/// A tank joint takes by default, a pump's gives.
+/// A consumer's joint takes by default, a pump's gives.
 const TANK_DEFAULT: Mode = Mode::Into;
+/// Round 31 (FL3): a store's joint (a tank, the storage) works both ways by its role.
+const STORE_DEFAULT: Mode = Mode::Both;
 const PUMP_DEFAULT: Mode = Mode::From;
 const AIR: &str = "minecraft:air";
 /// Blocks that hold no water up under a source.
@@ -99,6 +114,8 @@ pub struct Fluids {
     flow: HashMap<Pos, (u64, u64)>,
     /// What each tank group's window showed last, by its anchor: buckets a second in and out.
     rates: HashMap<Pos, (f64, f64)>,
+    /// Round 31 (FL4): the anchors of the storages that are joints of a fluid net.
+    pub stores: BTreeSet<Pos>,
 }
 
 impl Fluids {
@@ -111,10 +128,14 @@ impl Fluids {
     }
 }
 
-/// The default direction of a fluid joint on `block`: a tank takes, a pump gives, a lava generator
-/// and a crystal (its structure's solution) take, a mixer takes water and gives its product.
+/// The default direction of a fluid joint on `block`: a tank and the storage both ways by their
+/// role (round 31), a pump gives, a lava generator and a crystal (its structure's solution) take,
+/// a mixer takes water and gives its product.
 pub(super) fn default_mode(block: &str) -> Option<Mode> {
-    if block == content::TANK || block == content::LAVA_GENERATOR || block == content::CRYSTAL {
+    // Round 31 (FL3): tanks and the storage are stores, both ways by their role.
+    if block == content::TANK || storage::is_storage_block(block) {
+        Some(STORE_DEFAULT)
+    } else if block == content::LAVA_GENERATOR || block == content::CRYSTAL {
         Some(TANK_DEFAULT)
     } else if block == content::PUMP {
         Some(PUMP_DEFAULT)
@@ -170,22 +191,38 @@ pub(super) fn rebuild(
         .iter()
         .filter(|n| n.kind == ChannelKind::Fluid);
     let mut blocks: BTreeMap<Pos, Mode> = BTreeMap::new();
+    let mut storage_blocks: BTreeSet<Pos> = BTreeSet::new();
     for net in fluid_nets.clone() {
         for &housing in &net.housings {
             for face in Face::ALL {
                 let pos = step(housing, face);
-                if let Some(mode) = default_mode(&game.native_block(pos)) {
+                let block = game.native_block(pos);
+                if let Some(mode) = default_mode(&block) {
                     blocks.insert(pos, mode);
+                    if storage::is_storage_block(&block) {
+                        storage_blocks.insert(pos);
+                    }
                 }
             }
         }
     }
+    let dimension = game.native_dimension().to_owned();
     // Slice 18 (cross, guide `mod_line`): a line-boost module in a node raises the fluid
     // channels it serves too, the net held to its weakest section, as the item nets.
     let boosts = crate::game::rustcraft_node_window::node_modules(game, level.layout.nodes.keys().copied());
     let nets: Vec<FluidNet> = fluid_nets
         .filter_map(|net| {
-            let joints = joints::item_joints(net, &level.layout, &blocks, &level.joints);
+            // Round 31 (FL4): a storage's cells and terminals are one joint, at its anchor; a
+            // terminal that touches no cell is none.
+            let joints: Vec<Joint> = joints::item_joints(net, &level.layout, &blocks, &level.joints)
+                .into_iter()
+                .filter_map(|mut j| {
+                    if storage_blocks.contains(&j.block) {
+                        j.block = storage::anchor_of(&dimension, j.block)?;
+                    }
+                    Some(j)
+                })
+                .collect();
             let first = *net.housings.first()?;
             (!joints.is_empty()).then(|| FluidNet {
                 key: (net.slot, first),
@@ -203,7 +240,18 @@ pub(super) fn rebuild(
             modes.push(j.mode);
         }
     }
+    let anchors: BTreeSet<Pos> = storage_blocks
+        .iter()
+        .filter_map(|&p| storage::anchor_of(&dimension, p))
+        .collect();
     let f = &mut level.fluids;
+    f.stores = nets
+        .iter()
+        .flat_map(|n| n.joints.iter())
+        .filter(|j| anchors.contains(&j.block))
+        .map(|j| j.block)
+        .collect();
+    storage::clear_line_fluids_but(&dimension, &f.stores);
     f.joint_blocks = joint_blocks;
     f.states.retain(|key, _| nets.iter().any(|n| n.key == *key));
     f.nets = nets;
@@ -274,10 +322,27 @@ struct Inventories<'a> {
     /// Slice 18: what each trash may still destroy this pass, mB, and what it destroyed.
     trash: BTreeMap<Pos, u64>,
     destroyed: BTreeMap<Pos, (u64, String)>,
+    /// Round 31 (FL4): the storages on the nets by anchor, each its id and its fluid part, and
+    /// what a cell holds of each fluid, mB.
+    storages: &'a mut BTreeMap<Pos, (u32, Store)>,
+    cell_mb: u64,
 }
 
 impl FluidInventories for Inventories<'_> {
+    fn endpoint(&self, block: Pos) -> Endpoint {
+        if self.storages.contains_key(&block) || self.by_anchor.contains_key(&block) {
+            Endpoint::Store
+        } else if self.mixers.contains_key(&block) || self.sinks.contains_key(&block) {
+            Endpoint::Consumer
+        } else {
+            Endpoint::Plain
+        }
+    }
+
     fn offered(&self, block: Pos) -> Vec<(FluidKey, u64)> {
+        if let Some((_, store)) = self.storages.get(&block) {
+            return store.fluids.iter().map(|(f, n)| (f.clone(), *n)).collect();
+        }
         if let Some(m) = self.mixers.get(&block) {
             return m.product.iter().cloned().collect();
         }
@@ -294,6 +359,9 @@ impl FluidInventories for Inventories<'_> {
     }
 
     fn room_for(&self, block: Pos, fluid: &str) -> u64 {
+        if let Some((_, store)) = self.storages.get(&block) {
+            return store.fluid_room(fluid, self.cell_mb);
+        }
         if let Some(room) = self.trash.get(&block) {
             return *room;
         }
@@ -316,6 +384,9 @@ impl FluidInventories for Inventories<'_> {
     }
 
     fn take(&mut self, block: Pos, fluid: &str, amount: u64) -> u64 {
+        if let Some((_, store)) = self.storages.get_mut(&block) {
+            return store.take_fluid(fluid, amount);
+        }
         if let Some(m) = self.mixers.get_mut(&block) {
             return take_product(m, fluid, amount);
         }
@@ -342,6 +413,9 @@ impl FluidInventories for Inventories<'_> {
     }
 
     fn put(&mut self, block: Pos, fluid: &str, amount: u64) -> u64 {
+        if let Some((_, store)) = self.storages.get_mut(&block) {
+            return store.put_fluid(fluid, amount, self.cell_mb);
+        }
         if let Some(room) = self.trash.get_mut(&block) {
             let n = (*room).min(amount);
             *room -= n;
@@ -503,10 +577,18 @@ pub(super) fn tick(game: &mut Game<'_>, level: &mut LevelNet, tuning: &Tuning) {
         .filter(|(_, m)| machines::takes_catalyst(m.block()))
         .map(|(p, _)| *p)
         .collect();
+    let dimension = game.native_dimension().to_owned();
     let f = &mut level.fluids;
-    if f.tanks.is_empty() && pumps_at.is_empty() && mixers_at.is_empty() {
+    if f.tanks.is_empty() && pumps_at.is_empty() && mixers_at.is_empty() && f.stores.is_empty() {
         return;
     }
+    // Round 31 (FL4): the storages' fluids as they are now.
+    let mut storages: BTreeMap<Pos, (u32, Store)> = f
+        .stores
+        .iter()
+        .filter_map(|&anchor| Some((anchor, storage::fluid_store(&dimension, anchor)?)))
+        .collect();
+    let storages_before = storages.clone();
     let per_block = tuning.tank_buckets * BUCKET;
     let mut groups = read_groups(game, &f.tanks, per_block);
     let before = groups.clone();
@@ -592,6 +674,8 @@ pub(super) fn tick(game: &mut Game<'_>, level: &mut LevelNet, tuning: &Tuning) {
         tuning,
         trash,
         destroyed: BTreeMap::new(),
+        storages: &mut storages,
+        cell_mb: tuning.storage_cell_buckets * BUCKET,
     };
     f.no_lane.retain(|_, (_, until)| *until > now);
     for net in &f.nets {
@@ -636,6 +720,12 @@ pub(super) fn tick(game: &mut Game<'_>, level: &mut LevelNet, tuning: &Tuning) {
         let e = machines::buffer_energy(game, pos);
         machines::set_buffer_energy(game, pos, e - mb as f64 / BUCKET as f64 * per);
     }
+    for (anchor, (id, store)) in &storages {
+        if let Some((_, was)) = storages_before.get(anchor) {
+            storage::apply_fluids(&dimension, *id, was, store);
+        }
+    }
+    hand_over_line_fluids(&dimension, &level.fluids, &groups, &group_of);
     write_back(game, &before, &groups, per_block);
     power::write_sinks(game, &sinks_before, &sinks);
     for (pos, m) in &mixers {
@@ -655,6 +745,38 @@ pub(super) fn tick(game: &mut Game<'_>, level: &mut LevelNet, tuning: &Tuning) {
     }
     if now.is_multiple_of(WINDOW_EVERY) {
         show_windows(game, level, &groups);
+    }
+}
+
+/// Round 31 (FL5): each storage on a fluid net learns what the tanks on its nets hold: every tank
+/// group behind a joint that gives (by default, or set «из блока») on a net the storage is a joint
+/// of, each group once.
+fn hand_over_line_fluids(
+    dimension: &str,
+    f: &Fluids,
+    groups: &[TankGroup],
+    group_of: &HashMap<Pos, usize>,
+) {
+    for &anchor in &f.stores {
+        let mut seen: BTreeSet<usize> = BTreeSet::new();
+        for net in &f.nets {
+            if !net.joints.iter().any(|j| j.block == anchor && j.mode != Mode::Off) {
+                continue;
+            }
+            seen.extend(
+                net.joints
+                    .iter()
+                    .filter(|j| j.mode.gives())
+                    .filter_map(|j| group_of.get(&j.block).copied()),
+            );
+        }
+        let mut fluids: BTreeMap<String, u64> = BTreeMap::new();
+        for g in seen.into_iter().map(|i| &groups[i]) {
+            if let Some(fluid) = g.fluid.as_ref().filter(|_| g.amount > 0) {
+                *fluids.entry(fluid.clone()).or_insert(0) += g.amount;
+            }
+        }
+        storage::set_line_fluids(dimension, anchor, fluids);
     }
 }
 
@@ -922,51 +1044,60 @@ pub(super) fn group_at(
         .find(|g| g.blocks.contains(&pos))
 }
 
-/// Slice 15 (O12): how much of `fluid` (mB) the mixers at `mixers` can draw on: the water in
-/// their own tanks, and what the tank groups hold that touch one of them or stand behind a joint
-/// that gives on a fluid net one of them is a joint of. Each group counts once.
-pub(super) fn reachable(
+/// Round 31 (FL5, FL6; slice 15, O12): the fluid stock (mB by fluid) an order of the storage
+/// `owner` (its id and anchor) can draw on, with the mixers `mixers` on its line: what the
+/// storage's cells hold; the tank groups `stock_tanks_near` finds, each once; and the water in the
+/// mixers' own tanks.
+pub(super) fn line_stock(
     game: &Game<'_>,
     level: &LevelNet,
+    owner: Option<(u32, Pos)>,
     mixers: &[Pos],
-    fluid: &str,
     tuning: &Tuning,
-) -> u64 {
-    let mut near: BTreeSet<Pos> = BTreeSet::new();
-    for &m in mixers {
-        near.extend(Face::ALL.into_iter().map(|f| step(m, f)));
-        for net in &level.fluids.nets {
-            if net
-                .joints
-                .iter()
-                .any(|j| j.block == m && j.mode != Mode::From)
-            {
-                near.extend(
-                    net.joints
-                        .iter()
-                        .filter(|j| j.mode != Mode::Into)
-                        .map(|j| j.block),
-                );
-            }
+) -> BTreeMap<String, u64> {
+    let dimension = game.native_dimension().to_owned();
+    let mut stock = owner.map_or_else(BTreeMap::new, |(id, _)| storage::own_fluids(&dimension, id));
+    let near = stock_tanks_near(level, owner.map(|(_, anchor)| anchor), mixers);
+    let per_block = tuning.tank_buckets * BUCKET;
+    for g in read_groups(game, &level.fluids.tanks, per_block) {
+        if g.amount == 0 || !g.blocks.iter().any(|b| near.contains(b)) {
+            continue;
+        }
+        if let Some(fluid) = g.fluid {
+            *stock.entry(fluid).or_insert(0) += g.amount;
         }
     }
-    let per_block = tuning.tank_buckets * BUCKET;
-    let in_tanks: u64 = read_groups(game, &level.fluids.tanks, per_block)
+    let water: u64 = mixers
         .iter()
-        .filter(|g| g.fluid.as_deref() == Some(fluid))
-        .filter(|g| g.blocks.iter().any(|b| near.contains(b)))
-        .map(|g| g.amount)
+        .filter_map(|&m| mixer::read_tanks(game, m))
+        .map(|t| t.water)
         .sum();
-    let own: u64 = if fluid == WATER {
-        mixers
+    if water > 0 {
+        *stock.entry(WATER.to_owned()).or_insert(0) += water;
+    }
+    stock
+}
+
+/// The blocks whose tank groups an order's fluid comes from: those touching one of `mixers`, and
+/// those behind a joint that gives (by default or «из блока») on a fluid net a mixer takes from or
+/// the storage at `owner` is a joint of (FL5).
+fn stock_tanks_near(level: &LevelNet, owner: Option<Pos>, mixers: &[Pos]) -> BTreeSet<Pos> {
+    let mut near: BTreeSet<Pos> = mixers
+        .iter()
+        .flat_map(|&m| Face::ALL.into_iter().map(move |f| step(m, f)))
+        .collect();
+    for net in &level.fluids.nets {
+        let mixer_takes = net
+            .joints
             .iter()
-            .filter_map(|&m| mixer::read_tanks(game, m))
-            .map(|t| t.water)
-            .sum()
-    } else {
-        0
-    };
-    in_tanks + own
+            .any(|j| mixers.contains(&j.block) && j.mode.takes());
+        let storage_on = owner
+            .is_some_and(|a| net.joints.iter().any(|j| j.block == a && j.mode != Mode::Off));
+        if mixer_takes || storage_on {
+            near.extend(net.joints.iter().filter(|j| j.mode.gives()).map(|j| j.block));
+        }
+    }
+    near
 }
 
 // ---- Slice 18 (stream 5): the kitchen and the shearer use the tank they touch ----
@@ -1094,40 +1225,90 @@ fn touching_group(game: &Game<'_>, level: &LevelNet, pos: Pos, fluid: &str, fill
     Some((groups, i))
 }
 
-/// How much `fluid` (mB) the tanks touching `pos` hold, and their room for it.
+/// Round 31 (FL7): the storages on the fluid nets `pos` is a joint of that reach it: to take
+/// (`fill` false) those whose joint gives, to fill those whose joint takes; by anchor.
+fn net_storages(level: &LevelNet, pos: Pos, fill: bool) -> Vec<Pos> {
+    net_reach(level, pos, fill)
+        .into_iter()
+        .filter(|b| level.fluids.stores.contains(b))
+        .collect()
+}
+
+/// How much `fluid` (mB) the tanks touching `pos` hold, and their room for it; round 31 (FL7):
+/// with the storages on its fluid line.
 pub(super) fn touching_amount(game: &Game<'_>, level: &LevelNet, pos: Pos, fluid: &str, tuning: &Tuning) -> (u64, u64) {
     let held = touching_group(game, level, pos, fluid, false, tuning).map_or(0, |(g, i)| g[i].amount);
     let room = touching_group(game, level, pos, fluid, true, tuning).map_or(0, |(g, i)| g[i].room_for(fluid));
-    (held, room)
+    let dimension = game.native_dimension();
+    let cell_mb = tuning.storage_cell_buckets * BUCKET;
+    let stored: u64 = net_storages(level, pos, false)
+        .into_iter()
+        .filter_map(|a| storage::fluid_store(dimension, a))
+        .map(|(_, s)| s.fluid(fluid))
+        .sum();
+    let store_room = net_storages(level, pos, true)
+        .into_iter()
+        .filter_map(|a| storage::fluid_store(dimension, a))
+        .fold(0u64, |n, (_, s)| n.saturating_add(s.fluid_room(fluid, cell_mb)));
+    // A storage that destroys its surplus has room without end; the windows add these up.
+    (held + stored, room.saturating_add(store_room).min(u64::from(u32::MAX)))
 }
 
-/// Takes up to `amount` of `fluid` from a tank touching `pos`: how much it took.
+/// Takes up to `amount` of `fluid` from a tank touching `pos`, then (round 31, FL7) from the
+/// storages on its fluid line: how much it took.
 pub(super) fn take_touching(game: &mut Game<'_>, level: &LevelNet, pos: Pos, fluid: &str, amount: u64, tuning: &Tuning) -> u64 {
-    let Some((before, i)) = touching_group(game, level, pos, fluid, false, tuning) else {
-        return 0;
-    };
-    let mut after = before.clone();
-    let took = after[i].take(fluid, amount);
-    write_back(game, &before, &after, tuning.tank_buckets * BUCKET);
+    let mut took = 0;
+    if let Some((before, i)) = touching_group(game, level, pos, fluid, false, tuning) {
+        let mut after = before.clone();
+        took = after[i].take(fluid, amount);
+        write_back(game, &before, &after, tuning.tank_buckets * BUCKET);
+    }
+    let dimension = game.native_dimension().to_owned();
+    for anchor in net_storages(level, pos, false) {
+        if took >= amount {
+            break;
+        }
+        if let Some((id, _)) = storage::fluid_store(&dimension, anchor) {
+            took += storage::take_fluid(&dimension, id, fluid, amount - took);
+        }
+    }
     took
 }
 
-/// Puts up to `amount` of `fluid` into a tank touching `pos`: how much went in.
+/// Puts up to `amount` of `fluid` into a tank touching `pos`, then (round 31, FL7) into the
+/// storages on its fluid line: how much went in.
 pub(super) fn put_touching(game: &mut Game<'_>, level: &LevelNet, pos: Pos, fluid: &str, amount: u64, tuning: &Tuning) -> u64 {
-    let Some((before, i)) = touching_group(game, level, pos, fluid, true, tuning) else {
-        return 0;
-    };
-    let mut after = before.clone();
-    let went = after[i].put(fluid, amount);
-    write_back(game, &before, &after, tuning.tank_buckets * BUCKET);
+    let mut went = 0;
+    if let Some((before, i)) = touching_group(game, level, pos, fluid, true, tuning) {
+        let mut after = before.clone();
+        went = after[i].put(fluid, amount);
+        write_back(game, &before, &after, tuning.tank_buckets * BUCKET);
+    }
+    let dimension = game.native_dimension().to_owned();
+    let cell_mb = tuning.storage_cell_buckets * BUCKET;
+    for anchor in net_storages(level, pos, true) {
+        if went >= amount {
+            break;
+        }
+        if let Some((id, _)) = storage::fluid_store(&dimension, anchor) {
+            went += storage::put_fluid(&dimension, id, fluid, amount - went, cell_mb);
+        }
+    }
     went
 }
 
 /// Slice 18 (stream 5, O12 handed over from stream 1): «заказ приносит свою воду»: an order's
-/// mixer step takes its water from the tanks `reachable` counts for it (touching it, or behind a
-/// joint that gives on a fluid net it is a joint of) into the mixer's own tank, as far as it has
-/// room. How much came.
-pub(super) fn bring_water(game: &mut Game<'_>, level: &LevelNet, mixer_at: Pos, amount: u64, tuning: &Tuning) -> u64 {
+/// mixer step takes its water into the mixer's own tank, as far as it has room. Round 31 (FL6):
+/// from the cells of the order's storage `owner` (its id and anchor) first, straight in as items
+/// go where no net joins the two, then from the tanks `line_stock` counts. How much came.
+pub(super) fn bring_water(
+    game: &mut Game<'_>,
+    level: &LevelNet,
+    mixer_at: Pos,
+    amount: u64,
+    owner: Option<(u32, Pos)>,
+    tuning: &Tuning,
+) -> u64 {
     let Some(mut tanks) = mixer::read_tanks(game, mixer_at) else {
         return 0;
     };
@@ -1135,25 +1316,23 @@ pub(super) fn bring_water(game: &mut Game<'_>, level: &LevelNet, mixer_at: Pos, 
     if room == 0 {
         return 0;
     }
-    let mut near: BTreeSet<Pos> = Face::ALL.into_iter().map(|f| step(mixer_at, f)).collect();
-    for net in &level.fluids.nets {
-        if net.joints.iter().any(|j| j.block == mixer_at && j.mode != Mode::From) {
-            near.extend(net.joints.iter().filter(|j| j.mode != Mode::Into).map(|j| j.block));
+    let dimension = game.native_dimension().to_owned();
+    let mut got = owner.map_or(0, |(id, _)| storage::take_fluid(&dimension, id, WATER, room));
+    if got < room {
+        let near = stock_tanks_near(level, owner.map(|(_, anchor)| anchor), &[mixer_at]);
+        let per_block = tuning.tank_buckets * BUCKET;
+        let before = read_groups(game, &level.fluids.tanks, per_block);
+        let mut after = before.clone();
+        for g in after.iter_mut() {
+            if got >= room {
+                break;
+            }
+            if g.fluid.as_deref() == Some(WATER) && g.blocks.iter().any(|b| near.contains(b)) {
+                got += g.take(WATER, room - got);
+            }
         }
+        write_back(game, &before, &after, per_block);
     }
-    let per_block = tuning.tank_buckets * BUCKET;
-    let before = read_groups(game, &level.fluids.tanks, per_block);
-    let mut after = before.clone();
-    let mut got = 0;
-    for g in after.iter_mut() {
-        if got >= room {
-            break;
-        }
-        if g.fluid.as_deref() == Some(WATER) && g.blocks.iter().any(|b| near.contains(b)) {
-            got += g.take(WATER, room - got);
-        }
-    }
-    write_back(game, &before, &after, per_block);
     tanks.water += got;
     mixer::write_tanks(game, mixer_at, &tanks);
     got

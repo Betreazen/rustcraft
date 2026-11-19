@@ -1,6 +1,6 @@
 //! Slice 5: tanks, pumps and fluid channels. Touching tanks are one, a tank of another fluid stays
-//! apart; a pump keeps endless water but drains lava (round 15); a tier-1 fluid channel carries
-//! one fluid at a time and names the other on its source, a tier-2 one carries both (M13).
+//! apart; a pump keeps endless water but drains lava (round 15); since round 31 (FL1) a fluid
+//! channel of any tier carries both water and lava, a tier-2 one as well (M13).
 
 use super::energy::CRYSTAL;
 use super::magistral::{channel, line};
@@ -18,7 +18,7 @@ pub const ALL: [Build; 5] = [
     tanks_join,
     pump_keeps_endless_water,
     pump_drains_lava,
-    one_fluid_on_tier_1,
+    both_fluids_on_tier_1,
     two_fluids_on_tier_2,
 ];
 
@@ -182,26 +182,26 @@ fn sources(b: &dyn Bench, o: Pos) -> Result<[(u64, bool); 2], String> {
     Ok(out)
 }
 
-fn one_fluid_on_tier_1(o: Pos, t: &Tuning) -> Scenario {
+/// Round 31 (FL1): a tier-1 channel carries both, as a tier-2 one does.
+fn both_fluids_on_tier_1(o: Pos, t: &Tuning) -> Scenario {
     let kinds = t.kinds_of(1);
-    Scenario::new("fluids_tier_1_channel_carries_one_fluid", plot_area(o))
+    Scenario::new("fluids_tier_1_channel_carries_both", plot_area(o))
         .then(
             "build water and lava sources on a tier-1 fluid net",
             move |b, _| two_sources(b, o, 1),
         )
         .wait(40)
-        .check("one fluid flows, the other has no lane", move |b, _| {
-            same("fluids a tier-1 channel carries", kinds, 1)?;
+        .check("both flow, no lane refused", move |b, _| {
+            if kinds < 2 {
+                return Err(format!("a tier-1 channel carries {kinds} fluids"));
+            }
             let [water, lava] = sources(b, o)?;
-            let flowing = [water, lava].iter().filter(|(gave, _)| *gave > 0).count();
-            let refused = [water, lava].iter().filter(|(_, no)| *no).count();
-            same("fluids that flowed", flowing, 1)?;
-            same("sources told «no lane»", refused, 1)?;
             same(
-                "the refused one gave nothing",
-                [water, lava].iter().any(|(g, n)| *n && *g > 0),
-                false,
-            )
+                "water flowed, lava flowed",
+                (water.0 > 0, lava.0 > 0),
+                (true, true),
+            )?;
+            same("no lane refused", (water.1, lava.1), (false, false))
         })
 }
 

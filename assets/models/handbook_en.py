@@ -39,7 +39,7 @@ PAGES = {
              'The magistral\'s relay and crossing. It extends the line by its range. Nodes of tiers 1–3 pass the line straight through; a tier 4 node is a junction.'),
     'ch_item': ('Item Channel', 'Carries items from sources to receivers: between chests, machines and the storage.'),
     'ch_fluid': ('Fluid Channel',
-                 'Carries water, lava, nutrient solution and catalysts. A higher tier channel carries several fluids at once.'),
+                 'Carries water, lava, milk, nutrient solution and catalysts. One channel carries any number of fluids at once, both ways.'),
     'ch_energy': ('Energy Channel', 'Carries energy from sources to machines.'),
     'facade': ('Facade', 'Hides a magistral housing: the whole housing looks like an ordinary block such as stone, planks or bricks.'),
     'wrench': ('Wrench', 'Sets up joints, the places where a housing touches a machine or a chest. Turns and takes up machines.'),

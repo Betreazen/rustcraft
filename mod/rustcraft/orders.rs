@@ -38,9 +38,12 @@
 //
 // O12: the mixer's recipes are in the book with water as an input and their fluid as the output,
 // both in buckets. A mixer step needs a mixer on the line and the water for it in the mixers'
-// own tanks or the tanks they touch or share a fluid net with (rustcraft_fluids::reachable); the
-// water itself comes by the fluid nets, as it always does, and the product goes on the same way.
-// Water short reads «не хватает: вода ×N».
+// own tanks or the tanks they touch or share a fluid net with; the product goes on by the fluid
+// nets. Water short reads «не хватает: вода ×N». Round 31 (spec 28, FL5, FL6): the storage's
+// fluid stock counts too, every fluid in whole buckets (rustcraft_fluids::line_stock): what its
+// cells hold and the tanks on its fluid nets. «Держать N» and a kitchen's milk (FL7) plan on it,
+// and a mixer step's water comes from the cells first when the step starts
+// (rustcraft_fluids::bring_water).
 //
 // Energy: a step goes to a free machine with energy (a source touching it or on its circuit, and
 // it did not say «Нет энергии» last tick) or, for the alloy smelter, fuel first; to one without
@@ -97,13 +100,14 @@ const BOOK_KEY: &str = "book";
 /// (its chunk loaded) before it ends.
 const ADOPT_SECONDS: u32 = 300;
 const WATER: &str = "minecraft:water";
+/// Round 31 (FL7): the milk a kitchen takes for a milk bucket.
+const MILK: &str = "rustcraft:milk";
 
-/// The recipe book (O1): every recipe the orders know, the items and fluids they make as the
-/// terminal's numbers, and the fluids mixer steps take.
+/// The recipe book (O1): every recipe the orders know, and the items and fluids they make as the
+/// terminal's numbers.
 pub(super) struct Book {
     recipes: Vec<PlanRecipe>,
     orderable: Vec<u16>,
-    fluids_in: Vec<String>,
 }
 
 /// A job read back from the record that has not found its machine yet.
@@ -450,15 +454,9 @@ fn build_book(game: &Game<'_>, recipes: &machines::MachineRecipes) -> Book {
         .into_iter()
         .filter_map(|key| number(game, key))
         .collect();
-    let fluids_in: BTreeSet<String> = book
-        .iter()
-        .flat_map(|r| r.inputs.iter().flat_map(|(alts, _)| alts.iter()))
-        .filter_map(|k| fluid_of(k).map(str::to_owned))
-        .collect();
     Book {
         recipes: book,
         orderable,
-        fluids_in: fluids_in.into_iter().collect(),
     }
 }
 
@@ -1744,22 +1742,18 @@ fn follow_jobs(
     *jobs = kept;
 }
 
-/// O12: what the storage holds, and the fluids mixer steps take as the line's mixers can draw
-/// on them, in whole buckets.
+/// O12, round 31 (FL5, FL6): what the storage holds, and every fluid of its stock in whole
+/// buckets: its cells', its fluid line's tanks' and what the line's mixers can draw on.
 fn stock_with_fluids(
     game: &Game<'_>,
     level: &LevelNet,
     mut stock: BTreeMap<ItemKey, u64>,
-    book: &Book,
+    owner: (u32, Pos),
     mixers: &[Pos],
 ) -> BTreeMap<ItemKey, u64> {
-    if mixers.is_empty() {
-        return stock;
-    }
-    for fluid in &book.fluids_in {
-        let mb = fluids::reachable(game, level, mixers, fluid, server::tuning());
+    for (fluid, mb) in fluids::line_stock(game, level, Some(owner), mixers, server::tuning()) {
         if mb >= BUCKET {
-            stock.insert(fluid_key(fluid), mb / BUCKET);
+            stock.insert(fluid_key(&fluid), mb / BUCKET);
         }
     }
     stock
@@ -1850,9 +1844,16 @@ fn storage_round(
     let running = |order: u16| {
         riding.contains(&order) || jobs.iter().any(|r| r.storage == id && r.job.order == order)
     };
+    let mixers: Vec<Pos> = machines_on_line
+        .iter()
+        .filter(|(_, m)| *m == Machine::Mixer)
+        .map(|(p, _)| *p)
+        .collect();
+    // Round 31 (FL5): «держать N» of a fluid sees its buckets too.
+    let plan_stock = stock_with_fluids(game, level, stock, (id, anchor), &mixers);
     let queue = state.queues.entry(id).or_default();
     if book_in {
-        queue.keep(&keeps, &stock, &running);
+        queue.keep(&keeps, &plan_stock, &running);
     }
     let busy: BTreeSet<Pos> = jobs.iter().map(|r| r.job.machine).collect();
     let mut kinds: Vec<&str> = Vec::new();
@@ -1880,19 +1881,29 @@ fn storage_round(
             });
         }
     }
-    let mixers: Vec<Pos> = machines_on_line
-        .iter()
-        .filter(|(_, m)| *m == Machine::Mixer)
-        .map(|(p, _)| *p)
-        .collect();
-    let plan_stock = stock_with_fluids(game, level, stock, &book, &mixers);
     let machine_at: BTreeMap<Pos, Machine> = machines_on_line.iter().copied().collect();
+    // Round 31 (FL7): the milk each kitchen of the line reaches; a step that takes milk from the
+    // stock starts on a kitchen only for the runs that milk covers.
+    let kitchen_milk: BTreeMap<Pos, u64> = machines_on_line
+        .iter()
+        .filter(|(_, m)| *m == Machine::Util(rustcraft_rules::utility::Util::Kitchen))
+        .map(|&(p, _)| (p, fluids::touching_amount(game, level, p, MILK, server::tuning()).0))
+        .collect();
     let new_jobs = {
         let recipes = &mut level.recipes;
         let mut fits = |pos: Pos, step: &Step, want: u32| -> u32 {
             let Some(&machine) = machine_at.get(&pos) else {
                 return 0;
             };
+            let mut want = want;
+            if let Some(&milk) = kitchen_milk.get(&pos) {
+                for (key, n) in &step.inputs {
+                    if fluid_of(key) == Some(MILK) {
+                        let runs = milk / (u64::from(*n).max(1) * BUCKET);
+                        want = want.min(u32::try_from(runs).unwrap_or(u32::MAX));
+                    }
+                }
+            }
             if machine == Machine::Crafter {
                 let pattern: Pattern = step.pattern(&book.recipes);
                 let makes = crafter::makes(game, recipes, &pattern);
@@ -1959,7 +1970,14 @@ fn storage_round(
                 .map(|(_, n)| u64::from(*n) * u64::from(job.runs) * BUCKET)
                 .sum();
             if water > 0 {
-                crate::game::rustcraft_fluids::bring_water(game, level, job.machine, water, server::tuning());
+                crate::game::rustcraft_fluids::bring_water(
+                    game,
+                    level,
+                    job.machine,
+                    water,
+                    Some((id, anchor)),
+                    server::tuning(),
+                );
             }
         }
         // Along the channel the page comes when the items arrive.

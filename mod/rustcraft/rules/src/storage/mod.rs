@@ -3,11 +3,17 @@
 //! item the player can set a limit: the storage stops taking the item at it, or destroys the
 //! surplus if that is switched on (S5). A storage whose cells are not a solid box shows which cell
 //! is wrong and loses nothing (S8).
+//!
+//! Round 31 (spec 28, FL4, FL5): the cells hold fluids too, as amounts beside the items: each cell
+//! a share of each fluid that the stack module multiplies, none of it in the item slots. A limit
+//! on a fluid's key (`orders::fluid_key`) counts buckets.
 
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::geom::Pos;
+use crate::net::fluids::BUCKET;
 use crate::net::items::ItemKey;
+use crate::orders::{fluid_key, fluid_of};
 
 pub mod cells;
 pub mod filter;
@@ -41,6 +47,8 @@ pub struct Store {
     pub limits: BTreeMap<ItemKey, Limit>,
     /// O14: «держать N»: the items the storage orders whenever it holds fewer than N.
     pub keep: BTreeMap<ItemKey, u64>,
+    /// Round 31 (FL4): the fluids its cells hold, in millibuckets, by fluid.
+    pub fluids: BTreeMap<String, u64>,
 }
 
 impl Store {
@@ -111,6 +119,82 @@ impl Store {
         for (item, n) in other.keep {
             self.keep.entry(item).or_insert(n);
         }
+        for (fluid, mb) in other.fluids {
+            *self.fluids.entry(fluid).or_insert(0) += mb;
+        }
+    }
+
+    /// FL4: what the storage holds of one fluid at most, mB: `cell_mb` a cell, times what its
+    /// stack module multiplies a stack by (×4 / ×16 / ×64).
+    pub fn fluid_capacity(&self, cell_mb: u64) -> u64 {
+        let module = STACK_BY_MODULE[usize::from(self.stack_module).min(STACK_BY_MODULE.len() - 1)];
+        u64::from(self.cells) * cell_mb * u64::from(module) / 64
+    }
+
+    /// The mB of `fluid` the cells hold.
+    pub fn fluid(&self, fluid: &str) -> u64 {
+        self.fluids.get(fluid).copied().unwrap_or(0)
+    }
+
+    /// FL5: how much of `fluid` (mB) the storage takes now: room in its cells under the fluid's
+    /// limit, in buckets; everything while its surplus is destroyed (S5).
+    pub fn fluid_room(&self, fluid: &str, cell_mb: u64) -> u64 {
+        let held = self.fluid(fluid);
+        let room = self.fluid_capacity(cell_mb).saturating_sub(held);
+        match self.limits.get(&fluid_key(fluid)) {
+            Some(l) if l.destroy_surplus => u64::MAX,
+            Some(l) => room.min(l.max.saturating_mul(BUCKET).saturating_sub(held)),
+            None => room,
+        }
+    }
+
+    /// Puts up to `amount` mB of `fluid` into the cells; how much it took (destroyed surplus
+    /// counts as taken).
+    pub fn put_fluid(&mut self, fluid: &str, amount: u64, cell_mb: u64) -> u64 {
+        let held = self.fluid(fluid);
+        let limit = self.limits.get(&fluid_key(fluid)).copied();
+        let mut keep = amount.min(self.fluid_capacity(cell_mb).saturating_sub(held));
+        if let Some(l) = limit {
+            keep = keep.min(l.max.saturating_mul(BUCKET).saturating_sub(held));
+        }
+        if keep > 0 {
+            *self.fluids.entry(fluid.to_owned()).or_insert(0) += keep;
+        }
+        if limit.is_some_and(|l| l.destroy_surplus) {
+            amount
+        } else {
+            keep
+        }
+    }
+
+    /// Takes up to `amount` mB of `fluid` out of the cells; how much it took.
+    pub fn take_fluid(&mut self, fluid: &str, amount: u64) -> u64 {
+        let Some(held) = self.fluids.get_mut(fluid) else {
+            return 0;
+        };
+        let taken = (*held).min(amount);
+        *held -= taken;
+        if *held == 0 {
+            self.fluids.remove(fluid);
+        }
+        taken
+    }
+
+    /// FL4: what the fluid nets need of the storage, without its items: its cells, its stack
+    /// module, its fluids and the fluids' limits.
+    pub fn fluid_part(&self) -> Store {
+        Store {
+            cells: self.cells,
+            stack_module: self.stack_module,
+            fluids: self.fluids.clone(),
+            limits: self
+                .limits
+                .iter()
+                .filter(|(k, _)| fluid_of(k).is_some())
+                .map(|(k, l)| (k.clone(), *l))
+                .collect(),
+            ..Store::default()
+        }
     }
 
     /// Slots the storage has.
@@ -126,8 +210,11 @@ impl Store {
             .sum()
     }
 
-    /// How many of `item` the storage holds.
+    /// How many of `item` the storage holds; of a fluid's key (FL5), whole buckets.
     pub fn count(&self, item: &str) -> u64 {
+        if let Some(fluid) = fluid_of(item) {
+            return self.fluid(fluid) / BUCKET;
+        }
         self.items.get(item).copied().unwrap_or(0)
     }
 
@@ -488,5 +575,79 @@ mod tests {
         assert_eq!(a.count("minecraft:book"), 3);
         assert_eq!(a.limits["minecraft:book"].max, 256);
         assert_eq!(a.total_slots(), 54);
+    }
+
+    // ---- Round 31: fluids in the cells (FL4, FL5) ----
+
+    const WATER: &str = "minecraft:water";
+    const CELL_MB: u64 = 16 * BUCKET;
+
+    #[test]
+    fn each_cell_holds_a_share_of_each_fluid_apart_from_the_slots() {
+        // Rule FL4: 16 buckets of each fluid a cell, none of it in the item slots.
+        let mut s = store(2);
+        assert_eq!(s.put_fluid(WATER, 40 * BUCKET, CELL_MB), 32 * BUCKET);
+        assert_eq!(s.put_fluid("rustcraft:solution", 5 * BUCKET, CELL_MB), 5 * BUCKET);
+        assert_eq!(s.fluid_room(WATER, CELL_MB), 0);
+        assert_eq!(s.used_slots(&vanilla), 0);
+        assert_eq!(s.count(&fluid_key(WATER)), 32);
+        assert_eq!(s.take_fluid(WATER, 40 * BUCKET), 32 * BUCKET);
+        assert!(!s.fluids.contains_key(WATER));
+    }
+
+    #[test]
+    fn the_stack_module_raises_the_fluid_share_too() {
+        let s = Store {
+            stack_module: 1,
+            ..store(1)
+        };
+        assert_eq!(s.fluid_capacity(CELL_MB), 64 * BUCKET);
+    }
+
+    #[test]
+    fn a_fluid_limit_counts_buckets_and_may_destroy_the_surplus() {
+        // Rule FL5 with S5.
+        let mut s = store(4);
+        s.limits.insert(
+            fluid_key(WATER),
+            Limit {
+                max: 3,
+                destroy_surplus: false,
+            },
+        );
+        assert_eq!(s.fluid_room(WATER, CELL_MB), 3 * BUCKET);
+        assert_eq!(s.put_fluid(WATER, 5 * BUCKET, CELL_MB), 3 * BUCKET);
+        s.limits.get_mut(&fluid_key(WATER)).unwrap().destroy_surplus = true;
+        assert_eq!(s.fluid_room(WATER, CELL_MB), u64::MAX);
+        assert_eq!(s.put_fluid(WATER, 5 * BUCKET, CELL_MB), 5 * BUCKET);
+        assert_eq!(s.fluid(WATER), 3 * BUCKET);
+    }
+
+    #[test]
+    fn the_fluid_part_keeps_the_fluids_and_their_limits_only() {
+        let mut s = store(2);
+        s.put("minecraft:dirt", 5, &vanilla);
+        s.put_fluid(WATER, BUCKET, CELL_MB);
+        let limit = Limit {
+            max: 9,
+            destroy_surplus: false,
+        };
+        s.limits.insert("minecraft:dirt".into(), limit);
+        s.limits.insert(fluid_key(WATER), limit);
+        let f = s.fluid_part();
+        assert!(f.items.is_empty());
+        assert_eq!(f.fluid(WATER), BUCKET);
+        assert_eq!(f.limits.len(), 1);
+        assert_eq!(f.fluid_capacity(CELL_MB), s.fluid_capacity(CELL_MB));
+    }
+
+    #[test]
+    fn joined_storages_pour_their_fluids_together() {
+        let mut a = store(1);
+        a.put_fluid(WATER, 2 * BUCKET, CELL_MB);
+        let mut b = store(1);
+        b.put_fluid(WATER, 3 * BUCKET, CELL_MB);
+        a.absorb(b);
+        assert_eq!(a.fluid(WATER), 5 * BUCKET);
     }
 }

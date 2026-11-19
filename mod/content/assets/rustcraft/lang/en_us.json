@@ -1137,7 +1137,7 @@
   "rustcraft.handbook.page.ch_item.name": "Item Channel",
   "rustcraft.handbook.page.ch_item.sum": "Carries items from sources to receivers: between chests, machines and the storage.",
   "rustcraft.handbook.page.ch_fluid.name": "Fluid Channel",
-  "rustcraft.handbook.page.ch_fluid.sum": "Carries water, lava, nutrient solution and catalysts. A higher tier channel carries several fluids at once.",
+  "rustcraft.handbook.page.ch_fluid.sum": "Carries water, lava, milk, nutrient solution and catalysts. One channel carries any number of fluids at once, both ways.",
   "rustcraft.handbook.page.ch_energy.name": "Energy Channel",
   "rustcraft.handbook.page.ch_energy.sum": "Carries energy from sources to machines.",
   "rustcraft.handbook.page.facade.name": "Facade",

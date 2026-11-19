@@ -4,7 +4,7 @@
 //! - The mixer makes a bucket of solution out of water, bone meal and redstone: water from a tank
 //!   it touches, the solution into the tank on top of it (guide `mixer`). On a fluid channel of
 //!   tier 2 it takes water and gives solution by the same channel (M13, guide `ch_fluid`), and the
-//!   solution feeds a crystal structure (E8); on tier 1 the second fluid finds no lane.
+//!   solution feeds a crystal structure (E8); since round 31 (FL1) a tier-1 channel does it too.
 //! - Its window: energy, water and product bars, the mode switch and the module sockets.
 //! - The crafting table makes channels of each tier out of that tier's alloy (guide `ch_*`).
 //! - A cargo worker rides from the load dock to the unload dock with its load (W6); the grab
@@ -31,7 +31,7 @@ use std::collections::BTreeSet;
 pub const ALL: [Build; 12] = [
     mixer_makes_solution,
     mixer_feeds_crystals_on_tier_2,
-    mixer_tier_1_channel_has_no_lane,
+    mixer_feeds_crystals_on_tier_1,
     mixer_window,
     channel_recipes_by_tier,
     cargo_carries_its_load,
@@ -137,7 +137,7 @@ fn mixer_on_a_channel(b: &mut dyn Bench, o: Pos, tier: u8) -> Result<(), String>
     b.place(water, TANK, &[])?;
     b.set_tank(water, WATER, 16_000)?;
     // Slice 18: the mixer's tanks hold 16 buckets (`ui.js` mixer), so the water tank holds more
-    // than that: the water keeps the tier-1 channel's one lane.
+    // than that: water still flows when the mixer's tank is full.
     b.place(at(water, [0, 1, 0]), TANK, &[])?;
     b.set_tank(at(water, [0, 1, 0]), WATER, 16_000)?;
     b.set_joint(
@@ -154,13 +154,22 @@ fn mixer_on_a_channel(b: &mut dyn Bench, o: Pos, tier: u8) -> Result<(), String>
 }
 
 fn mixer_feeds_crystals_on_tier_2(o: Pos, t: &Tuning) -> Scenario {
+    mixer_feeds_crystals(o, t, 2, "mixer_feeds_crystals_on_tier_2")
+}
+
+/// Round 31 (FL1): a tier-1 channel carries the water and the solution as well.
+fn mixer_feeds_crystals_on_tier_1(o: Pos, t: &Tuning) -> Scenario {
+    mixer_feeds_crystals(o, t, 1, "mixer_feeds_crystals_on_tier_1")
+}
+
+fn mixer_feeds_crystals(o: Pos, t: &Tuning, tier: u8, name: &'static str) -> Scenario {
     let pair = [at(o, [4, 0, 1]), at(o, [5, 0, 1])];
     let set: BTreeSet<Pos> = pair.into_iter().collect();
     let fed = rules::structure_output(2, rules::form(&set), true, t);
-    Scenario::new("mixer_feeds_crystals_on_tier_2", plot_area(o))
+    Scenario::new(name, plot_area(o))
         .then(
-            "water, the mixer and a crystal pair on a tier-2 fluid channel",
-            move |b, _| mixer_on_a_channel(b, o, 2),
+            "water, the mixer and a crystal pair on a fluid channel",
+            move |b, _| mixer_on_a_channel(b, o, tier),
         )
         .until(
             "the solution went along the channel into the crystals",
@@ -174,20 +183,6 @@ fn mixer_feeds_crystals_on_tier_2(o: Pos, t: &Tuning) -> Scenario {
             let v = b.power(pair[0]).ok_or("no crystal")?;
             near("structure output, E/s", v.output, fed, 0.05)
         })
-}
-
-fn mixer_tier_1_channel_has_no_lane(o: Pos, _: &Tuning) -> Scenario {
-    let m = at(o, [2, 0, -1]);
-    Scenario::new("mixer_tier_1_channel_has_no_lane", plot_area(o))
-        .then(
-            "water, the mixer and a crystal pair on a tier-1 fluid channel",
-            move |b, _| mixer_on_a_channel(b, o, 1),
-        )
-        .until(
-            "the solution finds no lane: the channel carries one fluid",
-            LIMIT * 2,
-            move |b, _| Ok(b.no_lane(m).as_deref() == Some(rules::SOLUTION)),
-        )
 }
 
 fn mixer_window(o: Pos, _: &Tuning) -> Scenario {
