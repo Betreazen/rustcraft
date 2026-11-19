@@ -9,11 +9,23 @@
 // press puts a line-boost module from the player's inventory into the node's block entity or
 // gives it back; the item nets on the housings the node serves carry that much more
 // (rustcraft_transport, `node_window::net_boost`).
+//
+// 0.21 (owner 2026-11-19): the window counts the line's housings by tier, and its button puts
+// housings of the next tier in place of every housing of the line's lowest tier at once
+// (`upgrade_line`): that many come out of the inventory (none in creative), each housing takes
+// the tier in place as a single click with one does (its block entity, joints and facade stay,
+// rustcraft_pipe18::upgrade_housing), and the old ones come back, what does not fit dropping by
+// the node. An empty hand on a housing opens the window of the node that serves it, on its line.
 use crate::game::{Game, rustcraft_content as content, rustcraft_server as server};
-use horizon_world::nbt::{JavaString, Tag};
+use horizon_client::text::Text;
+use horizon_world::nbt::{Compound, JavaString, Tag};
 use rustcraft_rules::{
     geom::{Face, Pos, step},
-    net::node_window::{self as nw, NodeView, Press},
+    housing,
+    net::{
+        node_window::{self as nw, NodeView, Press},
+        topology::Reach,
+    },
 };
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap},
@@ -24,13 +36,20 @@ use std::{
 const MODULES_KEY: &str = "line_modules";
 /// The mod screen's id.
 const SCREEN: &str = "rustcraft:node";
-/// How far a viewer may walk from the node before its window stops getting views, blocks.
+/// How far a viewer may walk from the block they opened the window by before it stops getting
+/// views, blocks.
 const VIEW_REACH: f64 = 8.0;
+/// `NativeServerPlayer::game_mode` of creative.
+const CREATIVE: i32 = 1;
+/// The most items one dropped stack holds.
+const STACK: u32 = 64;
 
 struct Viewer {
     dimension: String,
     pos: Pos,
     axis: usize,
+    /// The block clicked: the node, or the housing whose node it is (0.21).
+    at: Pos,
 }
 
 #[derive(Default)]
@@ -78,9 +97,17 @@ pub(super) fn set_modules(game: &mut Game<'_>, pos: Pos, n: u8) -> bool {
     .is_some()
 }
 
-/// `native_right_click_block`: an empty hand on a node opens its window on the clicked face's line.
+/// `native_right_click_block`: an empty hand on a node opens its window on the clicked face's line;
+/// 0.21: on a housing, the window of the node serving it, on its line.
 pub(super) fn on_right_click_block(game: &mut Game<'_>, pos: Pos, face: [i32; 3], canceled: &mut bool) {
-    if *canceled || game.native_block(pos) != content::NODE {
+    if *canceled {
+        return;
+    }
+    if game.native_block(pos) == content::HOUSING {
+        open_from_housing(game, pos, canceled);
+        return;
+    }
+    if game.native_block(pos) != content::NODE {
         return;
     }
     let held = game.native_held().map(|(item, _, _)| item);
@@ -105,6 +132,46 @@ pub(super) fn on_right_click_block(game: &mut Game<'_>, pos: Pos, face: [i32; 3]
             dimension: player.dimension.clone(),
             pos,
             axis,
+            at: pos,
+        },
+    );
+    send_view(game, player.uuid, true);
+}
+
+/// 0.21: an empty hand, not sneaking, on the housing at `pos` opens the window of its node on its
+/// line; a housing no node serves says so.
+fn open_from_housing(game: &mut Game<'_>, pos: Pos, canceled: &mut bool) {
+    if game.native_held().is_some() {
+        return;
+    }
+    let Some(player) = server::acting(game) else {
+        return;
+    };
+    if player.sneaking {
+        return;
+    }
+    let found = server::with_level(&player.dimension, |level| {
+        let node = match level.topology.reach.get(&pos) {
+            Some(Reach::Served { node, .. }) => *node,
+            _ => return None,
+        };
+        let axis = nw::axis_of(&level.topology, &level.layout, server::tuning(), node, pos)?;
+        Some((node, axis))
+    })
+    .flatten();
+    *canceled = true;
+    let Some((node, axis)) = found else {
+        let text = server::line("rustcraft.node.window.no_node", "No magistral node serves this housing", &[]);
+        server::tell(game, player.uuid, text);
+        return;
+    };
+    nodes().viewers.insert(
+        player.uuid,
+        Viewer {
+            dimension: player.dimension.clone(),
+            pos: node,
+            axis,
+            at: pos,
         },
     );
     send_view(game, player.uuid, true);
@@ -123,6 +190,10 @@ fn send_view(game: &mut Game<'_>, player: u128, open: bool) {
         return;
     };
     view.open = open;
+    if let Some(up) = view.upgrade.as_mut() {
+        up.free = is_creative(game, player);
+        up.have = held_count(game, player, &housing::item_of_tier(up.to));
+    }
     if let Err(e) = game.native_net_send_to_player(player, nw::CHANNEL, &nw::encode(&view)) {
         log::debug!("rustcraft: a node window not sent to {player:032x}: {e}");
     }
@@ -186,7 +257,7 @@ pub(super) fn tick(game: &mut Game<'_>, dimension: &str) {
         let mut s = nodes();
         s.viewers.retain(|uuid, v| {
             players.iter().any(|p| {
-                let c = v.pos.map(|c| f64::from(c) + 0.5);
+                let c = v.at.map(|c| f64::from(c) + 0.5);
                 let d: f64 = (0..3).map(|i| (p.position[i] - c[i]).powi(2)).sum();
                 p.uuid == *uuid && p.dimension == v.dimension && d.sqrt() <= VIEW_REACH
             })
@@ -234,8 +305,178 @@ fn apply_press(game: &mut Game<'_>, player: u128, pos: Pos, press: Press) {
                 server::mark_level_stale(&v.dimension);
             }
         }
+        Press::Upgrade => press_upgrade(game, player, pos),
     }
     send_view(game, player, false);
+}
+
+/// 0.21: the upgrade button of `player`'s window on the node at `pos`, and what it did, told.
+fn press_upgrade(game: &mut Game<'_>, player: u128, pos: Pos) {
+    let Some((dimension, axis)) = nodes()
+        .viewers
+        .get(&player)
+        .map(|v| (v.dimension.clone(), v.axis))
+    else {
+        return;
+    };
+    let free = is_creative(game, player);
+    let text = match upgrade_line(game, &dimension, pos, axis, (!free).then_some(player)) {
+        Ok(done) => server::line(
+            "rustcraft.node.window.upgraded",
+            "%s housings of tier %s replaced with tier %s",
+            &[
+                Text::literal(done.count.to_string()),
+                Text::literal(done.from.to_string()),
+                Text::literal(done.to.to_string()),
+            ],
+        ),
+        Err(Refused::AllTop) => server::line(
+            "rustcraft.node.window.all_top",
+            "Every housing of the line is of the highest tier",
+            &[],
+        ),
+        Err(Refused::Short { need, have, to }) => server::line(
+            "rustcraft.node.window.short_housings",
+            "Needs %s housings of tier %s in the inventory, you have %s",
+            &[
+                Text::literal(need.to_string()),
+                Text::literal(to.to_string()),
+                Text::literal(have.to_string()),
+            ],
+        ),
+        Err(Refused::Nothing) => server::line(
+            "rustcraft.node.window.none_replaced",
+            "No housing was replaced",
+            &[],
+        ),
+    };
+    server::tell(game, player, text);
+}
+
+/// What a line's upgrade did.
+#[derive(Debug)]
+pub(super) struct Upgraded {
+    pub from: u8,
+    pub to: u8,
+    pub count: u32,
+}
+
+/// Why a line's upgrade did nothing.
+#[derive(Debug)]
+pub(super) enum Refused {
+    /// Every housing of the line is of tier 4 (or there is no line).
+    AllTop,
+    /// The inventory holds `have` of the `need` housings of tier `to`.
+    Short { need: u32, have: u32, to: u8 },
+    /// No housing took the tier.
+    Nothing,
+}
+
+/// 0.21: every housing of the line `axis` of the node at `pos` that is of the line's lowest tier
+/// takes the next tier in place. With `payer` that many housings of the next tier come out of
+/// their inventory first and the old ones go back to it (what does not fit drops by the node);
+/// without one (creative, the self-test) nothing is paid and nothing given.
+pub(super) fn upgrade_line(
+    game: &mut Game<'_>,
+    dimension: &str,
+    pos: Pos,
+    axis: usize,
+    payer: Option<u128>,
+) -> Result<Upgraded, Refused> {
+    let plan = server::with_level(dimension, |level| {
+        let view = nw::view(&level.topology, &level.layout, server::tuning(), pos, axis, 0);
+        let up = view.upgrade?;
+        let line = nw::line_housings(&level.topology, &level.layout, pos, &nw::faces(view.hub, view.axis));
+        Some((up, nw::upgrade_targets(&level.layout, &line, up.from)))
+    })
+    .flatten();
+    let Some((up, targets)) = plan else {
+        return Err(Refused::AllTop);
+    };
+    let new_item = housing::item_of_tier(up.to);
+    let need = targets.len() as u32;
+    if let Some(player) = payer {
+        let have = held_count(game, player, &new_item);
+        if have < need {
+            return Err(Refused::Short { need, have, to: up.to });
+        }
+        let took = moved(game, player, &new_item, need, true);
+        if took < need {
+            moved(game, player, &new_item, took, false);
+            return Err(Refused::Short { need, have: took, to: up.to });
+        }
+    }
+    let tier = up.to.to_string();
+    let mut count = 0;
+    for h in targets {
+        let still = game.native_block(h) == content::HOUSING && server::housing_at(game, h).tier == up.from;
+        if still && game.native_set_block_property(h, content::TIER, &tier) {
+            count += 1;
+        }
+    }
+    if let Some(player) = payer {
+        give_or_drop(game, player, dimension, pos, &new_item, need - count);
+        give_or_drop(game, player, dimension, pos, &housing::item_of_tier(up.from), count);
+    }
+    if count == 0 {
+        return Err(Refused::Nothing);
+    }
+    server::mark_level_stale(dimension);
+    Ok(Upgraded { from: up.from, to: up.to, count })
+}
+
+/// Whether `player` plays in creative.
+fn is_creative(game: &Game<'_>, player: u128) -> bool {
+    game.native_server_players()
+        .iter()
+        .any(|p| p.uuid == player && p.game_mode == CREATIVE)
+}
+
+/// How many `item` the inventory of `player` holds.
+fn held_count(game: &Game<'_>, player: u128, item: &str) -> u32 {
+    game.native_player_stacks(player).map_or(0, |stacks| {
+        stacks
+            .iter()
+            .flatten()
+            .filter(|s| &*s.item == item)
+            .map(|s| s.count)
+            .sum()
+    })
+}
+
+/// `count` of `item` taken from (`take`) or given to the inventory of `player`: how many moved.
+fn moved(game: &mut Game<'_>, player: u128, item: &str, count: u32, take: bool) -> u32 {
+    if count == 0 {
+        return 0;
+    }
+    let mut n = 0;
+    game.native_as_player(player, |g| {
+        n = if take {
+            g.native_take_items(item, count)
+        } else {
+            g.native_give_items(item, count)
+        };
+    });
+    n
+}
+
+/// `count` of `item` into the inventory of `player`; what does not fit drops by the node at `pos`
+/// in stacks.
+fn give_or_drop(game: &mut Game<'_>, player: u128, dimension: &str, pos: Pos, item: &str, count: u32) {
+    let mut rest = count - moved(game, player, item, count, false).min(count);
+    let at = [f64::from(pos[0]) + 0.5, f64::from(pos[1]) + 1.2, f64::from(pos[2]) + 0.5];
+    while rest > 0 {
+        let n = rest.min(STACK);
+        let stack = Tag::compound([
+            ("id", Tag::String(JavaString::from(item))),
+            ("count", Tag::Int(n as i32)),
+        ]);
+        let nbt = Compound::from([(JavaString::from("Item"), stack)]);
+        if game.native_summon(dimension, "minecraft:item", at, nbt).is_none() {
+            crate::game::rustcraft_debug::journal_warn!("rustcraft: {n} {item} by the node at {pos:?} were lost");
+        }
+        rest -= n;
+    }
 }
 
 /// A socket press of `player` (none: the self-test, who has no inventory): a filled socket gives
@@ -244,12 +485,12 @@ fn apply_press(game: &mut Game<'_>, player: u128, pos: Pos, press: Press) {
 pub(super) fn socket(game: &mut Game<'_>, player: u128, pos: Pos, i: u8) -> Option<u8> {
     let have = modules_of(game, pos);
     let next = if i < have {
-        if player != 0 && moved(game, player, false) == 0 {
+        if player != 0 && moved(game, player, nw::LINE_MODULE, 1, false) == 0 {
             return None;
         }
         have - 1
     } else if have < nw::SOCKETS {
-        if player != 0 && moved(game, player, true) == 0 {
+        if player != 0 && moved(game, player, nw::LINE_MODULE, 1, true) == 0 {
             return None;
         }
         have + 1
@@ -259,18 +500,6 @@ pub(super) fn socket(game: &mut Game<'_>, player: u128, pos: Pos, i: u8) -> Opti
     set_modules(game, pos, next).then_some(next)
 }
 
-/// One line-boost module taken from (`take`) or given to the player's inventory: how many moved.
-fn moved(game: &mut Game<'_>, player: u128, take: bool) -> u32 {
-    let mut n = 0;
-    game.native_as_player(player, |g| {
-        n = if take {
-            g.native_take_items(nw::LINE_MODULE, 1)
-        } else {
-            g.native_give_items(nw::LINE_MODULE, 1)
-        };
-    });
-    n
-}
 
 // ---- The client ----
 
@@ -393,6 +622,7 @@ pub(super) fn draw(
             kit::button(game, batch, o, r, &names[i], i == v.axis);
         }
     }
+    upgrade_button(game, batch, o, &v);
     for (i, (k, val)) in rows(&v).iter().enumerate() {
         let y = if i < nw::BALANCE_ROWS {
             nw::BALANCE_Y + nw::ROW * i as f32
@@ -425,8 +655,32 @@ pub(super) fn draw(
     kit::status_line(game, batch, o, nw::STATUS, severity, &status);
 }
 
+/// 0.21: the button that replaces the line's lowest tier, or what says there is none to replace.
+fn upgrade_button(
+    game: &Game<'_>,
+    batch: &mut horizon_client::hud::HudBatch,
+    o: [f32; 2],
+    v: &NodeView,
+) {
+    use crate::game::rustcraft_screens::{self as kit, tr, tr_with};
+    let Some(up) = v.upgrade else {
+        if v.housings > 0 {
+            let all = tr("rustcraft.node.window.all_top_short", "every housing is of tier 4");
+            kit::centred(game, batch, o, nw::UPGRADE, &all, kit::LABEL);
+        }
+        return;
+    };
+    let count = kit::plural(
+        u64::from(up.need),
+        "rustcraft.node.window.housings_n",
+        ("%s housing", "%s housings", "%s housings"),
+    );
+    let name = tr_with("rustcraft.node.window.upgrade", "Replace %s with tier %s", &[count, up.to.to_string()]);
+    kit::button(game, batch, o, nw::UPGRADE, &name, false);
+}
+
 /// The window's rows: the balance (production, consumption, stored, enough), then the line (housings,
-/// the farthest, the item channel on the section).
+/// their tiers, the upgrade, the farthest, the item channel on the section).
 fn rows(v: &NodeView) -> Vec<(String, String)> {
     use crate::game::rustcraft_screens::{tr, tr_with};
     // In-game check w3: «-0 Е/с» on an idle line; energy_text reads a rounded −0 as 0.
@@ -474,7 +728,40 @@ fn rows(v: &NodeView) -> Vec<(String, String)> {
         (tr("rustcraft.window.stored", "Stored"), stored),
         (tr("rustcraft.node.window.enough", "Enough"), enough),
         (tr("rustcraft.node.window.housings", "Housings"), v.housings.to_string()),
+        (tr("rustcraft.node.window.tiers", "By tier"), tiers_text(v)),
+        (tr("rustcraft.node.window.upgrade_need", "To replace"), need_text(v)),
         (tr("rustcraft.node.window.farthest", "Farthest"), farthest),
         (tr("rustcraft.node.window.items", "Item channel on the section"), items),
     ]
+}
+
+/// 0.21: the line's housings by tier, «ур. 1: 170 · ур. 2: 5»; a dash on an empty line.
+fn tiers_text(v: &NodeView) -> String {
+    use crate::game::rustcraft_screens::tr_with;
+    let parts: Vec<String> = v
+        .tiers
+        .iter()
+        .enumerate()
+        .filter(|(_, n)| **n > 0)
+        .map(|(i, n)| {
+            tr_with("rustcraft.node.window.tier_count", "t%s: %s", &[(i + 1).to_string(), n.to_string()])
+        })
+        .collect();
+    if parts.is_empty() { "—".to_owned() } else { parts.join(" · ") }
+}
+
+/// 0.21: what the upgrade wants from the inventory and what it holds.
+fn need_text(v: &NodeView) -> String {
+    use crate::game::rustcraft_screens::{tr, tr_with};
+    let Some(up) = v.upgrade else {
+        return "—".to_owned();
+    };
+    if up.free {
+        return tr("rustcraft.node.window.upgrade_free", "free in creative");
+    }
+    tr_with(
+        "rustcraft.node.window.upgrade_have",
+        "%s of tier %s, you have %s",
+        &[up.need.to_string(), up.to.to_string(), up.have.to_string()],
+    )
 }

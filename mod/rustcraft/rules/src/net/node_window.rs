@@ -9,13 +9,20 @@
 //! A line-boost module in a node raises what every channel carries on the housings that node
 //! serves by half (`boost`); a net running through sections of several nodes is held to its
 //! weakest section, as a net is held to its weakest channel (M10).
+//!
+//! 0.21 (owner 2026-11-19: «при клике на магистраль был пункт, который пишет, сколько корпусов
+//! сейчас к нему присоединено… кнопка, которая будет требовать в инвентаре определённое количество
+//! корпусов следующей ступени, чтобы заменить все подключённые корпуса за один клик»): the window
+//! counts the line's housings by tier, and one press puts housings of the next tier in place of
+//! every housing of the line's lowest tier (`upgrade_of`), taking that many from the inventory and
+//! giving the old ones back. An empty hand on a housing opens the window of the node serving it.
 
 use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
 
 use crate::geom::{Face, Pos, step};
-use crate::net::topology::{ChannelKind, Layout, Reach, Topology};
+use crate::net::topology::{ChannelKind, Layout, MAX_TIER, Reach, Topology};
 use crate::tuning::Tuning;
 
 /// The mod message the window goes in, server to the player who opened it.
@@ -81,6 +88,12 @@ pub struct NodeView {
     pub capacity: f64,
     /// Line-boost modules in its sockets.
     pub modules: u8,
+    /// 0.21: the line's housings of tiers 1–4.
+    #[serde(default)]
+    pub tiers: [u32; MAX_TIER as usize],
+    /// 0.21: what the one-click upgrade of the line asks; none when every housing is of tier 4.
+    #[serde(default)]
+    pub upgrade: Option<Upgrade>,
     /// Whether the window is to open (the first message) or only refresh.
     pub open: bool,
 }
@@ -106,6 +119,59 @@ impl NodeView {
     }
 }
 
+/// 0.21: the one-click upgrade of a line: every housing of tier `from` (its lowest) becomes one
+/// of tier `to`, which takes `need` housings of tier `to` from the inventory; the player has
+/// `have` of them, or plays in creative and needs none (`free`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Upgrade {
+    pub from: u8,
+    pub to: u8,
+    pub need: u32,
+    pub have: u32,
+    pub free: bool,
+}
+
+impl Upgrade {
+    /// Whether a press would replace them now.
+    pub fn ready(&self) -> bool {
+        self.free || self.have >= self.need
+    }
+}
+
+/// The housings of `housings` by tier, tier 1 first.
+pub fn tier_counts(layout: &Layout, housings: &BTreeSet<Pos>) -> [u32; MAX_TIER as usize] {
+    let mut out = [0; MAX_TIER as usize];
+    for h in housings {
+        if let Some(housing) = layout.housings.get(h) {
+            out[usize::from(housing.tier.clamp(1, MAX_TIER) - 1)] += 1;
+        }
+    }
+    out
+}
+
+/// The upgrade a line with `tiers` housings of each tier asks: its lowest tier to the next, for
+/// as many housings as it has of that tier (`have` and `free` are the bundle's to fill). None
+/// when the line has no housing or all are of tier 4.
+pub fn upgrade_of(tiers: [u32; MAX_TIER as usize]) -> Option<Upgrade> {
+    let i = tiers.iter().position(|&n| n > 0)?;
+    let from = i as u8 + 1;
+    (from < MAX_TIER).then(|| Upgrade {
+        from,
+        to: from + 1,
+        need: tiers[i],
+        ..Upgrade::default()
+    })
+}
+
+/// The housings of `housings` the upgrade from tier `from` replaces, in a stable order.
+pub fn upgrade_targets(layout: &Layout, housings: &BTreeSet<Pos>, from: u8) -> Vec<Pos> {
+    housings
+        .iter()
+        .copied()
+        .filter(|h| layout.housings.get(h).is_some_and(|x| x.tier.clamp(1, MAX_TIER) == from))
+        .collect()
+}
+
 /// A press in the window.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Press {
@@ -113,6 +179,8 @@ pub enum Press {
     Axis(usize),
     /// A click on socket `i`: a module from the inventory into an empty one, or back out of a full one.
     Socket(u8),
+    /// 0.21: replace the line's housings of its lowest tier with the next tier's.
+    Upgrade,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -175,6 +243,7 @@ pub fn view(
         })
         .max()
         .unwrap_or(0);
+    let tiers = tier_counts(layout, &housings);
     let item_tier = topology
         .nets
         .iter()
@@ -194,8 +263,18 @@ pub fn view(
             (base, base * boost(modules))
         }),
         modules,
+        tiers,
+        upgrade: upgrade_of(tiers),
         ..NodeView::default()
     }
+}
+
+/// 0.21: the line of the node at `node` that the housing at `housing` is on, as the window's
+/// axis (0 on a hub); none when it is on none of the node's lines.
+pub fn axis_of(topology: &Topology, layout: &Layout, tuning: &Tuning, node: Pos, housing: Pos) -> Option<usize> {
+    let hub = layout.nodes.get(&node)?.tier >= tuning.hub_tier;
+    let axes = if hub { 1 } else { AXES.len() };
+    (0..axes).find(|&a| line_housings(topology, layout, node, &faces(hub, a)).contains(&housing))
 }
 
 /// The throughput factor of a channel net over `housings`: the weakest boost among the nodes that
@@ -222,23 +301,26 @@ pub fn net_boost(
 pub type Rect = [f32; 4];
 
 pub const WIDTH: f32 = 214.0;
-pub const HEIGHT: f32 = 176.0;
+pub const HEIGHT: f32 = 210.0;
 const LEFT: f32 = 8.0;
 /// The «Линия» label and the three axis buttons under it.
 pub const LINE_LABEL_Y: f32 = 18.0;
 pub const AXIS_Y: f32 = 28.0;
 const AXIS_H: f32 = 14.0;
 const AXIS_GAP: f32 = 2.0;
-/// The balance's four rows, then the line's three.
+/// The balance's four rows, then the line's five (0.21: its tiers and the upgrade added).
 pub const BALANCE_Y: f32 = 47.0;
 pub const LINE_ROWS_Y: f32 = 90.0;
 /// Wave 2: the balance's rows (ui.js `balance`: Производство, Потребление, В запасе, Хватает).
 pub const BALANCE_ROWS: usize = 4;
 pub const ROW: f32 = 10.0;
 /// The «Модули» label and the sockets' items.
-pub const MODULES_LABEL_Y: f32 = 123.0;
-pub const SOCKETS_Y: f32 = 134.0;
-pub const STATUS: Rect = [LEFT, 158.0, WIDTH - 2.0 * LEFT, 12.0];
+pub const LINE_ROWS: usize = 5;
+pub const MODULES_LABEL_Y: f32 = 143.0;
+pub const SOCKETS_Y: f32 = 154.0;
+/// 0.21: the button that replaces the line's housings of its lowest tier.
+pub const UPGRADE: Rect = [LEFT, 174.0, WIDTH - 2.0 * LEFT, 14.0];
+pub const STATUS: Rect = [LEFT, 192.0, WIDTH - 2.0 * LEFT, 12.0];
 
 /// The axis buttons, west–east, north–south, up–down.
 pub fn axis_rects() -> [Rect; 3] {
@@ -259,6 +341,9 @@ fn inside(r: Rect, at: [f32; 2]) -> bool {
 pub fn press_at(at: [f32; 2], hub: bool) -> Option<Press> {
     if !hub && let Some(i) = axis_rects().iter().position(|r| inside(*r, at)) {
         return Some(Press::Axis(i));
+    }
+    if inside(UPGRADE, at) {
+        return Some(Press::Upgrade);
     }
     socket_items()
         .iter()
@@ -378,6 +463,48 @@ mod tests {
         assert_eq!(press_at([1.0, 1.0], false), None);
         assert!(STATUS[1] + STATUS[3] <= HEIGHT);
         assert!(BALANCE_Y + ROW * BALANCE_ROWS as f32 <= LINE_ROWS_Y, "the four balance rows fit");
+        assert!(LINE_ROWS_Y + ROW * LINE_ROWS as f32 <= MODULES_LABEL_Y, "the five line rows fit");
+        assert!(SOCKETS_Y + 18.0 <= UPGRADE[1] && UPGRADE[1] + UPGRADE[3] <= STATUS[1]);
+        assert_eq!(press_at([UPGRADE[0] + 5.0, UPGRADE[1] + 5.0], true), Some(Press::Upgrade));
+    }
+
+    #[test]
+    fn the_window_counts_the_line_by_tier_and_asks_for_the_next() {
+        // The owner (0.21): how many housings are joined, and a button that wants that many
+        // housings of the next tier.
+        let t = Tuning::default();
+        let mut l = cross(1, 3, 4, 0);
+        l.housings.insert([2, 0, 0], Housing::new(3));
+        l.housings.insert([3, 0, 0], Housing::new(2));
+        let topo = analyse(&l, &t);
+        let v = view(&topo, &l, &t, [0, 0, 0], 0, 0);
+        assert_eq!(v.housings, 7);
+        assert_eq!(v.tiers, [5, 1, 1, 0]);
+        let up = v.upgrade.expect("tier 1 goes up");
+        assert_eq!((up.from, up.to, up.need), (1, 2, 5));
+        assert!(!up.ready(), "no housings in hand");
+        assert!(Upgrade { have: 5, ..up }.ready());
+        assert!(Upgrade { free: true, ..up }.ready());
+        let line = line_housings(&topo, &l, [0, 0, 0], &faces(false, 0));
+        let targets = upgrade_targets(&l, &line, 1);
+        assert_eq!(targets.len(), 5);
+        assert!(!targets.contains(&[2, 0, 0]) && !targets.contains(&[3, 0, 0]));
+        assert_eq!(upgrade_of([0, 0, 2, 0]).map(|u| (u.from, u.to, u.need)), Some((3, 4, 2)));
+        assert_eq!(upgrade_of([0, 0, 0, 9]), None, "all of tier 4");
+        assert_eq!(upgrade_of([0; 4]), None, "no housing");
+    }
+
+    #[test]
+    fn a_housing_finds_the_line_of_its_node() {
+        let t = Tuning::default();
+        let l = cross(1, 2, 2, 3);
+        let topo = analyse(&l, &t);
+        assert_eq!(axis_of(&topo, &l, &t, [0, 0, 0], [-2, 0, 0]), Some(0));
+        assert_eq!(axis_of(&topo, &l, &t, [0, 0, 0], [0, 3, 0]), Some(2));
+        assert_eq!(axis_of(&topo, &l, &t, [0, 0, 0], [9, 9, 9]), None);
+        let hub = cross(4, 2, 2, 3);
+        let topo = analyse(&hub, &t);
+        assert_eq!(axis_of(&topo, &hub, &t, [0, 0, 0], [0, 3, 0]), Some(0));
     }
 
     #[test]
@@ -385,5 +512,8 @@ mod tests {
         let v = NodeView { pos: [1, 2, 3], housings: 4, open: true, ..NodeView::default() };
         assert_eq!(decode(&encode(&v)), Some(v));
         assert_eq!(decode_press(&encode_press([1, 2, 3], Press::Socket(2))), Some(([1, 2, 3], Press::Socket(2))));
+        assert_eq!(decode_press(&encode_press([1, 2, 3], Press::Upgrade)), Some(([1, 2, 3], Press::Upgrade)));
+        let up = NodeView { tiers: [3, 0, 0, 0], upgrade: upgrade_of([3, 0, 0, 0]), ..NodeView::default() };
+        assert_eq!(decode(&encode(&up)), Some(up));
     }
 }

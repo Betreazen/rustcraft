@@ -73,6 +73,7 @@ pub mod w2_pipe_energy;
 pub mod s20_machines;
 // Round 32 (spec 33): the terminal's «Сеть» page.
 pub mod s21_terminal;
+pub mod s21_upgrade;
 // 0.21 (round 32): the storage's surplus and the wrench on the trash.
 pub mod s21_surplus;
 
@@ -809,6 +810,7 @@ pub fn catalog() -> Vec<Build> {
     all.extend(s21_intake::ALL);
     // Round 32 (spec 33): the terminal's «Сеть» page.
     all.extend(s21_terminal::ALL);
+    all.extend(s21_upgrade::ALL);
     // 0.21 (round 32): the storage's surplus and the wrench on the trash.
     all.extend(s21_surplus::ALL);
     all
