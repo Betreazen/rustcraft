@@ -126,11 +126,12 @@ fn placer_and_breaker_by_tier(o: Pos, t: &Tuning) -> Scenario {
 }
 
 fn tiered_blocks_drop_their_tier(o: Pos, _: &Tuning) -> Scenario {
-    // Every machine family on its top tier, and the node and the monorail (their own tables).
+    // Every machine family on its top tier, and the node, the monorail and (round 31) the
+    // housing (their own tables).
     let blocks: Vec<&'static str> = crate::tiers::FAMILIES
         .iter()
         .map(|f| f.block)
-        .chain(["rustcraft:node", "rustcraft:monorail"])
+        .chain(["rustcraft:node", "rustcraft:monorail", "rustcraft:housing"])
         .collect();
     let cell = move |i: usize| at(o, [(i % 7) as i32, 1, (i / 7) as i32 * 2 - 1]);
     let placed = blocks.clone();
@@ -158,12 +159,11 @@ fn tiered_blocks_drop_their_tier(o: Pos, _: &Tuning) -> Scenario {
 const FLOW_WINDOW: u64 = 100;
 
 fn line_boost_on_a_fluid_net(o: Pos, t: &Tuning) -> Scenario {
-    use super::magistral::{channel, line};
+    use super::magistral::line;
     use crate::geom::Face;
     use crate::net::fluids::BUCKET;
     use crate::net::items::Mode;
     use crate::net::settings::JointSetting;
-    use crate::net::topology::ChannelKind;
     const TANK: &str = "rustcraft:tank";
     const WATER: &str = "minecraft:water";
     // Two stacked tanks each end: 32 buckets, more than both windows move.
@@ -173,13 +173,13 @@ fn line_boost_on_a_fluid_net(o: Pos, t: &Tuning) -> Scenario {
     let boost = crate::net::node_window::boost(1);
     Scenario::new("s18_line_boost_on_a_fluid_net", plot_area(o))
         .then("a tier-1 fluid line from a full tank to an empty one", move |b, _| {
-            line(b, o, 1, 4, [channel(ChannelKind::Fluid, 1), None, None, None])?;
+            line(b, o, 1, 4, 1)?;
             for p in [from, to] {
                 b.place(p, TANK, &[])?;
                 b.place(at(p, [0, 1, 0]), TANK, &[])?;
             }
             b.set_tank(from, WATER, full)?;
-            b.set_joint(at(o, [1, 0, 0]), Face::ZNeg, 0, JointSetting::of_mode(Mode::From))
+            b.set_joint(at(o, [1, 0, 0]), Face::ZNeg, crate::net::topology::FLUID_SLOT, JointSetting::of_mode(Mode::From))
         })
         .wait(20)
         .then("count the plain flow", move |b, m| {

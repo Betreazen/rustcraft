@@ -1,0 +1,17 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    "aga",
+    "g g",
+    "aga"
+  ],
+  "key": {
+    "a": "rustcraft:sparksteel",
+    "g": "minecraft:glass"
+  },
+  "result": {
+    "id": "rustcraft:housing_2",
+    "count": 8
+  }
+}

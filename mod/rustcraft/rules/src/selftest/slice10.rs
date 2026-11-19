@@ -6,13 +6,13 @@
 //!   tier 2 it takes water and gives solution by the same channel (M13, guide `ch_fluid`), and the
 //!   solution feeds a crystal structure (E8); on tier 1 the second fluid finds no lane.
 //! - Its window: energy, water and product bars, the mode switch and the module sockets.
-//! - The crafting table makes channels of each tier out of that tier's alloy (guide `ch_*`).
+//! - The crafting table makes housings of each tier out of that tier's alloy (round 31).
 //! - A cargo worker rides from the load dock to the unload dock with its load (W6); the grab
 //!   breaks an ore by the way and picks up an item lying there; the scoop digs earth beside and
 //!   under the way and spares the block under the rails.
 //! - Turbines in a current give by their place in it (E12); a turbine out of water says so.
 
-use super::magistral::{channel, line};
+use super::magistral::line;
 use super::{Bench, Build, Memo, Scenario, at, base, count_of, near, plot_area, same};
 use crate::geom::{Face, Pos};
 use crate::machines::mixer::MixerView;
@@ -22,7 +22,6 @@ use crate::modules::Module;
 use crate::monorail::shape;
 use crate::net::items::Mode;
 use crate::net::settings::JointSetting;
-use crate::net::topology::ChannelKind;
 use crate::power::{self as rules, Shown, Water};
 use crate::tuning::Tuning;
 use crate::worker::Tool;
@@ -33,7 +32,7 @@ pub const ALL: [Build; 12] = [
     mixer_feeds_crystals_on_tier_2,
     mixer_tier_1_channel_has_no_lane,
     mixer_window,
-    channel_recipes_by_tier,
+    housing_recipes_by_tier,
     cargo_carries_its_load,
     grab_takes_ore_and_items,
     scoop_digs_beside_the_way,
@@ -123,16 +122,10 @@ fn mixer_makes_solution(o: Pos, _: &Tuning) -> Scenario {
         )
 }
 
-/// A tier-`tier` fluid channel: a water tank («из блока») at housing 1, the mixer at housing 2
+/// A line of tier-`tier` housings: a water tank («из блока») at housing 1, the mixer at housing 2
 /// with a crystal of its own, a crystal pair at housing 4.
 fn mixer_on_a_channel(b: &mut dyn Bench, o: Pos, tier: u8) -> Result<(), String> {
-    line(
-        b,
-        o,
-        1,
-        5,
-        [channel(ChannelKind::Fluid, tier), None, None, None],
-    )?;
+    line(b, o, 1, 5, tier)?;
     let water = at(o, [1, 0, 1]);
     b.place(water, TANK, &[])?;
     b.set_tank(water, WATER, 16_000)?;
@@ -143,7 +136,7 @@ fn mixer_on_a_channel(b: &mut dyn Bench, o: Pos, tier: u8) -> Result<(), String>
     b.set_joint(
         at(o, [1, 0, 0]),
         Face::ZPos,
-        0,
+        crate::net::topology::FLUID_SLOT,
         JointSetting::of_mode(Mode::From),
     )?;
     let m = at(o, [2, 0, -1]);
@@ -223,30 +216,26 @@ fn mixer_window(o: Pos, _: &Tuning) -> Scenario {
         })
 }
 
-fn channel_recipes_by_tier(o: Pos, _: &Tuning) -> Scenario {
-    Scenario::new("channels_recipes_by_tier", plot_area(o)).check(
-        "a crafting table makes eight channels of each tier from its alloy",
+fn housing_recipes_by_tier(o: Pos, _: &Tuning) -> Scenario {
+    // Round 31: the channels are built into the housing, whose tier sets their speed; a housing
+    // of each tier is made from its alloy, eight at a time.
+    Scenario::new("housings_recipes_by_tier", plot_area(o)).check(
+        "a crafting table makes eight housings of each tier from its alloy",
         |b, _| {
             let alloys = [
                 ("rustcraft:coppersteel", ""),
                 ("rustcraft:sparksteel", "_2"),
                 ("rustcraft:crystallite", "_3"),
-            ];
-            let middles = [
-                ("minecraft:hopper", "item_channel"),
-                ("minecraft:bucket", "fluid_channel"),
-                ("minecraft:copper_ingot", "energy_channel"),
+                ("rustcraft:starsteel", "_4"),
             ];
             for (alloy, tier) in alloys {
-                for (middle, channel) in middles {
-                    let a = Some(alloy);
-                    let grid = [None, a, None, a, Some(middle), a, None, a, None];
-                    same(
-                        "the crafting table's result",
-                        b.craft(&grid),
-                        Some((format!("rustcraft:{channel}{tier}"), 8)),
-                    )?;
-                }
+                let (a, g) = (Some(alloy), Some("minecraft:glass"));
+                let grid = [a, g, a, g, None, g, a, g, a];
+                same(
+                    "the crafting table's result",
+                    b.craft(&grid),
+                    Some((format!("rustcraft:housing{tier}"), 8)),
+                )?;
             }
             Ok(())
         },

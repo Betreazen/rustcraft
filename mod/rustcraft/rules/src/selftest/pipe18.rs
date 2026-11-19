@@ -1,15 +1,18 @@
 //! Slice 18, stream 1: the magistral as the handbook says (docs/superpowers/plans/s18-pipe.md).
 //!
-//! - The housing, the node of every tier, the wrench and the tier-4 channels are crafted from
-//!   their handbook recipes (guide `housing`, `node`, `wrench`, `ch_*`: «для ступеней 2–4 вместо
-//!   медностали берётся сплав этой ступени»).
+//! - The housing and the node of every tier and the wrench are crafted from their handbook
+//!   recipes (guide `housing`, `node`, `wrench`: «для ступеней 2–4 вместо медностали берётся сплав
+//!   этой ступени»); round 31: the channels are built into the housing, and the channel items left
+//!   from 0.19 are taken apart into their alloy.
 
-use super::magistral::{channel, line};
+use super::magistral::{line, place_housing, place_node};
 use super::transport::{COBBLE, chest, fill, item_line, joint};
-use super::{Bench, Build, Scenario, at, count_of, plot_area};
+use super::{Bench, Build, Scenario, at, count_of, plot_area, same};
 use crate::housing::Diagnosis;
-use crate::net::topology::ChannelKind;
 use crate::geom::{Face, Pos};
+use crate::net::items::Mode;
+use crate::net::settings::JointSetting;
+use crate::net::topology::ITEM_SLOT;
 use crate::tuning::Tuning;
 
 pub const ALL: [Build; 10] = [
@@ -20,7 +23,7 @@ pub const ALL: [Build; 10] = [
     node_window_and_boost,
     wrench_turns_and_lifts,
     bottlenecks_marked,
-    lost_housing_drops_channels,
+    housing_tiers_swap_in_place,
     joint_window_table,
     quickstart_line,
 ];
@@ -60,14 +63,29 @@ const fn node(tier: usize, result: &'static str) -> Recipe {
     }
 }
 
-/// The recipes stream 1 adds, as data.js writes them.
-pub const RECIPES: [Recipe; 9] = [
+const HOUSING_KEYS: [[(char, &str); 2]; 4] = [
+    [('a', A1), ('g', "minecraft:glass")],
+    [('a', A2), ('g', "minecraft:glass")],
+    [('a', A3), ('g', "minecraft:glass")],
+    [('a', A4), ('g', "minecraft:glass")],
+];
+
+/// Round 31: the housing of tier `tier` (1–4), copper-steel's recipe with that tier's alloy.
+const fn housing(tier: usize, result: &'static str) -> Recipe {
     Recipe {
         rows: ["aga", "g g", "aga"],
-        keys: &[('a', A1), ('g', "minecraft:glass")],
-        result: "rustcraft:housing",
+        keys: &HOUSING_KEYS[tier - 1],
+        result,
         count: 8,
-    },
+    }
+}
+
+/// The recipes stream 1 adds, as data.js writes them.
+pub const RECIPES: [Recipe; 9] = [
+    housing(1, "rustcraft:housing"),
+    housing(2, "rustcraft:housing_2"),
+    housing(3, "rustcraft:housing_3"),
+    housing(4, "rustcraft:housing_4"),
     node(1, "rustcraft:node"),
     node(2, "rustcraft:node_2"),
     node(3, "rustcraft:node_3"),
@@ -78,24 +96,23 @@ pub const RECIPES: [Recipe; 9] = [
         result: "rustcraft:wrench",
         count: 1,
     },
-    Recipe {
-        rows: [" a ", "aha", " a "],
-        keys: &[('a', A4), ('h', "minecraft:hopper")],
-        result: "rustcraft:item_channel_4",
-        count: 8,
-    },
-    Recipe {
-        rows: [" a ", "aha", " a "],
-        keys: &[('a', A4), ('h', "minecraft:bucket")],
-        result: "rustcraft:fluid_channel_4",
-        count: 8,
-    },
-    Recipe {
-        rows: [" a ", "aha", " a "],
-        keys: &[('a', A4), ('h', "minecraft:copper_ingot")],
-        result: "rustcraft:energy_channel_4",
-        count: 8,
-    },
+];
+
+/// Round 31: the channel items of 0.19, by kind and tier; two of one are taken apart into one
+/// alloy of their tier (the half alloy each was made of).
+pub const OLD_CHANNELS: [(&str, &str); 12] = [
+    ("rustcraft:item_channel", A1),
+    ("rustcraft:item_channel_2", A2),
+    ("rustcraft:item_channel_3", A3),
+    ("rustcraft:item_channel_4", A4),
+    ("rustcraft:fluid_channel", A1),
+    ("rustcraft:fluid_channel_2", A2),
+    ("rustcraft:fluid_channel_3", A3),
+    ("rustcraft:fluid_channel_4", A4),
+    ("rustcraft:energy_channel", A1),
+    ("rustcraft:energy_channel_2", A2),
+    ("rustcraft:energy_channel_3", A3),
+    ("rustcraft:energy_channel_4", A4),
 ];
 
 impl Recipe {
@@ -112,18 +129,34 @@ impl Recipe {
 }
 
 fn recipes_craft(o: Pos, _t: &Tuning) -> Scenario {
-    Scenario::new("pipe_recipes_craft", super::plot_area(o)).check(
-        "the housing, the nodes, the wrench and the tier-4 channels craft as the handbook says",
-        |b: &mut dyn Bench, _| {
-            for r in &RECIPES {
-                let made = b.craft(&r.grid());
-                if made != Some((r.result.to_owned(), r.count)) {
-                    return Err(format!("{} × {} expected, {made:?} crafted", r.count, r.result));
+    Scenario::new("pipe_recipes_craft", super::plot_area(o))
+        .check(
+            "the housings, the nodes and the wrench craft as the handbook says",
+            |b: &mut dyn Bench, _| {
+                for r in &RECIPES {
+                    let made = b.craft(&r.grid());
+                    if made != Some((r.result.to_owned(), r.count)) {
+                        return Err(format!("{} × {} expected, {made:?} crafted", r.count, r.result));
+                    }
                 }
+                Ok(())
+            },
+        )
+        .check("two old channels of a tier give back its alloy; none is made any more", |b, _| {
+            for (channel, alloy) in OLD_CHANNELS {
+                let mut grid = [None; 9];
+                grid[3] = Some(channel);
+                grid[5] = Some(channel);
+                same(channel, b.craft(&grid), Some((alloy.to_owned(), 1)))?;
             }
-            Ok(())
-        },
-    )
+            let hopper = Some("minecraft:hopper");
+            let a = Some(A1);
+            let old = [None, a, None, a, hopper, a, None, a, None];
+            match b.craft(&old) {
+                Some((item, _)) if item.contains("channel") => Err(format!("{item} is still made")),
+                _ => Ok(()),
+            }
+        })
 }
 
 /// Housings of the node-tier line: past a tier-1 node's range, within a tier-2 node's.
@@ -137,7 +170,7 @@ fn node_tiers(o: Pos, t: &Tuning) -> Scenario {
     let limit_2 = t.range_of(2);
     Scenario::new("pipe_node_tiers_swap_in_place", plot_area(o))
         .then("a tier-1 node and a line of 40 housings", move |b, _| {
-            line(b, o, 1, TIER_LINE, [channel(ChannelKind::Item, 1), None, None, None])
+            line(b, o, 1, TIER_LINE, 1)
         })
         .until("the last housing is beyond a tier-1 node's range", 100, move |b, _| {
             Ok(matches!(b.housing(last), Some(Diagnosis::TooFar { limit, .. }) if limit == limit_1))
@@ -230,12 +263,12 @@ fn quickstart_line(o: Pos, _t: &Tuning) -> Scenario {
 }
 
 /// Guide `facade`: a hidden housing is a whole block (F4, `covered`); the facade and its look's
-/// block come back with it; the sneaking wrench then takes the housing itself, channels and all.
+/// block come back with it; the sneaking wrench then takes the housing itself, as its tier's item.
 fn facade_and_lift(o: Pos, _t: &Tuning) -> Scenario {
     let h = at(o, [1, 0, 0]);
     Scenario::new("pipe_facade_whole_block_and_lift", plot_area(o))
-        .then("a node and a housing with two channels, hidden as bricks", move |b, _| {
-            line(b, o, 1, 1, [channel(ChannelKind::Item, 2), channel(ChannelKind::Energy, 1), None, None])?;
+        .then("a node and a tier-2 housing, hidden as bricks", move |b, _| {
+            line(b, o, 1, 1, 2)?;
             b.pipe("cover:minecraft:bricks", h).map(|_| ())
         })
         .check("the hidden housing is a whole block and keeps its facade", move |b, _| {
@@ -250,7 +283,7 @@ fn facade_and_lift(o: Pos, _t: &Tuning) -> Scenario {
         })
         .then("the sneaking wrench takes the housing", move |b, m| {
             let items = b.pipe("lift_housing", h)?;
-            let want = "rustcraft:housing,rustcraft:facade,minecraft:bricks,rustcraft:item_channel_2,rustcraft:energy_channel";
+            let want = "rustcraft:housing_2,rustcraft:facade,minecraft:bricks";
             if items != want {
                 return Err(format!("{items:?} came back, {want:?} expected"));
             }
@@ -361,14 +394,14 @@ fn wrench_turns_and_lifts(o: Pos, _t: &Tuning) -> Scenario {
         })
 }
 
-/// Guide `wrench`: on a line of tier-3, tier-1, tier-1, tier-3 item channels the two tier-1
-/// housings are its bottleneck; clients get the mark with the housing.
+/// Guide `wrench`: on a line of housings of tiers 3, 1, 1, 3 the two tier-1 housings are its
+/// bottleneck; clients get the mark with the housing.
 fn bottlenecks_marked(o: Pos, _t: &Tuning) -> Scenario {
     Scenario::new("pipe_bottlenecks_marked_for_the_wrench", plot_area(o))
         .then("a line of tiers 3, 1, 1, 3", move |b, _| {
-            line(b, o, 1, 4, [channel(ChannelKind::Item, 3), None, None, None])?;
-            for k in [2, 3] {
-                b.set_channels(at(o, [k, 0, 0]), [channel(ChannelKind::Item, 1), None, None, None])?;
+            place_node(b, o, 1)?;
+            for (k, tier) in [(1, 3), (2, 1), (3, 1), (4, 3)] {
+                place_housing(b, at(o, [k, 0, 0]), tier)?;
             }
             b.refresh();
             Ok(())
@@ -381,30 +414,37 @@ fn bottlenecks_marked(o: Pos, _t: &Tuning) -> Scenario {
         })
 }
 
-/// Guide `housing`: a housing that goes without a player (an explosion, a command) drops its
-/// channels where it stood at the next rescan.
-fn lost_housing_drops_channels(o: Pos, _t: &Tuning) -> Scenario {
-    let h = at(o, [1, 0, 0]);
-    Scenario::new("pipe_lost_housing_drops_its_channels", plot_area(o))
-        .then("a housing with two channels", move |b, _| {
-            line(b, o, 1, 1, [channel(ChannelKind::Item, 2), channel(ChannelKind::Fluid, 1), None, None])?;
-            b.refresh();
-            Ok(())
+/// Round 31 (U2 for housings, as the machines and the node): a click with a housing of a higher
+/// tier on a placed one sets its tier in place, its joints' settings kept, and the old tier comes
+/// back to the hand; a housing of a tier not higher is placed beside it, as any block.
+fn housing_tiers_swap_in_place(o: Pos, _t: &Tuning) -> Scenario {
+    let h = at(o, [2, 0, 0]);
+    let joint_of = move |b: &dyn Bench| {
+        b.housing_joints(h)
+            .and_then(|j| j.get(Face::ZNeg, ITEM_SLOT).map(|s| s.mode))
+    };
+    Scenario::new("pipe_housing_tiers_swap_in_place", plot_area(o))
+        .then("a node and three tier-1 housings, a joint set on the middle one", move |b, _| {
+            line(b, o, 1, 3, 1)?;
+            b.set_joint(h, Face::ZNeg, ITEM_SLOT, JointSetting::of_mode(Mode::Off))
         })
-        .wait(40)
-        .then("the housing set to air, as a command does", move |b, _| {
-            b.place(h, "minecraft:air", &[])?;
-            b.refresh();
-            Ok(())
+        .then("a click with a tier-3 housing on the middle one", move |b, _| {
+            let got = b.click_block(h, Face::YPos, "rustcraft:housing_3", false)?;
+            same("given back", got, vec!["rustcraft:housing".to_owned()])
         })
-        .until("its channels lie where it stood", 100, move |b, _| {
-            let c = h.map(f64::from);
-            let lying = b.lying([c[0] - 1.0, c[1] - 1.0, c[2] - 1.0], [c[0] + 2.0, c[1] + 2.0, c[2] + 2.0]);
-            let has = |item: &str| lying.iter().any(|(i, n)| i == item && *n >= 1);
-            Ok(has("rustcraft:item_channel_2") && has("rustcraft:fluid_channel"))
+        .check("it is of tier 3 and keeps its joint", move |b, _| {
+            same("tier", b.property(h, "tier"), Some("3".to_owned()))?;
+            same("joint", joint_of(b), Some(Mode::Off))
+        })
+        .then("a click with a tier-1 housing on top of it", move |b, _| {
+            b.click_block(h, Face::YPos, "rustcraft:housing", false).map(|_| ())
+        })
+        .check("a tier-1 housing stands above it, still of tier 3", move |b, _| {
+            same("above", b.block(at(h, [0, 1, 0])), "rustcraft:housing".to_owned())?;
+            same("its tier", b.property(at(h, [0, 1, 0]), "tier"), Some("1".to_owned()))?;
+            same("tier", b.property(h, "tier"), Some("3".to_owned()))
         })
 }
-
 
 /// Guide `wrench` (ui.js «Стык: …»): the joint window as the drawn table. A press goes through
 /// the same rules a player's does: a direction, the off hand's item on the filter, the list and
@@ -419,7 +459,7 @@ fn joint_window_table(o: Pos, _t: &Tuning) -> Scenario {
         js::decode(out.as_bytes()).ok_or_else(|| "the view does not read".to_owned())
     };
     Scenario::new("pipe_joint_window_is_the_guides_table", plot_area(o))
-        .then("a housing with an item channel and a chest beside it", move |b, _| item_line(b, o, 1, 1, &[1]))
+        .then("a housing and a chest beside it", move |b, _| item_line(b, o, 1, 1, &[1]))
         .check("the window names the chest and shows an item row", move |b, _| {
             let out = b.pipe(&format!("joint_view:{face}"), h)?;
             let v = js::decode(out.as_bytes()).ok_or("the view does not read")?;
@@ -444,7 +484,7 @@ fn joint_window_table(o: Pos, _t: &Tuning) -> Scenario {
                 && r.priority == 1;
             if kept { Ok(()) } else { Err(format!("{r:?} after the presses (mode {first})")) }
         })
-        .check("a filter press on the empty slot does nothing", move |b, _| {
+        .check("a filter press on the fluid row, no joint for a chest, does nothing", move |b, _| {
             match press(b, "minecraft:dirt", Press::Add { slot: 1 }) {
                 Err(e) if e.contains("nothing") => Ok(()),
                 other => Err(format!("{other:?}")),
@@ -461,20 +501,14 @@ mod tests {
     fn file(name: &str) -> Value {
         let text = match name {
             "housing" => include_str!("../../../../content/data/rustcraft/recipe/housing.json"),
+            "housing_2" => include_str!("../../../../content/data/rustcraft/recipe/housing_2.json"),
+            "housing_3" => include_str!("../../../../content/data/rustcraft/recipe/housing_3.json"),
+            "housing_4" => include_str!("../../../../content/data/rustcraft/recipe/housing_4.json"),
             "node" => include_str!("../../../../content/data/rustcraft/recipe/node.json"),
             "node_2" => include_str!("../../../../content/data/rustcraft/recipe/node_2.json"),
             "node_3" => include_str!("../../../../content/data/rustcraft/recipe/node_3.json"),
             "node_4" => include_str!("../../../../content/data/rustcraft/recipe/node_4.json"),
             "wrench" => include_str!("../../../../content/data/rustcraft/recipe/wrench.json"),
-            "item_channel_4" => {
-                include_str!("../../../../content/data/rustcraft/recipe/item_channel_4.json")
-            }
-            "fluid_channel_4" => {
-                include_str!("../../../../content/data/rustcraft/recipe/fluid_channel_4.json")
-            }
-            "energy_channel_4" => {
-                include_str!("../../../../content/data/rustcraft/recipe/energy_channel_4.json")
-            }
             _ => panic!("no recipe file {name}"),
         };
         serde_json::from_str(text).expect("recipe JSON")
@@ -493,6 +527,72 @@ mod tests {
             assert_eq!(f["key"].as_object().unwrap().len(), r.keys.len(), "{name} keys");
             assert_eq!(f["result"]["id"], r.result);
             assert_eq!(f["result"]["count"], r.count);
+        }
+    }
+
+    /// A file of the content mod, read at test time.
+    fn content(path: &str) -> Value {
+        let full = format!("{}/../../content/{path}", env!("CARGO_MANIFEST_DIR"));
+        let text = std::fs::read_to_string(&full).unwrap_or_else(|e| panic!("{full}: {e}"));
+        serde_json::from_str(&text).unwrap_or_else(|e| panic!("{full}: {e}"))
+    }
+
+    #[test]
+    fn a_broken_housing_gives_back_its_own_tier() {
+        // Round 31: tiers 2–4 by their state, anything else the first tier.
+        let loot = content("data/rustcraft/loot_table/blocks/housing.json");
+        let children = loot["pools"][0]["entries"][0]["children"].as_array().unwrap();
+        for tier in 2..=4u8 {
+            let child = children
+                .iter()
+                .find(|c| c["condition"]["state"]["tier"] == tier.to_string())
+                .unwrap_or_else(|| panic!("no loot for tier {tier}"));
+            assert_eq!(child["condition"]["type"], "minecraft:match_block");
+            assert_eq!(child["name"], crate::housing::item_of_tier(tier));
+        }
+        let last = children.last().unwrap();
+        assert!(last.get("condition").is_none());
+        assert_eq!(last["name"], "rustcraft:housing");
+    }
+
+    #[test]
+    fn old_channels_come_apart_into_their_alloy_and_none_is_made() {
+        for (channel, alloy) in OLD_CHANNELS {
+            let name = channel.trim_start_matches("rustcraft:");
+            let r = content(&format!("data/rustcraft/recipe/{name}_apart.json"));
+            assert_eq!(r["type"], "minecraft:crafting_shapeless", "{name}");
+            assert_eq!(r["ingredients"], serde_json::json!([channel, channel]), "{name}");
+            assert_eq!(r["result"]["id"], alloy, "{name}");
+            assert_eq!(r["result"]["count"], 1, "{name}");
+            let made = format!("{}/../../content/data/rustcraft/recipe/{name}.json", env!("CARGO_MANIFEST_DIR"));
+            assert!(!std::path::Path::new(&made).exists(), "{name} is still made");
+        }
+    }
+
+    #[test]
+    fn the_housing_shows_its_tier_and_its_channels_along_its_joins() {
+        // Round 31 (R5): a core and an arm a side for each tier, the channels in the arms and
+        // across the centre of a housing joined to nothing; every model it names is there.
+        let states = content("assets/rustcraft/blockstates/housing.json");
+        let parts = states["multipart"].as_array().unwrap();
+        let models: Vec<&str> = parts.iter().map(|p| p["apply"]["model"].as_str().unwrap()).collect();
+        for tier in 1..=4 {
+            assert!(models.contains(&format!("rustcraft:block/housing_core_{tier}").as_str()));
+            for side in crate::housing::SIDES {
+                assert!(models.contains(&format!("rustcraft:block/housing_arm_{side}_{tier}").as_str()));
+            }
+        }
+        let alone = parts.iter().find(|p| p["apply"]["model"] == "rustcraft:block/housing_channels").unwrap();
+        for side in crate::housing::SIDES {
+            assert_eq!(alone["when"][side], "false", "the centre's channels show only when nothing is joined");
+        }
+        for model in models {
+            let path = format!("assets/rustcraft/models/block/{}.json", model.trim_start_matches("rustcraft:block/"));
+            assert!(content(&path)["elements"].as_array().is_some_and(|e| !e.is_empty()), "{path}");
+        }
+        for tier in 2..=4 {
+            let item = content(&format!("assets/rustcraft/items/housing_{tier}.json"));
+            assert_eq!(item["model"]["model"], format!("rustcraft:block/housing_inventory_{tier}"));
         }
     }
 

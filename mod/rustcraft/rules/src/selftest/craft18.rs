@@ -41,7 +41,7 @@ pub const ALL: [Build; 20] = [
     repair_mends_a_rod_with_string,
     util_work_mode_switch,
     order_bread_through_the_kitchen,
-    order_item_channels_needs_21_iron,
+    order_housings_needs_6_iron,
     storage_terminal_keeps_its_holes,
     storage_full_says_so,
     storage_far_terminal,
@@ -208,31 +208,32 @@ fn order_bread_through_the_kitchen(o: Pos, _: &Tuning) -> Scenario {
         .until("and the order is done", 60, move |b, _| Ok(b.orders(terminal_at(o)).is_empty()))
 }
 
-fn order_item_channels_needs_21_iron(o: Pos, _: &Tuning) -> Scenario {
-    // The owner: an order for 24 item channels waited for 264 iron ingots. 24 channels are 3 runs
-    // of 4 coppersteel and a hopper: 6 coppersteel runs (6 iron) and 3 hoppers (15 iron).
+fn order_housings_needs_6_iron(o: Pos, _: &Tuning) -> Scenario {
+    // The owner: an order for 24 item channels waited for 264 iron ingots. Round 31 makes no
+    // channels; the same chain on housings: 24 housings are 3 runs of 4 coppersteel and 4 glass,
+    // so 6 coppersteel runs (6 iron).
     use super::slice15::{build, crafter_at, furnace_at, held, machine, put_book, terminal_at};
     use crate::orders::queue::Wait;
     const COPPER: &str = "minecraft:copper_ingot";
-    const PLANKS: &str = "minecraft:oak_planks";
-    Scenario::new("orders19_item_channels_need_21_iron", plot_area(o))
-        .then("a storage with copper and planks, an autocrafter and a furnace", move |b, _| {
-            build(b, o, &[(COPPER, 64), (PLANKS, 64)])?;
+    const GLASS: &str = "minecraft:glass";
+    Scenario::new("orders19_housings_need_6_iron", plot_area(o))
+        .then("a storage with copper and glass, an autocrafter and a furnace", move |b, _| {
+            build(b, o, &[(COPPER, 64), (GLASS, 64)])?;
             machine(b, crafter_at(o), "rustcraft:crafter", true)?;
             machine(b, furnace_at(o), "rustcraft:furnace", true)
         })
-        .until("the storage holds them", 200, move |b, _| Ok(held(b, o, COPPER)? == 64 && held(b, o, PLANKS)? == 64))
+        .until("the storage holds them", 200, move |b, _| Ok(held(b, o, COPPER)? == 64 && held(b, o, GLASS)? == 64))
         .then("the book", move |b, _| put_book(b, o))
-        .until("the storage takes an order for 24 item channels", 200, move |b, _| {
-            Ok(b.order(terminal_at(o), "rustcraft:item_channel", 24).is_ok())
+        .until("the storage takes an order for 24 housings", 200, move |b, _| {
+            Ok(b.order(terminal_at(o), "rustcraft:housing", 24).is_ok())
         })
         .until("the order waits for something", 100, move |b, _| {
             Ok(b.orders(terminal_at(o)).first().is_some_and(|x| !matches!(x.wait, Wait::New | Wait::Running)))
         })
-        .check("it waits for 21 iron ingots", move |b, _| {
+        .check("it waits for 6 iron ingots", move |b, _| {
             let orders = b.orders(terminal_at(o));
             let first = orders.first().ok_or("no order")?;
-            if first.wait == Wait::Items(vec![("minecraft:iron_ingot".into(), 21)]) {
+            if first.wait == Wait::Items(vec![("minecraft:iron_ingot".into(), 6)]) {
                 Ok(())
             } else {
                 Err(format!("wait {:?}, chain {:?}", first.wait, first.chain))

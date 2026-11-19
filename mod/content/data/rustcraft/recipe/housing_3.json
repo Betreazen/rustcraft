@@ -1,0 +1,17 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    "aga",
+    "g g",
+    "aga"
+  ],
+  "key": {
+    "a": "rustcraft:crystallite",
+    "g": "minecraft:glass"
+  },
+  "result": {
+    "id": "rustcraft:housing_3",
+    "count": 8
+  }
+}

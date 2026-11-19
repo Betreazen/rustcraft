@@ -2,12 +2,11 @@
 //! a joint's filter and priority (M7, M8), and a full receiver that leaves the items where they
 //! are (M6).
 
-use super::magistral::{channel, line};
+use super::magistral::line;
 use super::{Bench, Build, Scenario, at, count_of, expect, near, plot_area, same, total};
 use crate::geom::{Face, Pos};
 use crate::net::items::Mode;
 use crate::net::settings::JointSetting;
-use crate::net::topology::ChannelKind;
 use crate::tuning::Tuning;
 
 pub const ALL: [Build; 8] = [
@@ -42,7 +41,7 @@ pub fn housing(o: Pos, k: i32) -> Pos {
     at(o, [k, 0, 0])
 }
 
-/// A node, `len` housings with an item channel of `tier` in slot 0, and a chest beside each
+/// A node, `len` housings of `tier` (round 31: their channels built in), and a chest beside each
 /// housing of `chests`.
 pub fn item_line(
     b: &mut dyn Bench,
@@ -51,13 +50,7 @@ pub fn item_line(
     len: i32,
     chests: &[i32],
 ) -> Result<(), String> {
-    line(
-        b,
-        o,
-        1,
-        len,
-        [channel(ChannelKind::Item, tier), None, None, None],
-    )?;
+    line(b, o, 1, len, tier)?;
     for &k in chests {
         b.place(chest(o, k), CHEST, &[])?;
     }

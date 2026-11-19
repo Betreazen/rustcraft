@@ -73,7 +73,6 @@ use crate::machines::processor::Shown;
 use crate::monorail::{Network, Trip, TripError};
 use crate::net::settings::JointSetting;
 use crate::net::tanks::TankGroup;
-use crate::net::topology::Channel;
 use crate::storage::terminal::LimitChange;
 use crate::storage::{Shape, Store};
 use crate::tuning::Tuning;
@@ -135,8 +134,18 @@ pub trait Bench {
     /// Puts `count` of `item` into the vanilla container at `pos` from above, as a hopper would;
     /// how many went in.
     fn insert(&mut self, pos: Pos, item: &str, count: u32) -> Result<u32, String>;
-    /// The housing at `pos` with these channels, written as its block entity keeps them.
-    fn set_channels(&mut self, pos: Pos, slots: [Option<Channel>; 4]) -> Result<(), String>;
+    /// Round 31: the housing at `pos` as 0.19 saved it, channels set by hand into its four slots
+    /// and its joints' settings by face and old slot; the next rescan builds all three channels
+    /// in (rustcraft_rules::net::migrate).
+    fn set_old_housing(
+        &mut self,
+        pos: Pos,
+        slots: crate::net::migrate::OldSlots,
+        joints: &[(crate::geom::Face, usize, JointSetting)],
+    ) -> Result<(), String> {
+        let _ = (pos, slots, joints);
+        Err("no old housings on this bench".into())
+    }
     /// One joint setting of the housing at `pos`, written as the joint window writes it.
     fn set_joint(
         &mut self,
@@ -166,6 +175,11 @@ pub trait Bench {
     fn inputs(&self, pos: Pos) -> Vec<usize>;
     /// The housing's diagnosis as the server worked it out.
     fn housing(&self, pos: Pos) -> Option<Diagnosis>;
+    /// Round 31: the joints' settings the housing at `pos` keeps, by face and slot.
+    fn housing_joints(&self, pos: Pos) -> Option<crate::net::settings::HousingJoints> {
+        let _ = pos;
+        None
+    }
     /// What the machine at `pos` showed on its last tick.
     fn shown(&self, pos: Pos) -> Option<Shown>;
     /// Whether an item net found the receiver at `pos` full lately («Приёмник полон»).

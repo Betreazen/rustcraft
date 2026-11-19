@@ -619,6 +619,12 @@ fn magistral(l: &LevelNet, pos: Pos) -> Vec<String> {
             hs.len()
         ));
     }
+    // Round 31: each housing's tier, then its nets (every housing carries all three channels).
+    for h in &housings {
+        if let Some(housing) = l.layout.housings.get(h) {
+            out.push(format!("  housing {h:?}: tier {}", housing.tier));
+        }
+    }
     for net in l
         .topology
         .nets
@@ -626,7 +632,7 @@ fn magistral(l: &LevelNet, pos: Pos) -> Vec<String> {
         .filter(|n| housings.iter().any(|h| n.housings.contains(h)))
     {
         out.push(format!(
-            "  net {:?} slot {}: {} housings, weakest tier {}",
+            "  net {:?} (slot {}): {} housings, weakest housing tier {}",
             net.kind,
             net.slot + 1,
             net.housings.len(),

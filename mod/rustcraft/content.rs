@@ -8,7 +8,7 @@ use crate::game::Game;
 use horizon_client::containers::ModContainer;
 use horizon_mods::content::{Block, BlockProperties, BlockShapes, Item, StateProperty};
 use horizon_world::nbt::Compound;
-use rustcraft_rules::net::topology::{Channel, ChannelKind};
+use rustcraft_rules::net::topology::ChannelKind;
 use rustcraft_rules::utility::Util;
 use std::{
     collections::{BTreeMap, HashMap},
@@ -405,7 +405,10 @@ const CRYSTAL_BOX: [f64; 6] = [0.125, 0.0, 0.125, 0.875, 0.9375, 0.875];
 pub const ITEM_CHANNEL: &str = "rustcraft:item_channel";
 pub const FLUID_CHANNEL: &str = "rustcraft:fluid_channel";
 pub const ENERGY_CHANNEL: &str = "rustcraft:energy_channel";
-/// Slice 10: the channels by kind and tier, one item each (tiers 2 and 3 of plan slice 2).
+/// Slice 10: the channels by kind and tier, one item each (tiers 2 and 3 of plan slice 2). Round
+/// 31: the channels are built into the housing and none is made any more; these items stay so that
+/// those a player has are taken apart into their alloy (the content mod's `*_channel*_apart`
+/// recipes), and the joint window's rows show them as icons.
 const CHANNEL_ITEMS: [(ChannelKind, u8, &str); 12] = [
     (ChannelKind::Item, 1, ITEM_CHANNEL),
     (ChannelKind::Item, 2, "rustcraft:item_channel_2"),
@@ -422,7 +425,7 @@ const CHANNEL_ITEMS: [(ChannelKind, u8, &str); 12] = [
 ];
 pub const WRENCH: &str = "rustcraft:wrench";
 
-/// The node's state property: its tier, 1 to 4 (N3).
+/// The node's and (round 31) the housing's state property: its tier, 1 to 4 (N3, M10).
 pub const TIER: &str = "tier";
 const TIERS: [&str; 4] = ["1", "2", "3", "4"];
 
@@ -446,24 +449,16 @@ pub fn channel_item(kind: ChannelKind, tier: u8) -> &'static str {
         .map_or(ITEM_CHANNEL, |(_, _, i)| i)
 }
 
-/// The channel item `item` carries, if it is one.
-pub fn channel_of(item: &str) -> Option<Channel> {
-    CHANNEL_ITEMS
-        .iter()
-        .find(|(_, _, i)| *i == item)
-        .map(|&(kind, tier, _)| Channel { kind, tier })
-}
-
 /// The housing, the node, the crystal and the machines, each with its block item.
 ///
 /// States: the housing copies `minecraft:chorus_plant`, whose six side booleans give it 64
-/// states; the node copies `minecraft:iron_block` (one state) times its tier (4). Every state of
-/// every block must fit in 2^20 (SRC/docs/mods.md:160-166; vanilla takes 35,723), and these 68
-/// with the crystal's and the cell's 1 each, 8 for each of the seven machines (the station is
-/// one), the terminal and the tank (72) and the monorail's 480 keep the registry under 2^16, so
-/// chunks keep vanilla's 16-bit palette
-/// (SRC/docs/modpacks.md:281-284). Which channel sits in which slot is block entity data, not
-/// state: four slots of four kinds would multiply the housing's states by 256.
+/// states, times `covered` (2) and, round 31, its tier (4): 512; the node copies
+/// `minecraft:iron_block` (one state) times its tier (4). Every state of every block must fit in
+/// 2^20 (SRC/docs/mods.md:160-166; vanilla takes 35,723), and these with the crystal's and the
+/// cell's 1 each, 8 for each of the seven machines (the station is one), the terminal and the tank
+/// (72) and the monorail's 480 keep the registry under 2^16, so chunks keep vanilla's 16-bit
+/// palette (SRC/docs/modpacks.md:281-284). The housing's three channels are built in, one of each
+/// kind in a fixed slot, so they need no state; its tier shows on its model.
 pub fn declare_blocks(blocks: &mut Vec<Block>) {
     blocks.push(Block {
         id: HOUSING.into(),
@@ -479,15 +474,27 @@ pub fn declare_blocks(blocks: &mut Vec<Block>) {
         // rustcraft_builder); open, its outline and collision are the pipe's, HOUSING_THICKNESS
         // across, as `thickness` built them. The engine takes `thickness` or `shapes`, never
         // both (SRC horizon-mods/src/content.rs:1164-1166), so the shapes table builds the pipe
-        // too. 64 states become 128.
-        state_properties: BTreeMap::from([(
-            rustcraft_rules::housing::COVERED.to_owned(),
-            StateProperty::Boolean,
-        )]),
-        default_state: BTreeMap::from([(
-            rustcraft_rules::housing::COVERED.to_owned(),
-            "false".to_owned(),
-        )]),
+        // too. 64 states become 128. Round 31: its tier, 1 to 4 (M10), the first by default, so a
+        // housing saved before stands as the first tier until rustcraft_server reads its channels.
+        state_properties: BTreeMap::from([
+            (
+                rustcraft_rules::housing::COVERED.to_owned(),
+                StateProperty::Boolean,
+            ),
+            (
+                TIER.to_owned(),
+                StateProperty::Enum {
+                    values: TIERS.map(str::to_owned).to_vec(),
+                },
+            ),
+        ]),
+        default_state: BTreeMap::from([
+            (
+                rustcraft_rules::housing::COVERED.to_owned(),
+                "false".to_owned(),
+            ),
+            (TIER.to_owned(), TIERS[0].to_owned()),
+        ]),
         shapes: Some(housing_shapes()),
         collision_shapes: Some(housing_shapes()),
         item: true,
@@ -832,8 +839,9 @@ fn declare_tier_items(items: &mut Vec<Item>) {
     }
 }
 
-/// The channels, the wrench and the dusts. The channels' and the wrench's templates have no use of their own: what a click with them
-/// does is all `native_use_item_on`'s (rustcraft_server::on_use_item_on).
+/// The channels, the wrench and the dusts. The wrench's template has no use of its own: what a
+/// click with it does is all `native_use_item_on`'s (rustcraft_server::on_use_item_on). Round 31:
+/// the channels have no use at all; they are taken apart on a crafting table.
 pub fn declare_items(items: &mut Vec<Item>) {
     declare_gear(items);
     // Slice 18, stream 3: the machines' higher tiers.
@@ -863,6 +871,15 @@ pub fn declare_items(items: &mut Vec<Item>) {
         items.push(Item {
             id: id.into(),
             template: "minecraft:sugar".into(),
+            ..Item::default()
+        });
+    }
+    // Round 31: the housing's higher tiers place the housing (rustcraft_pipe18 sets the tier).
+    for tier in 2..=rustcraft_rules::tiers::MAX_TIER {
+        items.push(Item {
+            id: rustcraft_rules::housing::item_of_tier(tier),
+            template: "minecraft:iron_ingot".into(),
+            place_block: Some(HOUSING.into()),
             ..Item::default()
         });
     }
@@ -947,7 +964,7 @@ pub fn declare_items(items: &mut Vec<Item>) {
     }
 }
 
-/// `native_block_entity`: the housing keeps its slots and its joints' settings in a block entity
+/// `native_block_entity`: the housing keeps its joints' settings in a block entity
 /// and each machine its items, progress and work mode; the node and the crystal have an empty one only so that
 /// `native_level_block_entities` lists them when the server rebuilds the magistral
 /// (rustcraft_server::scan). Any template may have one since API 129

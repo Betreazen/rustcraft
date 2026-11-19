@@ -1,0 +1,12 @@
+{
+  "type": "minecraft:crafting_shapeless",
+  "category": "misc",
+  "ingredients": [
+    "rustcraft:energy_channel_4",
+    "rustcraft:energy_channel_4"
+  ],
+  "result": {
+    "id": "rustcraft:starsteel",
+    "count": 1
+  }
+}

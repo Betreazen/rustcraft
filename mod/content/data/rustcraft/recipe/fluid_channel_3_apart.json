@@ -1,0 +1,12 @@
+{
+  "type": "minecraft:crafting_shapeless",
+  "category": "misc",
+  "ingredients": [
+    "rustcraft:fluid_channel_3",
+    "rustcraft:fluid_channel_3"
+  ],
+  "result": {
+    "id": "rustcraft:crystallite",
+    "count": 1
+  }
+}

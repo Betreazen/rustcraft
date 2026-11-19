@@ -1,100 +1,29 @@
-//! What a housing holds and how a player changes it (M1, M2), and the diagnosis a housing shows
-//! (N3, which replaces M9). Game-free: the bundle keeps `encode`'s bytes in the housing's block
-//! entity and turns a `Diagnosis` into text.
+//! What a housing shows when a player looks at it (N3, which replaces M9). Game-free: the bundle
+//! turns a `Diagnosis` into text. Round 31: the three channels are built into every housing (see
+//! `net::topology`); a housing saved with channels set by hand is read by `net::migrate`.
 
 use crate::geom::Pos;
-use crate::net::topology::{Channel, ChannelKind, Housing, Layout, Reach, SLOTS, Topology};
+use crate::net::topology::{ChannelKind, Layout, Reach, Topology};
+use crate::tiers::{self, Family};
 
-/// Byte of an empty slot in `encode`.
-const EMPTY: u8 = 0;
-/// A slot's byte is `kind * KIND_STEP + tier`; tiers 1 to 15 fit below the step.
-const KIND_STEP: u8 = 16;
-const MAX_TIER: u8 = KIND_STEP - 1;
+/// The housing block.
+pub const BLOCK: &str = "rustcraft:housing";
+/// Round 31: the housing in tiers 1–4, as the machines (U1): `rustcraft:housing` and
+/// `rustcraft:housing_2..4`, each the same block with its `tier`. Not in `tiers::FAMILIES`: its
+/// placement and replacement are its own (`rustcraft_pipe18`), since a housing placed must keep the
+/// sides the game joins it by.
+pub const TIERS: Family = Family::new(BLOCK, 1);
 
-fn kind_code(kind: ChannelKind) -> u8 {
-    match kind {
-        ChannelKind::Item => 1,
-        ChannelKind::Fluid => 2,
-        ChannelKind::Energy => 3,
-    }
+/// The item of a housing of `tier` (brought into 1–4).
+pub fn item_of_tier(tier: u8) -> String {
+    let tier = tier.clamp(TIERS.first, TIERS.last);
+    TIERS.item(tier).unwrap_or_else(|| BLOCK.to_owned())
 }
 
-fn kind_of(code: u8) -> Option<ChannelKind> {
-    match code {
-        1 => Some(ChannelKind::Item),
-        2 => Some(ChannelKind::Fluid),
-        3 => Some(ChannelKind::Energy),
-        _ => None,
-    }
-}
-
-/// The four slots as four bytes, the form the housing saves.
-pub fn encode(housing: &Housing) -> [u8; SLOTS] {
-    housing.slots.map(|slot| match slot {
-        None => EMPTY,
-        Some(c) => kind_code(c.kind) * KIND_STEP + c.tier.clamp(1, MAX_TIER),
-    })
-}
-
-/// The housing `encode` wrote. A byte it does not know reads as an empty slot, and missing
-/// bytes too, so a damaged save loses a channel instead of the housing.
-pub fn decode(bytes: &[u8]) -> Housing {
-    let mut housing = Housing::default();
-    for (slot, &byte) in housing.slots.iter_mut().zip(bytes) {
-        let tier = byte % KIND_STEP;
-        *slot = kind_of(byte / KIND_STEP)
-            .filter(|_| tier >= 1)
-            .map(|kind| Channel { kind, tier });
-    }
-    housing
-}
-
-/// M2: the housing with `channel` in its first free slot, and that slot; none when all four
-/// are taken.
-pub fn insert(housing: Housing, channel: Channel) -> Option<(Housing, usize)> {
-    let slot = housing.slots.iter().position(Option::is_none)?;
-    let mut next = housing;
-    next.slots[slot] = Some(channel);
-    Some((next, slot))
-}
-
-/// What a click with `channel` does to a housing (M2, U4): a channel of a higher tier takes the
-/// place of the first channel of its kind with a lower tier, which comes back (the slot keeps its
-/// joint settings, U3); otherwise it goes into the first free slot (M2). The housing after it,
-/// the slot, and the channel that came out; none when all four slots are taken by others.
-pub fn put(housing: Housing, channel: Channel) -> Option<(Housing, usize, Option<Channel>)> {
-    let lower = housing
-        .slots
-        .iter()
-        .position(|s| s.is_some_and(|c| c.kind == channel.kind && c.tier < channel.tier));
-    if let Some(slot) = lower {
-        let mut next = housing;
-        let old = next.slots[slot].replace(channel);
-        return Some((next, slot, old));
-    }
-    insert(housing, channel).map(|(h, slot)| (h, slot, None))
-}
-
-/// The wrench: the housing without its last channel (the highest slot that holds one), that
-/// slot and the channel; none when the housing is empty.
-pub fn remove_last(housing: Housing) -> Option<(Housing, usize, Channel)> {
-    let slot = housing.slots.iter().rposition(Option::is_some)?;
-    let channel = housing.slots[slot]?;
-    let mut next = housing;
-    next.slots[slot] = None;
-    Some((next, slot, channel))
-}
-
-/// What one slot of a working housing does.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum SlotState {
-    Empty,
-    /// A channel and the number of housings its channel net joins (M3), this one included.
-    Channel {
-        kind: ChannelKind,
-        tier: u8,
-        net_len: usize,
-    },
+/// U2 for housings: a housing of tier `held` clicked on one of tier `placed` takes its place only
+/// when it is higher; the answer is the tier that comes back to the hand.
+pub fn swap(placed: u8, held: u8) -> Option<u8> {
+    tiers::upgrade(placed, held).then_some(placed)
 }
 
 /// What a housing shows when a player looks at it.
@@ -105,12 +34,15 @@ pub enum Diagnosis {
     /// N3: «Дальше предела узла», `distance` blocks of pipe from the best node, which serves `limit`.
     TooFar { distance: u32, limit: u32 },
     /// The housing works: `distance` blocks of pipe from its node, which serves `limit`; its line
-    /// has `line_len` housings.
+    /// has `line_len` housings. It is of `tier`; its channels' nets join `net_len` housings and
+    /// carry at `net_tier`, the tier of their weakest housing (M10).
     Works {
         distance: u32,
         limit: u32,
         line_len: usize,
-        slots: [SlotState; SLOTS],
+        tier: u8,
+        net_len: usize,
+        net_tier: u8,
     },
 }
 
@@ -128,21 +60,15 @@ pub fn diagnose(topology: &Topology, layout: &Layout, pos: Pos) -> Option<Diagno
             let line_len = topology
                 .line_of(pos)
                 .map_or(1, |line| topology.lines[line].len());
-            let slots = std::array::from_fn(|slot| match housing.slots[slot] {
-                None => SlotState::Empty,
-                Some(c) => SlotState::Channel {
-                    kind: c.kind,
-                    tier: c.tier,
-                    net_len: topology
-                        .net_of(pos, slot)
-                        .map_or(1, |net| net.housings.len()),
-                },
-            });
+            // Every channel of a housing is on a net of the same housings (round 31).
+            let net = topology.net_of_kind(pos, ChannelKind::Item);
             Diagnosis::Works {
                 distance,
                 limit,
                 line_len,
-                slots,
+                tier: housing.tier,
+                net_len: net.map_or(1, |n| n.housings.len()),
+                net_tier: net.map_or(housing.tier, |n| n.min_tier),
             }
         }
     })
@@ -231,137 +157,17 @@ pub fn whole_block(block: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::net::topology::{Node, analyse};
+    use crate::net::topology::{Housing, Node, analyse};
     use crate::tuning::Tuning;
-
-    fn channel(kind: ChannelKind) -> Channel {
-        Channel { kind, tier: 1 }
-    }
-
-    #[test]
-    fn a_higher_tier_channel_takes_the_place_of_a_lower_one() {
-        // U4: a tier-2 item channel replaces the tier-1 one in its slot; the old one comes back.
-        let h = Housing {
-            slots: [
-                Some(channel(ChannelKind::Energy)),
-                Some(channel(ChannelKind::Item)),
-                None,
-                None,
-            ],
-        };
-        let two = Channel {
-            kind: ChannelKind::Item,
-            tier: 2,
-        };
-        let (h, slot, old) = put(h, two).unwrap();
-        assert_eq!((slot, old), (1, Some(channel(ChannelKind::Item))));
-        assert_eq!(h.slots[1], Some(two));
-        // The same tier again, or a lower one, goes into a free slot (M2).
-        let (h, slot, old) = put(h, two).unwrap();
-        assert_eq!((slot, old), (2, None));
-        let (h, slot, old) = put(h, channel(ChannelKind::Item)).unwrap();
-        assert_eq!((slot, old), (3, None));
-        // All four taken, nothing lower of its kind: no room.
-        assert_eq!(put(h, channel(ChannelKind::Fluid)), None);
-        let three = Channel {
-            kind: ChannelKind::Energy,
-            tier: 3,
-        };
-        let (_, slot, old) = put(h, three).unwrap();
-        assert_eq!((slot, old), (0, Some(channel(ChannelKind::Energy))));
-    }
-
-    #[test]
-    fn slots_survive_a_save() {
-        let housing = Housing {
-            slots: [
-                Some(channel(ChannelKind::Item)),
-                None,
-                Some(Channel {
-                    kind: ChannelKind::Energy,
-                    tier: 3,
-                }),
-                Some(channel(ChannelKind::Fluid)),
-            ],
-        };
-        assert_eq!(decode(&encode(&housing)), housing);
-    }
-
-    #[test]
-    fn a_damaged_save_reads_as_empty_slots() {
-        assert_eq!(decode(&[]), Housing::default());
-        // Unknown kind 9, a tier of 0, then one good item channel; the fifth byte is ignored.
-        let housing = decode(&[9 * KIND_STEP + 1, KIND_STEP, KIND_STEP + 2, 0, 17]);
-        assert_eq!(housing.slots[0], None);
-        assert_eq!(housing.slots[1], None);
-        assert_eq!(
-            housing.slots[2],
-            Some(Channel {
-                kind: ChannelKind::Item,
-                tier: 2
-            })
-        );
-    }
-
-    #[test]
-    fn a_channel_takes_the_first_free_slot() {
-        // M2: any mix of kinds, in click order.
-        let mut housing = Housing::default();
-        let kinds = [
-            ChannelKind::Item,
-            ChannelKind::Item,
-            ChannelKind::Fluid,
-            ChannelKind::Energy,
-        ];
-        for (expected, kind) in kinds.into_iter().enumerate() {
-            let (next, slot) = insert(housing, channel(kind)).unwrap();
-            assert_eq!(slot, expected);
-            housing = next;
-        }
-        assert_eq!(insert(housing, channel(ChannelKind::Item)), None);
-    }
-
-    #[test]
-    fn a_freed_slot_is_filled_first() {
-        let housing = Housing {
-            slots: [
-                Some(channel(ChannelKind::Item)),
-                None,
-                Some(channel(ChannelKind::Fluid)),
-                None,
-            ],
-        };
-        assert_eq!(insert(housing, channel(ChannelKind::Energy)).unwrap().1, 1);
-    }
-
-    #[test]
-    fn the_wrench_takes_the_last_channel() {
-        let housing = Housing {
-            slots: [
-                Some(channel(ChannelKind::Item)),
-                None,
-                Some(channel(ChannelKind::Fluid)),
-                None,
-            ],
-        };
-        let (next, slot, taken) = remove_last(housing).unwrap();
-        assert_eq!((slot, taken.kind), (2, ChannelKind::Fluid));
-        let (next, slot, _) = remove_last(next).unwrap();
-        assert_eq!(slot, 0);
-        assert_eq!(remove_last(next), None);
-    }
 
     #[test]
     fn diagnoses_follow_the_node_rules() {
         let mut layout = Layout::default();
         layout.nodes.insert([0, 0, 0], Node { tier: 1 });
         for x in 1..=33 {
-            layout.housings.insert(
-                [x, 0, 0],
-                Housing {
-                    slots: [Some(channel(ChannelKind::Item)), None, None, None],
-                },
-            );
+            // Tier 2 but for the tenth housing: it holds the net back.
+            let tier = if x == 10 { 1 } else { 2 };
+            layout.housings.insert([x, 0, 0], Housing::new(tier));
         }
         // A lone housing far away: no node on its line.
         layout.housings.insert([0, 10, 0], Housing::default());
@@ -378,26 +184,32 @@ mod tests {
             Some(Diagnosis::NoNode)
         );
         assert_eq!(diagnose(&topology, &layout, [5, 5, 5]), None);
-        let Some(Diagnosis::Works {
-            distance,
-            limit,
-            line_len,
-            slots,
-        }) = diagnose(&topology, &layout, [2, 0, 0])
-        else {
-            panic!("the housing two blocks from the node works");
-        };
-        assert_eq!((distance, limit, line_len), (2, 32, 33));
-        // The item net stops at the 32nd housing: the 33rd is beyond range (N3).
+        // The net stops at the 32nd housing: the 33rd is beyond range (N3).
         assert_eq!(
-            slots[0],
-            SlotState::Channel {
-                kind: ChannelKind::Item,
-                tier: 1,
-                net_len: 32
-            }
+            diagnose(&topology, &layout, [2, 0, 0]),
+            Some(Diagnosis::Works {
+                distance: 2,
+                limit: 32,
+                line_len: 33,
+                tier: 2,
+                net_len: 32,
+                net_tier: 1,
+            })
         );
-        assert_eq!(slots[1], SlotState::Empty);
+    }
+
+    #[test]
+    fn each_housing_item_places_its_own_tier() {
+        assert_eq!(TIERS.tier_of("rustcraft:housing"), Some(1));
+        assert_eq!(TIERS.tier_of("rustcraft:housing_4"), Some(4));
+        assert_eq!(TIERS.tier_of("rustcraft:node_2"), None);
+        assert!(tiers::family_of_block(BLOCK).is_none());
+        for tier in 1..=4 {
+            assert_eq!(TIERS.tier_of(&item_of_tier(tier)), Some(tier));
+        }
+        assert_eq!(item_of_tier(0), "rustcraft:housing");
+        assert_eq!(item_of_tier(9), "rustcraft:housing_4");
+        assert_eq!((swap(1, 3), swap(2, 2), swap(3, 2)), (Some(1), None, None));
     }
 
     #[test]

@@ -3,12 +3,11 @@
 //! (E2), the fuel generator burning for a furnace, the alloy smelter, the crusher, the
 //! autocrafter's pattern, and a station's buffer filling.
 
-use super::magistral::{channel, line};
+use super::magistral::line;
 use super::{Bench, Build, Memo, Scenario, at, count_of, expect, near, plot_area, same};
 use crate::geom::Pos;
 use crate::machines::alloy::AlloyRecipe;
 use crate::machines::windows::crafter::CELL_BUTTON;
-use crate::net::topology::ChannelKind;
 use crate::tuning::Tuning;
 
 pub const ALL: [Build; 7] = [
@@ -118,13 +117,7 @@ fn furnace_through_a_channel(o: Pos, t: &Tuning) -> Scenario {
         .then(
             "build two crystals and a furnace on an energy net",
             move |b, m| {
-                line(
-                    b,
-                    o,
-                    1,
-                    6,
-                    [channel(ChannelKind::Energy, 1), None, None, None],
-                )?;
+                line(b, o, 1, 6, 1)?;
                 b.place(at(o, [1, 0, -1]), CRYSTAL, &[])?;
                 b.place(at(o, [1, 0, 1]), CRYSTAL, &[])?;
                 b.place(furnace, FURNACE, &[])?;

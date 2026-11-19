@@ -170,34 +170,19 @@ pub fn joint_faces(housing: Pos, layout: &Layout, blocks: &BTreeSet<Pos>) -> Vec
 mod tests {
     use super::*;
     use crate::net::settings::Edit;
-    use crate::net::topology::{Channel, ChannelKind, Housing, Node, analyse};
+    use crate::net::topology::{ChannelKind, ENERGY_SLOT, Housing, ITEM_SLOT, Node, analyse};
     use crate::tuning::Tuning;
-
-    fn channel(kind: ChannelKind) -> Option<Channel> {
-        Some(Channel { kind, tier: 1 })
-    }
 
     fn none() -> BTreeMap<Pos, HousingJoints> {
         BTreeMap::new()
     }
 
-    /// A node at x=0, then housings at x=1..=3 with an item channel in slot 0 and an energy
-    /// channel in slot 1.
+    /// A node at x=0, then housings at x=1..=3.
     fn line() -> Layout {
         let mut layout = Layout::default();
         layout.nodes.insert([0, 0, 0], Node { tier: 1 });
         for x in 1..=3 {
-            layout.housings.insert(
-                [x, 0, 0],
-                Housing {
-                    slots: [
-                        channel(ChannelKind::Item),
-                        channel(ChannelKind::Energy),
-                        None,
-                        None,
-                    ],
-                },
-            );
+            layout.housings.insert([x, 0, 0], Housing::default());
         }
         layout
     }
@@ -207,7 +192,7 @@ mod tests {
         // M7: a chest above the first housing, a furnace at the end of the line.
         let layout = line();
         let topology = analyse(&layout, &Tuning::default());
-        let net = topology.net_of([1, 0, 0], 0).unwrap();
+        let net = topology.net_of([1, 0, 0], ITEM_SLOT).unwrap();
         let chest: Pos = [1, 1, 0];
         let furnace: Pos = [4, 0, 0];
         let inventories = BTreeMap::from([
@@ -234,7 +219,7 @@ mod tests {
         // The node at x=0 is in `inventories` by mistake: it is pipe, so no joint.
         let layout = line();
         let topology = analyse(&layout, &Tuning::default());
-        let net = topology.net_of([2, 0, 0], 0).unwrap();
+        let net = topology.net_of([2, 0, 0], ITEM_SLOT).unwrap();
         let inventories = BTreeMap::from([([0, 0, 0], Mode::Into), ([2, 0, 0], Mode::Into)]);
         assert!(item_joints(net, &layout, &inventories, &none()).is_empty());
     }
@@ -243,20 +228,15 @@ mod tests {
     fn a_block_touched_by_two_housings_has_two_joints() {
         let layout = line();
         let topology = analyse(&layout, &Tuning::default());
-        let net = topology.net_of([1, 0, 0], 0).unwrap();
+        let net = topology.net_of([1, 0, 0], ITEM_SLOT).unwrap();
         // Below housings 2 and 3 there is one block each; a block at (2,-1,0) touches only one.
         let inventories = BTreeMap::from([([2, 0, 1], Mode::Into)]);
         assert_eq!(item_joints(net, &layout, &inventories, &none()).len(), 1);
         // A block in a corner between two housings of an L touches both.
         let mut layout = line();
-        layout.housings.insert(
-            [3, 0, 1],
-            Housing {
-                slots: [channel(ChannelKind::Item), None, None, None],
-            },
-        );
+        layout.housings.insert([3, 0, 1], Housing::default());
         let topology = analyse(&layout, &Tuning::default());
-        let net = topology.net_of([1, 0, 0], 0).unwrap();
+        let net = topology.net_of([1, 0, 0], ITEM_SLOT).unwrap();
         let corner = BTreeMap::from([([2, 0, 1], Mode::Into)]);
         assert_eq!(item_joints(net, &layout, &corner, &none()).len(), 2);
     }
@@ -265,7 +245,7 @@ mod tests {
     fn energy_ports_are_the_sources_and_machines_touching_the_net() {
         let layout = line();
         let topology = analyse(&layout, &Tuning::default());
-        let energy = topology.net_of([1, 0, 0], 1).unwrap();
+        let energy = topology.net_of([1, 0, 0], ENERGY_SLOT).unwrap();
         assert_eq!(energy.kind, ChannelKind::Energy);
         let crystal: Pos = [2, -1, 0];
         let furnace: Pos = [4, 0, 0];
@@ -280,11 +260,11 @@ mod tests {
     #[test]
     fn a_housings_setting_for_its_face_and_slot_wins_over_the_blocks_default() {
         // M7: the chest above housing 1 is «в блок» by default; its housing says «из блока»
-        // with a white list and priority 2 for slot 0, and something else for slot 1 and for
-        // its other faces, which the item net of slot 0 never reads.
+        // with a white list and priority 2 for the item slot, and something else for the energy
+        // slot and for its other faces, which the item net never reads.
         let layout = line();
         let topology = analyse(&layout, &Tuning::default());
-        let net = topology.net_of([1, 0, 0], 0).unwrap();
+        let net = topology.net_of([1, 0, 0], ITEM_SLOT).unwrap();
         let chest: Pos = [1, 1, 0];
         let wanted = JointSetting::of_mode(Mode::Into)
             .apply(&Edit::NextMode)
@@ -295,9 +275,9 @@ mod tests {
         let settings = BTreeMap::from([(
             [1, 0, 0],
             HousingJoints::default()
-                .with(Face::YPos, 0, wanted.clone())
-                .with(Face::YPos, 1, off.clone())
-                .with(Face::ZPos, 0, off),
+                .with(Face::YPos, ITEM_SLOT, wanted.clone())
+                .with(Face::YPos, ENERGY_SLOT, off.clone())
+                .with(Face::ZPos, ITEM_SLOT, off),
         )]);
         let inventories = BTreeMap::from([(chest, Mode::Into), ([2, 1, 0], Mode::Into)]);
         let joints = item_joints(net, &layout, &inventories, &settings);
@@ -328,7 +308,7 @@ mod tests {
         // machine from the circuit; with no setting both work (ENERGY_DEFAULT).
         let layout = line();
         let topology = analyse(&layout, &Tuning::default());
-        let energy = topology.net_of([1, 0, 0], 1).unwrap();
+        let energy = topology.net_of([1, 0, 0], ENERGY_SLOT).unwrap();
         let furnace: Pos = [4, 0, 0];
         let crystal: Pos = [2, -1, 0];
         let other_crystal: Pos = [1, -1, 0];
@@ -343,13 +323,13 @@ mod tests {
         let settings = BTreeMap::from([
             (
                 [2, 0, 0],
-                HousingJoints::default().with(Face::YNeg, 1, into.clone()),
+                HousingJoints::default().with(Face::YNeg, ENERGY_SLOT, into.clone()),
             ),
             (
                 [3, 0, 0],
-                HousingJoints::default().with(Face::XPos, 1, into).with(
+                HousingJoints::default().with(Face::XPos, ENERGY_SLOT, into).with(
                     Face::YPos,
-                    1,
+                    ENERGY_SLOT,
                     JointSetting::of_mode(Mode::Off),
                 ),
             ),

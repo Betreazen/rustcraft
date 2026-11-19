@@ -259,7 +259,7 @@ class Skin:
         self.colors = []
 
     def color(self, mat):
-        return self.tints.get(mat, COLORS[mat])
+        return self.tints[mat] if mat in self.tints else COLORS[mat]
 
     def slot(self, mat):
         """(page key, uv) of the material's cell."""
@@ -461,31 +461,86 @@ class Writer:
 # The housing's arms by side of the model, and the Minecraft side each one points to.
 ARMS = {'x+': 'east', 'x-': 'west', 'y+': 'south', 'y-': 'north', 'z+': 'up', 'z-': 'down'}
 BLOCK = 'minecraft:block/block'
+# The bottleneck's frame the client draws round a housing while the wrench is in hand
+# (rustcraft_pipe18): twelve edges 0.75 pixel thick round the cage, tinted red by the client.
+WEAK_LO, WEAK_HI, WEAK_T = 4.25, 11.75, 0.75
 
 
 def housing(out, report):
+    """Round 31: the housing's blockstate and models. Its three channels are built in and run in its
+    arms, from the middle of the block to each joined side, so they follow the line whichever way
+    it turns (a housing joined to nothing shows them along x); its tier, 1 to 4, colours its corner
+    caps and the collars of its arms, as the node's tier colours its pips. The client draws no strip
+    of its own: a housing shows its channels as soon as its block is there."""
     boxes = read(transport.pipe)
-    skin = Skin('housing')
+    tints = {'tint_%d' % t: TIER[t] for t in range(1, 5)}
+    skin = Skin('housing', tints)
     stats = {}
     by_part = {}
     for b in boxes:
         by_part.setdefault(b[0], []).append(b)
-    # Fix the palette over all parts first, so every part's model reads the same texture.
+
+    def tiered(part_boxes, tier):
+        return [(p, 'tint_%d' % tier if mat == 'tint' else mat, lo, hi, rot) for p, mat, lo, hi, rot in part_boxes]
+
+    # Fix the palette over all parts and tiers first, so every model reads the same texture.
     for b in boxes:
-        skin.slot(b[1])
-    models = {'housing_core': by_part['body']}
-    models.update(('housing_arm_' + side, by_part[arm]) for arm, side in ARMS.items())
+        if b[1] != 'tint':
+            skin.slot(b[1])
+    for t in range(1, 5):
+        skin.slot('tint_%d' % t)
+    models = {}
+    for t in range(1, 5):
+        models['housing_core_%d' % t] = tiered(by_part['body'], t)
+        # An arm with its collar in one model, so the collar hides the ends of the arm's beams.
+        for arm, side in ARMS.items():
+            models['housing_arm_%s_%d' % (side, t)] = tiered(by_part[arm] + by_part['collar_' + arm], t)
+    models['housing_channels'] = by_part['ch_x']
     for name, part_boxes in models.items():
         out.text('models/block/%s.json' % name, model_json(skin.textures(), elements(part_boxes, skin, stats)))
-    # In the inventory: a straight piece, the core with its east and west arms.
-    inventory = by_part['body'] + by_part['x-'] + by_part['x+']
-    out.text('models/block/housing_inventory.json', model_json(skin.textures(), elements(inventory, skin, stats), BLOCK))
+    # In the inventory: a straight piece of the item's tier, its channels along it.
+    for t in range(1, 5):
+        piece = by_part['body'] + by_part['x-'] + by_part['collar_x-'] + by_part['x+'] + by_part['collar_x+']
+        name = 'housing_inventory' if t == 1 else 'housing_inventory_%d' % t
+        out.text('models/block/%s.json' % name, model_json(skin.textures(), elements(tiered(piece, t), skin, stats), BLOCK))
     out.skin(skin)
-    parts = [{'apply': {'model': 'rustcraft:block/housing_core'}}]
-    for side in ('north', 'east', 'south', 'west', 'up', 'down'):
-        parts.append({'when': {side: 'true'}, 'apply': {'model': 'rustcraft:block/housing_arm_' + side}})
+    out.text('models/block/housing_weak.json', weak_frame())
+    sides = ('north', 'east', 'south', 'west', 'up', 'down')
+    parts = []
+    for t in range(1, 5):
+        parts.append({'when': {'tier': str(t)}, 'apply': {'model': 'rustcraft:block/housing_core_%d' % t}})
+    for side in sides:
+        for t in range(1, 5):
+            parts.append({'when': {side: 'true', 'tier': str(t)},
+                          'apply': {'model': 'rustcraft:block/housing_arm_%s_%d' % (side, t)}})
+    parts.append({'when': {s: 'false' for s in sides}, 'apply': {'model': 'rustcraft:block/housing_channels'}})
     out.text('blockstates/housing.json', '{\n  "multipart": [\n%s\n  ]\n}\n' % ',\n'.join('    ' + json.dumps(p) for p in parts))
-    report.append(('pipe', 'housing_core, housing_arm_<side> x6, housing_inventory', stats))
+    for t in range(2, 5):
+        out.text('items/housing_%d.json' % t,
+                 '{\n  "model": { "type": "minecraft:model", "model": "rustcraft:block/housing_inventory_%d" }\n}\n' % t)
+    report.append(('pipe', 'housing_core_<tier> x4, housing_arm_<side>_<tier> x24, housing_channels, '
+                   'housing_inventory x4, housing_weak', stats))
+
+
+def weak_frame():
+    """The bottleneck frame: the twelve edges of a box round the cage, white for the client's tint."""
+    lo, hi, t = WEAK_LO, WEAK_HI, WEAK_T
+    edges = []
+    for axis in range(3):
+        for a in (lo, hi - t):
+            for b in (lo, hi - t):
+                start, end = [0.0] * 3, [0.0] * 3
+                others = [i for i in range(3) if i != axis]
+                start[axis], end[axis] = lo, hi
+                start[others[0]], end[others[0]] = a, a + t
+                start[others[1]], end[others[1]] = b, b + t
+                edges.append((start, end))
+    face = {'uv': [0, 0, 2, 2], 'texture': '#s', 'tintindex': 0}
+    elements = [{'from': [num(v) for v in s], 'to': [num(v) for v in e], 'shade': False,
+                 'faces': {f: dict(face) for f in ('down', 'up', 'north', 'south', 'west', 'east')}}
+                for s, e in edges]
+    textures = {'particle': 'minecraft:block/white_concrete', 's': 'minecraft:block/white_concrete'}
+    return json.dumps({'textures': textures, 'elements': elements}, indent=1) + '\n'
 
 
 def node(out, report):

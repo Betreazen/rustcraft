@@ -7,7 +7,7 @@
 //!   item remembers the cell and the loot table, and the archaeology table brushes it and tells
 //!   Path-of-craft-tree `brush` (ST5: it is a block found in the world).
 
-use super::magistral::{channel, line};
+use super::magistral::line;
 use super::slice15::{
     CELL, COBBLE, CRAFTER, FILL, IRON, PISTON, PLANKS, TERMINAL, held, holds, machine, parts_for,
     put_book, terminal_at,
@@ -16,7 +16,6 @@ use super::transport::{chest, fill, joint};
 use super::{Bench, Build, Scenario, at, count_of, plot_area, same};
 use crate::geom::Pos;
 use crate::net::items::Mode;
-use crate::net::topology::ChannelKind;
 use crate::orders::ship::{Route, trip_ticks};
 use crate::tuning::Tuning;
 use crate::utility::found::Lift;
@@ -49,17 +48,11 @@ fn trip(tier: u8, t: &Tuning) -> u64 {
     trip_ticks(PARTS, &route, t.ticks_per_second)
 }
 
-/// A node of tier 3 and LEN housings with an item channel of `tier`, a chest «из блока» at
+/// A node of tier 3 and LEN housings of `tier`, a chest «из блока» at
 /// housing 1 with the parts of a piston, a storage of four cells with its terminal at housings 3
 /// to 5, as slice 15 builds it.
 fn long_line(b: &mut dyn Bench, o: Pos, tier: u8) -> Result<(), String> {
-    line(
-        b,
-        o,
-        SMART,
-        LEN,
-        [channel(ChannelKind::Item, tier), None, None, None],
-    )?;
+    line(b, o, SMART, LEN, tier)?;
     b.place(chest(o, 1), "minecraft:chest", &[])?;
     joint(b, o, 1, Mode::From, 0)?;
     for c in [[3, 0, 1], [4, 0, 1], [3, 0, 2], [4, 0, 2]] {

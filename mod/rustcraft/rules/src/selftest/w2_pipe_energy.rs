@@ -1,9 +1,8 @@
 //! Slice 18, wave 2: the magistral's and the energy's leftovers of the second audit
 //! (docs/superpowers/plans/s18-w2-pipe-energy.md).
 
-use super::magistral::{channel, line};
+use super::magistral::line;
 use super::{Build, Scenario, at, count_of, expect, plot_area};
-use crate::net::topology::ChannelKind;
 use crate::geom::Pos;
 use crate::tuning::Tuning;
 
@@ -59,7 +58,7 @@ fn energy_channel_caps_all_its_passes(o: Pos, t: &Tuning) -> Scenario {
     let want = expect::working_shown(expect::share(supply, request));
     Scenario::new("w2_energy_channel_caps_all_its_passes", plot_area(o))
         .then("a generator, a charged battery and five furnaces on a tier-1 energy net", move |b, _| {
-            line(b, o, 1, 6, [channel(ChannelKind::Energy, 1), None, None, None])?;
+            line(b, o, 1, 6, 1)?;
             b.place(generator, "rustcraft:gen_fuel", &[])?;
             let fuel = b.inputs(generator).first().copied().ok_or("no fuel slot")?;
             b.put(generator, fuel, "minecraft:coal", 16)?;
@@ -104,7 +103,7 @@ fn windmill_blades_where_the_rotor_turns(o: Pos, _t: &Tuning) -> Scenario {
 fn broken_node_gives_back(o: Pos, _t: &Tuning) -> Scenario {
     Scenario::new("w2_broken_node_gives_back_facade_look_and_modules", plot_area(o))
         .then("a node with two line-boost modules, hidden as bricks", move |b, _| {
-            line(b, o, 1, 1, [channel(ChannelKind::Item, 1), None, None, None])?;
+            line(b, o, 1, 1, 1)?;
             for i in 0..2 {
                 b.pipe(&format!("socket:{i}"), o)?;
             }
@@ -118,12 +117,12 @@ fn broken_node_gives_back(o: Pos, _t: &Tuning) -> Scenario {
 }
 
 /// Guide `facade`, `housing`: a housing under a facade that goes without a player (an explosion,
-/// a command) drops its facade and the block of its look with its channels at the next rescan.
+/// a command) drops its facade and the block of its look at the next rescan.
 fn lost_housing_drops_its_facade(o: Pos, _t: &Tuning) -> Scenario {
     let h = at(o, [1, 0, 0]);
     Scenario::new("w2_lost_housing_drops_its_facade_and_look", plot_area(o))
-        .then("a housing with a channel, hidden as bricks", move |b, _| {
-            line(b, o, 1, 1, [channel(ChannelKind::Item, 1), None, None, None])?;
+        .then("a housing hidden as bricks", move |b, _| {
+            line(b, o, 1, 1, 1)?;
             b.pipe("cover:minecraft:bricks", h)?;
             b.refresh();
             Ok(())
@@ -134,11 +133,15 @@ fn lost_housing_drops_its_facade(o: Pos, _t: &Tuning) -> Scenario {
             b.refresh();
             Ok(())
         })
-        .until("its facade, the bricks and its channel lie where it stood", 100, move |b, _| {
+        .until("its facade and the bricks lie where it stood", 100, move |b, _| {
             let c = h.map(f64::from);
             let lying = b.lying([c[0] - 1.0, c[1] - 1.0, c[2] - 1.0], [c[0] + 2.0, c[1] + 2.0, c[2] + 2.0]);
             let has = |item: &str| lying.iter().any(|(i, n)| i == item && *n >= 1);
-            Ok(has("rustcraft:facade") && has("minecraft:bricks") && has("rustcraft:item_channel"))
+            // Round 31: its channels are built in, so none of them lies there.
+            if lying.iter().any(|(i, _)| i.contains("channel")) {
+                return Err(format!("a channel item dropped: {lying:?}"));
+            }
+            Ok(has("rustcraft:facade") && has("minecraft:bricks"))
         })
 }
 
@@ -149,7 +152,7 @@ fn node_window_shows_what_is_stored(o: Pos, t: &Tuning) -> Scenario {
     let capacity = crate::power::battery(1, &[], t).capacity;
     Scenario::new("w2_node_window_shows_what_is_stored", plot_area(o))
         .then("a node, an energy line and a charged battery on it", move |b, _| {
-            line(b, o, 1, 3, [channel(ChannelKind::Energy, 1), None, None, None])?;
+            line(b, o, 1, 3, 1)?;
             b.place(battery, "rustcraft:battery", &[])?;
             b.set_buffer(battery, 5_000.0)?;
             b.refresh();
@@ -195,7 +198,6 @@ fn miner_with_chest_and_magistral(o: Pos, _t: &Tuning) -> Scenario {
             for k in [1, 2] {
                 let h = at(m, [0, 0, -k]);
                 b.place(h, super::magistral::HOUSING, &[])?;
-                b.set_channels(h, [channel(ChannelKind::Item, 1), None, None, None])?;
             }
             b.place(net_chest, "minecraft:chest", &[])?;
             ores_under(b, &ores)?;

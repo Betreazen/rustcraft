@@ -138,22 +138,21 @@ fn projector_says_no_storage(o: Pos, _: &Tuning) -> Scenario {
 }
 
 fn kitchen_milk_through_a_channel(o: Pos, _: &Tuning) -> Scenario {
-    use super::magistral::{channel, line};
+    use super::magistral::line;
     use crate::geom::Face;
     use crate::machines::sheet::Press;
     use crate::net::items::Mode;
     use crate::net::settings::JointSetting;
-    use crate::net::topology::ChannelKind;
     let tank = at(o, [1, 0, -1]);
     let p = at(o, [4, 0, -1]);
     Scenario::new("w2_kitchen_milk_through_a_channel", plot_area(o))
         .then("a fluid line from a tank of milk (its joint gives) to a kitchen", move |b, _| {
-            line(b, o, 1, 4, [channel(ChannelKind::Fluid, 1), None, None, None])?;
+            line(b, o, 1, 4, 1)?;
             b.place(tank, "rustcraft:tank", &[])?;
             b.set_tank(tank, "rustcraft:milk", 3000)?;
             b.place(p, "rustcraft:kitchen", &[])?;
             b.set_buffer(p, 400.0)?;
-            b.set_joint(at(o, [1, 0, 0]), Face::ZNeg, 0, JointSetting::of_mode(Mode::From))?;
+            b.set_joint(at(o, [1, 0, 0]), Face::ZNeg, crate::net::topology::FLUID_SLOT, JointSetting::of_mode(Mode::From))?;
             b.put(p, 0, "minecraft:sugar", 2)?;
             b.put(p, 1, "minecraft:egg", 1)?;
             b.put(p, 2, "minecraft:wheat", 3)
@@ -190,11 +189,10 @@ fn terminal_marks_the_extra_cell(o: Pos, _: &Tuning) -> Scenario {
 }
 
 fn portal_dock_sends_fluid_to_its_pair(o: Pos, _: &Tuning) -> Scenario {
-    use super::magistral::{channel, line};
+    use super::magistral::line;
     use crate::geom::Face;
     use crate::net::items::Mode;
     use crate::net::settings::JointSetting;
-    use crate::net::topology::ChannelKind;
     const DOCK: &str = "rustcraft:portal_dock";
     const TANK: &str = "rustcraft:tank";
     const WATER: &str = "minecraft:water";
@@ -222,10 +220,10 @@ fn portal_dock_sends_fluid_to_its_pair(o: Pos, _: &Tuning) -> Scenario {
             b.pair_docks(a, b2)
         })
         .then("a tank of water behind a giving joint on the first dock's fluid line", move |b, _| {
-            line(b, at(o, [-1, 1, -1]), 1, 3, [channel(ChannelKind::Fluid, 1), None, None, None])?;
+            line(b, at(o, [-1, 1, -1]), 1, 3, 1)?;
             b.place(from, TANK, &[])?;
             b.set_tank(from, WATER, 5000)?;
-            b.set_joint(at(o, [0, 1, -1]), Face::ZNeg, 0, JointSetting::of_mode(Mode::From))?;
+            b.set_joint(at(o, [0, 1, -1]), Face::ZNeg, crate::net::topology::FLUID_SLOT, JointSetting::of_mode(Mode::From))?;
             b.place(to, TANK, &[])
         })
         .until("the water is in the tank by the other dock", 400, move |b, _| {

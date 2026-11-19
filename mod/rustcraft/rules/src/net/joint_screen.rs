@@ -1,5 +1,6 @@
 //! s18/pipe: the joint window drawn as the guide's table (ui.js `wrench`, «Стык: Электропечь»):
-//! a row per slot of the housing with «Гнездо / Канал / Направление / Фильтр / Приоритет» and
+//! a row per channel of the housing (round 31: its three built-in channels, items, fluid and
+//! energy) with «Гнездо / Канал / Направление / Фильтр / Приоритет» and
 //! «Скопировать настройки / Вставить» under it. It is a screen of the mod's own, as the node's
 //! window is (`node_window`): the server sends the view of one face (`JointView`), the client
 //! draws it and sends back what was pressed (`Press`), the server turns a press into the same
@@ -200,13 +201,14 @@ pub fn mode_of(row: &ViewRow) -> Mode {
 pub type Rect = [f32; 4];
 
 pub const WIDTH: f32 = 354.0;
-pub const HEIGHT: f32 = 172.0;
+/// Round 31: three rows, one a built-in channel (it had four slots).
+pub const HEIGHT: f32 = 152.0;
 const LEFT: f32 = 8.0;
 /// The face tabs under the title.
 pub const TABS_Y: f32 = 18.0;
 const TAB_H: f32 = 12.0;
 const TAB_GAP: f32 = 2.0;
-/// The table's head and its four rows.
+/// The table's head and its rows.
 pub const HEAD_Y: f32 = 36.0;
 pub const ROWS_Y: f32 = 47.0;
 pub const ROW_H: f32 = 20.0;
@@ -319,7 +321,8 @@ mod tests {
     use crate::net::joint_window::Row;
     use crate::net::settings::JointSetting;
 
-    /// The guide's example: «Стык: Электропечь», items into the machine, energy, items out, empty.
+    /// The guide's example: «Стык: Электропечь», items into the machine on a white list, no fluid
+    /// there, energy «из блока».
     fn page() -> Page {
         let mut joints = [false; 6];
         joints[usize::from(Face::YPos.index())] = true;
@@ -333,9 +336,8 @@ mod tests {
             selected: Face::YPos,
             rows: [
                 row(Some(ChannelKind::Item), true),
+                row(Some(ChannelKind::Fluid), false),
                 row(Some(ChannelKind::Energy), true),
-                row(Some(ChannelKind::Item), true),
-                row(None, false),
             ],
             settings,
             armed: None,
@@ -353,8 +355,8 @@ mod tests {
         assert_eq!(v.rows[0].items, vec!["minecraft:raw_iron".to_owned()]);
         assert_eq!(mode_of(&v.rows[0]), Mode::Into);
         assert_eq!(mode_of(&v.rows[2]), Mode::From);
-        assert!(v.rows[1].directed() && !v.rows[1].filtered(), "energy: a direction, no filter");
-        assert!(!v.rows[3].directed(), "an empty slot: only dashes");
+        assert!(v.rows[2].directed() && !v.rows[2].filtered(), "energy: a direction, no filter");
+        assert!(!v.rows[1].directed(), "no fluid at a furnace: only dashes");
     }
 
     #[test]
@@ -364,11 +366,12 @@ mod tests {
         assert_eq!(action(&p, &Press::Face(Face::XNeg.index()), None), Action::None, "no joint there");
         assert_eq!(action(&p, &Press::Face(9), None), Action::None);
         assert_eq!(
-            action(&p, &Press::Mode { slot: 1, back: true }, None),
-            Action::Edit { slot: 1, edit: Edit::PreviousMode }
+            action(&p, &Press::Mode { slot: 2, back: true }, None),
+            Action::Edit { slot: 2, edit: Edit::PreviousMode }
         );
-        assert_eq!(action(&p, &Press::Mode { slot: 3, back: false }, None), Action::None);
-        assert_eq!(action(&p, &Press::List { slot: 1 }, None), Action::None, "energy has no filter");
+        assert_eq!(action(&p, &Press::Mode { slot: 1, back: false }, None), Action::None);
+        assert_eq!(action(&p, &Press::Mode { slot: SLOTS, back: false }, None), Action::None);
+        assert_eq!(action(&p, &Press::List { slot: 2 }, None), Action::None, "energy has no filter");
         assert_eq!(
             action(&p, &Press::Priority { slot: 0, delta: 5 }, None),
             Action::Edit { slot: 0, edit: Edit::Priority(1) },
@@ -397,10 +400,10 @@ mod tests {
             "not on the filter"
         );
         let mut fluid = page();
-        fluid.rows[2].kind = Some(ChannelKind::Fluid);
+        fluid.rows[1].here = true;
         assert_eq!(
-            action(&fluid, &Press::Add { slot: 2 }, Some("minecraft:lava_bucket")),
-            Action::Edit { slot: 2, edit: Edit::AddItem("minecraft:lava".into()) }
+            action(&fluid, &Press::Add { slot: 1 }, Some("minecraft:lava_bucket")),
+            Action::Edit { slot: 1, edit: Edit::AddItem("minecraft:lava".into()) }
         );
         let mut full = page();
         for i in ["a:1", "a:2"] {
@@ -416,7 +419,7 @@ mod tests {
         assert_eq!(press_at(&v, mid(tab_rects()[usize::from(Face::XPos.index())]), false), Some(Press::Face(Face::XPos.index())));
         assert_eq!(press_at(&v, mid(tab_rects()[usize::from(Face::XNeg.index())]), false), None);
         assert_eq!(press_at(&v, mid(mode_rect(0)), true), Some(Press::Mode { slot: 0, back: true }));
-        assert_eq!(press_at(&v, mid(list_rect(1)), false), None, "energy has no list");
+        assert_eq!(press_at(&v, mid(list_rect(2)), false), None, "energy has no list");
         assert_eq!(press_at(&v, mid(list_rect(0)), false), Some(Press::List { slot: 0 }));
         let first = item_at(0, 0);
         assert_eq!(
@@ -424,10 +427,10 @@ mod tests {
             Some(Press::Remove { slot: 0, item: "minecraft:raw_iron".into() })
         );
         assert_eq!(press_at(&v, mid(add_rect(0)), false), Some(Press::Add { slot: 0 }));
-        let [down, up] = priority_rects(2);
-        assert_eq!(press_at(&v, mid(down), false), Some(Press::Priority { slot: 2, delta: -1 }));
-        assert_eq!(press_at(&v, mid(up), false), Some(Press::Priority { slot: 2, delta: 1 }));
-        assert_eq!(press_at(&v, mid(mode_rect(3)), false), None, "an empty slot");
+        let [down, up] = priority_rects(0);
+        assert_eq!(press_at(&v, mid(down), false), Some(Press::Priority { slot: 0, delta: -1 }));
+        assert_eq!(press_at(&v, mid(up), false), Some(Press::Priority { slot: 0, delta: 1 }));
+        assert_eq!(press_at(&v, mid(mode_rect(1)), false), None, "no fluid here");
         assert_eq!(press_at(&v, mid(COPY), false), Some(Press::Copy));
         assert_eq!(press_at(&v, mid(PASTE), false), None);
         v.clipboard = true;

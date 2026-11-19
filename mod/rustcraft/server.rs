@@ -1,12 +1,13 @@
-// Server half of RustCraft. It keeps each level's magistral in memory (housings with their
-// slots and joint settings, nodes with their tiers, crystals and machines), rebuilt from the
-// block entities whenever something may have changed; puts a channel into a housing when a
-// player clicks it with one (M2) and takes the last one out with the wrench and sneaking. Every
-// tick it powers and runs the machines (rustcraft_machines) and answers the joint windows
-// (rustcraft_window), every few ticks it moves items along the item nets (rustcraft_transport)
-// and fluids along the fluid nets (rustcraft_fluids), and once a second it shows each player the
-// diagnosis of the housing, machine, storage, tank or joint they look at. The storages
-// (rustcraft_storage) are read again with the magistral and saved when they change.
+// Server half of RustCraft. It keeps each level's magistral in memory (housings with their tiers
+// and joint settings, nodes with their tiers, crystals and machines), rebuilt from the block
+// entities whenever something may have changed. Round 31: the three channels are built into every
+// housing; a housing saved by 0.19 with channels set by hand gets them built in when its level is
+// read (rustcraft_rules::net::migrate). Every tick it powers and runs the machines
+// (rustcraft_machines) and answers the joint windows (rustcraft_window), every few ticks it moves
+// items along the item nets (rustcraft_transport) and fluids along the fluid nets
+// (rustcraft_fluids), and once a second it shows each player the diagnosis of the housing,
+// machine, storage, tank or joint they look at. The storages (rustcraft_storage) are read again
+// with the magistral and saved when they change.
 //
 // Every helper here reads the level in place: inside a player's hook it is that player's
 // (`native_acting_player`, SRC/crates/horizon-client/src/game/native_server.rs:656-661), in
@@ -29,12 +30,13 @@ use horizon_client::{
 use horizon_world::nbt::{Compound, JavaString, Tag};
 use rustcraft_rules::{
     geom::{Face, Pos, step},
-    housing::{self, Diagnosis, SlotState},
+    housing::{self, Diagnosis},
     machines::processor::Shown,
     net::{
         joints::Port,
+        migrate::{self, OldSlots},
         settings::HousingJoints,
-        topology::{self, Channel, ChannelKind, Housing, Layout, Node, Topology},
+        topology::{self, Housing, Layout, Node, Topology},
     },
     ray,
     tuning::Tuning,
@@ -59,12 +61,13 @@ const SEE_THROUGH: [&str; 5] = [
     "minecraft:water",
     "minecraft:lava",
 ];
-/// The housing's saved compound keeps its four slots under this key, as housing::encode's bytes.
-const SLOTS_KEY: &str = "slots";
+/// Round 31: a housing saved by 0.19 kept the channels set into its four slots under this key
+/// (rustcraft_rules::net::migrate's bytes); a housing without it has its channels built in.
+const OLD_SLOTS_KEY: &str = "slots";
 /// `NativeServerPlayer::game_mode` of creative and spectator.
 const CREATIVE: i32 = 1;
 const SPECTATOR: i32 = 3;
-/// Channels the slice makes are all of the first tier; tiers come with recipes.
+/// A node or a housing whose state names no tier is of the first.
 const FIRST_TIER: u8 = 1;
 
 /// One level's magistral and machines as the server last read them.
@@ -149,18 +152,29 @@ fn mark_stale(dimension: &str) {
         .stale = true;
 }
 
-pub(super) fn read_slots(nbt: &Compound) -> Housing {
-    match nbt.get(&JavaString::from(SLOTS_KEY)) {
-        Some(Tag::ByteArray(bytes)) => housing::decode(bytes),
-        _ => Housing::default(),
+/// Round 31: the channels a housing saved by 0.19 held in its four slots, if it is one.
+pub(super) fn old_slots(nbt: &Compound) -> Option<OldSlots> {
+    match nbt.get(&JavaString::from(OLD_SLOTS_KEY)) {
+        Some(Tag::ByteArray(bytes)) => Some(migrate::decode(bytes)),
+        _ => None,
     }
 }
 
-pub(super) fn write_slots(nbt: &mut Compound, housing: &Housing) {
+/// Round 31: a housing written as 0.19 saved it (the self-test's old housings).
+pub(super) fn write_old_slots(nbt: &mut Compound, slots: &OldSlots) {
     nbt.insert(
-        JavaString::from(SLOTS_KEY),
-        Tag::ByteArray(housing::encode(housing).to_vec()),
+        JavaString::from(OLD_SLOTS_KEY),
+        Tag::ByteArray(migrate::encode(slots).to_vec()),
     );
+}
+
+/// The housing at `pos` as its state says: of the tier its `tier` names, the first without one.
+pub(super) fn housing_at(game: &Game<'_>, pos: Pos) -> Housing {
+    let tier = game
+        .native_block_property(pos, content::TIER)
+        .and_then(|tier| tier.parse().ok())
+        .unwrap_or(FIRST_TIER);
+    Housing::new(tier)
 }
 
 /// A translated line: `key` from the content mod's lang files, `fallback` (English) without them.
@@ -364,8 +378,9 @@ pub(super) fn rescan_now(game: &mut Game<'_>, dimension: &str) {
     s.levels.insert(dimension.to_owned(), level);
 }
 
-/// `native_use_item_on`: a channel clicked on a housing goes into its first free slot (M2) and
-/// leaves the hand; the wrench with sneaking takes the housing off with its channels (s18/pipe).
+/// `native_use_item_on`: the wrench with sneaking takes the housing off as its tier's item
+/// (s18/pipe); round 31: a housing of a higher tier clicked on a housing takes its place
+/// (rustcraft_pipe18).
 pub(super) fn on_use_item_on(
     game: &mut Game<'_>,
     stack: &ItemStack,
@@ -402,23 +417,15 @@ pub(super) fn on_use_item_on(
             return;
         }
     }
-    let channel = content::channel_of(item);
-    if *claimed || (channel.is_none() && item != content::WRENCH) {
-        return;
-    }
-    if game.native_block(pos) != content::HOUSING {
+    if *claimed || item != content::WRENCH || game.native_block(pos) != content::HOUSING {
         return;
     }
     // None outside a player's hook on a server: a client predicting its own click does nothing.
     let Some(player) = acting(game) else {
         return;
     };
-    if let Some(channel) = channel {
-        *claimed = true;
-        put_channel(game, &player, pos, channel);
-    } else if item == content::WRENCH && player.sneaking {
-        // s18/pipe (guide `facade`): after the facade, the sneaking wrench takes the housing itself,
-        // its channels with it; it no longer takes one channel out.
+    if player.sneaking {
+        // s18/pipe (guide `facade`): after the facade, the sneaking wrench takes the housing itself.
         *claimed = true;
         crate::game::rustcraft_pipe18::lift_housing(game, &player, pos);
     }
@@ -512,6 +519,8 @@ pub(super) fn on_place_block(game: &mut Game<'_>, stack: &ItemStack, pos: [i32; 
     crate::game::rustcraft_utility::on_placed(game, pos);
     // s18/pipe: a machine lifted by the wrench gets its contents back.
     crate::game::rustcraft_pipe18::on_place_block(game, stack, pos);
+    // Round 31: a housing of a higher tier placed takes its item's tier.
+    crate::game::rustcraft_pipe18::housing_placed(game, stack, pos);
     let Some(player) = acting(game) else {
         mark_all_stale();
         return;
@@ -540,9 +549,9 @@ pub(super) fn on_place_block(game: &mut Game<'_>, stack: &ItemStack, pos: [i32; 
 }
 
 /// `native_destroy_block`: one of our blocks, or a block beside a housing, broken changes the
-/// magistral or its joints; a housing broken in survival gives its channels to the player (the
-/// engine drops only the block's loot and removes the block entity with what it held), and a
-/// vanilla container's slice-2 joint mode goes with it.
+/// magistral or its joints; a housing broken in survival gives its facade to the player (the
+/// engine drops only the block's loot, its own tier's item, and removes the block entity with what
+/// it held), and a vanilla container's slice-2 joint mode goes with it.
 pub(super) fn on_destroy_block(game: &mut Game<'_>, pos: [i32; 3]) {
     let block = game.native_block(pos);
     let Some(player) = acting(game) else {
@@ -604,12 +613,10 @@ pub(super) fn on_destroy_block(game: &mut Game<'_>, pos: [i32; 3]) {
     if block != content::HOUSING || player.game_mode == CREATIVE {
         return;
     }
-    let Some(held) =
-        crate::game::rustcraft_machines::entity(game, pos).map(|entity| read_slots(&entity.nbt))
-    else {
-        return;
-    };
-    for channel in held.slots.into_iter().flatten() {
+    // Round 31: a housing of 0.19 broken before its level was read again still holds the
+    // channels set into it: they come back as they did.
+    let old = crate::game::rustcraft_machines::entity(game, pos).and_then(|entity| old_slots(&entity.nbt));
+    for channel in old.into_iter().flatten().flatten() {
         let item = content::channel_item(channel.kind, channel.tier);
         if game.native_give_items(item, 1) == 0 {
             drop_item(game, &player.dimension, pos, item);
@@ -660,6 +667,10 @@ fn rescan(game: &mut Game<'_>, dimension: &str, level: &mut LevelNet) {
         .collect();
     monorail::rescan(game, dimension, &found.rails, &stations);
     zipline::rescan(game, dimension, &found.anchors);
+    if !found.old_housings.is_empty() {
+        migrate_old(game, dimension, level, &found.old_housings);
+        level.joints = window::all_joints(game, level.layout.housings.keys().copied());
+    }
     level.topology = topology::analyse(&level.layout, &TUNING);
     // Slice 18 (S6): extra terminals anywhere on the storage's magistral.
     storage::link_far_terminals(game, dimension, &level.topology);
@@ -708,10 +719,13 @@ struct Found {
     rails: Vec<Pos>,
     /// The zipline's anchors.
     anchors: Vec<Pos>,
+    /// Round 31: the housings saved by 0.19, with the channels set into their slots.
+    old_housings: BTreeMap<Pos, OldSlots>,
 }
 
 /// The magistral and the machines of the level in place, from its block entities: each
-/// housing's slots and joint settings from its saved compound, each node's tier from its state.
+/// housing's tier and each node's from its state, each housing's joint settings from its saved
+/// compound, and the housings 0.19 saved with their channels set by hand.
 fn scan(game: &Game<'_>, dimension: &str, level: &mut LevelNet) -> Found {
     let mut found = Found {
         cells: BTreeSet::new(),
@@ -719,6 +733,7 @@ fn scan(game: &Game<'_>, dimension: &str, level: &mut LevelNet) -> Found {
         tanks: BTreeSet::new(),
         rails: Vec::new(),
         anchors: Vec::new(),
+        old_housings: BTreeMap::new(),
     };
     let mut layout = Layout::default();
     level.crystals.clear();
@@ -727,10 +742,12 @@ fn scan(game: &Game<'_>, dimension: &str, level: &mut LevelNet) -> Found {
     // A mod block's entry is named after its block (native_diagnostics.rs:76-88, 207-218).
     for (pos, kind) in game.native_level_block_entities(dimension) {
         if kind == content::HOUSING {
-            let slots = crate::game::rustcraft_machines::entity(game, pos)
-                .map(|entity| read_slots(&entity.nbt))
-                .unwrap_or_default();
-            layout.housings.insert(pos, slots);
+            if let Some(old) =
+                crate::game::rustcraft_machines::entity(game, pos).and_then(|e| old_slots(&e.nbt))
+            {
+                found.old_housings.insert(pos, old);
+            }
+            layout.housings.insert(pos, housing_at(game, pos));
         } else if kind == content::NODE {
             let tier = game
                 .native_block_property(pos, content::TIER)
@@ -760,48 +777,49 @@ fn scan(game: &Game<'_>, dimension: &str, level: &mut LevelNet) -> Found {
     found
 }
 
-/// M2 and U4: the channel goes into the first free slot, or takes the place of a channel of its
-/// kind with a lower tier, which comes back to the player.
-fn put_channel(game: &mut Game<'_>, player: &NativeServerPlayer, pos: Pos, channel: Channel) {
-    let kind = channel.kind;
-    // None: no block entity there; Some(None): all four slots taken.
-    let placed = game.native_with_mod_block_entity(pos, |entity| {
-        let (next, slot, old) = housing::put(read_slots(&entity.nbt), channel)?;
-        write_slots(&mut entity.nbt, &next);
-        Some((slot, old))
-    });
-    match placed {
-        None => crate::game::rustcraft_debug::journal_warn!("rustcraft: the housing at {pos:?} has no block entity"),
-        Some(None) => tell(
-            game,
-            player.uuid,
-            line("rustcraft.housing.full", "All four slots are taken", &[]),
-        ),
-        Some(Some((slot, old))) => {
-            if player.game_mode != CREATIVE {
-                game.native_take_items(content::channel_item(kind, channel.tier), 1);
-                if let Some(old) = old {
-                    let item = content::channel_item(old.kind, old.tier);
-                    if game.native_give_items(item, 1) == 0 {
-                        drop_item(game, &player.dimension, pos, item);
-                    }
-                }
-            }
-            mark_stale(&player.dimension);
-            let text = match old {
-                Some(old) => line(
-                    "rustcraft.housing.channel_swapped",
-                    "%s took the place of tier %s in slot %s",
-                    &[kind_name(kind), number(old.tier), number(slot + 1)],
-                ),
-                None => line(
-                    "rustcraft.housing.channel_set",
-                    "%s went into slot %s",
-                    &[kind_name(kind), number(slot + 1)],
-                ),
-            };
-            tell(game, player.uuid, text);
+/// Round 31: the housings 0.19 saved (`old`, with the channels set into their slots) get all three
+/// channels built in (rustcraft_rules::net::migrate): each takes the tier of its best channel, its
+/// joints' settings move with their kind to the kind's slot, and its old slots go. A housing that
+/// does not take its tier stays as it was, for the next read of the level.
+fn migrate_old(
+    game: &mut Game<'_>,
+    dimension: &str,
+    level: &mut LevelNet,
+    old: &BTreeMap<Pos, OldSlots>,
+) {
+    let plans = migrate::plan(old, &level.layout, &TUNING);
+    for (pos, plan) in plans {
+        let tier = plan.tier.to_string();
+        let has = game.native_block_property(pos, content::TIER);
+        if has.as_deref() != Some(tier.as_str())
+            && !game.native_set_block_property(pos, content::TIER, &tier)
+        {
+            crate::game::rustcraft_debug::journal_warn!("rustcraft: the old housing at {pos:?} did not take tier {tier}");
+            continue;
         }
+        let moved = game.native_with_mod_block_entity(pos, |e| {
+            let records = window::read_records(&e.nbt);
+            let moved = migrate::remap(&records, &plan);
+            window::write_records(&mut e.nbt, &moved);
+            e.nbt.remove(&JavaString::from(OLD_SLOTS_KEY));
+            (records.len(), moved.len())
+        });
+        let Some((had, kept)) = moved else {
+            crate::game::rustcraft_debug::journal_warn!("rustcraft: the old housing at {pos:?} has no block entity");
+            continue;
+        };
+        game.native_block_entity_sync(pos);
+        level.layout.housings.insert(pos, Housing::new(plan.tier));
+        crate::game::rustcraft_debug::record(
+            Some(dimension),
+            Some(pos),
+            "housing updated",
+            &format!(
+                "the channels it held, {:?}, built in at tier {}; joint settings {had} -> {kept}",
+                old.get(&pos),
+                plan.tier
+            ),
+        );
     }
 }
 
@@ -962,22 +980,6 @@ fn looked_at(game: &Game<'_>, player: &NativeServerPlayer) -> Option<(Pos, Strin
     None
 }
 
-fn kind_name(kind: ChannelKind) -> Text {
-    match kind {
-        ChannelKind::Item => line("rustcraft.channel.item", "Item channel", &[]),
-        ChannelKind::Fluid => line("rustcraft.channel.fluid", "Fluid channel", &[]),
-        ChannelKind::Energy => line("rustcraft.channel.energy", "Energy channel", &[]),
-    }
-}
-
-fn kind_short(kind: ChannelKind) -> Text {
-    match kind {
-        ChannelKind::Item => line("rustcraft.slot.item", "items", &[]),
-        ChannelKind::Fluid => line("rustcraft.slot.fluid", "fluid", &[]),
-        ChannelKind::Energy => line("rustcraft.slot.energy", "energy", &[]),
-    }
-}
-
 /// A machine's diagnosis (A4): «Работает», «Не хватает энергии: 50%», «Нет энергии»,
 /// «Готовое некуда отдать», «Нет сырья».
 fn machine_text(machine: Option<Machine>, shown: Shown) -> Text {
@@ -1030,31 +1032,29 @@ fn diagnosis_text(diagnosis: &Diagnosis) -> Text {
             distance,
             limit,
             line_len,
-            slots,
+            tier,
+            net_len,
+            net_tier,
         } => {
             let mut text = line(
                 "rustcraft.diagnosis.works",
-                "Line of %s · node %s of %s ·",
+                "Line of %s · node %s of %s",
                 &[number(line_len), number(distance), number(limit)],
             );
-            for (i, slot) in slots.iter().enumerate() {
-                text.push(Text::literal(" "));
-                text.push(slot_text(i + 1, *slot));
-            }
+            text.push(Text::literal(" · "));
+            text.push(line("rustcraft.diagnosis.tier", "tier %s", &[number(tier)]));
+            text.push(Text::literal(" · "));
+            // Round 31 (M10): a weaker housing on the net holds this one's channels back.
+            text.push(if net_tier < tier {
+                line(
+                    "rustcraft.diagnosis.net_held",
+                    "net of %s held to tier %s",
+                    &[number(net_len), number(net_tier)],
+                )
+            } else {
+                line("rustcraft.diagnosis.net", "net of %s", &[number(net_len)])
+            });
             text
         }
-    }
-}
-
-/// One slot of a working housing: «1: предметы ×12», the channel and how many housings its net
-/// joins (M3).
-fn slot_text(number_shown: usize, slot: SlotState) -> Text {
-    match slot {
-        SlotState::Empty => line("rustcraft.slot.empty", "%s: —", &[number(number_shown)]),
-        SlotState::Channel { kind, net_len, .. } => line(
-            "rustcraft.slot.channel",
-            "%s: %s ×%s",
-            &[number(number_shown), kind_short(kind), number(net_len)],
-        ),
     }
 }

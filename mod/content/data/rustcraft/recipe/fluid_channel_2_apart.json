@@ -1,0 +1,12 @@
+{
+  "type": "minecraft:crafting_shapeless",
+  "category": "misc",
+  "ingredients": [
+    "rustcraft:fluid_channel_2",
+    "rustcraft:fluid_channel_2"
+  ],
+  "result": {
+    "id": "rustcraft:sparksteel",
+    "count": 1
+  }
+}
