@@ -4,7 +4,8 @@
 //! (`slice15::build`), and the machine on the line keeps none of what it would not use.
 //!
 //! - The alloy smelter and the mixer take none of the gold, redstone, diamonds, shards, dust,
-//!   bone meal, sugar and glowstone that ride to the storage; a joint's allow list feeds them.
+//!   bone meal, sugar and glowstone that ride to the storage; a joint's allow list feeds the smelter,
+//!   the recipes turned on feed the mixer (0.21, spec 39).
 //! - A kitchen running an order's bread takes no more wheat than the order brought.
 //! - A feeder by two cows takes wheat, never the carrots and seeds that ride to the storage.
 //! - An apiary collector set to combs takes no glass bottles; set to honey it does.
@@ -126,18 +127,25 @@ fn alloy_and_mixer_leave_the_storage_traffic(o: Pos, _: &Tuning) -> Scenario {
             same("items in the mixer", total(&b.items(mixer)), 0)?;
             keeps_none(b, alloy, "smelter", &items)
         })
-        .then("the smelter's joint names gold, the mixer's bone meal; more of both in the chest", move |b, _| {
+        // 0.21 (spec 39, RT5): the mixer's recipes on, not a joint's list, choose what it takes.
+        .then("the smelter's joint names gold, the mixer's solution is on; more of all in the chest", move |b, _| {
             feed_joint(b, o, 3, &[GOLD])?;
-            feed_joint(b, o, 4, &[BONE_MEAL])?;
+            b.press(mixer, Press::Toggle(0).id(), None)?;
             fill(b, chest(o, 1), GOLD, 4)?;
             fill(b, chest(o, 1), BONE_MEAL, 4)?;
-            fill(b, chest(o, 1), REDSTONE, 4)
+            fill(b, chest(o, 1), REDSTONE, 4)?;
+            fill(b, chest(o, 1), SUGAR, 4)
         })
         .until("the smelter takes gold and the mixer bone meal", TAKE, move |b, _| {
             Ok(count_of(&b.items(alloy), GOLD) > 0 && count_of(&b.items(mixer), BONE_MEAL) > 0)
         })
-        .until("the redstone reaches the storage", TAKE, move |b, _| Ok(held(b, o, REDSTONE)? == 12))
-        .check("the smelter took no redstone", move |b, _| keeps_none(b, alloy, "smelter", &[REDSTONE]))
+        .until("the redstone and the sugar reach the storage", TAKE, move |b, _| {
+            Ok(held(b, o, REDSTONE)? == 12 && held(b, o, SUGAR)? == 8)
+        })
+        .check("the smelter took no redstone, the mixer nothing of the accelerator", move |b, _| {
+            keeps_none(b, alloy, "smelter", &[REDSTONE])?;
+            keeps_none(b, mixer, "mixer", &[REDSTONE, SUGAR, GLOWSTONE])
+        })
 }
 
 fn kitchen_leaves_an_orders_dish_to_its_order(o: Pos, _: &Tuning) -> Scenario {

@@ -126,9 +126,9 @@ impl Util {
             Util::Charger => s("rustcraft:charger", 1000.0, 128.0, 0, 2),
             Util::ChargePlate => s("rustcraft:charge_plate", 1000.0, 256.0, 0, 2),
             Util::Repair => s("rustcraft:repair", 400.0, 32.0, 0, 2),
-            // Slice 18: a toggle a page, its rows (the page's dish and what it takes, the milk in
+            // 0.21 (spec 39): a toggle a dish, all in one row; its rows (the dish it cooks, the milk in
             // the tank: a line, not a bar, so the window fits 240 pixels).
-            Util::Kitchen => s("rustcraft:kitchen", 400.0, 16.0, kitchen::PAGES_MAX, 2),
+            Util::Kitchen => s("rustcraft:kitchen", 400.0, 16.0, KITCHEN_RECIPES.len(), 2),
             // Slice 18: its rows: the water; the rod and the wait (18 catch slots leave room for
             // two in 240 pixels).
             Util::Fishery => s("rustcraft:fishery", 200.0, 8.0, 0, 2),

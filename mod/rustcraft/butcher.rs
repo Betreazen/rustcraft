@@ -488,6 +488,7 @@ pub(super) fn sheet(game: &Game<'_>, dimension: &str, pos: Pos, t: &Tuning, s: &
                     ],
                 )),
                 on: counts[i] > k,
+                active: false,
                 hint: base::v(&line(
                     "rustcraft.butcher.animal_hint",
                     "Click: keep one more (%s to %s)",

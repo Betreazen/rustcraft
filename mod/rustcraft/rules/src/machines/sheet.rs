@@ -107,7 +107,13 @@ pub struct Shape {
     /// 0.21 (spec 46, LP7): the shown slots on the toggles' row, right of them, instead of rows of
     /// their own (the turret's loot beside its target chips: the window keeps to 240 pixels).
     pub beside: bool,
+    /// 0.21 (spec 39, RT1): the toggles on the lead row after the work arrow, not on a row of
+    /// their own: the mixer's recipes, its ingredients → the arrow → what it makes.
+    pub toggles_aside: bool,
 }
+
+/// 0.21 (spec 39): the mixer's recipe toggles the window has room for after its arrow.
+pub const MIXER_TOGGLES: usize = 5;
 
 impl Shape {
     /// The menu slots shown, in order.
@@ -250,6 +256,7 @@ impl Kind {
             // cells), its three input slots.
             // Slice 18, wave 2 (`ui.js` mixer): its three ingredient slots and the work arrow
             // after them; one line, its pace (and its queue cells).
+            // 0.21 (spec 39, RT1): its recipes' toggles after the arrow, one a recipe.
             Kind::Mixer => Shape {
                 sockets,
                 mode: true,
@@ -258,6 +265,8 @@ impl Kind {
                 slots: 3,
                 lead: 3,
                 work: true,
+                toggles: MIXER_TOGGLES,
+                toggles_aside: true,
                 ..Shape::default()
             },
             Kind::DockLoad => Shape {
@@ -336,6 +345,9 @@ pub struct Toggle {
     pub icon: String,
     pub name: Value,
     pub on: bool,
+    /// 0.21 (spec 39, RT4): the recipe the machine makes now, outlined in the «работает» colour.
+    #[serde(default)]
+    pub active: bool,
     pub hint: Value,
 }
 
@@ -512,7 +524,7 @@ pub fn layout(shape: Shape) -> Layout {
     let shown = shape.shown_range();
     // 0.21 (spec 46): the slots right of the toggles, on their row, centred on it.
     let beside = shape.beside && shape.toggles > 0;
-    if shape.toggles > 0 {
+    if shape.toggles > 0 && !shape.toggles_aside {
         out.toggles = (0..shape.toggles)
             .map(|i| [LEFT + (TOGGLE + TOGGLE_GAP) * i as f32, y, TOGGLE, TOGGLE])
             .collect();
@@ -540,7 +552,16 @@ pub fn layout(shape: Shape) -> Layout {
             x += WORK_W + 4.0;
         }
         out.preview = (0..shape.preview).map(|k| [x + 1.0 + 18.0 * k as f32, y + 1.0]).collect();
-        y += 18.0 + 2.0;
+        if shape.toggles_aside {
+            // 0.21 (spec 39): the recipes after the arrow, each toggle a pixel over and under
+            // the cells beside it.
+            out.toggles = (0..shape.toggles)
+                .map(|i| [x + (TOGGLE + TOGGLE_GAP) * i as f32, y, TOGGLE, TOGGLE])
+                .collect();
+            y += TOGGLE + TOGGLE_GAP;
+        } else {
+            y += 18.0 + 2.0;
+        }
     }
     let rest = if beside { 0 } else { shown.len() - lead };
     if rest > 0 {
@@ -800,6 +821,23 @@ mod tests {
             assert!(f[0] >= chips[0] + chips[2], "right of the chips: {f:?}");
             assert!(f[1] >= chips[1] && f[1] + f[3] <= chips[1] + chips[3], "on their row: {f:?}");
         }
+    }
+
+    #[test]
+    fn the_mixers_recipes_follow_its_arrow_and_the_kitchens_dishes_are_one_row() {
+        // 0.21 (spec 39, RT1): ingredients → the arrow → the recipes; the kitchen's seven dishes
+        // side by side where its four pages were.
+        let l = layout(Kind::Mixer.shape());
+        let arrow = l.work.expect("the arrow");
+        assert_eq!(l.toggles.len(), MIXER_TOGGLES);
+        for t in &l.toggles {
+            assert!(t[0] >= arrow[0] + arrow[2], "{t:?}");
+            assert!(t[1] <= arrow[1] && t[1] + t[3] >= arrow[1] + arrow[3], "{t:?}");
+        }
+        assert_eq!(press_at(&l, [l.toggles[1][0] + 5.0, l.toggles[1][1] + 5.0]), Some(Press::Toggle(1)));
+        let kitchen = layout(Kind::Util(crate::utility::Util::Kitchen).shape());
+        assert_eq!(kitchen.toggles.len(), crate::utility::KITCHEN_RECIPES.len());
+        assert!(kitchen.toggles.iter().all(|t| t[1] == kitchen.toggles[0][1]));
     }
 
     #[test]

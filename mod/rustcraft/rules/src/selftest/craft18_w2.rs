@@ -164,11 +164,9 @@ fn kitchen_milk_through_a_channel(o: Pos, _: &Tuning) -> Scenario {
             b.put(p, 1, "minecraft:egg", 1)?;
             b.put(p, 2, "minecraft:wheat", 3)
         })
-        .then("the first page set to cake", move |b, _| {
-            for _ in 0..4 {
-                b.press_cursor(p, Press::Toggle(0).id(), None)?;
-            }
-            Ok(())
+        // 0.21 (spec 39): cake, the fourth dish, turned on.
+        .then("cake turned on", move |b, _| {
+            b.press_cursor(p, Press::Toggle(3).id(), None).map(|_| ())
         })
         .until("a cake in its output", 400, move |b, _| {
             Ok(b.items(p).iter().skip(9).flatten().any(|s| s.0 == "minecraft:cake"))

@@ -2032,6 +2032,7 @@ fn target_chips() -> Vec<rustcraft_rules::machines::sheet::Toggle> {
         icon: icon.to_owned(),
         name: v(&line(key, fallback, &[])),
         on,
+        active: false,
         hint: v(&fixed),
     })
     .collect()
@@ -2252,6 +2253,8 @@ pub(super) fn on_sheet_button(
         Press::Mode(mode) if kind.shape().mode => machines::write_work(&mut entity.nbt, mode),
         Press::Toggle(i) if kind == SheetKind::Miner => mining::toggle_ore(&mut entity.nbt, i),
         Press::Toggle(i) if kind == SheetKind::Butcher => butcher::step_keep(&mut entity.nbt, i),
+        // 0.21 (spec 39): a recipe of the mixer on or off.
+        Press::Toggle(i) if kind == SheetKind::Mixer => mixer::press(entity, i),
         _ => {}
     }
 }

@@ -48,6 +48,34 @@ pub enum Shown {
     NoWater,
     /// «Готовое некуда отдать»: the product tank is full or holds another fluid.
     Full,
+    /// 0.21 (spec 39, RT4): no recipe turned on in its window: «Включи рецепт в окне».
+    Off,
+}
+
+/// 0.21 (spec 39, RT1): the window's order of the mixer's recipes, by product: the solution
+/// first, then the catalysts; a fluid not named here comes after them, by its id.
+pub const ORDER: [&str; 4] = [
+    "rustcraft:solution",
+    "rustcraft:accelerator",
+    "rustcraft:economizer",
+    "rustcraft:enricher",
+];
+
+/// The recipes in the window's order ([`ORDER`]).
+pub fn ordered(mut recipes: Vec<MixRecipe>) -> Vec<MixRecipe> {
+    recipes.sort_by(|a, b| {
+        let rank = |r: &MixRecipe| ORDER.iter().position(|f| *f == r.fluid).unwrap_or(ORDER.len());
+        rank(a).cmp(&rank(b)).then_with(|| a.fluid.cmp(&b.fluid))
+    });
+    recipes
+}
+
+/// Each recipe's ingredients, as a set, in the recipes' order.
+pub fn ingredient_sets(recipes: &[MixRecipe]) -> Vec<std::collections::BTreeSet<String>> {
+    recipes
+        .iter()
+        .map(|r| r.ingredients.iter().map(|(i, _)| i.clone()).collect())
+        .collect()
 }
 
 /// The numbers one tick runs on: the tanks' size, E/s in normal mode, and the work and energy
@@ -273,6 +301,15 @@ mod tests {
             m.tick(&r, &mut slots, &s, 1.0);
         }
         assert!(m.product.is_some());
+    }
+
+    #[test]
+    fn the_window_lists_the_solution_first() {
+        let of = |fluid: &str| MixRecipe { fluid: fluid.into(), ..solution() };
+        let list = ordered(vec![of("rustcraft:enricher"), of("zzz:other"), of("aaa:other"), of(SOLUTION), of("rustcraft:accelerator")]);
+        let fluids: Vec<&str> = list.iter().map(|r| r.fluid.as_str()).collect();
+        assert_eq!(fluids, vec![SOLUTION, "rustcraft:accelerator", "rustcraft:enricher", "aaa:other", "zzz:other"]);
+        assert_eq!(ingredient_sets(&[solution()])[0].len(), 2);
     }
 
     #[test]

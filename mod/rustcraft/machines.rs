@@ -159,6 +159,9 @@ pub(super) fn load_recipes(game: &Game<'_>) -> MachineRecipes {
             None => warn_once(&recipe.id),
         }
     }
+    // 0.21 (spec 39): in the window's order, which its toggles and presses read too.
+    let mixing = rustcraft_rules::machines::mixer::ordered(mixing);
+    mixer::remember(&mixing);
     MachineRecipes {
         crushing,
         alloying: rustcraft_rules::machines::alloy::ordered(alloying),
@@ -625,7 +628,7 @@ pub(super) fn tick(game: &mut Game<'_>, level: &mut LevelNet, tuning: &Tuning) {
                 None
             }
             Unit::Mixer(h) => {
-                mixer::run(game, pos, h, share, &level.recipes, tuning);
+                mixer::run(game, pos, h, share, &level.recipes, &level.topology, ticks, tuning);
                 None
             }
         };
@@ -1206,9 +1209,10 @@ pub(super) fn net_takes(
         Some(Machine::Furnace) => intake::furnace_takes(item, true, net.kept_raw),
         Some(Machine::Generator) => intake::net_fuel(item, true),
         Some(Machine::Alloy) if slot == content::ALLOY_FUEL => intake::net_fuel(item, true),
-        // 0.21 (round 32): the smelter's and the mixer's ingredients only by a joint's allow list;
-        // orders bring their own.
-        Some(Machine::Alloy | Machine::Mixer) => intake::recipe_net_takes(net.filters, item),
+        // 0.21 (round 32): the smelter's ingredients only by a joint's allow list; orders bring
+        // their own. 0.21 (spec 39, RT5): the mixer's, those of its recipes turned on.
+        Some(Machine::Alloy) => intake::recipe_net_takes(net.filters, item),
+        Some(Machine::Mixer) => mixer::net_takes(entity, item),
         Some(Machine::Placer) => {
             let held: Vec<&str> = (0..content::BLOCK_SLOTS)
                 .filter_map(|i| entity.items.get(i).and_then(Option::as_ref))
@@ -1233,8 +1237,7 @@ pub(super) fn net_takes(
         // feeder its animals' food, the apiary bottles for honey, the vein the rock it grows from,
         // the portal dock what a joint names.
         Some(Machine::Util(Util::Kitchen)) => {
-            let (pages, usable) = crate::game::rustcraft_utility::kitchen_page_rule(entity);
-            rustcraft_rules::utility::kitchen::net_takes(&pages, usable, &accepts().cooking, item)
+            crate::game::rustcraft_utility::kitchen_net_takes(entity, &accepts().cooking, item)
         }
         Some(Machine::Util(Util::Feeder)) => {
             rustcraft_rules::utility::farm::feeder_net_takes(&crate::game::rustcraft_farm::eaten(entity), item)
@@ -1261,9 +1264,8 @@ fn util_wants(u: rustcraft_rules::utility::Util, entity: &ModBlockEntity, slot: 
     let a = accepts();
     match u {
         Util::Kitchen => {
-            let (pages, usable) = crate::game::rustcraft_utility::kitchen_page_rule(entity);
             let ordered = crate::game::rustcraft_orders::ordered_dishes();
-            rustcraft_rules::utility::kitchen::takes(&pages, usable, &a.cooking, &ordered, item)
+            crate::game::rustcraft_utility::kitchen_takes(entity, &a.cooking, &ordered, item)
         }
         Util::Charger => a.chargeable.contains(item),
         Util::Disintegrator => a.reversible.contains(item),

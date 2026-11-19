@@ -299,11 +299,9 @@ fn kitchen_cake_with_milk_from_a_tank(o: Pos, _: &Tuning) -> Scenario {
             b.put(p, 1, "minecraft:egg", 1)?;
             b.put(p, 2, "minecraft:wheat", 3)
         })
-        .then("the first page set to cake", move |b, _| {
-            for _ in 0..4 {
-                b.press_cursor(p, SheetPress::Toggle(0).id(), None)?;
-            }
-            Ok(())
+        // 0.21 (spec 39): cake, the fourth dish, turned on.
+        .then("cake turned on", move |b, _| {
+            b.press_cursor(p, SheetPress::Toggle(3).id(), None).map(|_| ())
         })
         .until("a cake in its output", 400, move |b, _| {
             Ok(b.items(p).iter().skip(9).flatten().any(|s| s.0 == "minecraft:cake"))
@@ -420,7 +418,7 @@ fn kitchen_takes_only_its_dishes(o: Pos, _: &Tuning) -> Scenario {
     use crate::machines::sheet::Press as SheetPress;
     let p = at(o, [3, 1, 0]);
     Scenario::new("kitchen185_takes_only_its_dishes", plot_area(o))
-        .then("a kitchen with no dish chosen", move |b, _| {
+        .then("a kitchen with no dish on", move |b, _| {
             b.place(at(o, [3, 0, 0]), "minecraft:stone", &[])?;
             b.place(p, "rustcraft:kitchen", &[])
         })
@@ -428,7 +426,7 @@ fn kitchen_takes_only_its_dishes(o: Pos, _: &Tuning) -> Scenario {
             same("ore", b.insert(p, "minecraft:raw_iron", 4)?, 0)?;
             same("wheat", b.insert(p, "minecraft:wheat", 3)?, 0)
         })
-        .then("its first page set to bread", move |b, _| {
+        .then("bread turned on, its first toggle", move |b, _| {
             b.press_cursor(p, SheetPress::Toggle(0).id(), None).map(|_| ())
         })
         .check("now wheat goes in, ore still not", move |b, _| {

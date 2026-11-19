@@ -93,6 +93,8 @@ pub mod s21_tanks;
 pub mod s21_catalyst;
 // 0.21 (spec 47): orders take any item of a tag.
 pub mod s21_tags;
+// 0.21 (spec 39): the mixer's and the kitchen's recipes turned on and off.
+pub mod s21_recipes;
 
 use std::collections::BTreeMap;
 
@@ -848,6 +850,8 @@ pub fn catalog() -> Vec<Build> {
     all.extend(s21_catalyst::ALL);
     // 0.21 (spec 47): orders take any item of a tag.
     all.extend(s21_tags::ALL);
+    // 0.21 (spec 39): the mixer's and the kitchen's recipes turned on and off.
+    all.extend(s21_recipes::ALL);
     all
 }
 

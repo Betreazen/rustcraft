@@ -17,6 +17,8 @@ pub mod processor;
 pub mod pump;
 pub mod sheet;
 pub mod queue;
+// 0.21 (spec 39): the mixer's and the kitchen's recipes turned on and off.
+pub mod recipes;
 pub mod slots;
 pub mod sockets;
 pub mod style;

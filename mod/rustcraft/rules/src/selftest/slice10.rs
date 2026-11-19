@@ -71,11 +71,12 @@ fn sheet(b: &dyn Bench, pos: Pos) -> Result<Sheet, String> {
 }
 
 /// A mixer at `pos` with bone meal for `batches` batches, and redstone the solution no longer
-/// takes (0.20).
+/// takes (0.20); 0.21 (spec 39): its solution recipe turned on in its window, the first toggle.
 fn mixer(b: &mut dyn Bench, pos: Pos, batches: u32) -> Result<(), String> {
     b.place(pos, MIXER, &[])?;
     b.put(pos, 0, BONE_MEAL, batches)?;
-    b.put(pos, 1, REDSTONE, batches)
+    b.put(pos, 1, REDSTONE, batches)?;
+    b.press(pos, Press::Toggle(0).id(), None)
 }
 
 fn mixer_makes_solution(o: Pos, _: &Tuning) -> Scenario {

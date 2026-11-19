@@ -124,6 +124,8 @@ fn mixer_gives_its_fluid_to_the_storage(o: Pos, _: &Tuning) -> Scenario {
                 machine(b, m, MIXER, true)?;
                 b.put(m, 0, BONE_MEAL, 2)?;
                 b.put(m, 1, REDSTONE, 2)?;
+                // 0.21 (spec 39): its solution recipe on.
+                b.press(m, crate::machines::sheet::Press::Toggle(0).id(), None)?;
                 for c in cells {
                     b.place(c, CELL, &[])?;
                 }
@@ -240,11 +242,9 @@ fn kitchen_takes_milk_from_the_storage(o: Pos, _: &Tuning) -> Scenario {
             b.put(p, 2, "minecraft:wheat", 3)
         })
         .until("4 buckets of milk in the storage's cells", 40, storage_with(cells[0], MILK, 4 * BUCKET))
-        .then("the first page set to cake", move |b, _| {
-            for _ in 0..4 {
-                b.press_cursor(p, Press::Toggle(0).id(), None)?;
-            }
-            Ok(())
+        // 0.21 (spec 39): cake, the fourth dish, turned on.
+        .then("cake turned on", move |b, _| {
+            b.press_cursor(p, Press::Toggle(3).id(), None).map(|_| ())
         })
         .until("a cake in its output", 400, move |b, _| {
             Ok(b.items(p).iter().skip(9).flatten().any(|s| s.0 == "minecraft:cake"))

@@ -353,7 +353,8 @@ fn bars(game: &Game<'_>, batch: &mut HudBatch, o: [f32; 2], l: &Layout, s: &Shee
 }
 
 /// The miner's ore toggles: a raised brass chip with the ore's icon when it is taken, a well with
-/// the icon veiled when it is left.
+/// the icon veiled when it is left. 0.21 (spec 39): the mixer's and the kitchen's recipes alike,
+/// the one it makes now outlined in the «работает» colour.
 fn toggles(game: &Game<'_>, batch: &mut HudBatch, o: [f32; 2], l: &Layout, s: &Sheet) {
     for (t, r) in s.toggles.iter().zip(&l.toggles) {
         let face = if t.on {
@@ -365,6 +366,9 @@ fn toggles(game: &Game<'_>, batch: &mut HudBatch, o: [f32; 2], l: &Layout, s: &S
         let at = [o[0] + r[0] + 2.0, o[1] + r[1] + 2.0];
         if game.native_item(batch, &t.icon, at, 16.0) && !t.on {
             game.native_fill(batch, [at[0], at[1], 16.0, 16.0], colour::GHOST);
+        }
+        if t.active {
+            kit::fills(game, batch, o, &style::outline(*r, kit::STATUS_OK));
         }
         kit::hover(game, batch, o, *r);
     }

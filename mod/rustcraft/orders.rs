@@ -1322,15 +1322,69 @@ fn take_back(
     }
 }
 
+/// The block entity's key of a machine's hidden input cells: the kitchen's own, the queue cells of
+/// the others' modules.
+fn hidden_key(machine: Machine) -> &'static str {
+    match machine {
+        Machine::Util(rustcraft_rules::utility::Util::Kitchen) => crate::game::rustcraft_utility::KITCHEN_CELLS_KEY,
+        _ => machines::QUEUE_KEY,
+    }
+}
+
+/// 0.21 (spec 39): the machines that take their recipes' ingredients from the storage themselves:
+/// the mixer and the kitchen.
+fn fetches_itself(machine: Machine) -> bool {
+    matches!(machine, Machine::Mixer | Machine::Util(rustcraft_rules::utility::Util::Kitchen))
+}
+
+/// 0.21 (spec 39, RT6): an order's job starts on a mixer or a kitchen: the plain stacks its inputs
+/// and hidden cells hold (what it took for its own recipes, what a hand or a hopper put in) go
+/// back to the storage `id`, and the job's items go in alone, so its end is counted as before.
+fn evict(game: &mut Game<'_>, dimension: &str, id: u32, machine: Machine, pos: Pos) {
+    let (inputs, _) = slots_of(machine);
+    let key = hidden_key(machine);
+    let Some(entity) = game.native_mod_block_entity(pos) else {
+        return;
+    };
+    let plain = |s: &horizon_client::items::ItemStack| s.count > 0 && s.damage == 0 && s.extra.is_none();
+    let back: Vec<usize> = inputs
+        .clone()
+        .filter(|i| entity.items.get(*i).and_then(Option::as_ref).is_some_and(plain))
+        .collect();
+    let mut gone: Vec<(ItemKey, u32)> = back
+        .iter()
+        .filter_map(|i| entity.items.get(*i).cloned().flatten())
+        .map(|s| (storage::net_key(&s), s.count))
+        .collect();
+    let cells: Vec<Slot> = crate::game::rustcraft_utility::read_json(&entity.nbt, key);
+    drop(entity);
+    gone.extend(cells.iter().flatten().cloned());
+    if gone.is_empty() {
+        return;
+    }
+    game.native_with_mod_block_entity(pos, |e| {
+        for i in &back {
+            if let Some(s) = e.items.get_mut(*i) {
+                *s = None;
+            }
+        }
+        if !cells.is_empty() {
+            crate::game::rustcraft_utility::write_json(&mut e.nbt, key, &Vec::<Slot>::new());
+        }
+    });
+    let route = format!("({}) -> storage#{id}, an order's job", rustcraft_rules::debug::pos_text(pos));
+    for (item, n) in gone {
+        storage::restore_into(dimension, id, &item, u64::from(n));
+        crate::game::rustcraft_debug::flow(dimension, &route, &item, u64::from(n));
+    }
+}
+
 /// What a machine still holds of each of the job's items: its inputs and its hidden cells (wave
 /// 2: the kitchen's, which a stack or capacity module fills from its slots; 0.21: the queue cells
 /// of the other machines' modules too). None when the machine is gone.
 fn job_items_left(game: &Game<'_>, machine: Machine, job: &Job) -> Option<BTreeMap<ItemKey, u64>> {
     let (inputs, _) = slots_of(machine);
-    let key = match machine {
-        Machine::Util(rustcraft_rules::utility::Util::Kitchen) => crate::game::rustcraft_utility::KITCHEN_CELLS_KEY,
-        _ => machines::QUEUE_KEY,
-    };
+    let key = hidden_key(machine);
     let hidden: Vec<Slot> = game
         .native_mod_block_entity(job.machine)
         .map(|e| crate::game::rustcraft_utility::read_json(&e.nbt, key))
@@ -2081,6 +2135,10 @@ fn storage_round(
         with_energy.insert(pos, is_powered);
         let idle = match machine {
             Machine::Crafter => !level.temp_pages.contains_key(&pos),
+            // 0.21 (spec 39, RT6): a mixer or a kitchen holds the ingredients it took for its
+            // recipes itself; it is free for an order all the same, and gives them back when the
+            // job starts (`evict`).
+            _ if fetches_itself(machine) => true,
             _ => read_slots(game, pos, slots_of(machine).0)
                 .is_some_and(|s| s.iter().all(Option::is_none)),
         };
@@ -2124,9 +2182,13 @@ fn storage_round(
                     return 0;
                 }
             }
-            let Some(slots) = read_slots(game, pos, slots_of(machine).0) else {
+            let Some(mut slots) = read_slots(game, pos, slots_of(machine).0) else {
                 return 0;
             };
+            // RT6: what it holds goes back before the job's items come.
+            if fetches_itself(machine) {
+                slots.iter_mut().for_each(|s| *s = None);
+            }
             let items = step.items();
             let sizes = stacks(game, &items);
             let size = |item: &str| sizes.get(item).copied().unwrap_or(machines::FALLBACK_STACK);
@@ -2153,6 +2215,9 @@ fn storage_round(
             route: route_of(level, Some(anchor), job.machine),
             ships: &mut *ships,
         };
+        if fetches_itself(machine) {
+            evict(game, dimension, id, machine, job.machine);
+        }
         let (sent, from_held) = deliver(game, dimension, level, held, &mut way, machine, &job);
         if sent == Sent::No {
             continue;

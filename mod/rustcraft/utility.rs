@@ -84,6 +84,9 @@ struct State {
     shown: HashMap<(String, Pos), Shown>,
     /// Slice 18: the milk (held, room) of the tank each kitchen and shearer touched last step.
     milk: HashMap<Pos, (u64, u64)>,
+    /// 0.21 (spec 39, RT4): the dish each kitchen cooks, or the first turned on when it lacks
+    /// ingredients, as its last step chose it.
+    dish: HashMap<(String, Pos), Option<String>>,
     seed: u64,
     /// The game's crafting recipes as the disintegrator reads them, made at the first need.
     recipes: Option<Vec<disassembly::Recipe>>,
@@ -1105,34 +1108,65 @@ fn take(slots: &mut [Option<ItemStack>], range: std::ops::Range<usize>, item: &s
     }
 }
 
-// Slice 18 (guide `kitchen`): the pages, each a dish, in turn; milk from the tank it touches.
+// Slice 18 (guide `kitchen`): milk from the tank it touches. 0.21 (round 32, spec 39): a toggle a
+// dish of KITCHEN_RECIPES (rustcraft_rules::machines::recipes) where its pages were; the pages of
+// 0.18–0.20 turn their dishes on (RT7) and go at its first step.
 const PAGES_KEY: &str = "kitchen_pages";
 const NEXT_PAGE_KEY: &str = "kitchen_next";
 
-fn kitchen_pages(nbt: &Compound) -> Vec<Option<usize>> {
-    let mut p: Vec<Option<usize>> = read_json(nbt, PAGES_KEY);
-    p.resize(rustcraft_rules::utility::kitchen::PAGES_MAX, None);
-    p
+/// The saved list of the recipes turned on (the kitchen's dishes, the mixer's fluids); none in a
+/// block of 0.20 or earlier.
+pub(super) fn saved_on(nbt: &Compound) -> Option<Vec<String>> {
+    nbt.get(&JavaString::from(rustcraft_rules::machines::recipes::KEY))?;
+    Some(read_json(nbt, rustcraft_rules::machines::recipes::KEY))
 }
 
-/// A press on a page's toggle: its dish becomes the next of the list (a page the kitchen has
-/// no capacity module for stays as it is).
-fn kitchen_press(game: &Game<'_>, pos: Pos, entity: &mut ModBlockEntity, i: usize) {
-    use rustcraft_rules::utility::kitchen;
-    let _ = (game, pos);
-    let usable = kitchen::pages(capacity_of(entity));
-    if i >= usable {
-        return;
+/// The recipe it works on now (its product), as saved.
+pub(super) fn saved_now(nbt: &Compound) -> Option<String> {
+    read_json::<Option<String>>(nbt, rustcraft_rules::machines::recipes::NOW_KEY)
+}
+
+/// The kitchen's dishes turned on, a flag a dish of KITCHEN_RECIPES; a kitchen of 0.20, the
+/// dishes of its pages (RT7).
+fn kitchen_on(nbt: &Compound) -> Vec<bool> {
+    use rustcraft_rules::machines::recipes;
+    match saved_on(nbt) {
+        Some(on) => recipes::flags(&KITCHEN_RECIPES, &on),
+        None => {
+            let pages: Vec<Option<usize>> = read_json(nbt, PAGES_KEY);
+            recipes::kitchen_from_pages(&pages, KITCHEN_RECIPES.len())
+        }
     }
-    let mut pages = kitchen_pages(&entity.nbt);
-    pages[i] = kitchen::cycle(pages[i]);
-    write_json(&mut entity.nbt, PAGES_KEY, &pages);
 }
 
-/// 0.18.5: the kitchen's pages and how many of them it uses, for its slot rule
-/// (rustcraft_rules::utility::kitchen::takes).
-pub(super) fn kitchen_page_rule(entity: &ModBlockEntity) -> (Vec<Option<usize>>, usize) {
-    (kitchen_pages(&entity.nbt), rustcraft_rules::utility::kitchen::pages(capacity_of(entity)))
+/// The pages of 0.18–0.20 go once the toggles are saved.
+fn forget_pages(nbt: &mut Compound) {
+    nbt.remove(&JavaString::from(PAGES_KEY));
+    nbt.remove(&JavaString::from(NEXT_PAGE_KEY));
+}
+
+/// A press on a dish's toggle: the dish on or off.
+fn kitchen_press(entity: &mut ModBlockEntity, i: usize) {
+    use rustcraft_rules::machines::recipes;
+    let Some(dish) = KITCHEN_RECIPES.get(i) else {
+        return;
+    };
+    let on = recipes::saved(&KITCHEN_RECIPES, &kitchen_on(&entity.nbt));
+    write_json(&mut entity.nbt, recipes::KEY, &recipes::press(&on, dish));
+    forget_pages(&mut entity.nbt);
+}
+
+/// 0.18.5: whether a hopper puts `item` into the kitchen `entity` (rustcraft_machines::slot_takes):
+/// an ingredient of a dish turned on, or of one an order cooks (`ordered`); `ingredients` a set a
+/// dish of KITCHEN_RECIPES.
+pub(super) fn kitchen_takes(entity: &ModBlockEntity, ingredients: &[BTreeSet<String>], ordered: &[usize], item: &str) -> bool {
+    rules::kitchen::takes(&kitchen_on(&entity.nbt), ingredients, ordered, item)
+}
+
+/// 0.21 (RT5): whether the magistral brings the kitchen `entity` `item`: an ingredient of a dish
+/// turned on.
+pub(super) fn kitchen_net_takes(entity: &ModBlockEntity, ingredients: &[BTreeSet<String>], item: &str) -> bool {
+    rules::kitchen::net_takes(&kitchen_on(&entity.nbt), ingredients, item)
 }
 
 /// 0.20 (round 31): whether the magistral brings the vat `entity` `item` into its reagent cells:
@@ -1221,90 +1255,185 @@ fn kitchen_stash(game: &mut Game<'_>, pos: Pos) -> Vec<rustcraft_rules::machines
     cells
 }
 
+/// One dish as the kitchen cooks it this step: the crafting recipe's id, the items it takes (its
+/// milk buckets left out when the tank holds the milk), the stack it makes, the milk it takes
+/// from the tank and the milk buckets it takes as items, in buckets.
+struct Dish {
+    id: String,
+    items: Vec<(String, u32)>,
+    made: ItemStack,
+    from_tank: u32,
+    buckets: u32,
+}
+
+fn dish(game: &Game<'_>, result: &str, in_tank: u64) -> Option<Dish> {
+    use rustcraft_rules::utility::kitchen::{self, BUCKET_MB, MILK_BUCKET};
+    let (id, need, made) = food_recipe(game, result)?;
+    let milk = kitchen::milk_buckets(&need);
+    let tank = milk > 0 && in_tank >= u64::from(milk) * BUCKET_MB;
+    let items = need.into_iter().filter(|(i, _)| !(tank && i == MILK_BUCKET)).collect();
+    Some(Dish {
+        id,
+        items,
+        made,
+        from_tank: if tank { milk } else { 0 },
+        buckets: if tank { 0 } else { milk },
+    })
+}
+
+/// 0.21 (spec 39, RT3): what a few runs of `dish` need, from the storage `id` on the kitchen's item
+/// net into its input slots (rustcraft_rules::machines::recipes::fetch); what does not fit goes
+/// back.
+fn kitchen_fetch(game: &mut Game<'_>, dimension: &str, id: u32, pos: Pos, dish: &Dish, have: &dyn Fn(&str) -> u64) {
+    use rustcraft_rules::machines::recipes;
+    use rustcraft_rules::utility::kitchen::INPUTS;
+    let takes = {
+        let slots = items(game, pos);
+        let game: &Game<'_> = game;
+        let room = |item: &str| -> u64 {
+            let max = machines::max_stack(game, item);
+            slots
+                .iter()
+                .take(INPUTS)
+                .map(|s| match s {
+                    None => u64::from(max),
+                    Some(s) if *s.item == *item && s.damage == 0 && s.extra.is_none() => u64::from(max.saturating_sub(s.count)),
+                    Some(_) => 0,
+                })
+                .sum()
+        };
+        let stored = |item: &str| crate::game::rustcraft_storage::stored_count(dimension, id, item);
+        recipes::fetch(&dish.items, have, stored, room, recipes::FETCH_RUNS)
+    };
+    let route = format!("storage#{id} -> rustcraft:kitchen({})", rustcraft_rules::debug::pos_text(pos));
+    for (item, n) in takes {
+        let took = crate::game::rustcraft_storage::take_from(dimension, id, &item, u64::from(n)) as u32;
+        if took == 0 {
+            continue;
+        }
+        let left = put(game, pos, 0..INPUTS, stack(&item, took)).map_or(0, |s| s.count.min(took));
+        if left > 0 {
+            crate::game::rustcraft_storage::restore_into(dimension, id, &item, u64::from(left));
+        }
+        crate::game::rustcraft_debug::flow(dimension, &route, &item, u64::from(took - left));
+    }
+}
+
+/// The kitchen's step (spec 39, RT2–RT6): an order's dish first, whatever the toggles say; else the
+/// dish it cooks now while it has a run of it, then the next dish turned on, its ingredients
+/// taken from the storage on its item net a few runs at a time.
 fn cook(game: &mut Game<'_>, dimension: &str, level: &LevelNet, pos: Pos, cost: f64, t: &Tuning) -> Shown {
-    use rustcraft_rules::utility::kitchen::{self, BUCKET_MB, MILK, MILK_BUCKET};
+    use rustcraft_rules::machines::recipes::{self, Pick};
+    use rustcraft_rules::machines::slots::{Slot, count_in};
+    use rustcraft_rules::utility::kitchen::{self, BUCKET_MB, INPUTS, MILK, MILK_BUCKET};
     // Slice 18 (cross): with a stack module each input holds 256, the rest in hidden cells.
     let mut cells = kitchen_stash(game, pos);
     let Some(entity) = game.native_mod_block_entity(pos) else {
-        return Shown::Idle("kitchen_none");
+        return Shown::Idle("kitchen_off");
     };
-    let pages = kitchen_pages(&entity.nbt);
-    let usable = kitchen::pages(capacity_of(&entity));
-    let next = read_i64(&entity.nbt, NEXT_PAGE_KEY).max(0) as usize;
+    let on = kitchen_on(&entity.nbt);
+    let fresh = saved_on(&entity.nbt).is_none();
+    let now_dish = saved_now(&entity.nbt);
     drop(entity);
-    // An order's dish first, whatever the pages say.
-    let ordered = crate::game::rustcraft_orders::job_output_at(dimension, pos);
-    let wanted: Vec<(Option<usize>, &str)> = ordered
-        .iter()
-        .map(|d| (None, d.as_str()))
-        .chain(kitchen::in_turn(&pages, usable, next).into_iter().map(|(p, d)| (Some(p), KITCHEN_RECIPES[d])))
-        .collect();
-    if wanted.is_empty() {
-        return Shown::Idle("kitchen_none");
-    }
-    let slots = items(game, pos);
-    let mut no_milk = false;
-    for (page, result) in wanted {
-        let Some((id, need, made)) = food_recipe(game, result) else { continue };
-        let milk = kitchen::milk_buckets(&need);
-        let tank = crate::game::rustcraft_fluids::touching_amount(game, level, pos, MILK, t);
-        state().milk.insert(pos, tank);
-        let in_tank = tank.0;
-        let from_tank = milk > 0 && in_tank >= u64::from(milk) * BUCKET_MB;
-        let items_need: Vec<(String, u32)> = need
-            .iter()
-            .filter(|(i, _)| !(from_tank && i == MILK_BUCKET))
-            .cloned()
-            .collect();
-        let have = |item: &str| count_of(&slots, 0..9, item) + rustcraft_rules::machines::slots::count_in(&cells, item);
-        if !items_need.iter().all(|(item, n)| have(item.as_str()) >= *n) {
-            no_milk |= milk > 0 && !from_tank;
-            continue;
-        }
-        // Milk buckets brought as items leave their empty buckets with the dish.
-        let buckets = if from_tank { 0 } else { milk };
-        let mut out = vec![made.clone()];
-        if buckets > 0 {
-            out.push(stack("minecraft:bucket", buckets));
-        }
-        if !fits(game, pos, 9..13, &out) {
-            return Shown::Blocked("output_full");
-        }
-        if !spend(game, pos, cost) {
-            return Shown::NoEnergy;
-        }
-        if from_tank {
-            crate::game::rustcraft_fluids::take_touching(game, level, pos, MILK, u64::from(milk) * BUCKET_MB, t);
-        }
-        // The hidden cells first, then the slots.
-        let cells_was = cells.clone();
-        // w2: what the slots still give after the cells (take_from returns what is left to take).
-        let from_slots = kitchen::take_ingredients(&mut cells, &items_need);
-        let cells_now = cells.clone();
+    // RT7: a kitchen of 0.20 keeps its pages' dishes on, and its pages go.
+    if fresh {
+        let list = recipes::saved(&KITCHEN_RECIPES, &on);
         game.native_with_mod_block_entity(pos, |e| {
-            for ((item, _), n) in items_need.iter().zip(&from_slots) {
-                take(&mut e.items, 0..9, item, *n);
-            }
-            if cells_now != cells_was {
-                write_json(&mut e.nbt, KITCHEN_CELLS_KEY, &cells_now);
-            }
-            if let Some(p) = page {
-                write_i64(&mut e.nbt, NEXT_PAGE_KEY, (p as i64 + 1) % usable.max(1) as i64);
-            }
+            write_json(&mut e.nbt, recipes::KEY, &list);
+            forget_pages(&mut e.nbt);
         });
-        let count = made.count;
-        for s in out {
-            put(game, pos, 9..13, s);
-        }
-        if let Some(o) = owner(game, pos) {
-            base::report(Report::Craft { owner: o, recipe: id, item: result.to_owned(), count, crafts: 1 });
-        }
-        return Shown::Working;
     }
-    if no_milk {
-        return Shown::Blocked("kitchen_no_milk");
+    let tank = crate::game::rustcraft_fluids::touching_amount(game, level, pos, MILK, t);
+    state().milk.insert(pos, tank);
+    // RT6: the dish an order cooks here.
+    let ordered = crate::game::rustcraft_orders::job_output_at(dimension, pos)
+        .and_then(|o| KITCHEN_RECIPES.iter().position(|r| *r == o.as_str()));
+    let dishes: Vec<Option<Dish>> = KITCHEN_RECIPES
+        .iter()
+        .enumerate()
+        .map(|(d, r)| if on[d] || ordered == Some(d) { dish(game, r, tank.0) } else { None })
+        .collect();
+    let held = |slots: &[Option<ItemStack>], cells: &[Slot], item: &str| {
+        u64::from(count_of(slots, 0..INPUTS, item) + count_in(cells, item))
+    };
+    let runs = |d: usize, have: &dyn Fn(&str) -> u64| dishes[d].as_ref().map_or(0, |x| recipes::runs_in(&x.items, have));
+    let pick = match ordered {
+        Some(d) => {
+            let slots = items(game, pos);
+            if runs(d, &|i: &str| held(&slots, &cells, i)) > 0 { Pick::Run(d) } else { Pick::Missing(d) }
+        }
+        None => {
+            let now = now_dish.as_deref().and_then(|n| KITCHEN_RECIPES.iter().position(|r| *r == n));
+            if let Some(id) = crate::game::rustcraft_storage::storage_by(dimension, pos, &level.topology) {
+                let slots = items(game, pos);
+                let have = |item: &str| held(&slots, &cells, item);
+                let reach = |item: &str| have(item) + crate::game::rustcraft_storage::stored_count(dimension, id, item);
+                if let Some(d) = recipes::pick(&on, now, |d| runs(d, &reach) > 0).run()
+                    && let Some(x) = &dishes[d]
+                {
+                    kitchen_fetch(game, dimension, id, pos, x, &have);
+                }
+            }
+            let slots = items(game, pos);
+            recipes::pick(&on, now, |d| runs(d, &|i: &str| held(&slots, &cells, i)) > 0)
+        }
+    };
+    state().dish.insert((dimension.to_owned(), pos), pick.named().map(|d| KITCHEN_RECIPES[d].to_owned()));
+    let d = match pick {
+        Pick::Off => return Shown::Idle("kitchen_off"),
+        Pick::Missing(d) => {
+            let slots = items(game, pos);
+            let no_milk = dishes[d]
+                .as_ref()
+                .is_some_and(|x| x.buckets > 0 && held(&slots, &cells, MILK_BUCKET) < u64::from(x.buckets));
+            return if no_milk { Shown::Blocked("kitchen_no_milk") } else { Shown::Idle("kitchen_missing") };
+        }
+        Pick::Run(d) => d,
+    };
+    let Some(x) = dishes[d].as_ref() else {
+        return Shown::Idle("kitchen_missing");
+    };
+    // Milk buckets brought as items leave their empty buckets with the dish.
+    let mut out = vec![x.made.clone()];
+    if x.buckets > 0 {
+        out.push(stack("minecraft:bucket", x.buckets));
     }
-    Shown::Idle("kitchen_missing")
+    if !fits(game, pos, 9..13, &out) {
+        return Shown::Blocked("output_full");
+    }
+    if !spend(game, pos, cost) {
+        return Shown::NoEnergy;
+    }
+    if x.from_tank > 0 {
+        crate::game::rustcraft_fluids::take_touching(game, level, pos, MILK, u64::from(x.from_tank) * BUCKET_MB, t);
+    }
+    // The hidden cells first, then the slots.
+    let cells_was = cells.clone();
+    // w2: what the slots still give after the cells (take_from returns what is left to take).
+    let from_slots = kitchen::take_ingredients(&mut cells, &x.items);
+    let cells_now = cells.clone();
+    let now_text = ordered.is_none().then(|| Some(KITCHEN_RECIPES[d].to_owned()));
+    game.native_with_mod_block_entity(pos, |e| {
+        for ((item, _), n) in x.items.iter().zip(&from_slots) {
+            take(&mut e.items, 0..INPUTS, item, *n);
+        }
+        if cells_now != cells_was {
+            write_json(&mut e.nbt, KITCHEN_CELLS_KEY, &cells_now);
+        }
+        if let Some(now) = &now_text
+            && saved_now(&e.nbt) != *now
+        {
+            write_json(&mut e.nbt, recipes::NOW_KEY, now);
+        }
+    });
+    let count = x.made.count;
+    for s in out {
+        put(game, pos, 9..13, s);
+    }
+    if let Some(o) = owner(game, pos) {
+        base::report(Report::Craft { owner: o, recipe: x.id.clone(), item: KITCHEN_RECIPES[d].to_owned(), count, crafts: 1 });
+    }
+    Shown::Working
 }
 
 // ---- The brewer ----
@@ -2000,16 +2129,35 @@ fn grow(game: &mut Game<'_>, dimension: &str, pos: Pos, cost: f64) -> Shown {
 
 // ---- Windows and diagnoses ----
 
-fn shown_text(u: Util, s: &Shown) -> Text {
+/// What it shows; 0.21 (spec 39, RT4): a kitchen's names its dish (`dish`): «Готовит: торт», «Нет
+/// ингредиентов: торт».
+fn shown_text(u: Util, s: &Shown, dish: Option<&str>) -> Text {
+    if u == Util::Kitchen
+        && let Some(d) = dish
+    {
+        let name = dish_name(d);
+        match s {
+            Shown::Working => return line("rustcraft.util.kitchen.making", "Cooking: %s", &[name]),
+            Shown::Idle("kitchen_missing") => {
+                return line("rustcraft.util.kitchen_missing_dish", "No ingredients: %s", &[name]);
+            }
+            _ => {}
+        }
+    }
     let key = format!("rustcraft.util.{}", s.key());
     let fallback = match s {
         Shown::Working => "Works",
         Shown::NoEnergy => "No energy",
+        Shown::Idle("kitchen_off") => "Turn a recipe on in the window",
         Shown::Idle(_) => "Nothing to do",
         Shown::Blocked(_) => "Stands",
     };
-    let _ = u;
     line(&key, fallback, &[])
+}
+
+/// The dish the kitchen at `pos` cooks now, or the first turned on when it lacks ingredients.
+fn dish_at(dimension: &str, pos: Pos) -> Option<String> {
+    state().dish.get(&(dimension.to_owned(), pos)).cloned().flatten()
 }
 
 fn severity(s: &Shown) -> Severity {
@@ -2024,7 +2172,7 @@ fn severity(s: &Shown) -> Severity {
 pub(super) fn diagnosis(dimension: &str, pos: Pos, u: Util) -> Text {
     shown_at(dimension, pos).map_or_else(
         || line(&format!("block.rustcraft.{}", u.spec().block.trim_start_matches("rustcraft:")), title(u), &[]),
-        |s| shown_text(u, &s),
+        |s| shown_text(u, &s, dish_at(dimension, pos).as_deref()),
     )
 }
 
@@ -2042,10 +2190,9 @@ fn toggle_names(u: Util) -> Vec<(String, String)> {
             .map(|(k, i)| (k.to_owned(), i.to_owned()));
             pages.chain(kinds).collect()
         }
-        // Slice 18: a toggle a page (its icons are set by the sheet from the page's dish).
-        Util::Kitchen => (1..=rustcraft_rules::utility::kitchen::PAGES_MAX)
-            .map(|p| (format!("page{p}"), "minecraft:paper".to_owned()))
-            .collect(),
+        // 0.21 (spec 39, RT1): a toggle a dish, its icon the dish (its name, hint and state are
+        // set by `craft_toggles`).
+        Util::Kitchen => KITCHEN_RECIPES.iter().map(|d| ((*d).to_owned(), (*d).to_owned())).collect(),
         Util::Enchanter => ["minus10", "minus1", "plus1", "plus10"]
             .iter()
             .map(|k| ((*k).to_owned(), "minecraft:lapis_lazuli".to_owned()))
@@ -2147,13 +2294,14 @@ pub(super) fn sheet(game: &Game<'_>, dimension: &str, level: &LevelNet, pos: Pos
                     && i == 0
                     && !on.iter().take(shown_n).any(|t| *t)),
             hint: base::v(&line(&format!("rustcraft.util.{short}.hint"), "Click to turn on or off", &[])),
+            active: false,
         })
         .collect();
-    craft_toggles(game, pos, u, s);
+    craft_toggles(game, dimension, pos, u, s);
     let shown = shown_at(dimension, pos).unwrap_or(Shown::Idle("idle"));
     s.status = Some(SheetStatus {
         severity: severity_code(severity(&shown)),
-        text: base::v(&shown_text(u, &shown)),
+        text: base::v(&shown_text(u, &shown, dish_at(dimension, pos).as_deref())),
     });
     // Slice 18: the living vein's mode, progress and counts (rustcraft_mining).
     if u == Util::Vein {
@@ -2195,7 +2343,7 @@ fn craft_sheet(game: &Game<'_>, dimension: &str, level: &LevelNet, pos: Pos, u: 
                 colour: None,
             });
         }
-        Util::Kitchen => kitchen_sheet(game, pos, s),
+        Util::Kitchen => kitchen_sheet(game, dimension, pos, s),
         Util::Projector => {
             s.rows = crate::game::rustcraft_projector::projector_rows(game, dimension, level, pos).iter().map(base::v).collect();
         }
@@ -2308,29 +2456,46 @@ fn craft_sheet(game: &Game<'_>, dimension: &str, level: &LevelNet, pos: Pos, u: 
     }
 }
 
-/// The kitchen's window: the page's dish and what it takes, the milk in the tank it touches.
-fn kitchen_sheet(game: &Game<'_>, pos: Pos, s: &mut Sheet) {
-    use rustcraft_rules::utility::kitchen::{self, BUCKET_MB, MILK};
-    let Some(entity) = game.native_mod_block_entity(pos) else { return };
-    let pages = kitchen_pages(&entity.nbt);
-    let usable = kitchen::pages(capacity_of(&entity));
-    let next = read_i64(&entity.nbt, NEXT_PAGE_KEY).max(0) as usize % usable.max(1);
-    drop(entity);
-    let row = match pages[next].and_then(|d| KITCHEN_RECIPES.get(d)) {
-        Some(dish) => {
-            let need = food_recipe(game, dish).map(|(_, n, _)| n).unwrap_or_default();
-            let parts: Vec<String> = need.iter().map(|(i, n)| format!("{} ×{n}", i.rsplit(':').next().unwrap_or(i))).collect();
-            line(
-                "rustcraft.util.kitchen.page",
-                "Page %s: %s (%s)",
-                &[
-                    Text::literal((next + 1).to_string()),
-                    line(&item_key(dish), dish, &[]),
-                    Text::literal(parts.join(", ")),
-                ],
-            )
+/// A kitchen dish's name in the reader's language (its toggle's key).
+fn dish_name(dish: &str) -> Text {
+    let fallback = dish.rsplit(':').next().unwrap_or(dish).replace('_', " ");
+    line(&format!("rustcraft.util.kitchen.toggle.{}", dish.replace([':', '/'], "_")), &fallback, &[])
+}
+
+/// What a recipe takes, «сахар ×2, яйцо ×1», each name in the reader's language.
+pub(super) fn needs_text(game: &Game<'_>, need: &[(String, u32)]) -> Text {
+    let mut out = Text::literal("");
+    for (k, (item, n)) in need.iter().enumerate() {
+        if k > 0 {
+            out.push(Text::literal(", "));
         }
-        None => line("rustcraft.util.kitchen.no_dish", "Click a page to choose its dish", &[]),
+        out.push(name_of(game, item));
+        out.push(Text::literal(format!(" ×{n}")));
+    }
+    out
+}
+
+/// The kitchen's window (spec 39, RT1, RT4): the dish it cooks now and what it takes, or how many
+/// dishes are on; the milk in the tank it touches.
+fn kitchen_sheet(game: &Game<'_>, dimension: &str, pos: Pos, s: &mut Sheet) {
+    use rustcraft_rules::utility::kitchen::BUCKET_MB;
+    let Some(entity) = game.native_mod_block_entity(pos) else { return };
+    let on = kitchen_on(&entity.nbt);
+    drop(entity);
+    let working = shown_at(dimension, pos).is_some_and(|x| x.working());
+    let row = match dish_at(dimension, pos).filter(|_| working) {
+        Some(dish) => {
+            let need = food_recipe(game, &dish).map(|(_, n, _)| n).unwrap_or_default();
+            line("rustcraft.util.kitchen.now", "Now: %s (%s)", &[dish_name(&dish), needs_text(game, &need)])
+        }
+        None => line(
+            "rustcraft.util.kitchen.on_count",
+            "Recipes on: %s of %s",
+            &[
+                Text::literal(on.iter().filter(|b| **b).count().to_string()),
+                Text::literal(KITCHEN_RECIPES.len().to_string()),
+            ],
+        ),
     };
     let milk = server_milk(pos);
     let milk_line = line(
@@ -2342,7 +2507,11 @@ fn kitchen_sheet(game: &Game<'_>, pos: Pos, s: &mut Sheet) {
         ],
     );
     s.rows = vec![base::v(&row), base::v(&milk_line)];
-    let _ = MILK;
+    s.hints = vec![vec![base::v(&line(
+        "rustcraft.util.kitchen.rows_hint",
+        "The icons above are its recipes: a click turns one on or off. It cooks the first one on while its ingredients last, then the next, and takes them from the storage itself",
+        &[],
+    ))]];
 }
 
 /// The milk (held, room) of the tank a kitchen or shearer touches, as its last step read it.
@@ -2350,10 +2519,9 @@ fn server_milk(pos: Pos) -> (u64, u64) {
     state().milk.get(&pos).copied().unwrap_or((0, 0))
 }
 
-/// Slice 18: the kitchen's page toggles show each page's dish, a page without a capacity module
-/// for it barred.
-fn craft_toggles(game: &Game<'_>, pos: Pos, u: Util, s: &mut Sheet) {
-    use rustcraft_rules::utility::kitchen;
+/// 0.21 (spec 39, RT1): the kitchen's toggles, a dish each: on in brass, the one it cooks now
+/// outlined; the tooltip names the dish and what it takes.
+fn craft_toggles(game: &Game<'_>, dimension: &str, pos: Pos, u: Util, s: &mut Sheet) {
     if u == Util::Brewer {
         brew_toggles(game, pos, s);
         return;
@@ -2362,26 +2530,26 @@ fn craft_toggles(game: &Game<'_>, pos: Pos, u: Util, s: &mut Sheet) {
         return;
     }
     let Some(entity) = game.native_mod_block_entity(pos) else { return };
-    let pages = kitchen_pages(&entity.nbt);
-    let usable = kitchen::pages(capacity_of(&entity));
+    let on = kitchen_on(&entity.nbt);
     drop(entity);
+    let working = shown_at(dimension, pos).is_some_and(|x| x.working());
+    let now = dish_at(dimension, pos).filter(|_| working);
     for (i, t) in s.toggles.iter_mut().enumerate() {
-        let dish = pages.get(i).copied().flatten().and_then(|d| KITCHEN_RECIPES.get(d));
-        t.on = dish.is_some() && i < usable;
-        t.icon = match (i < usable, dish) {
-            (false, _) => "minecraft:iron_bars".to_owned(),
-            (true, Some(d)) => (*d).to_owned(),
-            (true, None) => "minecraft:paper".to_owned(),
-        };
-        t.name = base::v(&match dish {
-            Some(d) => line(&item_key(d), d, &[]),
-            None => line("rustcraft.util.kitchen.empty_page", "Empty page", &[]),
-        });
-        t.hint = base::v(&if i < usable {
-            line("rustcraft.util.kitchen.page_hint", "Click: the next dish", &[])
+        let Some(dish) = KITCHEN_RECIPES.get(i) else { continue };
+        t.on = on.get(i).copied().unwrap_or(false);
+        t.active = now.as_deref() == Some(*dish);
+        t.icon = (*dish).to_owned();
+        t.name = base::v(&dish_name(dish));
+        let need = food_recipe(game, dish).map(|(_, n, _)| n).unwrap_or_default();
+        let click = if t.on {
+            line("rustcraft.recipes.click_off", "click: turn off", &[])
         } else {
-            line("rustcraft.util.kitchen.locked", "One more page for each capacity module", &[])
-        });
+            line("rustcraft.recipes.click_on", "click: turn on", &[])
+        };
+        let mut hint = needs_text(game, &need);
+        hint.push(Text::literal(" · "));
+        hint.push(click);
+        t.hint = base::v(&hint);
     }
 }
 
@@ -2434,7 +2602,7 @@ pub(super) fn on_button(game: &mut Game<'_>, pos: Pos, entity: &mut ModBlockEnti
     match u {
         Util::XpTank => xp_press(game, entity, i),
         Util::Projector => builder::projector_press(game, pos, entity, i),
-        Util::Kitchen => kitchen_press(game, pos, entity, i),
+        Util::Kitchen => kitchen_press(entity, i),
         Util::Brewer => brew_press(entity, i),
         // A choice: this one on, the rest off.
         Util::Enchanter => {
@@ -2473,9 +2641,10 @@ pub(super) fn say(game: &mut Game<'_>, player: u128, key: &str, fallback: &str, 
 
 /// Forgets what it showed of the blocks in an area that was taken away.
 pub(super) fn forget_area(dimension: &str, min: Pos, max: Pos) {
-    state().shown.retain(|(d, p), _| {
-        d != dimension || !(0..3).all(|i| p[i] >= min[i] && p[i] <= max[i])
-    });
+    let inside = |d: &str, p: &Pos| d == dimension && (0..3).all(|i| p[i] >= min[i] && p[i] <= max[i]);
+    let mut s = state();
+    s.shown.retain(|(d, p), _| !inside(d, p));
+    s.dish.retain(|(d, p), _| !inside(d, p));
 }
 
 // ---- Slice 18, stream 3: the trash's, the disintegrator's and the charger's windows (`ui.js`) ----

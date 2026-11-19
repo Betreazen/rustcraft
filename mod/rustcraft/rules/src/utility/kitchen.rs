@@ -1,11 +1,13 @@
-//! Slice 18 (guide `kitchen`): the kitchen's pages and its milk. «На каждой странице одно блюдо.
-//! Его выбирают из списка рецептов еды… Страницы работают по очереди.» One page, and one more for
-//! each capacity module. A recipe that asks for a bucket of milk takes a bucket's worth from the
-//! tank the kitchen touches, and no bucket is needed or left over.
+//! Slice 18 (guide `kitchen`): the kitchen's dishes and its milk. A recipe that asks for a bucket
+//! of milk takes a bucket's worth from the tank the kitchen touches, and no bucket is needed or
+//! left over.
+//!
+//! 0.21 (round 32, spec 39): the pages went. Every dish of KITCHEN_RECIPES has a toggle in the
+//! window, all in one row; the kitchen cooks the dishes turned on, one while its ingredients
+//! last, then the next (rustcraft_rules::machines::recipes). A kitchen's old pages turn their
+//! dishes on (RT7).
 
-use crate::utility::KITCHEN_RECIPES;
-
-/// The most pages: one and one a capacity module, three sockets.
+/// 0.18–0.20: the most pages a kitchen had; the world's update reads them (RT7).
 pub const PAGES_MAX: usize = 4;
 /// The fluid of milk in a tank.
 pub const MILK: &str = "rustcraft:milk";
@@ -13,61 +15,24 @@ pub const MILK: &str = "rustcraft:milk";
 pub const BUCKET_MB: u64 = 1000;
 pub const MILK_BUCKET: &str = "minecraft:milk_bucket";
 
-/// The pages a kitchen with `capacity` capacity modules has.
-pub fn pages(capacity: u32) -> usize {
-    (1 + capacity as usize).min(PAGES_MAX)
-}
-
-/// A press on a page's toggle: its dish becomes the next of the list, after the last none.
-pub fn cycle(dish: Option<usize>) -> Option<usize> {
-    match dish {
-        None => Some(0),
-        Some(i) if i + 1 < KITCHEN_RECIPES.len() => Some(i + 1),
-        Some(_) => None,
-    }
-}
-
-/// The dishes to try this step, each page in turn from `next` (the page after the last one that
-/// cooked), only the `usable` first pages, empty pages left out: (page, dish).
-pub fn in_turn(pages: &[Option<usize>], usable: usize, next: usize) -> Vec<(usize, usize)> {
-    let n = usable.min(pages.len());
-    (0..n)
-        .map(|k| (next + k) % n.max(1))
-        .filter_map(|p| pages.get(p).copied().flatten().map(|d| (p, d)))
-        .filter(|(_, d)| *d < KITCHEN_RECIPES.len())
-        .collect()
-}
-
-/// 0.18.5: whether the kitchen takes `item` into its inputs (from the net, a hopper or a hand):
-/// only an ingredient of a dish it may cook — those of its `usable` pages, `ingredients` given a
-/// dish (KITCHEN_RECIPES order), and those of `ordered`, the dishes the storage's orders cook in
-/// a kitchen now. Before, it took anything, and the net filled it with ore, dust and blocks.
+/// 0.18.5: whether a hopper puts `item` into the kitchen: only an ingredient of a dish it may
+/// cook — those turned on (`on`, `ingredients` given a dish in KITCHEN_RECIPES order), and those
+/// of `ordered`, the dishes the storage's orders cook in a kitchen now. Before, it took anything,
+/// and the net filled it with ore, dust and blocks.
 pub fn takes(
-    pages: &[Option<usize>],
-    usable: usize,
+    on: &[bool],
     ingredients: &[std::collections::BTreeSet<String>],
     ordered: &[usize],
     item: &str,
 ) -> bool {
-    pages
-        .iter()
-        .take(usable)
-        .flatten()
-        .chain(ordered)
-        .any(|d| ingredients.get(*d).is_some_and(|set| set.contains(item)))
+    crate::machines::recipes::net_takes(on, ingredients, item)
+        || ordered.iter().any(|d| ingredients.get(*d).is_some_and(|set| set.contains(item)))
 }
 
-/// 0.21 (round 32): what the magistral brings a kitchen: the ingredients of its own `usable`
-/// pages only. An order cooking a dish brings that dish's ingredients itself; before, while any
-/// order cooked a cake, every kitchen took the sugar, eggs and wheat that rode to the storage and
-/// kept them, and its order's job did not end while its inputs held its items.
-pub fn net_takes(
-    pages: &[Option<usize>],
-    usable: usize,
-    ingredients: &[std::collections::BTreeSet<String>],
-    item: &str,
-) -> bool {
-    takes(pages, usable, ingredients, &[], item)
+/// 0.21 (round 32, RT5): what the magistral brings a kitchen: the ingredients of the dishes
+/// turned on only. An order cooking a dish brings that dish's ingredients itself.
+pub fn net_takes(on: &[bool], ingredients: &[std::collections::BTreeSet<String>], item: &str) -> bool {
+    crate::machines::recipes::net_takes(on, ingredients, item)
 }
 
 /// How many buckets of milk a recipe's ingredients ask for.
@@ -137,32 +102,32 @@ pub fn take_ingredients(cells: &mut [crate::machines::slots::Slot], need: &[(Str
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::utility::KITCHEN_RECIPES;
 
     #[test]
     fn it_takes_only_the_ingredients_of_its_dishes() {
         let set = |items: &[&str]| items.iter().map(|i| (*i).to_owned()).collect::<std::collections::BTreeSet<_>>();
         // bread, cookie
         let ingredients = vec![set(&["minecraft:wheat"]), set(&["minecraft:wheat", "minecraft:cocoa_beans"])];
-        let pages = [Some(0), Some(1), None, None];
-        assert!(takes(&pages, 1, &ingredients, &[], "minecraft:wheat"));
-        assert!(!takes(&pages, 1, &ingredients, &[], "minecraft:cocoa_beans"), "page 2 needs a capacity module");
-        assert!(takes(&pages, 2, &ingredients, &[], "minecraft:cocoa_beans"));
-        assert!(!takes(&pages, 4, &ingredients, &[], "minecraft:raw_iron"), "the owner's ore");
-        assert!(!takes(&[None; 4], 4, &ingredients, &[], "minecraft:wheat"), "no page, no order");
-        assert!(takes(&[None; 4], 1, &ingredients, &[1], "minecraft:cocoa_beans"), "an order's dish");
+        let bread = [true, false];
+        assert!(takes(&bread, &ingredients, &[], "minecraft:wheat"));
+        assert!(!takes(&bread, &ingredients, &[], "minecraft:cocoa_beans"), "cookies are off");
+        assert!(takes(&[true, true], &ingredients, &[], "minecraft:cocoa_beans"));
+        assert!(!takes(&[true, true], &ingredients, &[], "minecraft:raw_iron"), "the owner's ore");
+        assert!(!takes(&[false, false], &ingredients, &[], "minecraft:wheat"), "nothing on, no order");
+        assert!(takes(&[false, false], &ingredients, &[1], "minecraft:cocoa_beans"), "an order's dish");
     }
 
     #[test]
-    fn the_magistral_brings_only_its_pages_ingredients() {
-        // 0.21: while an order cooked cookies, a kitchen with no page took the cocoa and wheat
-        // that rode to the storage; the order brings its own.
+    fn the_magistral_brings_only_the_ingredients_of_the_dishes_on() {
+        // 0.21: while an order cooked cookies, a kitchen took the cocoa and wheat that rode to the
+        // storage; the order brings its own.
         let set = |items: &[&str]| items.iter().map(|i| (*i).to_owned()).collect::<std::collections::BTreeSet<_>>();
         let ingredients = vec![set(&["minecraft:wheat"]), set(&["minecraft:wheat", "minecraft:cocoa_beans"])];
-        assert!(!net_takes(&[None; 4], 4, &ingredients, "minecraft:cocoa_beans"));
-        assert!(!net_takes(&[None; 4], 4, &ingredients, "minecraft:wheat"));
-        let bread = [Some(0), None, None, None];
-        assert!(net_takes(&bread, 1, &ingredients, "minecraft:wheat"));
-        assert!(!net_takes(&bread, 1, &ingredients, "minecraft:cocoa_beans"));
+        assert!(!net_takes(&[false, false], &ingredients, "minecraft:cocoa_beans"));
+        assert!(!net_takes(&[false, false], &ingredients, "minecraft:wheat"));
+        assert!(net_takes(&[true, false], &ingredients, "minecraft:wheat"));
+        assert!(!net_takes(&[true, false], &ingredients, "minecraft:cocoa_beans"));
     }
 
     #[test]
@@ -221,26 +186,13 @@ mod tests {
     }
 
     #[test]
-    fn a_page_a_capacity_module() {
-        assert_eq!(pages(0), 1);
-        assert_eq!(pages(2), 3);
-        assert_eq!(pages(9), PAGES_MAX);
-    }
-
-    #[test]
-    fn a_page_cycles_through_the_dishes() {
-        assert_eq!(cycle(None), Some(0));
-        assert_eq!(cycle(Some(0)), Some(1));
-        assert_eq!(cycle(Some(KITCHEN_RECIPES.len() - 1)), None);
-    }
-
-    #[test]
-    fn the_pages_work_in_turn() {
-        let pages = [Some(0), None, Some(3), Some(1)];
-        assert_eq!(in_turn(&pages, 4, 0), vec![(0, 0), (2, 3), (3, 1)]);
-        assert_eq!(in_turn(&pages, 4, 2), vec![(2, 3), (3, 1), (0, 0)]);
-        assert_eq!(in_turn(&pages, 1, 3), vec![(0, 0)], "only the pages it has");
-        assert!(in_turn(&[], 1, 0).is_empty());
+    fn its_old_pages_turn_their_dishes_on() {
+        // RT7: a kitchen of 0.20 with bread on page 1 and cake on pages 2 and 4.
+        let pages = [Some(0), Some(3), None, Some(3)];
+        let on = crate::machines::recipes::kitchen_from_pages(&pages, KITCHEN_RECIPES.len());
+        assert_eq!(on.iter().filter(|b| **b).count(), 2);
+        assert!(on[0] && on[3]);
+        assert_eq!(pages.len(), PAGES_MAX);
     }
 
     #[test]

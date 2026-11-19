@@ -1,9 +1,13 @@
 // Slice 10's mixer on the server (spec 4.3, 4.12 K1; guide `mixer`, `fluids`). It makes fluids
 // out of water and items by the content mod's `rustcraft:mixing` recipes
-// (rustcraft_rules::machines::mixer): the nutrient solution out of water, bone meal and redstone.
+// (rustcraft_rules::machines::mixer): the nutrient solution out of water and bone meal.
 //
-// - Items: its three input slots, one ingredient a slot; the item net and hoppers put only
-//   ingredients there (rustcraft_machines::slot_takes).
+// - Items: its three input slots, one ingredient a slot; hoppers put only ingredients there
+//   (rustcraft_machines::slot_takes), the magistral only those of the recipes turned on.
+// - 0.21 (round 32, spec 39): its window has a toggle a recipe after its arrow; it makes the recipe
+//   turned on it works on now while it has a run of it, then the next one on, and takes their
+//   ingredients from the storage on its item net itself, a few runs at a time
+//   (rustcraft_rules::machines::recipes). An order's recipe runs whatever the toggles say.
 // - Fluids: its water tank (`water`, mB) and its product tank (`product_fluid`, `product`, mB) in its
 //   saved compound. rustcraft_fluids fills the water from a water tank it touches and from a fluid
 //   channel, and takes the product into the tank on top of it and along a fluid channel (the
@@ -18,19 +22,22 @@ use crate::game::{
         self as machines, MachineRecipes, read_f64, read_int, slot_of, write_f64, write_int,
     },
     rustcraft_server::line,
+    rustcraft_storage as storage,
+    rustcraft_utility::{needs_text, read_json, saved_now, saved_on, write_json},
 };
-use horizon_client::text::Text;
+use horizon_client::{containers::ModBlockEntity, text::Text};
 use horizon_world::nbt::{Compound, JavaString, Tag};
 use rustcraft_rules::{
     geom::Pos,
     machines::{
-        mixer::{INPUTS, MixRecipe, Mixer, MixerView, Shown, Spec},
-        sheet::{Bar as SheetBar, Sheet, Status as SheetStatus, severity_code},
-        slots::Slot,
+        mixer::{INPUTS, MixRecipe, Mixer, MixerView, Shown, Spec, ingredient_sets},
+        recipes::{self, Pick},
+        sheet::{Bar as SheetBar, Sheet, Status as SheetStatus, Toggle, severity_code},
+        slots::{Slot, count_in},
         style::Severity,
     },
     mining,
-    net::fluids::BUCKET,
+    net::{fluids::BUCKET, topology::Topology},
     power::SOLUTION,
     tuning::Tuning,
 };
@@ -47,17 +54,70 @@ pub const WATER: &str = "minecraft:water";
 /// Colours of the window's fluid bars (ARGB): water and the solution, as the guide draws them.
 const WATER_COLOUR: u32 = 0xFF3F_76E4;
 const SOLUTION_COLOUR: u32 = 0xFF59_D38C;
+/// 0.21 (spec 39, RT3): how often, in level ticks, a mixer takes from the storage what its recipe
+/// needs (it tops up below two runs, so a batch of 100 ticks never waits on it).
+const FETCH_EVERY: u64 = 10;
 
-/// What each mixer showed last and the energy it got, by level and place.
+/// What a mixer showed on its last tick, the energy it got and the recipe it named (the one it
+/// makes, or the first turned on when it lacks ingredients).
+#[derive(Clone, Debug)]
+struct Seen {
+    shown: Shown,
+    got: f64,
+    recipe: Option<String>,
+}
+
+/// What each mixer showed last, by level and place.
 #[derive(Default)]
 struct State {
-    shown: HashMap<(String, Pos), (Shown, f64)>,
+    shown: HashMap<(String, Pos), Seen>,
 }
 
 static STATE: LazyLock<Mutex<State>> = LazyLock::new(Mutex::default);
 
 fn state() -> MutexGuard<'static, State> {
     STATE.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+/// 0.21 (spec 39): the mixer's recipes in the window's order
+/// (rustcraft_rules::machines::mixer::ordered) as the last rescan read them, for its window and
+/// its presses, which have no level at hand.
+static RECIPES: LazyLock<Mutex<Vec<MixRecipe>>> = LazyLock::new(Mutex::default);
+
+fn recipes_now() -> Vec<MixRecipe> {
+    RECIPES.lock().unwrap_or_else(PoisonError::into_inner).clone()
+}
+
+/// The recipes rustcraft_machines::load_recipes read, in the window's order.
+pub(super) fn remember(recipes: &[MixRecipe]) {
+    *RECIPES.lock().unwrap_or_else(PoisonError::into_inner) = recipes.to_vec();
+}
+
+fn products(recipes: &[MixRecipe]) -> Vec<&str> {
+    recipes.iter().map(|r| r.fluid.as_str()).collect()
+}
+
+/// The recipes a mixer's block entity turns on, a flag a recipe of `recipes`.
+fn on_of(nbt: &Compound, recipes: &[MixRecipe]) -> Vec<bool> {
+    recipes::flags(&products(recipes), &saved_on(nbt).unwrap_or_default())
+}
+
+/// A press on the toggle of recipe `i` in its window (rustcraft_base::on_sheet_button).
+pub(super) fn press(entity: &mut ModBlockEntity, i: usize) {
+    let all = recipes_now();
+    let Some(r) = all.get(i) else {
+        return;
+    };
+    let on = saved_on(&entity.nbt).unwrap_or_default();
+    write_json(&mut entity.nbt, recipes::KEY, &recipes::press(&on, &r.fluid));
+}
+
+/// 0.21 (spec 39, RT5): whether the magistral brings the mixer `entity` `item`: an ingredient of a
+/// recipe turned on. Before, a joint's allow list (0.21's IN5) chose; the world's update turns
+/// its recipes on (RT7).
+pub(super) fn net_takes(entity: &ModBlockEntity, item: &str) -> bool {
+    let all = recipes_now();
+    recipes::net_takes(&on_of(&entity.nbt, &all), &ingredient_sets(&all), item)
 }
 
 /// One mixing recipe file; none when an ingredient is not one item the game knows.
@@ -143,6 +203,16 @@ pub struct Held {
     queue_before: Vec<Slot>,
     spec: Spec,
     pub request: f64,
+    /// 0.21 (spec 39): the recipe it works on this tick, by the window's order.
+    pick: Pick,
+    /// An order's job runs on it: its recipe, whatever the toggles say (RT6), and nothing from
+    /// the storage of its own.
+    job: bool,
+    /// The recipes turned on, none saved yet (a mixer of 0.20: RT7 turns them on at its first
+    /// fetch), and the recipe it worked on as saved.
+    on: Vec<bool>,
+    fresh: bool,
+    now: Option<usize>,
 }
 
 fn spec_of(game: &Game<'_>, pos: Pos, nbt: &Compound, t: &Tuning) -> Spec {
@@ -191,6 +261,11 @@ fn queued(game: &Game<'_>, pos: Pos, raw: &[Slot], saved: &[Slot]) -> Vec<Slot> 
     visible.into_iter().chain(cells).collect()
 }
 
+/// Whether `inputs` hold a whole run of `recipe`.
+fn has_run(recipe: &MixRecipe, inputs: &[Slot]) -> bool {
+    recipes::runs_in(&recipe.ingredients, |item| u64::from(count_in(inputs, item))) > 0
+}
+
 pub(super) fn read(
     game: &Game<'_>,
     pos: Pos,
@@ -207,11 +282,27 @@ pub(super) fn read(
     let raw: Vec<Slot> = (0..content::MIXER_SLOTS)
         .map(|i| slot_of(&entity, i))
         .collect();
-    let queue_before: Vec<Slot> =
-        crate::game::rustcraft_utility::read_json(&entity.nbt, machines::QUEUE_KEY);
+    let queue_before: Vec<Slot> = read_json(&entity.nbt, machines::QUEUE_KEY);
     let inputs = queued(game, pos, &raw, &queue_before);
     let spec = spec_of(game, pos, &entity.nbt, t);
-    let request = mixer.request(&recipes.mixing, &inputs, &spec);
+    let all = &recipes.mixing;
+    let names = products(all);
+    let on = on_of(&entity.nbt, all);
+    let fresh = saved_on(&entity.nbt).is_none();
+    let now = saved_now(&entity.nbt).and_then(|n| names.iter().position(|p| *p == n));
+    // RT6: an order's recipe, by the fluid its step makes.
+    let ordered = crate::game::rustcraft_orders::job_output_at(&game.native_dimension().to_owned(), pos)
+        .and_then(|k| rustcraft_rules::orders::fluid_of(&k).map(str::to_owned))
+        .and_then(|f| names.iter().position(|p| *p == f));
+    let can = |i: usize| has_run(&all[i], &inputs);
+    let pick = match ordered {
+        Some(i) if can(i) => Pick::Run(i),
+        Some(i) => Pick::Missing(i),
+        None => recipes::pick(&on, now, can),
+    };
+    let request = pick
+        .run()
+        .map_or(0.0, |i| mixer.request(std::slice::from_ref(&all[i]), &inputs, &spec));
     Some(Held {
         mixer,
         inputs,
@@ -219,42 +310,174 @@ pub(super) fn read(
         queue_before,
         spec,
         request,
+        pick,
+        job: ordered.is_some(),
+        on,
+        fresh,
+        now,
     })
 }
 
-/// Runs the mixer on `share` of its request and writes back what changed.
+/// What a mixer's fetch changed: the recipes turned on by the world's update (RT7), and what went
+/// back to the storage to free a slot.
+struct Fetched {
+    migrated: Option<Vec<String>>,
+}
+
+/// 0.21 (spec 39, RT3): the mixer at `pos` takes from the storage on its item net what a few runs
+/// of its recipe need, into its visible input slots (`inputs`' first ones), one kind a slot; a
+/// kind no slot is left for frees one, its items back to the storage. A mixer of 0.20 first turns
+/// on the recipes its joints' allow lists cover (RT7).
+#[allow(clippy::too_many_arguments)]
+fn fetch(
+    game: &Game<'_>,
+    dimension: &str,
+    topology: &Topology,
+    pos: Pos,
+    all: &[MixRecipe],
+    held: &Held,
+    now: Option<usize>,
+    inputs: &mut [Slot],
+) -> Fetched {
+    let mut on = held.on.clone();
+    let migrated = held.fresh.then(|| {
+        let filters = crate::game::rustcraft_utility::joint_filters(game, pos);
+        on = recipes::mixer_from_filters(&ingredient_sets(all), &filters);
+        recipes::saved(&products(all), &on)
+    });
+    let out = Fetched { migrated };
+    let Some(id) = storage::storage_by(dimension, pos, topology) else {
+        return out;
+    };
+    let stored = |item: &str| storage::stored_count(dimension, id, item);
+    let reach = |r: &MixRecipe| {
+        recipes::runs_in(&r.ingredients, |item| u64::from(count_in(&inputs[..], item)) + stored(item)) > 0
+    };
+    let Some(r) = recipes::pick(&on, now, |i| reach(&all[i])).run().map(|i| &all[i]) else {
+        return out;
+    };
+    let route = format!("storage#{id} -> rustcraft:mixer({})", rustcraft_rules::debug::pos_text(pos));
+    let visible = content::MIXER_SLOTS.min(inputs.len());
+    let needed = |item: &str| r.ingredients.iter().any(|(i, _)| i == item);
+    let holds = |slots: &[Slot], item: &str| slots.iter().any(|s| s.as_ref().is_some_and(|(i, _)| i == item));
+    let missing = r.ingredients.iter().filter(|(i, _)| !holds(&inputs[..visible], i)).count();
+    let mut empty = inputs[..visible].iter().filter(|s| s.is_none()).count();
+    for slot in inputs[..visible].iter_mut() {
+        if empty >= missing {
+            break;
+        }
+        if let Some((item, n)) = slot.clone()
+            && !needed(&item)
+        {
+            storage::restore_into(dimension, id, &item, u64::from(n));
+            crate::game::rustcraft_debug::flow(dimension, &format!("rustcraft:mixer({}) -> storage#{id}", rustcraft_rules::debug::pos_text(pos)), &item, u64::from(n));
+            *slot = None;
+            empty += 1;
+        }
+    }
+    let have = |item: &str| u64::from(count_in(&inputs[..], item));
+    let room = |item: &str| -> u64 {
+        let max = u64::from(machines::max_stack(game, item));
+        let same: u64 = inputs[..visible]
+            .iter()
+            .flatten()
+            .filter(|(i, _)| i == item)
+            .map(|(_, n)| max.saturating_sub(u64::from(*n)))
+            .sum();
+        if holds(&inputs[..visible], item) {
+            same
+        } else if empty > 0 {
+            max
+        } else {
+            0
+        }
+    };
+    let takes = recipes::fetch(&r.ingredients, have, stored, room, recipes::FETCH_RUNS);
+    for (item, n) in takes {
+        let took = storage::take_from(dimension, id, &item, u64::from(n)) as u32;
+        if took == 0 {
+            continue;
+        }
+        let max = machines::max_stack(game, &item);
+        let mut left = took;
+        for slot in inputs[..visible].iter_mut() {
+            match slot {
+                Some((i, c)) if *i == item => {
+                    let k = left.min(max.saturating_sub(*c));
+                    *c += k;
+                    left -= k;
+                }
+                _ => {}
+            }
+        }
+        if left > 0
+            && let Some(free) = inputs[..visible].iter_mut().find(|s| s.is_none())
+        {
+            let k = left.min(max);
+            *free = Some((item.clone(), k));
+            left -= k;
+        }
+        if left > 0 {
+            storage::restore_into(dimension, id, &item, u64::from(left));
+        }
+        crate::game::rustcraft_debug::flow(dimension, &route, &item, u64::from(took - left));
+    }
+    out
+}
+
+/// Runs the mixer on `share` of its request and writes back what changed; every FETCH_EVERY
+/// ticks it takes from the storage what its recipe needs (RT3).
+#[allow(clippy::too_many_arguments)]
 pub(super) fn run(
     game: &mut Game<'_>,
     pos: Pos,
     held: Held,
     share: f64,
     recipes: &MachineRecipes,
+    topology: &Topology,
+    ticks: u64,
     _t: &Tuning,
 ) {
-    let Held {
-        mut mixer,
-        inputs,
-        raw,
-        queue_before,
-        spec,
-        request,
-    } = held;
-    let before = mixer.clone();
-    let mut after = inputs.clone();
-    let shown = mixer.tick(&recipes.mixing, &mut after, &spec, share);
-    let got = if request > 0.0 { share * request } else { 0.0 };
-    state()
-        .shown
-        .insert((game.native_dimension().to_owned(), pos), (shown, got));
-    let mut after = after;
+    let dimension = game.native_dimension().to_owned();
+    let all = &recipes.mixing;
+    let before = held.mixer.clone();
+    let mut mixer = held.mixer.clone();
+    let mut after = held.inputs.clone();
+    // A recipe it turns to starts its batch afresh.
+    if held.pick.run().is_some_and(|i| Some(i) != held.now) {
+        mixer.progress = 0.0;
+    }
+    let shown = match held.pick {
+        Pick::Run(i) => mixer.tick(std::slice::from_ref(&all[i]), &mut after, &held.spec, share),
+        Pick::Missing(_) => {
+            mixer.progress = 0.0;
+            Shown::NoIngredients
+        }
+        Pick::Off => {
+            mixer.progress = 0.0;
+            Shown::Off
+        }
+    };
+    let got = if held.request > 0.0 { share * held.request } else { 0.0 };
+    let named = held.pick.named().and_then(|i| all.get(i)).map(|r| r.fluid.clone());
+    state().shown.insert(
+        (dimension.clone(), pos),
+        Seen { shown, got, recipe: named },
+    );
+    let now = held.pick.run().or(held.now);
+    let fetched = (!held.job && ticks.is_multiple_of(FETCH_EVERY))
+        .then(|| fetch(game, &dimension, topology, pos, all, &held, now, &mut after));
+    let migrated = fetched.and_then(|f| f.migrated);
+    let now_name = held.pick.run().filter(|_| !held.job && held.pick.run() != held.now).map(|i| all[i].fluid.clone());
     let cells = after.split_off(content::MIXER_SLOTS.min(after.len()));
-    if mixer == before && after == raw && cells == queue_before {
+    if mixer == before && after == held.raw && cells == held.queue_before && migrated.is_none() && now_name.is_none() {
         return;
     }
+    let (raw, queue_before) = (held.raw, held.queue_before);
     game.native_with_mod_block_entity(pos, |e| {
         machines::write_slots(e, 0..content::MIXER_SLOTS, &raw, &after, &[]);
         if cells != queue_before {
-            crate::game::rustcraft_utility::write_json(&mut e.nbt, machines::QUEUE_KEY, &cells);
+            write_json(&mut e.nbt, machines::QUEUE_KEY, &cells);
         }
         if mixer.progress != before.progress {
             write_f64(&mut e.nbt, PROGRESS_KEY, mixer.progress);
@@ -268,38 +491,53 @@ pub(super) fn run(
                 },
             );
         }
+        if let Some(list) = &migrated {
+            write_json(&mut e.nbt, recipes::KEY, list);
+        }
+        if let Some(name) = &now_name {
+            write_json(&mut e.nbt, recipes::NOW_KEY, &Some(name));
+        }
     });
 }
 
 // ---- What it shows ----
 
-fn shown_at(dimension: &str, pos: Pos) -> Option<(Shown, f64)> {
-    state().shown.get(&(dimension.to_owned(), pos)).copied()
+fn seen_at(dimension: &str, pos: Pos) -> Option<Seen> {
+    state().shown.get(&(dimension.to_owned(), pos)).cloned()
 }
 
-fn shown_text(s: Shown) -> Text {
-    match s {
-        Shown::Working => line("rustcraft.machine.working", "Working", &[]),
-        Shown::Slowed(p) => line(
+/// What it shows; 0.21 (spec 39, RT4) names its recipe (`recipe`, a fluid): «Делает:
+/// питательный раствор», «Нет ингредиентов: ускоритель».
+fn shown_text(s: Shown, recipe: Option<&str>) -> Text {
+    match (s, recipe) {
+        (Shown::Working, Some(f)) => line("rustcraft.mixer.making", "Making: %s", &[fluids::fluid_name(f)]),
+        (Shown::NoIngredients, Some(f)) => line(
+            "rustcraft.mixer.no_ingredients_for",
+            "No ingredients: %s",
+            &[fluids::fluid_name(f)],
+        ),
+        (Shown::Working, None) => line("rustcraft.machine.working", "Working", &[]),
+        (Shown::Slowed(p), _) => line(
             "rustcraft.machine.slowed",
             "Not enough energy: %s",
             &[Text::literal(format!("{p}%"))],
         ),
-        Shown::NoEnergy => line("rustcraft.machine.no_energy", "No energy", &[]),
-        Shown::NoIngredients => line("rustcraft.mixer.no_ingredients", "No ingredients", &[]),
-        Shown::NoWater => line("rustcraft.mixer.no_water", "No water", &[]),
-        Shown::Full => line(
+        (Shown::NoEnergy, _) => line("rustcraft.machine.no_energy", "No energy", &[]),
+        (Shown::NoIngredients, None) => line("rustcraft.mixer.no_ingredients", "No ingredients", &[]),
+        (Shown::NoWater, _) => line("rustcraft.mixer.no_water", "No water", &[]),
+        (Shown::Full, _) => line(
             "rustcraft.machine.output_full",
             "Nowhere to put the product",
             &[],
         ),
+        (Shown::Off, _) => line("rustcraft.mixer.off", "Turn a recipe on in the window", &[]),
     }
 }
 
 fn severity(s: Shown) -> Severity {
     match s {
         Shown::Working => Severity::Ok,
-        Shown::Slowed(_) => Severity::Warn,
+        Shown::Slowed(_) | Shown::Off => Severity::Warn,
         _ => Severity::Bad,
     }
 }
@@ -331,7 +569,7 @@ fn tank_line(game: &Game<'_>, pos: Pos, t: &Tuning) -> Text {
     text
 }
 
-/// The look of a mixer: its state and its tanks.
+/// The look of a mixer: its state, the recipe it works on and its tanks.
 pub(super) fn diagnosis(
     game: &Game<'_>,
     dimension: &str,
@@ -342,9 +580,19 @@ pub(super) fn diagnosis(
     if block != content::MIXER {
         return None;
     }
-    let mut text = shown_at(dimension, pos).map_or_else(
+    let mut text = seen_at(dimension, pos).map_or_else(
         || Text::translate("block.rustcraft.mixer", &[]),
-        |(s, _)| shown_text(s),
+        |s| {
+            let mut text = shown_text(s.shown, s.recipe.as_deref());
+            // RT4: a mixer that stands names the recipe it stands on too.
+            if let Some(f) = s.recipe.as_deref()
+                && !matches!(s.shown, Shown::Working | Shown::NoIngredients | Shown::Off)
+            {
+                text.push(Text::literal(" · "));
+                text.push(fluids::fluid_name(f));
+            }
+            text
+        },
     );
     text.push(Text::literal(" · "));
     text.push(tank_line(game, pos, t));
@@ -372,7 +620,28 @@ fn fluid_bar(label: Text, amount: u64, size: u64, colour: u32) -> SheetBar {
     }
 }
 
-/// The mixer's window: energy, water and product bars, its progress, its state.
+/// 0.21 (spec 39, RT1): a recipe's toggle: its icon the ingredient that tells it from the others
+/// (the last of its file: bone meal, glowstone dust, copper dust, gold dust), its name the fluid,
+/// its tooltip what it takes and the click.
+fn recipe_toggle(game: &Game<'_>, r: &MixRecipe, on: bool, active: bool) -> Toggle {
+    let mut hint = needs_text(game, &r.ingredients);
+    hint.push(line("rustcraft.mixer.plus_water", " + water", &[]));
+    hint.push(Text::literal(" · "));
+    hint.push(if on {
+        line("rustcraft.recipes.click_off", "click: turn off", &[])
+    } else {
+        line("rustcraft.recipes.click_on", "click: turn on", &[])
+    });
+    Toggle {
+        icon: r.ingredients.last().map_or_else(|| "minecraft:water_bucket".to_owned(), |(i, _)| i.clone()),
+        name: base::v(&fluids::fluid_name(&r.fluid)),
+        on,
+        active,
+        hint: base::v(&hint),
+    }
+}
+
+/// The mixer's window: energy, water and product bars, its progress, its recipes, its state.
 pub(super) fn sheet(game: &Game<'_>, dimension: &str, pos: Pos, t: &Tuning, s: &mut Sheet) {
     let Some(entity) = crate::game::rustcraft_machines::entity(game, pos) else {
         return;
@@ -380,7 +649,8 @@ pub(super) fn sheet(game: &Game<'_>, dimension: &str, pos: Pos, t: &Tuning, s: &
     s.mode = Some(machines::read_work(&entity.nbt).code());
     let spec = spec_of(game, pos, &entity.nbt, t);
     let asked = spec.energy * spec.energy_factor;
-    let (shown, got) = shown_at(dimension, pos).unwrap_or((Shown::NoIngredients, 0.0));
+    let seen = seen_at(dimension, pos).unwrap_or(Seen { shown: Shown::Off, got: 0.0, recipe: None });
+    let (shown, got) = (seen.shown, seen.got);
     let e = |n: f64| Text::literal(format!("{n:.1}").replace(".0", "").replace('.', ","));
     s.bars.push(SheetBar {
         label: base::v(&line("rustcraft.window.energy", "Energy", &[])),
@@ -423,7 +693,7 @@ pub(super) fn sheet(game: &Game<'_>, dimension: &str, pos: Pos, t: &Tuning, s: &
     };
     s.bars.push(fluid_bar(label, amount, size, colour));
     // Slice 18: the queue cells' items, when it has any.
-    let cells: Vec<Slot> = crate::game::rustcraft_utility::read_json(&entity.nbt, machines::QUEUE_KEY);
+    let cells: Vec<Slot> = read_json(&entity.nbt, machines::QUEUE_KEY);
     let queued: u32 = cells.iter().flatten().map(|(_, n)| n).sum();
     // Slice 18, wave 2 (`ui.js` mixer): the progress is the arrow after its slots; one line says
     // its pace, and its queue cells when it has any.
@@ -445,13 +715,23 @@ pub(super) fn sheet(game: &Game<'_>, dimension: &str, pos: Pos, t: &Tuning, s: &
     }
     s.rows.push(base::v(&row));
     s.hints = vec![vec![base::v(&line(
-        "rustcraft.mixer.hint",
-        "Water with bone meal and redstone: nutrient solution; sugar and glowstone: accelerator; honey and copper dust: economizer; nether wart and gold dust: enricher",
+        "rustcraft.mixer.recipes_hint",
+        "The icons after the arrow are its recipes: a click turns one on or off. It makes the first one on while its ingredients last, then the next, and takes them from the storage itself",
         &[],
     ))]];
+    // 0.21 (spec 39, RT1, RT4): a toggle a recipe, the one it makes now outlined.
+    let all = recipes_now();
+    let on = on_of(&entity.nbt, &all);
+    let making = seen.recipe.as_deref().filter(|_| matches!(shown, Shown::Working | Shown::Slowed(_)));
+    s.toggles = all
+        .iter()
+        .zip(&on)
+        .take(rustcraft_rules::machines::sheet::MIXER_TOGGLES)
+        .map(|(r, on)| recipe_toggle(game, r, *on, making == Some(r.fluid.as_str())))
+        .collect();
     s.status = Some(SheetStatus {
         severity: severity_code(severity(shown)),
-        text: base::v(&shown_text(shown)),
+        text: base::v(&shown_text(shown, seen.recipe.as_deref())),
     });
 }
 
@@ -472,7 +752,7 @@ pub(super) fn view(game: &Game<'_>, dimension: &str, pos: Pos) -> Option<MixerVi
     Some(MixerView {
         water: tanks.water,
         product: tanks.product,
-        shown: shown_at(dimension, pos).map(|(s, _)| s),
+        shown: seen_at(dimension, pos).map(|s| s.shown),
     })
 }
 

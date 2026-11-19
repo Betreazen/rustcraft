@@ -873,6 +873,7 @@ pub(super) fn sheet(
                         &[],
                     )),
                     on,
+                    active: false,
                     hint: base::v(&if on {
                         line("rustcraft.miner.ore_on", "Taken · click: leave it", &[])
                     } else {
