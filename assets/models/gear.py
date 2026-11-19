@@ -26,6 +26,7 @@ COLORS = {
     'glow_visor': '#5ad1e6', 'glow_suit': '#7af0ff', 'grip': '#ffa53c',
     'glow_blade': '#62e6f2', 'glow_blade_core': '#e6fdff', 'glow_field': '#4fd2e6', 'glow_field_core': '#b8f6fa',
     'glow_flash': '#f0feff', 'wood': '#8a6a3a', 'wood_dark': shade('#8a6a3a', -0.35),
+    'glow_energy': '#ffe14a',
 }
 # Fists of the figure facing x+, in pixels of the block: the right one on the y+ side, the left
 # one on the y- side, each in the middle of the lowest pixel and a half of the arm. A held item
@@ -55,71 +56,122 @@ def limbs(m, part, x, z):
 
 
 def armor_helmet(m):
-    # A shell round the head with a glowing visor across the eyes, a crest in the colour of the
-    # tier, sensor pods over the ears and an antenna.
-    g = U
-    out, back = WIDE[1] + g, WIDE[0] - g
+    # A closed helmet, as the armour looks on the player in the game (gear_mc.py): a brow band and
+    # a crest in the colour of the tier, a visor across the eyes that wraps round to the sides, a
+    # vented faceguard, an energy sensor in a pod of the tier's colour over each ear and a vent at
+    # the back.
+    g = 0.7 * U
+    front, back = WIDE[1] + g, WIDE[0] - g
+    left, right = WIDE[0] - g, WIDE[1] + g
+    brow, eyes, chin = TOP - 2.5 * U, TOP - 5.5 * U, NECK + 0.3 * U
     m.pivot('head', MID, MID, NECK)
-    span(m, 'steel', (back, out), (back, out), (TOP, TOP + g), 'head')
-    span(m, 'steel_mid', (back, WIDE[0]), (back, out), (NECK + 1.4, TOP), 'head')
-    for y in ((back, WIDE[0]), (WIDE[1], out)):
-        span(m, 'steel', (WIDE[0], out), y, (NECK + 1.4, TOP), 'head')
-    span(m, 'steel', (WIDE[1], out), WIDE, (TOP - 1.6, TOP), 'head')
-    span(m, 'glow_visor', (WIDE[1], out - 0.1), WIDE, (TOP - 3.6, TOP - 1.6), 'head')
-    span(m, 'steel_mid', (WIDE[1], out), WIDE, (NECK + 0.9, NECK + 2), 'head')
-    span(m, 'tint', (back + 0.9, out), (MID - 0.7, MID + 0.7), (TOP + g, TOP + g + 0.6), 'head')
-    for y in ((back - 0.4, back), (out, out + 0.4)):
-        span(m, 'tint', (MID - 1.5, MID + 1.5), y, (NECK + 2.9, NECK + 5.9), 'head')
-    span(m, 'steel_dark', (MID - 3, MID - 2.4), (back - 0.5, back + 0.1), (TOP - 1.8, TOP + 2.7), 'head')
+    span(m, 'steel', (back, front), (left, right), (TOP, TOP + g), 'head')
+    span(m, 'steel_mid', (back, WIDE[0]), (left, right), (chin, TOP), 'head')
+    sides(m, 'steel', (WIDE[0], front), (left, WIDE[0]), (chin, TOP), 'head')
+    # Brow band and crest.
+    span(m, 'tint', (back - 0.15, front + 0.15), (left - 0.15, right + 0.15), (brow, TOP + 0.25), 'head')
+    span(m, 'tint', (back + 0.3, front + 0.25), (MID - 1.1 * U, MID + 1.1 * U), (TOP + g, TOP + g + 0.4 * U), 'head')
+    span(m, 'tint_light', (back + 0.6, front + 0.3), (MID - 0.35 * U, MID + 0.35 * U), (TOP + g + 0.4 * U, TOP + g + 0.55 * U), 'head')
+    # Visor in a dark frame, wrapping round to the sides.
+    span(m, 'black', (WIDE[1], front), WIDE, (eyes, brow), 'head')
+    span(m, 'glow_visor', (WIDE[1], front + 0.15), (WIDE[0] + 0.2, WIDE[1] - 0.2), (eyes + 0.35, brow - 0.35), 'head')
+    sides(m, 'black', (front - 2.6 * U, front), (left - 0.1, WIDE[0]), (eyes, brow), 'head')
+    sides(m, 'glow_visor', (front - 2.3 * U, front + 0.15), (left - 0.2, WIDE[0]), (eyes + 0.35, brow - 0.35), 'head')
+    # Faceguard with vent slits.
+    span(m, 'steel', (WIDE[1], front + 0.3), (MID - 2.6 * U, MID + 2.6 * U), (chin, eyes), 'head')
+    for y in (-1.6, -0.6, 0.4, 1.4):
+        span(m, 'black', (front + 0.3, front + 0.35), (MID + (y - 0.2) * U, MID + (y + 0.2) * U), (chin + 0.5 * U, eyes - 0.5 * U), 'head')
+    # Ear pods with the energy sensor.
+    sides(m, 'tint', (MID - 1.6 * U, MID + 1.6 * U), (left - 0.45 * U, left), (eyes - 1.5 * U, eyes + 1.6 * U), 'head')
+    sides(m, 'black', (MID - 1 * U, MID + 1 * U), (left - 0.55 * U, left - 0.45 * U), (eyes - 0.9 * U, eyes + 1 * U), 'head')
+    sides(m, 'glow_energy', (MID - 0.5 * U, MID + 0.5 * U), (left - 0.65 * U, left - 0.55 * U), (eyes - 0.4 * U, eyes + 0.5 * U), 'head')
+    # Vent at the back.
+    span(m, 'black', (back - 0.2, back), (MID - 2 * U, MID + 2 * U), (chin + 0.4 * U, chin + 3.2 * U), 'head')
+    for z in (1.1, 2.1):
+        span(m, 'steel_dark', (back - 0.3, back - 0.2), (MID - 1.6 * U, MID + 1.6 * U), (chin + z * U, chin + (z + 0.4) * U), 'head')
 
 
 def armor_chest(m):
-    # A breastplate with a glowing core, a back plate, a collar and shoulder pads with guards on
-    # the forearms.
-    g = U
+    # A breastplate with two chest plates round a yellow energy core in a frame of the tier's
+    # colour, conduits from the core to the sides, a segmented belly, a collar and a trim of the
+    # tier's colour at the waist; a power pack with two glowing vents on the back. The sleeves:
+    # pauldrons of the tier's colour, ribbed elbows, bracers with a glowing strip and cuffs.
+    g = 0.6 * U
     front, back = BODY[1] + g, BODY[0] - g
-    span(m, 'steel', (BODY[1], front), WIDE, (HIP + 1.7, NECK))
-    span(m, 'steel_mid', (back, BODY[0]), WIDE, (HIP + 1.7, NECK))
-    span(m, 'steel_dark', (back, front), WIDE, (NECK, NECK + 0.7))
-    span(m, 'tint', (back, front + 0.1), WIDE, (HIP + 0.9, HIP + 1.7))
-    span(m, 'tint', (front, front + 0.2), (MID - 1.6, MID + 1.6), (HIP + 5.6, HIP + 8.8))
-    span(m, 'glow_suit', (front, front + 0.35), (MID - 1, MID + 1), (HIP + 6.2, HIP + 8.2))
-    for z in (HIP + 2.2, HIP + 3.8):
-        span(m, 'steel_mid', (front, front + 0.2), (WIDE[0] + 0.8, WIDE[1] - 0.8), (z, z + 1))
+    left, right = WIDE[0] - g, WIDE[1] + g
+    waist = HIP + 0.5 * U
+    span(m, 'steel_mid', (back, front), (left, right), (waist, NECK))
+    span(m, 'steel_dark', (back + 0.3, front - 0.3), (MID - 2.6 * U, MID + 2.6 * U), (NECK, NECK + 0.5 * U))
+    span(m, 'tint', (back - 0.15, front + 0.3), (left - 0.15, right + 0.15), (waist, waist + 1.2 * U))
+    # Chest plates and the core.
+    sides(m, 'steel', (front, front + 0.35), (MID - 3.6 * U, MID - 0.1 * U), (NECK - 5 * U, NECK - 1 * U), 'body')
+    span(m, 'black', (front, front + 0.45), (MID - 2 * U, MID + 2 * U), (NECK - 6.5 * U, NECK - 2.5 * U))
+    span(m, 'tint', (front, front + 0.6), (MID - 1.5 * U, MID + 1.5 * U), (NECK - 6 * U, NECK - 3 * U))
+    span(m, 'glow_energy', (front, front + 0.75), (MID - 1 * U, MID + 1 * U), (NECK - 5.5 * U, NECK - 3.5 * U))
+    sides(m, 'glow_energy', (front, front + 0.4), (left - 0.1, MID - 2 * U), (NECK - 5.35 * U, NECK - 4.85 * U), 'body')
+    sides(m, 'glow_energy', (front - 2 * U, front), (left - 0.1, left), (NECK - 5.35 * U, NECK - 4.85 * U), 'body')
+    # Belly plates.
+    for top in (NECK - 6.6 * U, NECK - 8.1 * U, NECK - 9.6 * U):
+        span(m, 'steel', (front, front + 0.3), (MID - 2.5 * U, MID + 2.5 * U), (top - 1.3 * U, top))
+    # Power pack on the back with two glowing vents.
+    span(m, 'steel_dark', (back - 0.3 * U, back), (MID - 3 * U, MID + 3 * U), (NECK - 7.5 * U, NECK - 2 * U))
+    sides(m, 'black', (back - 0.4 * U, back - 0.3 * U), (MID - 2.2 * U, MID - 0.8 * U), (NECK - 6.5 * U, NECK - 3 * U), 'body')
+    sides(m, 'glow_energy', (back - 0.45 * U, back - 0.4 * U), (MID - 1.8 * U, MID - 1.2 * U), (NECK - 6 * U, NECK - 3.5 * U), 'body')
+    # Sleeves, turning about the shoulders.
     limbs(m, 'arm_{}', MID, SHOULDER)
     arm = (MID - 8 * U, MID - 4 * U)
-    sides(m, 'steel', (back - 0.3, front + 0.3), (arm[0] - g, arm[1]), (SHOULDER - 0.8, NECK + 1), 'arm_{}')
-    sides(m, 'tint', (back - 0.3, front + 0.3), (arm[0] - g - 0.2, arm[0] - g), (SHOULDER, SHOULDER + 1), 'arm_{}')
-    sides(m, 'steel_mid', (back, front), (arm[0] - g + 0.45, arm[1]), (HIP + 1.7, HIP + 5.7), 'arm_{}')
-    sides(m, 'glow_suit', (front, front + 0.2), (arm[0] + 0.8, arm[1] - 0.8), (HIP + 3.2, HIP + 3.8), 'arm_{}')
+    x = (BODY[0] - g, BODY[1] + g)
+    sides(m, 'tint', (x[0] - 0.15, x[1] + 0.15), (arm[0] - 0.8 * U, arm[1] - 0.4 * U), (NECK - 5 * U, NECK + 0.6 * U), 'arm_{}')
+    sides(m, 'tint_light', (x[0] + 0.1, x[1] - 0.1), (arm[0] - 0.6 * U, arm[1] - 0.6 * U), (NECK + 0.6 * U, NECK + 0.85 * U), 'arm_{}')
+    sides(m, 'tint_dark', (x[0] - 0.2, x[1] + 0.2), (arm[0] - 0.85 * U, arm[1] - 0.4 * U), (NECK - 5 * U, NECK - 4.6 * U), 'arm_{}')
+    sides(m, 'glow_energy', (MID - 1 * U, MID + 1 * U), (arm[0] - 0.95 * U, arm[0] - 0.8 * U), (NECK - 3.2 * U, NECK - 2.7 * U), 'arm_{}')
+    sides(m, 'black', (x[0] + 0.3, x[1] - 0.3), (arm[0] - 0.3 * U, arm[1] - 0.4 * U), (NECK - 7 * U, NECK - 5 * U), 'arm_{}')
+    for z in (NECK - 6.6 * U, NECK - 5.8 * U):
+        sides(m, 'steel_dark', (x[0] + 0.15, x[1] - 0.15), (arm[0] - 0.45 * U, arm[1] - 0.4 * U), (z, z + 0.4 * U), 'arm_{}')
+    sides(m, 'steel', x, (arm[0] - 0.6 * U, arm[1] - 0.4 * U), (NECK - 10 * U, NECK - 7 * U), 'arm_{}')
+    sides(m, 'steel_dark', (MID - 1.4 * U, MID + 1.4 * U), (arm[0] - 0.8 * U, arm[0] - 0.6 * U), (NECK - 9.5 * U, NECK - 7.5 * U), 'arm_{}')
+    sides(m, 'glow_energy', (MID - 1 * U, MID + 1 * U), (arm[0] - 0.9 * U, arm[0] - 0.8 * U), (NECK - 9 * U, NECK - 8 * U), 'arm_{}')
+    sides(m, 'tint', (x[0] - 0.1, x[1] + 0.1), (arm[0] - 0.7 * U, arm[1] - 0.4 * U), (NECK - 11 * U, NECK - 10 * U), 'arm_{}')
 
 
 def armor_legs(m):
-    # A belt with a buckle in the colour of the tier, and plates on the thighs and shins with
-    # knee guards; the boots cover the feet.
-    g = U / 2
+    # A belt with a buckle of the tier's colour and a glowing pin; thigh plates with a stripe of
+    # the tier's colour on the outer side, knee caps of the tier's colour and shin plates. The
+    # boots cover the feet and ankles.
+    g = 0.4 * U
     front, back = BODY[1] + g, BODY[0] - g
-    span(m, 'steel_dark', (back, front), (WIDE[0] - g, WIDE[1] + g), (HIP - 1.2, HIP + 0.45))
-    span(m, 'tint', (front, front + 0.35), (MID - 1, MID + 1), (HIP - 1, HIP + 0.25))
+    span(m, 'steel_dark', (back - 0.1, front + 0.1), (WIDE[0] - g - 0.1, WIDE[1] + g + 0.1), (HIP - 0.3 * U, HIP + 1.2 * U))
+    span(m, 'tint', (front + 0.1, front + 0.35 * U), (MID - 1.3 * U, MID + 1.3 * U), (HIP - 0.4 * U, HIP + 1.2 * U))
+    span(m, 'glow_energy', (front + 0.35 * U, front + 0.45 * U), (MID - 0.5 * U, MID + 0.5 * U), (HIP, HIP + 0.8 * U))
     limbs(m, 'leg_{}', MID, HIP)
-    leg, low = (WIDE[0], MID), 4.5
-    sides(m, 'steel', (BODY[1], front), leg, (low, HIP - 1.2), 'leg_{}')
-    sides(m, 'steel_mid', BODY, (WIDE[0] - g, WIDE[0]), (low, HIP - 1.2), 'leg_{}')
-    sides(m, 'steel_mid', (back, BODY[0]), leg, (low, HIP - 1.2), 'leg_{}')
-    sides(m, 'tint', (front, front + 0.35), (WIDE[0] + 0.6, MID - 0.6), (low + 1.1, low + 2.9), 'leg_{}')
+    leg = (WIDE[0] - g, MID - 0.05)
+    knee = HIP - 4 * U
+    sides(m, 'steel_mid', (back, front), leg, (4.5 * U, HIP - 0.3 * U), 'leg_{}')
+    sides(m, 'steel', (front, front + 0.3 * U), (leg[0] + 0.5 * U, leg[1] - 0.5 * U), (knee + 0.3 * U, HIP - 0.5 * U), 'leg_{}')
+    sides(m, 'tint', (MID - 0.5 * U, MID + 0.5 * U), (leg[0] - 0.2 * U, leg[0]), (knee + 0.3 * U, HIP - 0.8 * U), 'leg_{}')
+    sides(m, 'steel_dark', (back + 0.3 * U, front - 0.3 * U), (leg[0] - 0.15 * U, leg[0]), (knee - 3 * U, knee), 'leg_{}')
+    sides(m, 'tint', (front, front + 0.6 * U), (leg[0] + 0.4 * U, leg[1] - 0.4 * U), (knee - 3 * U, knee), 'leg_{}')
+    sides(m, 'tint_light', (front + 0.6 * U, front + 0.75 * U), (leg[0] + 1.4 * U, leg[1] - 1.4 * U), (knee - 2 * U, knee - 1 * U), 'leg_{}')
+    sides(m, 'steel', (front, front + 0.3 * U), (leg[0] + 0.5 * U, leg[1] - 0.5 * U), (5.2 * U, knee - 3.2 * U), 'leg_{}')
 
 
 def armor_boots(m):
-    # Boots with thick soles, toe caps in the colour of the tier and small glowing heel vents.
-    g = U
+    # Ankle boots: a cuff of the tier's colour, a toe cap of the tier's colour, a strap with a
+    # glowing strip on the outer side, a glowing heel vent and thick black soles.
+    g = 0.6 * U
     front, back = BODY[1] + g, BODY[0] - g
     limbs(m, 'leg_{}', MID, HIP)
     foot = (WIDE[0] - g, MID - 0.05)
-    sides(m, 'black', (back - 0.3, front + 0.6), (foot[0] - 0.2, foot[1]), (0, 0.9), 'leg_{}')
-    sides(m, 'steel_dark', (back, front), foot, (0.9, 4.5), 'leg_{}')
-    sides(m, 'tint_light', (back, front), foot, (4.5, 4.9), 'leg_{}')
-    sides(m, 'tint', (front, front + 0.6), (foot[0] + 0.2, foot[1] - 0.2), (0.9, 2.6), 'leg_{}')
-    sides(m, 'glow_suit', (back - 0.4, back), (foot[0] + 1.4, foot[1] - 1.4), (1.3, 2.3), 'leg_{}')
+    sides(m, 'black', (back - 0.2 * U, front + 0.6 * U), (foot[0] - 0.2 * U, foot[1]), (0, 1.1 * U), 'leg_{}')
+    sides(m, 'steel_dark', (back - 0.1 * U, front + 0.5 * U), (foot[0] - 0.1 * U, foot[1]), (1.1 * U, 1.5 * U), 'leg_{}')
+    sides(m, 'steel', (back, front), foot, (1.5 * U, 4 * U), 'leg_{}')
+    sides(m, 'tint', (back - 0.15 * U, front + 0.15 * U), (foot[0] - 0.15 * U, foot[1]), (4 * U, 5 * U), 'leg_{}')
+    sides(m, 'tint', (front, front + 0.5 * U), (foot[0] + 0.4 * U, foot[1] - 0.4 * U), (1.5 * U, 3 * U), 'leg_{}')
+    sides(m, 'tint_light', (front + 0.1 * U, front + 0.55 * U), (foot[0] + 0.6 * U, foot[1] - 0.6 * U), (3 * U, 3.2 * U), 'leg_{}')
+    sides(m, 'steel_dark', (MID - 1.4 * U, MID + 1.4 * U), (foot[0] - 0.2 * U, foot[0]), (2 * U, 3.5 * U), 'leg_{}')
+    sides(m, 'glow_energy', (MID - 1 * U, MID + 1 * U), (foot[0] - 0.3 * U, foot[0] - 0.2 * U), (2.5 * U, 3 * U), 'leg_{}')
+    sides(m, 'black', (back - 0.2 * U, back), (foot[0] + 1 * U, foot[1] - 1 * U), (2 * U, 3.6 * U), 'leg_{}')
+    sides(m, 'glow_energy', (back - 0.3 * U, back - 0.2 * U), (foot[0] + 1.4 * U, foot[1] - 1.4 * U), (2.4 * U, 3.2 * U), 'leg_{}')
 
 
 def jetpack(m):
