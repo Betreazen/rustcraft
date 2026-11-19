@@ -36,7 +36,7 @@ PAGES = {
                    "The higher the owner's level in a branch of the skill tree, the faster their machines of that branch work: up to half again."),
     # ---- pipe
     'housing': ('Magistral Housing',
-                'A pipe block. Every housing has three channels built in, for items, fluid and energy; its tier sets how much they carry.'),
+                'A pipe block. Every housing has four channels built in, for items, fluid, energy and experience; its tier sets how much they carry.'),
     'node': ('Magistral Node',
              'The magistral\'s relay and crossing. It extends the line by its range. Nodes of tiers 1–3 pass the line straight through; a tier 4 node is a junction.'),
     'facade': ('Facade', 'Hides a magistral housing: the whole housing looks like an ordinary block such as stone, planks or bricks.'),
