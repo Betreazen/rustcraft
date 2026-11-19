@@ -339,6 +339,8 @@ pub(super) fn on_level_tick(game: &mut Game<'_>, dimension: &str) {
     workers::tick(game, dimension, &level, &TUNING);
     base::tick(game, dimension, &level, &TUNING);
     tablet::tick(game, dimension, &level);
+    // Round 32 (spec 33): the «Сеть» pages the clients asked for.
+    crate::game::rustcraft_terminal_net::tick(game, dimension, &level);
     {
         let mut s = server();
         // A hook may have marked the level stale while it was out of the map.

@@ -69,6 +69,8 @@ pub mod s18_w2_rail_gear;
 pub mod w2_pipe_energy;
 // 0.20 (round 31): the machines stream.
 pub mod s20_machines;
+// Round 32 (spec 33): the terminal's «Сеть» page.
+pub mod s21_terminal;
 
 use std::collections::BTreeMap;
 
@@ -523,6 +525,14 @@ pub trait Bench {
         Err("no storage fluids on this bench".into())
     }
 
+    // ---- Round 32: the terminal's «Сеть» page ----
+    /// The «Сеть» page the server would send for the terminal (or cell) at `pos` now
+    /// (rustcraft_terminal_net::build).
+    fn net_page(&self, pos: Pos) -> Option<crate::storage::network::NetPage> {
+        let _ = pos;
+        None
+    }
+
     // ---- 0.20: Path-of-craft-tree's summary ----
     /// Gives the made-up owner `owner` a tree summary as PCT writes it (`summary` its JSON text,
     /// crate::perks::fixture; none takes it away), as the server reads it from a player online.
@@ -772,6 +782,8 @@ pub fn catalog() -> Vec<Build> {
     all.extend(s20_machines::ALL);
     // Round 31, the models stream: the machines' connectors.
     all.extend(connectors::ALL);
+    // Round 32 (spec 33): the terminal's «Сеть» page.
+    all.extend(s21_terminal::ALL);
     all
 }
 

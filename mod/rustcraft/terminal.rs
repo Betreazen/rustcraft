@@ -32,6 +32,7 @@ use crate::game::{
         self as kit, HOT, LABEL, TEXT, VALUE, at, button, plural, slot, text, tr, tr_with,
     },
     rustcraft_storage::CHANNEL,
+    rustcraft_terminal_net as terminal_net,
 };
 use horizon_client::{
     hud::HudBatch,
@@ -46,6 +47,7 @@ use rustcraft_rules::{
     storage::{
         Limit,
         modules as sockets,
+        network::{self as net, Ask},
         terminal::{
             self as term, ItemRef, LimitChange, NO_PRESS, Part, Press, Take, cell,
             part_in,
@@ -96,6 +98,9 @@ struct View {
     selected: Option<ItemRef>,
     /// Slice 18: the count the orders row orders (0 reads as 1).
     order_count: u16,
+    /// Round 32 (spec 33): the «Сеть» page in the grid's place, and its page.
+    network: bool,
+    net_page: usize,
 }
 
 static VIEW: LazyLock<Mutex<View>> = LazyLock::new(Mutex::default);
@@ -131,6 +136,7 @@ pub(super) fn set_tablet_listing(l: Listing) {
 /// A fresh view for a tablet's window that opens.
 pub(super) fn reset_tablet_view() {
     *TABLET_VIEW.lock().unwrap_or_else(PoisonError::into_inner) = View::default();
+    terminal_net::forget_tablet();
 }
 
 fn view() -> MutexGuard<'static, View> {
@@ -389,6 +395,9 @@ pub(super) fn draw(game: &Game<'_>, batch: &mut HudBatch, o: [f32; 2]) {
     let listing = listing_of(v.terminal);
     kit::background(game, batch, o, [term::WIDTH, term::HEIGHT]);
     title(game, batch, o, listing.as_ref());
+    // Round 32 (spec 33): the «Сеть» button, right of the title.
+    let net_name = tr("rustcraft.netpage.button", "Network");
+    button(game, batch, o, net::NET_MODE, &net_name, v.network);
     let open = Tab::ALL.iter().position(|t| *t == v.tab);
     let line_y = term::TABS[0][1] + term::TABS[0][3];
     let right = term::WIDTH - 8.0;
@@ -407,6 +416,10 @@ pub(super) fn draw(game: &Game<'_>, batch: &mut HudBatch, o: [f32; 2]) {
         kit::centred(game, batch, o, r, &tab_name(tab), colour);
     }
     search_field(game, batch, o, &v);
+    if v.network {
+        network_page(game, batch, o, &mut v);
+        return;
+    }
     let list = listing
         .as_ref()
         .map(|l| shown(game, l, &v))
@@ -419,31 +432,8 @@ pub(super) fn draw(game: &Game<'_>, batch: &mut HudBatch, o: [f32; 2]) {
         view::pages(list.len())
     };
     v.page = v.page.min(pages - 1);
-    button(game, batch, o, term::PREV, "<", false);
-    button(game, batch, o, term::NEXT, ">", false);
-    let page = format!("{}/{}", v.page + 1, pages);
-    let w = game.native_text_width(&page);
-    let r = term::PAGE_TEXT;
-    text(
-        game,
-        batch,
-        &page,
-        o,
-        [r[0] + (r[2] - w) / 2.0, r[1] + 3.0],
-        VALUE,
-    );
-    if !tablet() {
-        let orders_name = tr("rustcraft.terminal.orders", "Orders");
-        button(game, batch, o, term::ORDER_MODE, &orders_name, v.orders);
-    }
-    button(
-        game,
-        batch,
-        o,
-        term::LIMIT_MODE,
-        &tr("rustcraft.terminal.limits", "Limits"),
-        v.limits,
-    );
+    pager(game, batch, o, v.page, pages);
+    mode_buttons(game, batch, o, &v);
     if !tablet() {
         sockets(game, batch, o, listing.as_ref());
     }
@@ -462,7 +452,61 @@ pub(super) fn draw(game: &Game<'_>, batch: &mut HudBatch, o: [f32; 2]) {
     kit::inventory(game, batch, o, term::INVENTORY, term::INVENTORY_LABEL_Y);
 }
 
-/// «Склад · 4 ячейки · 108 слотов».
+/// The page buttons of the top row and «2/5» between them.
+fn pager(game: &Game<'_>, batch: &mut HudBatch, o: [f32; 2], page: usize, pages: usize) {
+    button(game, batch, o, term::PREV, "<", false);
+    button(game, batch, o, term::NEXT, ">", false);
+    let page = format!("{}/{}", page + 1, pages);
+    let w = game.native_text_width(&page);
+    let r = term::PAGE_TEXT;
+    text(
+        game,
+        batch,
+        &page,
+        o,
+        [r[0] + (r[2] - w) / 2.0, r[1] + 3.0],
+        VALUE,
+    );
+}
+
+/// «Заказы» (not in the tablet) and «Лимиты».
+fn mode_buttons(game: &Game<'_>, batch: &mut HudBatch, o: [f32; 2], v: &View) {
+    if !tablet() {
+        let orders_name = tr("rustcraft.terminal.orders", "Orders");
+        button(game, batch, o, term::ORDER_MODE, &orders_name, v.orders);
+    }
+    button(
+        game,
+        batch,
+        o,
+        term::LIMIT_MODE,
+        &tr("rustcraft.terminal.limits", "Limits"),
+        v.limits,
+    );
+}
+
+/// Round 32 (spec 33): the «Сеть» page in the place of the grid, the row under it and the status
+/// (rustcraft_terminal_net draws its rows); the tabs and the search veiled, the page buttons
+/// turning its pages. Drawing it is what keeps the client asking the server for it.
+fn network_page(game: &Game<'_>, batch: &mut HudBatch, o: [f32; 2], v: &mut View) {
+    for r in term::TABS.into_iter().chain([term::SEARCH]) {
+        game.native_fill(batch, at(o, r), DIMMED);
+    }
+    let page = terminal_net::page_for(tablet(), v.terminal);
+    let pages = terminal_net::page_count(page.as_ref());
+    v.net_page = v.net_page.min(pages - 1);
+    pager(game, batch, o, v.net_page, pages);
+    mode_buttons(game, batch, o, v);
+    terminal_net::draw(game, batch, o, page.as_ref(), v.net_page);
+    if tablet() {
+        terminal_net::shown(Ask::Tablet);
+    } else if let Some(t) = v.terminal {
+        terminal_net::shown(Ask::Terminal(t));
+    }
+    kit::inventory(game, batch, o, term::INVENTORY, term::INVENTORY_LABEL_Y);
+}
+
+/// «Склад · 4 ячейки · 108 слотов», kept clear of the «Сеть» button.
 fn title(game: &Game<'_>, batch: &mut HudBatch, o: [f32; 2], listing: Option<&Listing>) {
     let mut title = tr("rustcraft.terminal.title", "Storage");
     if let Some(l) = listing.filter(|l| l.state != State::NoCells) {
@@ -482,6 +526,8 @@ fn title(game: &Game<'_>, batch: &mut HudBatch, o: [f32; 2], listing: Option<&Li
         Some((n, r)) => (n.to_owned(), Some(r.to_owned())),
         None => (title, None),
     };
+    let room = net::NET_MODE[0] - 4.0 - term::TITLE[0] - game.native_text_width(&name) - game.native_text_width(" · ");
+    let rest = rest.map(|r| kit::fit(game, &r, room.max(0.0)));
     kit::title_line(game, batch, o, &name, rest.as_deref(), term::WIDTH);
 }
 
@@ -964,8 +1010,16 @@ fn holes_line(l: &Listing) -> String {
 /// NO_PRESS (the press goes no further, native_hooks.rs:12160-12187); a place, a limit, the book's
 /// socket, an order or a «держать» button is a press for the server.
 pub(super) fn on_click(game: &Game<'_>, at: [f32; 2], right: bool) -> Option<i32> {
-    let orders_mode = view_for(game).orders;
-    let part = part_in(at, orders_mode)?;
+    let (orders_mode, network) = {
+        let v = view_for(game);
+        (v.orders, v.network)
+    };
+    // Round 32: the «Сеть» page has parts of its own.
+    let part = if network {
+        term::part_net(at)?
+    } else {
+        part_in(at, orders_mode)?
+    };
     let listing = {
         let v = view_for(game);
         listing_of(v.terminal)
@@ -991,17 +1045,28 @@ pub(super) fn on_click(game: &Game<'_>, at: [f32; 2], right: bool) -> Option<i32
             v.tab = tab;
             v.page = 0;
         }
-        Part::Search | Part::Status => {}
+        Part::Search | Part::Status | Part::NetRow(_) => {}
+        // Round 32 (spec 33): the «Сеть» page instead of the grid, and its own pages.
+        Part::NetMode => {
+            v.network = !v.network;
+            v.net_page = 0;
+            v.limits &= !v.network;
+            v.orders &= !v.network;
+        }
+        Part::Prev if v.network => v.net_page = v.net_page.saturating_sub(1),
+        Part::Next if v.network => v.net_page += 1,
         Part::Prev => v.page = v.page.saturating_sub(1),
         Part::Next => v.page += 1,
         Part::LimitMode => {
             v.limits = !v.limits;
             v.orders &= !v.limits;
+            v.network = false;
         }
         Part::OrderMode | Part::Socket(_) if tablet() => {}
         Part::OrderMode => {
             v.orders = !v.orders;
             v.limits &= !v.orders;
+            v.network = false;
         }
         Part::Socket(k) => {
             return u8::try_from(k)
@@ -1139,11 +1204,28 @@ fn hint(lines: &mut Vec<String>, key: &str, fallback: &str) {
 
 /// `native_screen_tooltip` on the terminal.
 pub(super) fn tooltip(game: &Game<'_>, at: [f32; 2], lines: &mut Vec<String>) {
-    let orders_mode = view_for(game).orders;
-    let Some(part) = part_in(at, orders_mode) else {
+    let (orders_mode, network, net_page, terminal) = {
+        let v = view_for(game);
+        (v.orders, v.network, v.net_page, v.terminal)
+    };
+    let part = if network {
+        term::part_net(at)
+    } else {
+        part_in(at, orders_mode)
+    };
+    let Some(part) = part else {
         return;
     };
     match part {
+        Part::NetMode => hint(
+            lines,
+            "rustcraft.netpage.button_hint",
+            "What the storage sees on its magistral: housings, machines, tanks",
+        ),
+        Part::NetRow(i) => {
+            let page = terminal_net::page_for(tablet(), terminal);
+            terminal_net::row_tooltip(page.as_ref(), net_page, i, lines);
+        }
         Part::Cell(i) => cell_tooltip(game, i, orders_mode, lines),
         Part::Search => hint(
             lines,

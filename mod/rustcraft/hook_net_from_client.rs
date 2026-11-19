@@ -9,4 +9,6 @@ fn rustcraft_net_from_client(player: u128, channel: &str, data: &[u8]) {
     crate::game::rustcraft_backpack::on_client_message(player, channel, data);
     crate::game::rustcraft_node_window::on_client_message(player, channel, data);
     crate::game::rustcraft_window::on_client_message(player, channel, data);
+    // Round 32 (spec 33): a client asks for the «Сеть» page.
+    crate::game::rustcraft_terminal_net::on_client_message(player, channel, data);
 }
