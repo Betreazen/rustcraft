@@ -5,7 +5,7 @@
 //!
 //! On 0.20 the line pushed gold into the smelters after their sparksteel runs: «none of the job's
 //! items left» never came, the jobs held both smelters for good and every other order waited
-//! «занято: сплавщик» (22 minutes on the owner's server, until he cancelled the harpoon). Here a
+//! «нет свободной плавильни» (22 minutes on the owner's server, until he cancelled the harpoon). Here a
 //! gold ingot goes into a smelter beside its job's items the same way: the job still ends once
 //! less than a run is left (OD2), the stray gold goes back to the storage, and all three orders
 //! finish.

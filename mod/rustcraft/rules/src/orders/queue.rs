@@ -448,7 +448,7 @@ impl Queue {
 ///
 /// The owner (0.20): the line pushed gold into the alloy smelters after their sparksteel runs,
 /// so «none of its items left» never came, the jobs held both smelters for 22 minutes and every
-/// other order waited «занято: сплавщик».
+/// other order waited «нет свободной плавильни».
 pub fn job_end(items: &[(ItemKey, u32)], runs: u32, left: &BTreeMap<ItemKey, u64>) -> Option<u32> {
     let left_of = |item: &str| left.get(item).copied().unwrap_or(0);
     let whole_run = !items.is_empty()
