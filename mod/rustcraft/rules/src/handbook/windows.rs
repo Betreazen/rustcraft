@@ -112,6 +112,7 @@ pub const WINDOWS: &[(&str, &[Widget])] = &[
         Widget::Tank { pct: 80, rgb: 0x3f76e4 },
         Widget::Slots { cols: 3, cells: &[Cell { rgb: 0xe8e6da, count: "22", ghost: false }, Cell { rgb: 0xe53b3b, count: "30", ghost: false }, Cell { rgb: 0x000000, count: "", ghost: false }] },
         Widget::Work { pct: 45 },
+        Widget::Chips { on: &[true, true, false, false], note: false },
         Widget::Tank { pct: 35, rgb: 0x59d38c },
         Widget::Bar { pct: 100, rgb: 0xffe14a },
         Widget::Mode { active: 1 },
@@ -364,7 +365,7 @@ pub const WINDOWS: &[(&str, &[Widget])] = &[
         Widget::Status { tone: 0 },
     ]),
     ("kitchen", &[
-        Widget::Chips { on: &[false, true, false, false], note: false },
+        Widget::Chips { on: &[true, false, true, false, false, false, false], note: false },
         Widget::Craft { from: &[Cell { rgb: 0xe08a2a, count: "1", ghost: false }, Cell { rgb: 0xf2f2f2, count: "1", ghost: false }, Cell { rgb: 0xefe3c8, count: "1", ghost: false }], to: &[Cell { rgb: 0xd8903a, count: "1", ghost: false }] },
         Widget::Slots { cols: 3, cells: &[Cell { rgb: 0xe08a2a, count: "14", ghost: false }, Cell { rgb: 0xf2f2f2, count: "30", ghost: false }, Cell { rgb: 0xefe3c8, count: "9", ghost: false }, Cell { rgb: 0xd8b84a, count: "48", ghost: false }, Cell { rgb: 0x000000, count: "", ghost: false }, Cell { rgb: 0x000000, count: "", ghost: false }] },
         Widget::Tank { pct: 45, rgb: 0xf4f4f0 },
