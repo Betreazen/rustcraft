@@ -1292,9 +1292,9 @@ fn kitchen_fetch(game: &mut Game<'_>, dimension: &str, id: u32, pos: Pos, dish: 
         let game: &Game<'_> = game;
         let room = |item: &str| -> u64 {
             let max = machines::max_stack(game, item);
-            slots
-                .iter()
-                .take(INPUTS)
+            // A new kitchen's block entity may have no slots yet: `put` makes them.
+            (0..INPUTS)
+                .map(|i| slots.get(i).and_then(Option::as_ref))
                 .map(|s| match s {
                     // An empty slot can hold an empty stack (count 0, air), as `mining::store` reads it.
                     None => u64::from(max),
