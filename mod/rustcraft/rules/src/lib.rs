@@ -36,6 +36,8 @@ pub mod tips;
 pub mod tuning;
 pub mod utility;
 pub mod turret;
+// 0.21 (spec 46): the turret vacuums up its kills' drops.
+pub mod turret_loot;
 pub mod worker;
 // Round 31: the z-fighting check over the content mod's block models (tests only).
 #[cfg(test)]

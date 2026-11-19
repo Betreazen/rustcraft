@@ -274,6 +274,64 @@ pub fn is_its_drop(kills: &[Kill], now: u64, at: [f64; 3], item: &str) -> bool {
     })
 }
 
+/// 0.21 (spec 46, LP1; the owner 2026-11-19: «забойщик не собирает предметы»): what the farm
+/// animals of [`ANIMALS`] leave in a pen, alive or slain, and the chickens' eggs. The butcher
+/// picks these up anywhere in its pen whoever left them there; a player's other things it leaves.
+/// Wool of any colour counts too ([`is_wool`]); the turtle's and the armadillo's scutes do not:
+/// those animals are not the butcher's.
+pub const PRODUCTS: [&str; 18] = [
+    // 26.x: the chicken's egg, the cold chicken's blue one and the warm chicken's brown one.
+    "minecraft:egg",
+    "minecraft:blue_egg",
+    "minecraft:brown_egg",
+    "minecraft:feather",
+    "minecraft:leather",
+    "minecraft:rabbit_hide",
+    "minecraft:rabbit_foot",
+    // A goat's horn falls when it rams a block.
+    "minecraft:goat_horn",
+    // Meat raw, and cooked by a Fire Aspect sword.
+    "minecraft:beef",
+    "minecraft:cooked_beef",
+    "minecraft:mutton",
+    "minecraft:cooked_mutton",
+    "minecraft:porkchop",
+    "minecraft:cooked_porkchop",
+    "minecraft:chicken",
+    "minecraft:cooked_chicken",
+    "minecraft:rabbit",
+    "minecraft:cooked_rabbit",
+];
+
+/// Wool of any of the sixteen colours: a sheep's.
+pub fn is_wool(item: &str) -> bool {
+    item.strip_prefix("minecraft:")
+        .is_some_and(|w| w.len() > "_wool".len() && w.ends_with("_wool"))
+}
+
+/// LP1: whether `item` is a farm animal's product the butcher takes anywhere in its pen.
+pub fn is_product(item: &str) -> bool {
+    PRODUCTS.contains(&item) || is_wool(item)
+}
+
+/// How far up and down from the butcher its pen reaches, blocks: the animals and the products it
+/// sees (across, its radius).
+pub const PEN_HEIGHT: f64 = 3.0;
+
+/// The box of its pen round the butcher's centre `c` with radius `r`: (min, max).
+pub fn pen_box(c: [f64; 3], r: f64) -> ([f64; 3], [f64; 3]) {
+    (
+        [c[0] - r, c[1] - PEN_HEIGHT, c[2] - r],
+        [c[0] + r, c[1] + PEN_HEIGHT, c[2] + r],
+    )
+}
+
+/// LP1, LP2: whether the butcher picks up `item` lying at `at` in its pen: a farm product
+/// wherever it lies, anything else only as the drop of one of its own recent `kills`.
+pub fn picks_up(kills: &[Kill], now: u64, at: [f64; 3], item: &str) -> bool {
+    is_product(item) || is_its_drop(kills, now, at, item)
+}
+
 /// 0.21 (K6a; owner 2026-11-19: «по каналу опыт не ходит: забойщик убивает скот, а в конденсаторе
 /// опыта пусто»): the blocks beside the magistral lines that touch the butcher at `machine`, the
 /// nearest first. A kill's experience goes into the first condenser among them with room when no
@@ -337,6 +395,54 @@ mod tests {
         assert!(is_drop_of("minecraft:sheep", "minecraft:light_blue_wool"));
         assert!(!is_drop_of("minecraft:sheep", "minecraft:beef"));
         assert!(is_drop_of("minecraft:chicken", "minecraft:cooked_chicken"));
+    }
+
+    #[test]
+    fn its_pen_gives_up_the_farms_products_and_nothing_else() {
+        // LP1: eggs of all three kinds, feathers, wool of every colour, leather, the rabbit's
+        // hide and foot, a goat's horn, every meat raw and cooked.
+        for item in PRODUCTS.iter().copied().chain(["minecraft:white_wool", "minecraft:light_blue_wool"]) {
+            assert!(is_product(item), "{item}");
+            // LP1: no kill needed, wherever in its pen.
+            assert!(picks_up(&[], 10, [0.0, 0.0, 0.0], item), "{item}");
+        }
+        assert!(["egg", "blue_egg", "brown_egg"].iter().all(|e| is_product(&format!("minecraft:{e}"))));
+        // A player's things, other animals' products, wool-like blocks: never.
+        for item in [
+            "minecraft:diamond",
+            "minecraft:cobblestone",
+            "minecraft:turtle_scute",
+            "minecraft:armadillo_scute",
+            "minecraft:honeycomb",
+            "minecraft:white_carpet",
+            "minecraft:red_mushroom",
+            "minecraft:rotten_flesh",
+            "minecraft:wool",
+            "minecraft:_wool",
+            "rustcraft:white_wool",
+            "minecraft:chicken_spawn_egg",
+        ] {
+            assert!(!is_product(item), "{item}");
+            assert!(!picks_up(&[], 10, [0.0, 0.0, 0.0], item), "{item}");
+        }
+        // LP2: a kill's drops are all products, so the kill rule adds nothing they leave, and it
+        // still lets nothing else in.
+        for kind in ANIMALS {
+            for item in PRODUCTS.iter().copied().chain(["minecraft:lime_wool"]) {
+                if is_drop_of(kind, item) {
+                    assert!(is_product(item), "{kind} drops {item}");
+                }
+            }
+        }
+        let kills = [Kill { at: [0.0, 0.0, 0.0], kind: "minecraft:cow".into(), tick: 5 }];
+        assert!(!picks_up(&kills, 10, [0.0, 0.0, 0.0], "minecraft:diamond"));
+    }
+
+    #[test]
+    fn its_pen_is_its_radius_across_and_three_blocks_up_and_down() {
+        let (lo, hi) = pen_box([10.5, 64.5, -3.5], 4.0);
+        assert_eq!(lo, [6.5, 61.5, -7.5]);
+        assert_eq!(hi, [14.5, 67.5, 0.5]);
     }
 
     #[test]

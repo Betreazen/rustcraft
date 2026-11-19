@@ -94,9 +94,12 @@ fn turret_kill_drops_the_owners_loot(o: Pos, t: &Tuning) -> Scenario {
         .until("the turret shot them all", 1200, move |b, m| {
             Ok(NAMES.iter().all(|n| b.mob(m.get(n) as u32).is_none()))
         })
-        .until("a spider eye lies on the plot", 60, move |b, _| {
+        // 0.21 (spec 46): the turret vacuums up its kills' drops; one may still lie where its
+        // slots had no room.
+        .until("a spider eye lies on the plot or in the turret's loot slots", 60, move |b, _| {
             let lying = b.lying(at(o, [-1, 0, -5]).map(f64::from), at(o, [25, 5, 5]).map(f64::from));
-            Ok(lying.iter().any(|(item, _)| item == "minecraft:spider_eye"))
+            Ok(lying.iter().any(|(item, _)| item == "minecraft:spider_eye")
+                || super::count_of(&b.items(turret), "minecraft:spider_eye") > 0)
         })
 }
 

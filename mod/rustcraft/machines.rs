@@ -1453,6 +1453,8 @@ pub(super) fn teach_slot_rules(game: &Game<'_>, recipes: &MachineRecipes) {
             .map(|m| (m.menu(), 0, &none)),
     );
     lists.extend((0..content::BLOCK_SLOTS).map(|i| (Machine::Placer.menu(), i, &next.placeable)));
+    // 0.21 (spec 46): the turret's loot slots take nothing from a player; they only give.
+    lists.extend((0..rustcraft_rules::turret_loot::LOOT_SLOTS).map(|i| (Machine::Turret.menu(), i, &none)));
     lists.extend(content::ALLOY_INPUTS.map(|i| (Machine::Alloy.menu(), i, &next.alloying)));
     lists.extend((0..content::MIXER_SLOTS).map(|i| (Machine::Mixer.menu(), i, &next.mixing)));
     lists.extend(content::CRAFTER_MODULES.map(|i| (Machine::Crafter.menu(), i, &modules)));

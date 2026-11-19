@@ -313,11 +313,13 @@ impl Machine {
             Kind::Mixer => MIXER_SLOTS,
             Kind::LoadDock => DOCK_SLOTS,
             Kind::Butcher => rustcraft_rules::butcher::SLOTS,
+            // 0.21 (spec 46): the turret's loot slots (rustcraft_turret_loot).
+            Kind::Turret => rustcraft_rules::turret_loot::LOOT_SLOTS,
             Kind::Util => match self {
                 Machine::Util(u) => u.slots().count,
                 _ => 0,
             },
-            Kind::Charger | Kind::Turret | Kind::Anchor | Kind::Power | Kind::Battery => 0,
+            Kind::Charger | Kind::Anchor | Kind::Power | Kind::Battery => 0,
         }
     }
 
@@ -349,6 +351,7 @@ impl Machine {
             Kind::Crafter => CRAFTER_OUTPUTS.collect(),
             Kind::Dock => (0..DOCK_SLOTS).collect(),
             Kind::Butcher => (0..rustcraft_rules::butcher::LOOT_SLOTS).collect(),
+            Kind::Turret => (0..rustcraft_rules::turret_loot::LOOT_SLOTS).collect(),
             Kind::Util => match self {
                 Machine::Util(u) => u.slots().outputs.collect(),
                 _ => Vec::new(),
@@ -992,7 +995,7 @@ pub fn block_entity_container(block: &str, container: &mut Option<ModContainer>)
         return;
     };
     if machine.slots() == 0 {
-        // A sheet window with no slot of its own (the turret, the anchor, the charge dock, the
+        // A sheet window with no slot of its own (the anchor, the charge dock, the
         // battery, the windmill, the lava generator) still needs its menu's one hidden slot.
         if container.is_none() && machine.has_menu() {
             *container = Some(hidden_container(block));
