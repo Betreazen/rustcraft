@@ -1520,7 +1520,7 @@
   "rustcraft.handbook.page.furnace.name": "Electric Furnace",
   "rustcraft.handbook.page.furnace.sum": "Smelts everything a furnace smelts, with no fuel and twice as fast.",
   "rustcraft.handbook.page.crusher.name": "Crusher",
-  "rustcraft.handbook.page.crusher.sum": "Crushes iron, copper and gold ore to dust: two dusts from one ore, an ingot from each dust.",
+  "rustcraft.handbook.page.crusher.sum": "Crushes iron, copper and gold ore to dust: two dusts from one ore, an ingot from each dust. For orders it also takes bone blocks, wool, cobblestone and more apart.",
   "rustcraft.handbook.page.tank.name": "Tank",
   "rustcraft.handbook.page.tank.sum": "Holds one fluid. Tanks placed together merge into one big tank.",
   "rustcraft.handbook.page.pump.name": "Pump",

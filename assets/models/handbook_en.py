@@ -61,7 +61,8 @@ PAGES = {
               'Makes the alloys of tiers two, three and four. Runs on any fuel, as a furnace does, or on energy.'),
     'furnace': ('Electric Furnace', 'Smelts everything a furnace smelts, with no fuel and twice as fast.'),
     'crusher': ('Crusher',
-                'Crushes iron, copper and gold ore to dust: two dusts from one ore, an ingot from each dust.'),
+                'Crushes iron, copper and gold ore to dust: two dusts from one ore, an ingot from each dust. '
+                'For orders it also takes bone blocks, wool, cobblestone and more apart.'),
     'tank': ('Tank', 'Holds one fluid. Tanks placed together merge into one big tank.'),
     'pump': ('Pump', 'Takes the water or lava under it and puts it into a fluid channel.'),
     'crafter': ('Autocrafter', 'Crafts items by recipes. It has pages, one recipe a page.'),

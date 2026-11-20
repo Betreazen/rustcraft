@@ -31,7 +31,7 @@ pub const PAGES: &[Page] = &[
     Page { id: "battery", section: 2, tier: 2, item: Some("rustcraft:battery"), text: 4, stats: 3, diagnoses: 0, parts: 4, makes: &["rustcraft:battery"], tables: &[], see: &["solar", "station", "mod_store_cap", "mod_output"] },
     Page { id: "alloy", section: 3, tier: 1, item: Some("rustcraft:alloy"), text: 4, stats: 3, diagnoses: 3, parts: 8, makes: &["rustcraft:alloy"], tables: &[], see: &["alloys", "progress", "modules"] },
     Page { id: "furnace", section: 3, tier: 1, item: Some("rustcraft:furnace"), text: 2, stats: 4, diagnoses: 2, parts: 7, makes: &["rustcraft:furnace"], tables: &[], see: &["crusher", "modules"] },
-    Page { id: "crusher", section: 3, tier: 1, item: Some("rustcraft:crusher"), text: 3, stats: 4, diagnoses: 2, parts: 7, makes: &["rustcraft:crusher"], tables: &[], see: &["furnace", "dusts", "modules"] },
+    Page { id: "crusher", section: 3, tier: 1, item: Some("rustcraft:crusher"), text: 5, stats: 4, diagnoses: 2, parts: 7, makes: &["rustcraft:crusher"], tables: &[[2, 13]], see: &["furnace", "dusts", "modules"] },
     Page { id: "tank", section: 3, tier: 1, item: Some("rustcraft:tank"), text: 4, stats: 2, diagnoses: 0, parts: 2, makes: &["rustcraft:tank"], tables: &[], see: &["pump", "housing"] },
     Page { id: "pump", section: 3, tier: 1, item: Some("rustcraft:pump"), text: 1, stats: 3, diagnoses: 2, parts: 5, makes: &["rustcraft:pump"], tables: &[], see: &["tank", "gen_lava"] },
     Page { id: "crafter", section: 3, tier: 2, item: Some("rustcraft:crafter"), text: 6, stats: 5, diagnoses: 2, parts: 8, makes: &["rustcraft:crafter"], tables: &[], see: &["terminal", "orders", "mod_recipes", "modules"] },
