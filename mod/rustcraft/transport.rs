@@ -569,13 +569,16 @@ fn snapshot(
             BTreeSet::new()
         };
         let net = NetIntake { filters: &filters, kept_raw: &kept_raw, plan: &plan };
+        // 0.21.2 (EW17): an enchanting machine set to «здесь» keeps what is done for the player.
+        let keeps = machine == Some(Machine::Util(rustcraft_rules::utility::Util::Enchanter))
+            && entity.as_ref().is_some_and(|e| crate::game::rustcraft_enchanter::keeps(e));
         let slots = slots
             .into_iter()
             .map(|(slot, held, can_take)| {
                 let input = machine.is_none_or(|m| m.inputs().contains(&slot));
                 let ordered = !input
                     && held.as_ref().is_some_and(|(i, _)| kept.get(&pos) == Some(i));
-                let can_take = can_take && !ordered;
+                let can_take = can_take && !ordered && !(keeps && !input);
                 let only = entity.as_ref().filter(|_| input).map(|entity| {
                     seen.iter()
                         .filter(|item| net_takes(entity, slot, keys::item_of(item), tuning, &net))

@@ -22,13 +22,18 @@ pub type Levels = Vec<(String, u32)>;
 /// The window's option rows: «Лучшее» and the three offers, or up to four enchantments to raise.
 pub const OPTION_ROWS: usize = 4;
 /// The machine's buttons, in its window's order: the four level steps (−10, −1, +1, +10), the
-/// four option rows, the two views, the four «×» beside the option rows (only in «Свои чары»).
+/// four option rows, the two views, the four «×» beside the option rows (only in «Свои чары»),
+/// the result slot's «на склад» / «здесь» (EW17).
 pub const LEVEL_BUTTONS: std::ops::Range<usize> = 0..4;
 pub const OPTION_BUTTONS: std::ops::Range<usize> = 4..8;
 pub const VIEW_NEW: usize = 8;
 pub const VIEW_RAISE: usize = 9;
 pub const REMOVE_BUTTONS: std::ops::Range<usize> = 10..14;
-pub const BUTTONS: usize = 14;
+/// 0.21.2 (EW17; the owner: «нужно сделать тумблер уносить сразу на склад или нет»): the result
+/// slot's label is a toggle: the magistral takes what is done (the default), or it stays in the
+/// result slot for the player.
+pub const KEEP_BUTTON: usize = 14;
+pub const BUTTONS: usize = 15;
 /// EW15: what taking an enchantment off costs: one lapis, no experience.
 pub const REMOVE_LAPIS: u32 = 1;
 
@@ -101,6 +106,8 @@ pub enum Action {
     /// Take off the enchantment of option row `k` of «Свои чары» (its «×»).
     RemoveRow(usize),
     Show(View),
+    /// EW17: the result slot between «на склад» and «здесь», in either view.
+    Keep,
 }
 
 pub fn press(i: usize, view: View) -> Option<Action> {
@@ -121,8 +128,15 @@ pub fn press(i: usize, view: View) -> Option<Action> {
     match i {
         VIEW_NEW => Some(Action::Show(View::New)),
         VIEW_RAISE => Some(Action::Show(View::Raise)),
+        KEEP_BUTTON => Some(Action::Keep),
         _ => None,
     }
+}
+
+/// EW17: whether the item net's own moves take the result slot's stack: not while the machine
+/// keeps it for the player. A hopper under it is the game's and still pulls.
+pub fn net_takes_result(keep: bool) -> bool {
+    !keep
 }
 
 /// How rich a list is: its levels together, then how many enchantments it has.
@@ -319,6 +333,11 @@ mod tests {
         assert_eq!(press(BUTTONS, View::New), None);
         assert_eq!(press(REMOVE_BUTTONS.start + 1, View::Raise), Some(Action::RemoveRow(1)));
         assert_eq!(press(REMOVE_BUTTONS.start, View::New), None, "no «×» among the offers");
+        // EW17: the result slot's toggle in either view, the last button.
+        assert_eq!(press(KEEP_BUTTON, View::New), Some(Action::Keep));
+        assert_eq!(press(KEEP_BUTTON, View::Raise), Some(Action::Keep));
+        assert_eq!(KEEP_BUTTON + 1, BUTTONS);
+        assert!(net_takes_result(false) && !net_takes_result(true));
         // The level steps, kept in 1..=30.
         let mut level = xp::LEVEL_MAX;
         for i in [0, 0, 0, 1] {

@@ -12,6 +12,9 @@
 //!   a book whose only enchantment comes off is a plain book.
 //! - The anvil keeps a level above the most: a book of Efficiency VI on a pickaxe of Efficiency V
 //!   gives VI; two of IV give V; two of VI stay VI.
+//! - 0.21.2 (EW17; the owner: «нужно сделать тумблер уносить сразу на склад или нет»): on a
+//!   storage's line with the result slot's toggle on «здесь», the enchanted book stays in the
+//!   machine and the storage gets none; switched back to «на склад», it goes to the storage.
 
 use super::slice15::{build, held, terminal_at};
 use super::transport::{chest, fill};
@@ -20,10 +23,10 @@ use crate::geom::Pos;
 use crate::machines::processor::WorkMode;
 use crate::machines::sheet::{Press, enchant_notes};
 use crate::tuning::Tuning;
-use crate::utility::enchanting::{OPTION_BUTTONS, REMOVE_BUTTONS, VIEW_RAISE};
+use crate::utility::enchanting::{KEEP_BUTTON, OPTION_BUTTONS, REMOVE_BUTTONS, VIEW_RAISE};
 use serde_json::Value;
 
-pub const ALL: [Build; 8] = [
+pub const ALL: [Build; 9] = [
     enchanter21_book_comes_out_enchanted,
     enchanter21_second_offer_gives_its_enchantments,
     enchanter21_boost_works_on_a_full_buffer,
@@ -32,6 +35,7 @@ pub const ALL: [Build; 8] = [
     enchanter21_takes_an_enchantment_off_a_book,
     enchanter21_a_book_with_none_left_is_plain,
     enchanter21_anvil_keeps_a_level_above_the_most,
+    enchanter21_keeps_the_result_here,
 ];
 
 const ENCHANTER: &str = "rustcraft:enchanter";
@@ -196,12 +200,7 @@ fn enchanter21_takes_lapis_from_the_storage(o: Pos, _: &Tuning) -> Scenario {
             b.put(p, 0, BOOK, 1)
         })
         .check("its window says the result goes to the storage", move |b, _| {
-            let s = b.sheet(p).ok_or("no sheet")?;
-            let note = s.notes.get(enchant_notes::RESULT).map(Value::to_string).unwrap_or_default();
-            if !note.contains("to_storage") {
-                return Err(format!("the result's label: {note}"));
-            }
-            Ok(())
+            keep_label(b, p, "to_storage", false)
         })
         .until("the book is enchanted with the storage's lapis", LIMIT, move |b, _| {
             let out = result(b, p).is_some_and(|r| r.starts_with(ENCHANTED_BOOK))
@@ -209,6 +208,62 @@ fn enchanter21_takes_lapis_from_the_storage(o: Pos, _: &Tuning) -> Scenario {
             Ok(out)
         })
         .check("3 lapis left the storage", move |b, _| same("lapis stored", held(b, o, LAPIS)?, 5))
+}
+
+/// EW17: the result slot's toggle says `key` (`rustcraft.util.enchanter.<key>`) and is lit or not.
+fn keep_label(b: &dyn Bench, p: Pos, key: &str, on: bool) -> Result<(), String> {
+    let s = b.sheet(p).ok_or("no sheet")?;
+    let lit = s.toggles.get(KEEP_BUTTON).ok_or("no result toggle")?.on;
+    let text = s.toggle_texts.get(KEEP_BUTTON).cloned().flatten().unwrap_or(Value::Null).to_string();
+    if !text.contains(&format!("rustcraft.util.enchanter.{key}\"")) || lit != on {
+        return Err(format!("the result's label: {text}, lit {lit}; wanted {key}, lit {on}"));
+    }
+    Ok(())
+}
+
+/// The enchanted books the storage of the line at `o` holds.
+fn stored_books(b: &dyn Bench, o: Pos) -> usize {
+    b.stored_stacks(terminal_at(o)).iter().filter(|s| s.starts_with(ENCHANTED_BOOK)).count()
+}
+
+fn enchanter21_keeps_the_result_here(o: Pos, _: &Tuning) -> Scenario {
+    let p = chest(o, 3);
+    let tank = at(o, [3, 0, -2]);
+    Scenario::new("enchanter21_keeps_the_result_here", plot_area(o))
+        .then("a storage line with an enchanting machine set to «здесь», a full condenser", move |b, _| {
+            build(b, o, &[])?;
+            b.place(p, ENCHANTER, &[])?;
+            b.set_buffer(p, 600.0)?;
+            b.place(tank, TANK, &[])?;
+            b.set_long(tank, "util_xp", FULL)?;
+            b.press(p, Press::Toggle(KEEP_BUTTON).id(), None)?;
+            same("kept in the block entity", b.long(p, "enchant_keep"), 1)?;
+            keep_label(b, p, "keep_here", true)?;
+            b.put(p, 1, LAPIS, 3)?;
+            b.put(p, 0, BOOK, 1)
+        })
+        .until("an enchanted book is in the result slot", LIMIT, move |b, _| {
+            Ok(result(b, p).is_some_and(|r| r.starts_with(ENCHANTED_BOOK)))
+        })
+        .wait(100)
+        .check("it stays there, the storage gets none, the status says to take it", move |b, _| {
+            if !result(b, p).is_some_and(|r| r.starts_with(ENCHANTED_BOOK)) {
+                return Err(format!("the result slot: {:?}", result(b, p)));
+            }
+            same("enchanted books stored", stored_books(b, o), 0)?;
+            let s = b.sheet(p).ok_or("no sheet")?;
+            let status = s.status.map(|x| x.text.to_string()).unwrap_or_default();
+            if !status.contains("enchanter.done\"") {
+                return Err(format!("the status: {status}"));
+            }
+            Ok(())
+        })
+        .then("switched back to «на склад»", move |b, _| {
+            b.press(p, Press::Toggle(KEEP_BUTTON).id(), None)?;
+            same("kept in the block entity", b.long(p, "enchant_keep"), 0)?;
+            keep_label(b, p, "to_storage", false)
+        })
+        .until("the book goes to the storage", 400, move |b, _| Ok(result(b, p).is_none() && stored_books(b, o) == 1))
 }
 
 fn enchanter21_raises_an_enchantment(o: Pos, _: &Tuning) -> Scenario {

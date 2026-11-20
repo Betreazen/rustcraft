@@ -514,22 +514,22 @@ pub enum Note {
 
 /// The enchanting machine's notes, in [`Sheet::notes`] order.
 pub mod enchant_notes {
-    /// The labels beside the item, lapis and result slots.
+    /// The labels beside the item and lapis slots (0.21.2, EW17: the result slot's is its
+    /// «на склад» / «здесь» toggle, `enchanting::KEEP_BUTTON`).
     pub const ITEM: usize = 0;
     pub const LAPIS: usize = 1;
-    pub const RESULT: usize = 2;
     /// «Конденсатор» and its levels under the slots.
-    pub const TANK_LABEL: usize = 3;
-    pub const TANK: usize = 4;
+    pub const TANK_LABEL: usize = 2;
+    pub const TANK: usize = 3;
     /// The level between its −/+ buttons.
-    pub const LEVEL: usize = 5;
-    pub const COUNT: usize = 6;
+    pub const LEVEL: usize = 4;
+    pub const COUNT: usize = 5;
 }
 
 /// The enchanting machine's work area from `y` (EW1): left, the item, lapis and result slots one
-/// under another, each with its label, and the condenser's levels; right, the view switch
-/// («Новые чары» / «Повысить»), the level row (−10, −1, the level, +1, +10) and four option rows.
-/// Its height.
+/// under another, each with its label (the result slot's a toggle, EW17), and the condenser's
+/// levels; right, the view switch («Новые чары» / «Повысить»), the level row (−10, −1, the
+/// level, +1, +10) and four option rows. Its height.
 fn enchant_area(out: &mut Layout, y: f32) -> f32 {
     use crate::utility::enchanting::OPTION_ROWS;
     const RIGHT_X: f32 = 88.0;
@@ -540,9 +540,11 @@ fn enchant_area(out: &mut Layout, y: f32) -> f32 {
     let w = RIGHT - RIGHT_X;
     out.slots = (0..3).map(|k| [LEFT + 1.0, y + 1.0 + SLOT_STEP * k as f32]).collect();
     let label_x = LEFT + 20.0;
-    let mut notes: Vec<(Rect, Note)> = (0..3)
+    let mut notes: Vec<(Rect, Note)> = (0..2)
         .map(|k| ([label_x, y + 5.0 + SLOT_STEP * k as f32, RIGHT_X - 2.0 - label_x, 9.0], Note::Text))
         .collect();
+    // EW17: the result slot's label is a text button on the slot's row.
+    let keep = [label_x, y + 3.0 + SLOT_STEP * 2.0, RIGHT_X - 2.0 - label_x, ROW_H];
     notes.push(([LEFT, y + 58.0, RIGHT_X - 2.0 - LEFT, 9.0], Note::Label));
     notes.push(([LEFT, y + 67.0, RIGHT_X - 2.0 - LEFT, 9.0], Note::Text));
     // The level row: −10, −1, the level, +1, +10.
@@ -567,7 +569,7 @@ fn enchant_area(out: &mut Layout, y: f32) -> f32 {
     let crosses = (0..OPTION_ROWS).map(|k| [RIGHT - CROSS_W, row_y(k), CROSS_W, OPTION_H]);
     let half = (w - 2.0) / 2.0;
     let views = [[RIGHT_X, y, half, ROW_H], [RIGHT_X + half + 2.0, y, half, ROW_H]];
-    out.toggles = level.into_iter().chain(options).chain(views).chain(crosses).collect();
+    out.toggles = level.into_iter().chain(options).chain(views).chain(crosses).chain([keep]).collect();
     out.notes = notes;
     let right_end = r + ROW_H + 2.0 + OPTION_STEP * (OPTION_ROWS - 1) as f32 + OPTION_H;
     (right_end - y).max(76.0) + 1.0
@@ -876,12 +878,18 @@ mod tests {
         assert!(l.menu_slots.iter().all(Option::is_some));
         assert_eq!(l.toggles.len(), enchanting::BUTTONS);
         assert_eq!(l.notes.len(), enchant_notes::COUNT);
-        // The slots one under another, each with its label to the right on its own line.
+        // The slots one under another, each with its label to the right on its own line; the
+        // result slot's label is its «на склад» / «здесь» toggle (EW17).
+        let keep = l.toggles[enchanting::KEEP_BUTTON];
         for k in 0..3 {
             let slot = slot_frame(l.slots[k]);
-            let (note, _) = l.notes[k];
-            assert!(note[0] >= slot[0] + slot[2] && note[1] >= slot[1] && note[1] + note[3] <= slot[1] + slot[3]);
+            let label = if k == 2 { keep } else { l.notes[k].0 };
+            assert!(label[0] >= slot[0] + slot[2] && label[1] >= slot[1] && label[1] + label[3] <= slot[1] + slot[3]);
         }
+        // As wide as the labels above it, for «→ на склад», and tall as a button.
+        assert_eq!(keep[2], l.notes[enchant_notes::LAPIS].0[2]);
+        assert!(keep[2] >= 56.0 && keep[3] >= 11.0, "{keep:?}");
+        assert_eq!(press_at(&l, [keep[0] + 20.0, keep[1] + 5.0]), Some(Press::Toggle(enchanting::KEEP_BUTTON)));
         assert!(l.slots[1][1] > l.slots[0][1] + 16.0 && l.slots[2][1] > l.slots[1][1] + 16.0);
         // The level between −1 and +1, on one row with the four steps.
         let (level, how) = l.notes[enchant_notes::LEVEL];

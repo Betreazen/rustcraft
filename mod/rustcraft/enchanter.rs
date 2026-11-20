@@ -15,6 +15,7 @@
 // - `restock`: the lapis the next enchanting lacks, from the storage on its item net (EW10).
 // - `sheet`: the window (EW1–EW3): labelled slots with ghost icons, the condenser's levels, the
 //   level row, the offers or the raises, and a status that says what to do.
+// - `keeps`: 0.21.2 (EW17), the result slot's toggle: the item net leaves what is done in it.
 use crate::game::{
     Game, rustcraft_base as base,
     rustcraft_server::{LevelNet, line},
@@ -49,6 +50,8 @@ const PICK_KEY: &str = "enchant_pick";
 const RAISE_KEY: &str = "enchant_raise";
 const VIEW_KEY: &str = "enchant_view";
 const SEED_KEY: &str = "enchant_seed";
+/// 0.21.2 (EW17): 1 while what is done stays in the result slot for the player.
+const KEEP_KEY: &str = "enchant_keep";
 const POOL: &str = "minecraft:in_enchanting_table";
 const BOOK: &str = "minecraft:book";
 const ENCHANTED_BOOK: &str = "minecraft:enchanted_book";
@@ -67,6 +70,7 @@ struct Settings {
     raise: Option<String>,
     view: View,
     seed: i32,
+    keep: bool,
 }
 
 fn read_string(nbt: &Compound, key: &str) -> Option<String> {
@@ -85,7 +89,14 @@ fn settings_of(nbt: &Compound, pos: Pos) -> Settings {
         raise: read_string(nbt, RAISE_KEY),
         view: View::of(read_i64(nbt, VIEW_KEY)),
         seed: if seed == 0 { enchanting::first_seed(pos) } else { seed },
+        keep: read_i64(nbt, KEEP_KEY) == 1,
     }
+}
+
+/// EW17: whether the item net leaves the result slot of the enchanting machine `entity` alone
+/// (rustcraft_transport's snapshot).
+pub(super) fn keeps(entity: &ModBlockEntity) -> bool {
+    !enchanting::net_takes_result(read_i64(&entity.nbt, KEEP_KEY) == 1)
 }
 
 fn settings(game: &Game<'_>, pos: Pos) -> Settings {
@@ -259,6 +270,10 @@ pub(super) fn press(game: &Game<'_>, entity: &mut ModBlockEntity, i: usize) {
             }
         }
         Some(Action::Show(v)) => write_i64(&mut entity.nbt, VIEW_KEY, v.code()),
+        Some(Action::Keep) => {
+            let keep = read_i64(&entity.nbt, KEEP_KEY) == 1;
+            write_i64(&mut entity.nbt, KEEP_KEY, i64::from(!keep));
+        }
         None => {}
     }
 }
@@ -406,17 +421,12 @@ pub(super) fn sheet(game: &Game<'_>, dimension: &str, level: &LevelNet, pos: Pos
         line("rustcraft.util.enchanter.lapis_tip", "Put lapis here, or bring it by the magistral", &[])
     };
     note(notes::LAPIS, line("rustcraft.util.enchanter.lapis", "Lapis ×%s", &[lit(lapis)]), vec![lapis_tip.clone()]);
-    let result_tip = if to_storage {
+    // EW17: what is done goes to the storage unless the window keeps it here.
+    let result_tip = if to_storage && !st.keep {
         line("rustcraft.util.enchanter.result_storage", "The magistral takes what is done to the storage", &[])
     } else {
         line("rustcraft.util.enchanter.result_tip", "Take what is done from here", &[])
     };
-    let result = if to_storage {
-        line("rustcraft.util.enchanter.to_storage", "→ storage", &[])
-    } else {
-        line("rustcraft.util.enchanter.result", "Done", &[])
-    };
-    note(notes::RESULT, result, vec![result_tip.clone()]);
     note(notes::TANK_LABEL, line("rustcraft.util.enchanter.tank", "Condenser", &[]), Vec::new());
     let need_levels = xp::levels_from(0, need_points);
     let (tank_text, tank_tip) = match tank {
@@ -462,7 +472,8 @@ pub(super) fn sheet(game: &Game<'_>, dimension: &str, level: &LevelNet, pos: Pos
         .iter()
         .map(|t| t.iter().map(base::v).collect())
         .collect();
-    let buttons = buttons(game, &st, item.as_ref());
+    let mut buttons = buttons(game, &st, item.as_ref());
+    buttons.push(keep_button(st.keep, to_storage));
     s.toggles = buttons
         .iter()
         .map(|b| Toggle { icon: String::new(), name: base::v(&b.name), on: b.on, active: false, hint: base::v(&b.hint) })
@@ -472,7 +483,48 @@ pub(super) fn sheet(game: &Game<'_>, dimension: &str, level: &LevelNet, pos: Pos
     s.status = Some(status(game, dimension, pos, &st, item.as_ref(), tank, need_points, lapis, to_storage));
 }
 
-/// The fourteen buttons: the level steps, the option rows, the view switch, the «×» of the rows.
+/// EW17 (the owner: «нужно сделать тумблер уносить сразу на склад или нет»): the result slot's
+/// label as a toggle: «→ на склад» (or «Готово» off a storage's line) while the magistral takes
+/// what is done, «← здесь», lit, while it stays in the slot for the player.
+fn keep_button(keep: bool, to_storage: bool) -> Button {
+    let name = line("rustcraft.util.enchanter.keep_name", "Done: to the storage or here", &[]);
+    if keep {
+        return button(
+            line("rustcraft.util.enchanter.keep_here", "← here", &[]),
+            name,
+            line(
+                "rustcraft.util.enchanter.keep_hint_on",
+                "What is done stays in this slot, the magistral leaves it. Click: to the storage",
+                &[],
+            ),
+            true,
+            false,
+        );
+    }
+    let (text, hint) = if to_storage {
+        (
+            line("rustcraft.util.enchanter.to_storage", "→ storage", &[]),
+            line(
+                "rustcraft.util.enchanter.keep_hint_storage",
+                "The magistral takes what is done to the storage. Click: keep it here",
+                &[],
+            ),
+        )
+    } else {
+        (
+            line("rustcraft.util.enchanter.result", "Done", &[]),
+            line(
+                "rustcraft.util.enchanter.keep_hint_off",
+                "Take what is done from here. Click: the magistral will leave it here",
+                &[],
+            ),
+        )
+    };
+    button(text, name, hint, false, false)
+}
+
+/// The fourteen buttons: the level steps, the option rows, the view switch, the «×» of the rows
+/// (the result slot's toggle follows them, [`keep_button`]).
 fn buttons(game: &Game<'_>, st: &Settings, item: Option<&ItemStack>) -> Vec<Button> {
     let raise_view = st.view == View::Raise;
     let mut out: Vec<Button> = ["-10", "-1", "+1", "+10"]
@@ -652,7 +704,8 @@ fn status(
                 .filter(|(_, at)| at.elapsed() < DONE_SHOWN)
                 .map(|(id, _)| id.clone());
             match last {
-                Some(id) if to_storage => {
+                // EW17: kept here, «Зачаровано: … — заберите внизу».
+                Some(id) if to_storage && !st.keep => {
                     (Severity::Ok, line("rustcraft.util.enchanter.done_storage", "Enchanted: %s → storage", &[item_name(&id)]))
                 }
                 Some(id) => (Severity::Ok, line("rustcraft.util.enchanter.done", "Enchanted: %s — take it below", &[item_name(&id)])),
