@@ -1700,5 +1700,6 @@
   "rustcraft.handbook.page.dusts.name": "Ore dust",
   "rustcraft.handbook.page.dusts.sum": "Iron, copper and gold dust from the crusher. Smelts into an ingot.",
   "rustcraft.handbook.page.fluids.name": "Solution and catalysts",
-  "rustcraft.handbook.page.fluids.sum": "Fluids from the mixer. Nutrient solution feeds crystal structures; catalysts boost machines."
+  "rustcraft.handbook.page.fluids.sum": "Fluids from the mixer. Nutrient solution feeds crystal structures; catalysts boost machines.",
+  "rustcraft.terminal.type_hint": "Click and type a number · Enter: set · Esc: leave"
 }

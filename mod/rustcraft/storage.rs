@@ -64,6 +64,7 @@ use rustcraft_rules::{
     storage::{
         self, Limit, Shape, Store, cells, keys, modules as sockets,
         terminal::{self as term, Press, Take},
+        typed,
         wire::{self, Line, Listing, State},
     },
 };
@@ -152,6 +153,9 @@ struct Viewer {
 struct Storages {
     levels: HashMap<String, LevelStorage>,
     viewers: HashMap<u128, Viewer>,
+    /// 0.21.2 (spec 49): numbers typed into terminals' windows, for their level's tick: the
+    /// player, the terminal and what it sets.
+    typed: Vec<(u128, Pos, typed::Set)>,
 }
 
 static STORAGES: LazyLock<Mutex<Storages>> = LazyLock::new(Mutex::default);
@@ -1102,6 +1106,7 @@ pub(super) fn tick(game: &mut Game<'_>, dimension: &str) {
     })
     .unwrap_or((false, false));
     save(game, dimension);
+    apply_typed(game, dimension);
     if sides {
         show_sides(game, dimension);
     }
@@ -1484,6 +1489,115 @@ pub(super) fn on_container_close(player: u128, menu: &str) {
 }
 
 // ---- The terminal's presses ----
+
+/// 0.21.2 (spec 49): `native_net_from_client`: a number typed into a terminal's window, for the
+/// next tick of the player's level.
+pub(super) fn on_client_message(player: u128, channel: &str, data: &[u8]) {
+    if channel != typed::CHANNEL {
+        return;
+    }
+    match typed::decode_terminal(data) {
+        Some((terminal, set)) => storages().typed.push((player, terminal, set)),
+        None => log::debug!("rustcraft: a typed number from {player:032x} that does not read"),
+    }
+}
+
+/// Single player: the client's typed number straight into the queue, the local player being the
+/// server's own.
+pub(super) fn queue_typed(player: u128, terminal: Pos, set: typed::Set) {
+    storages().typed.push((player, terminal, set));
+}
+
+/// The typed numbers of this level's players whose window is open on the terminal they name; the
+/// others are dropped.
+fn apply_typed(game: &mut Game<'_>, dimension: &str) {
+    let due: Vec<(u128, Pos, typed::Set)> = {
+        let mut s = storages();
+        if s.typed.is_empty() {
+            return;
+        }
+        let all = std::mem::take(&mut s.typed);
+        let (here, rest): (Vec<_>, Vec<_>) = all.into_iter().partition(|(player, _, _)| {
+            s.viewers.get(player).is_some_and(|v| v.dimension == dimension)
+        });
+        // A player of another level waits for that level's tick; one with no window is dropped.
+        let waiting: Vec<_> = rest.into_iter().filter(|(p, _, _)| s.viewers.contains_key(p)).collect();
+        s.typed = waiting;
+        here.into_iter()
+            .filter(|(player, terminal, _)| s.viewers.get(player).is_some_and(|v| v.terminal == *terminal))
+            .collect()
+    };
+    for (player, terminal, set) in due {
+        typed_at_terminal(game, dimension, terminal, set, Some(player));
+    }
+}
+
+/// 0.21.2 (spec 49): a typed limit or N on the storage of the terminal at `terminal`; `player` is
+/// told why one is refused. Whether it was set.
+pub(super) fn typed_at_terminal(
+    game: &mut Game<'_>,
+    dimension: &str,
+    terminal: Pos,
+    set: typed::Set,
+    player: Option<u128>,
+) -> bool {
+    if game.native_block(terminal) != content::TERMINAL {
+        return false;
+    }
+    let Some(storage) = with_level(dimension, |l| l.terminals.get(&terminal).copied().flatten()).flatten() else {
+        return false;
+    };
+    let book = crate::game::rustcraft_machines::entity(game, terminal).is_some_and(|e| orders::has_book(&e.nbt));
+    typed_on(game, dimension, storage, book, set, player)
+}
+
+/// A typed limit or N on the storage `storage`, for an item it lists (holds some of, limits,
+/// keeps N of, or, with the book, can make); an N only with the book and, above 0, only for an
+/// item a recipe makes (OT8).
+fn typed_on(
+    game: &mut Game<'_>,
+    dimension: &str,
+    storage: u32,
+    book: bool,
+    set: typed::Set,
+    player: Option<u128>,
+) -> bool {
+    let Some(key) = key_of_ref(game, dimension, storage, set.item) else {
+        return false;
+    };
+    let held = with_level(dimension, |l| {
+        l.stores
+            .get(&storage)
+            .is_some_and(|s| s.count(&key) > 0 || s.limits.contains_key(&key) || s.keep.contains_key(&key))
+    })
+    .unwrap_or(false);
+    if !held && !(book && orders::can_order(&key)) {
+        return false;
+    }
+    match set.press() {
+        Press::Limit { change, .. } => apply_limit(dimension, storage, &key, change),
+        Press::Keep { change, .. } => {
+            if !book {
+                return false;
+            }
+            if set.value > 0 && !orders::can_order(&key) {
+                if let Some(uuid) = player {
+                    let (lang, fallback) = orders::NOT_MADE;
+                    tell(game, uuid, line(lang, fallback, &[item_text(game, &key)]));
+                }
+                return false;
+            }
+            apply_keep(dimension, storage, &key, change);
+        }
+        _ => return false,
+    }
+    true
+}
+
+/// The tablet's typed limit on the storage `id` (its window has no orders).
+pub(super) fn tablet_typed(game: &mut Game<'_>, dimension: &str, id: u32, set: typed::Set, player: u128) -> bool {
+    set.setting == typed::Setting::Limit && typed_on(game, dimension, id, false, set, Some(player))
+}
 
 /// The storage the terminal at `terminal` shows, and the level it is in, for the acting player.
 fn terminal_storage(game: &Game<'_>, terminal: Pos) -> Option<(String, u32)> {

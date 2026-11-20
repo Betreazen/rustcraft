@@ -5,6 +5,13 @@
 // (rustcraft_rules::storage::view). A tab, a page or a letter of the search costs the server
 // nothing: they are this window's own.
 //
+// 0.21.2 (spec 49, rustcraft_rules::storage::typed): the chosen item's limit, the order's count
+// and «Держать: N» are fields too. A click on the number opens it with the number selected; digits
+// replace it, Backspace deletes, Enter applies, Escape or a click elsewhere leaves the old number.
+// Only one field (the search or a number) is focused at a time, and while one is, it takes every
+// key as the search does. The order's count is the window's own; a limit or an N goes to the server
+// as a message on its own channel (`client_tick`), the tablet's as its own press.
+//
 // The search: a mod's screen has no text box (`native_text_field` reaches only the game's own
 // focused boxes, game/native_text_field.rs:80-150), so the window keeps the text itself. A click
 // on the search field focuses it; while it is, `native_screen_key_pressed_pre` takes every key
@@ -37,7 +44,8 @@ use crate::game::{
     rustcraft_screens::{
         self as kit, HOT, LABEL, TEXT, VALUE, at, button, plural, slot, text, tr, tr_with,
     },
-    rustcraft_storage::CHANNEL,
+    rustcraft_storage::{self as storage, CHANNEL},
+    rustcraft_tablet as tablet_window,
     rustcraft_terminal_net as terminal_net,
 };
 use horizon_client::{
@@ -60,6 +68,7 @@ use rustcraft_rules::{
             self as term, ItemRef, LimitChange, NO_PRESS, Part, Press, Take, cell,
             part_in,
         },
+        typed::{self, Field, Setting, Typing},
         view::{self, Entry, Facts, PER_PAGE, Tab},
         wire::{self, Line, Listing, OrderLine, OrderWait, Smart, State},
     },
@@ -71,9 +80,14 @@ use std::sync::{
     LazyLock, Mutex, MutexGuard, PoisonError,
     atomic::{AtomicBool, Ordering},
 };
+use std::time::{Duration, Instant};
 
 /// The search keeps at most this many characters.
 const SEARCH_MAX: usize = 32;
+/// 0.21.2 (spec 49): a window not drawn for this long was closed: its number field is left.
+const CLOSED_AFTER: Duration = Duration::from_millis(500);
+/// The selected number's highlight in a field.
+const SELECTION: u32 = 0xAA33_5A8C;
 /// A sample item's veil: an item with a limit and none stored (style: the icon at 35%).
 const GHOST: u32 = colour::GHOST;
 /// The veil over the limit buttons while no item is chosen.
@@ -109,6 +123,10 @@ struct View {
     /// Round 32 (spec 33): the «Сеть» page in the grid's place, and its page.
     network: bool,
     net_page: usize,
+    /// 0.21.2 (spec 49): the number field being typed into; the search is not focused then.
+    typing: Option<Typing>,
+    /// When the window was last drawn: one not drawn since was closed.
+    drawn: Option<Instant>,
 }
 
 static VIEW: LazyLock<Mutex<View>> = LazyLock::new(Mutex::default);
@@ -465,6 +483,10 @@ fn limit_text(limit: Option<Limit>) -> String {
 /// `native_screen_draw` for the terminal.
 pub(super) fn draw(game: &Game<'_>, batch: &mut HudBatch, o: [f32; 2]) {
     let mut v = view_for(game);
+    if v.drawn.is_none_or(|t| t.elapsed() > CLOSED_AFTER) {
+        v.typing = None;
+    }
+    v.drawn = Some(Instant::now());
     let listing = listing_of(v.terminal);
     kit::background(game, batch, o, [term::WIDTH, term::HEIGHT]);
     title(game, batch, o, listing.as_ref());
@@ -758,8 +780,17 @@ fn limit_row(
                 let p = term::LIMIT_ICON;
                 game.native_item(batch, id, [o[0] + p[0], o[1] + p[1]], 12.0);
             }
-            let s = limit_text(line.and_then(|l| l.limit));
-            text(game, batch, &s, o, term::LIMIT_TEXT, VALUE);
+            match v.typing.as_ref().filter(|t| t.field == Field::Limit) {
+                Some(t) => {
+                    let label = tr_with("rustcraft.terminal.limit", "Limit: %s", &[t.text.clone()]);
+                    number_field(game, batch, o, term::LIMIT_VALUE, term::LIMIT_TEXT[0], &label, t);
+                }
+                None => {
+                    kit::hover(game, batch, o, term::LIMIT_VALUE);
+                    let s = limit_text(line.and_then(|l| l.limit));
+                    text(game, batch, &s, o, term::LIMIT_TEXT, VALUE);
+                }
+            }
         }
         None => {
             let s = tr("rustcraft.terminal.limit.choose", "Limit: —");
@@ -801,6 +832,27 @@ fn keep_text(keep: u64) -> String {
     }
 }
 
+/// 0.21.2 (spec 49): a number field being typed into: a well with the hover outline's colour
+/// round it, `label` from `x` (its digits last, the selected number highlighted) and the caret.
+fn number_field(
+    game: &Game<'_>,
+    batch: &mut HudBatch,
+    o: [f32; 2],
+    r: rustcraft_rules::machines::panel::Rect,
+    x: f32,
+    label: &str,
+    t: &Typing,
+) {
+    let end = x + game.native_text_width(label);
+    kit::fills(game, batch, o, &style::field(r, false, Some(end)));
+    kit::fills(game, batch, o, &style::outline(r, HOT));
+    if t.selected() {
+        let digits = game.native_text_width(&t.text);
+        game.native_fill(batch, [o[0] + end - digits, o[1] + r[1] + 2.0, digits, r[3] - 4.0], SELECTION);
+    }
+    text(game, batch, label, o, [x, r[1] + 2.0], VALUE);
+}
+
 /// The orders mode's row under the grid: the chosen item, «1», «8», «64» to order, its N.
 fn order_row(
     game: &Game<'_>,
@@ -822,10 +874,31 @@ fn order_row(
     button(game, batch, o, term::ORDER_BUTTONS[term::ORDER_PLUS], "+", false);
     let go = tr("rustcraft.terminal.order_go", "Order");
     button(game, batch, o, term::ORDER_BUTTONS[term::ORDER_GO], &go, false);
-    let count = v.order_count.max(1).to_string();
-    kit::centred(game, batch, o, term::ORDER_COUNT, &count, VALUE);
-    let colour = if v.selected.is_some() { VALUE } else { LABEL };
-    text(game, batch, &keep_text(keep), o, term::KEEP_TEXT, colour);
+    match v.typing.as_ref().filter(|t| t.field == Field::OrderCount) {
+        Some(t) => {
+            let r = term::ORDER_COUNT;
+            let x = r[0] + ((r[2] - game.native_text_width(&t.text)) / 2.0).round().max(1.0);
+            number_field(game, batch, o, r, x, &t.text, t);
+        }
+        None => {
+            kit::hover(game, batch, o, term::ORDER_COUNT);
+            let count = v.order_count.max(1).to_string();
+            kit::centred(game, batch, o, term::ORDER_COUNT, &count, VALUE);
+        }
+    }
+    match v.typing.as_ref().filter(|t| t.field == Field::Keep) {
+        Some(t) => {
+            let label = tr_with("rustcraft.terminal.keep", "Keep: %s", &[t.text.clone()]);
+            number_field(game, batch, o, term::KEEP_VALUE, term::KEEP_TEXT[0], &label, t);
+        }
+        None => {
+            if v.selected.is_some() {
+                kit::hover(game, batch, o, term::KEEP_VALUE);
+            }
+            let colour = if v.selected.is_some() { VALUE } else { LABEL };
+            text(game, batch, &keep_text(keep), o, term::KEEP_TEXT, colour);
+        }
+    }
     button(game, batch, o, term::KEEP_MINUS, "-", false);
     button(game, batch, o, term::KEEP_PLUS, "+", false);
     button(game, batch, o, term::KEEP_CLEAR, "x", false);
@@ -1101,14 +1174,20 @@ pub(super) fn on_click(game: &Game<'_>, at: [f32; 2], right: bool) -> Option<i32
     };
     // Round 32: the «Сеть» page has parts of its own.
     let part = if network {
-        term::part_net(at)?
+        term::part_net(at)
     } else {
-        part_in(at, orders_mode)?
+        part_in(at, orders_mode)
     };
     let listing = {
-        let v = view_for(game);
+        let mut v = view_for(game);
+        // 0.21.2 (spec 49): a click anywhere but on the field being typed into leaves it.
+        let field = part.and_then(field_of);
+        if v.typing.as_ref().map(|t| t.field) != field {
+            v.typing = None;
+        }
         listing_of(v.terminal)
     };
+    let part = part?;
     let mut v = view_for(game);
     v.focused = part == Part::Search;
     let step = if right { 1 } else { 64 };
@@ -1131,6 +1210,9 @@ pub(super) fn on_click(game: &Game<'_>, at: [f32; 2], right: bool) -> Option<i32
             v.page = 0;
         }
         Part::Search | Part::Status | Part::NetRow(_) => {}
+        Part::LimitValue | Part::KeepValue | Part::OrderCount => {
+            start_typing(&mut v, part, listing.as_ref());
+        }
         // Round 32 (spec 33): the «Сеть» page instead of the grid, and its own pages.
         Part::NetMode => {
             v.network = !v.network;
@@ -1229,6 +1311,85 @@ pub(super) fn on_click(game: &Game<'_>, at: [f32; 2], right: bool) -> Option<i32
     Some(NO_PRESS)
 }
 
+/// 0.21.2 (spec 49): the number field a part is.
+fn field_of(part: Part) -> Option<Field> {
+    match part {
+        Part::LimitValue => Some(Field::Limit),
+        Part::KeepValue => Some(Field::Keep),
+        Part::OrderCount => Some(Field::OrderCount),
+        _ => None,
+    }
+}
+
+/// A click on a number field opens it on its number, selected: the limit and «держать» only for
+/// a chosen item (and «держать» only with the book), the order's count always.
+fn start_typing(v: &mut View, part: Part, listing: Option<&Listing>) {
+    let Some(field) = field_of(part) else {
+        return;
+    };
+    if v.typing.as_ref().is_some_and(|t| t.field == field) {
+        return;
+    }
+    let line = v
+        .selected
+        .and_then(|key| listing.and_then(|l| l.lines.iter().find(|x| (x.item, x.damage) == key)));
+    let now = match field {
+        Field::OrderCount => Some(u64::from(v.order_count.max(1))),
+        _ if v.selected.is_none() => return,
+        Field::Limit => line.and_then(|l| l.limit).map(|l| l.max),
+        Field::Keep if !listing.is_some_and(|l| l.book) => return,
+        Field::Keep => line.map(|l| l.keep).filter(|n| *n > 0),
+    };
+    v.focused = false;
+    v.typing = Some(Typing::start(field, now));
+}
+
+/// Enter in a number field: the order's count changes in the window; a limit or an N goes to the
+/// server. An empty field changes nothing.
+fn apply_typing(v: &mut View) {
+    let Some(t) = v.typing.take() else {
+        return;
+    };
+    let Some(value) = t.value() else {
+        return;
+    };
+    let (setting, item) = match (t.field, v.selected) {
+        (Field::OrderCount, _) => {
+            v.order_count = u16::try_from(value).unwrap_or(term::MAX_ORDER);
+            return;
+        }
+        (_, None) => return,
+        (Field::Limit, Some(key)) => (Setting::Limit, key),
+        (Field::Keep, Some((item, _))) => (Setting::Keep, (item, 0)),
+    };
+    let set = typed::Set { setting, item, value };
+    if tablet() {
+        tablet_window::queue(rustcraft_rules::storage::tablet::Press::Set(set));
+    } else if let Some(terminal) = v.terminal {
+        TYPED.lock().unwrap_or_else(PoisonError::into_inner).push((terminal, set));
+    }
+}
+
+/// Numbers typed into the terminal's window since the client's last tick (a key hook has no
+/// `&mut Game` to send with).
+static TYPED: Mutex<Vec<(Pos, typed::Set)>> = Mutex::new(Vec::new());
+
+/// The client's tick: the typed numbers to the server; in single player straight into its
+/// queue, the local player being the server's own.
+pub(super) fn client_tick(game: &mut Game<'_>) {
+    let due = std::mem::take(&mut *TYPED.lock().unwrap_or_else(PoisonError::into_inner));
+    for (terminal, set) in due {
+        if game.remote.is_none() {
+            storage::queue_typed(game.native_acting_id(), terminal, set);
+            continue;
+        }
+        let bytes = typed::encode_terminal(terminal, set);
+        if let Err(e) = game.native_net_send_to_server(typed::CHANNEL, &bytes) {
+            log::debug!("rustcraft: a typed number not sent: {e}");
+        }
+    }
+}
+
 /// Whether the open screen is a terminal's.
 fn is_terminal(screen: &NativeScreenView<'_>) -> bool {
     if tablet() {
@@ -1248,6 +1409,20 @@ pub(super) fn on_key(
         return;
     }
     let mut v = view_for(game);
+    // 0.21.2 (spec 49): a number field takes every key, as the search does.
+    if v.typing.is_some() {
+        *canceled = true;
+        if key == ESCAPE {
+            v.typing = None;
+        } else if ENTER.contains(&key) {
+            apply_typing(&mut v);
+        } else if key == BACKSPACE
+            && let Some(t) = v.typing.as_mut()
+        {
+            t.backspace();
+        }
+        return;
+    }
     if !v.focused {
         return;
     }
@@ -1271,6 +1446,12 @@ pub(super) fn on_char(
         return;
     }
     let mut v = view_for(game);
+    // 0.21.2 (spec 49): digits into the number field; anything else goes nowhere.
+    if let Some(t) = v.typing.as_mut() {
+        *canceled = true;
+        t.type_char(c);
+        return;
+    }
     if !v.focused {
         return;
     }
@@ -1334,6 +1515,20 @@ pub(super) fn tooltip(game: &Game<'_>, at: [f32; 2], lines: &mut Vec<String>) {
             "Left click: by 64 · right click: by 1",
         ),
         Part::LimitClear => hint(lines, "rustcraft.terminal.clear_hint", "No limit"),
+        Part::LimitValue | Part::KeepValue | Part::OrderCount => {
+            if part == Part::KeepValue {
+                hint(
+                    lines,
+                    "rustcraft.terminal.keep_hint",
+                    "Keep N: below N the storage orders the difference by itself",
+                );
+            }
+            hint(
+                lines,
+                "rustcraft.terminal.type_hint",
+                "Click and type a number · Enter: set · Esc: leave",
+            );
+        }
         Part::LimitDestroy => hint(
             lines,
             "rustcraft.terminal.destroy_hint",

@@ -52,6 +52,8 @@ pub const LIMIT_MINUS: Rect = [96.0, 100.0, 13.0, 12.0];
 pub const LIMIT_PLUS: Rect = [110.0, 100.0, 13.0, 12.0];
 pub const LIMIT_CLEAR: Rect = [124.0, 100.0, 13.0, 12.0];
 pub const LIMIT_DESTROY: Rect = [140.0, 100.0, 66.0, 12.0];
+/// 0.21.2 (spec 49): the chosen item's limit as a field that takes typed digits (a click on it).
+pub const LIMIT_VALUE: Rect = [22.0, 100.0, 72.0, 12.0];
 /// The orders mode's row under the grid (slice 18: any count): «−», the count, «+», «Заказать»,
 /// then «держать N» and its buttons. ORDER_BUTTONS in ORDER_MINUS, ORDER_PLUS, ORDER_GO order.
 pub const ORDER_BUTTONS: [Rect; 3] = [
@@ -64,6 +66,9 @@ pub const ORDER_MINUS: usize = 0;
 pub const ORDER_PLUS: usize = 1;
 pub const ORDER_GO: usize = 2;
 pub const KEEP_TEXT: [f32; 2] = [104.0, 102.0];
+/// 0.21.2 (spec 49): «Держать: N» as a field that takes typed digits; the order count's field is
+/// ORDER_COUNT.
+pub const KEEP_VALUE: Rect = [102.0, 100.0, 63.0, 12.0];
 /// Slice 18: the «Лимиты» mode lists every item as a row (those with a limit first), this many a
 /// page, in the grid's place.
 pub const LIMIT_ROWS: usize = 5;
@@ -141,11 +146,16 @@ pub enum Part {
     LimitPlus,
     LimitClear,
     LimitDestroy,
+    /// 0.21.2 (spec 49): the chosen item's limit, its number typed.
+    LimitValue,
     /// The orders mode: «−», «+» or «Заказать» (ORDER_MINUS, ORDER_PLUS, ORDER_GO).
     Order(usize),
     KeepMinus,
     KeepPlus,
     KeepClear,
+    /// 0.21.2 (spec 49): the order's count and «Держать: N», their numbers typed.
+    OrderCount,
+    KeepValue,
     Status,
     /// Wave 2: a row of the queue, and its cancel button, by the row.
     Queue(usize),
@@ -205,6 +215,7 @@ pub fn part_in(at: [f32; 2], orders: bool) -> Option<Part> {
         (LIMIT_PLUS, Part::LimitPlus),
         (LIMIT_CLEAR, Part::LimitClear),
         (LIMIT_DESTROY, Part::LimitDestroy),
+        (LIMIT_VALUE, Part::LimitValue),
     ];
     let order_parts = [
         (ORDER_BUTTONS[0], Part::Order(0)),
@@ -213,6 +224,8 @@ pub fn part_in(at: [f32; 2], orders: bool) -> Option<Part> {
         (KEEP_MINUS, Part::KeepMinus),
         (KEEP_PLUS, Part::KeepPlus),
         (KEEP_CLEAR, Part::KeepClear),
+        (ORDER_COUNT, Part::OrderCount),
+        (KEEP_VALUE, Part::KeepValue),
     ];
     if orders
         && let Some(k) = (0..QUEUE_ROWS).find(|&k| inside(queue_row(k).0, at) || inside(queue_row(k).1, at))
@@ -273,6 +286,8 @@ pub enum Take {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum LimitChange {
     Add(i64),
+    /// 0.21.2 (spec 49): a typed number, as it is. It has no menu button id (`typed`).
+    Set(u64),
     Clear,
     /// «Уничтожать излишек» on or off.
     ToggleDestroy,
@@ -495,6 +510,11 @@ pub fn change_limit(store: &mut Store, key: &ItemKey, change: LimitChange) {
                 }),
             }
         }
+        // A typed 0 is a limit of 0, as «−» down to zero; «×» clears.
+        LimitChange::Set(max) => Some(Limit {
+            max,
+            destroy_surplus: now.is_some_and(|l| l.destroy_surplus),
+        }),
         LimitChange::ToggleDestroy => Some(match now {
             Some(l) => Limit {
                 destroy_surplus: !l.destroy_surplus,
@@ -525,6 +545,7 @@ pub fn change_keep(store: &mut Store, key: &ItemKey, change: LimitChange) {
     let now = store.keep.get(key).copied().unwrap_or(0);
     let next = match change {
         LimitChange::Add(delta) => add(now, delta),
+        LimitChange::Set(n) => n,
         LimitChange::Clear | LimitChange::ToggleDestroy => 0,
     };
     if next == 0 {
@@ -727,6 +748,46 @@ mod tests {
     }
 
     #[test]
+    fn a_typed_number_sets_a_limit_and_n_as_it_is() {
+        // 0.21.2 (spec 49).
+        let mut s = Store::default();
+        let key: ItemKey = "minecraft:birch_sapling".into();
+        change_limit(&mut s, &key, LimitChange::ToggleDestroy);
+        change_limit(&mut s, &key, LimitChange::Set(3938));
+        assert_eq!(s.limits[&key], Limit { max: 3938, destroy_surplus: true });
+        change_limit(&mut s, &key, LimitChange::Set(0));
+        assert_eq!(s.limits[&key].max, 0);
+        change_keep(&mut s, &key, LimitChange::Set(300));
+        assert_eq!(s.keep[&key], 300);
+        change_keep(&mut s, &key, LimitChange::Set(0));
+        assert!(s.keep.is_empty());
+        // No menu button id: a number goes as its own message.
+        let set = Press::Limit { item: (1, 0), change: LimitChange::Set(5) };
+        assert_eq!(encode(set), None);
+    }
+
+    #[test]
+    fn the_typed_fields_are_where_their_numbers_are() {
+        // 0.21.2 (spec 49): the limit's number, the order's count, «Держать: N».
+        assert_eq!(part_at([40.0, 104.0]), Some(Part::LimitValue));
+        assert_eq!(part_at([100.0, 104.0]), Some(Part::LimitMinus));
+        assert_eq!(part_in([45.0, 104.0], true), Some(Part::OrderCount));
+        assert_eq!(part_in([120.0, 104.0], true), Some(Part::KeepValue));
+        assert_eq!(part_in([170.0, 104.0], true), Some(Part::KeepMinus));
+        // They touch no button of their row.
+        for (field, buttons) in [
+            (LIMIT_VALUE, &[LIMIT_MINUS][..]),
+            (ORDER_COUNT, &ORDER_BUTTONS[..]),
+            (KEEP_VALUE, &[ORDER_BUTTONS[ORDER_GO], KEEP_MINUS][..]),
+        ] {
+            for b in buttons {
+                let apart = field[0] + field[2] <= b[0] || b[0] + b[2] <= field[0];
+                assert!(apart, "{field:?} and {b:?}");
+            }
+        }
+    }
+
+    #[test]
     fn the_parts_are_where_the_layout_puts_them() {
         assert_eq!(part_at([10.0, 20.0]), Some(Part::Tab(Tab::All)));
         assert_eq!(part_at([100.0, 20.0]), Some(Part::Tab(Tab::Tools)));
@@ -751,7 +812,8 @@ mod tests {
         assert_eq!(part_in([198.0, 131.0], true), Some(Part::Cancel(0)));
         assert_eq!(part_in([100.0, 141.0], true), Some(Part::Queue(1)));
         assert_eq!(part_in([198.0, 141.0], true), Some(Part::Cancel(1)));
-        assert_eq!(part_in([150.0, 104.0], true), None);
+        assert_eq!(part_in([150.0, 104.0], true), Some(Part::KeepValue));
+        assert_eq!(part_in([160.0, 113.0], true), None);
         assert_eq!(part_in([100.0, 131.0], false), None);
         // The book's socket and the grid do not touch.
         let book = slot_frame(BOOK);

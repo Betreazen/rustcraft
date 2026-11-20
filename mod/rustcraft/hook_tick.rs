@@ -9,4 +9,6 @@ fn rustcraft_tick(game: &mut crate::game::Game<'_>) {
     crate::game::rustcraft_joint_screen::client_tick(game);
     // Round 32 (spec 33): the «Сеть» page asked for while it is shown.
     crate::game::rustcraft_terminal_net::client_tick(game);
+    // 0.21.2 (spec 49): the numbers typed into the terminal's window go to the server.
+    crate::game::rustcraft_terminal::client_tick(game);
 }

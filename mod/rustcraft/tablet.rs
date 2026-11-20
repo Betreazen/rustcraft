@@ -279,6 +279,10 @@ fn press(game: &mut Game<'_>, dimension: &str, uuid: u128, p: Press) {
             }
             _ => {}
         },
+        // 0.21.2 (spec 49): a limit typed into the window.
+        Press::Set(set) => {
+            storage::tablet_typed(game, dimension, id, set, uuid);
+        }
     }
 }
 
@@ -328,7 +332,7 @@ pub(super) fn on_net(channel: &str, data: &[u8]) {
 /// Presses made since the client's last tick (a click hook has no `&mut Game` to send with).
 static PENDING: Mutex<Vec<Press>> = Mutex::new(Vec::new());
 
-fn queue(p: Press) {
+pub(super) fn queue(p: Press) {
     PENDING.lock().unwrap_or_else(PoisonError::into_inner).push(p);
 }
 

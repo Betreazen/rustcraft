@@ -735,6 +735,16 @@ impl Bench for GameBench<'_, '_> {
         crate::game::rustcraft_content::item_number(&*self.game, item).and_then(|n| u16::try_from(n).ok())
     }
 
+    fn terminal_typed(&mut self, message: &[u8]) -> Result<(), String> {
+        let (terminal, set) =
+            rustcraft_rules::storage::typed::decode_terminal(message).ok_or("the typed number does not read")?;
+        if storage::typed_at_terminal(self.game, DIMENSION, terminal, set, None) {
+            Ok(())
+        } else {
+            Err(format!("the terminal at {terminal:?} refused {set:?}"))
+        }
+    }
+
     fn stock_snbt(&mut self, pos: Pos, snbt: &str, count: u64) -> Result<(), String> {
         let (tag, _) = horizon_world::nbt::parse_snbt(snbt)?;
         let stack = horizon_client::save::item_from_nbt(&tag).ok_or_else(|| format!("no item in {snbt}"))?;

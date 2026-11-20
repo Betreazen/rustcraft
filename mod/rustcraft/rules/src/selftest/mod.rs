@@ -103,6 +103,8 @@ pub mod s21_xp;
 pub mod s21_enchanter;
 // 0.21.1 (spec 47, OT12): the recipe book's items on their own channel.
 pub mod s21_orderable;
+// 0.21.2 (spec 49): the terminal's numbers typed.
+pub mod s21_typed;
 
 use std::collections::BTreeMap;
 
@@ -619,6 +621,16 @@ pub trait Bench {
         let _ = (pos, snbt, count);
         Err("no stocking on this bench".into())
     }
+
+    // ---- 0.21.2 (spec 49): the terminal's numbers typed ----
+    /// A number typed into a terminal's window, as its client sends it on
+    /// `storage::typed::CHANNEL` (`typed::encode_terminal`), applied as the level's tick applies
+    /// it for a player whose window is open on that terminal. Err when it does not read or the
+    /// server refuses it.
+    fn terminal_typed(&mut self, message: &[u8]) -> Result<(), String> {
+        let _ = message;
+        Err("no typed numbers on this bench".into())
+    }
 }
 
 /// 0.21.1 (OT12, OT13): what the server sends a player who opens a terminal.
@@ -908,6 +920,8 @@ pub fn catalog() -> Vec<Build> {
     all.extend(s21_enchanter::ALL);
     // 0.21.1 (spec 47, OT12): a big storage still orders what the book makes.
     all.extend(s21_orderable::ALL);
+    // 0.21.2 (spec 49): a typed limit, «держать» and order count.
+    all.extend(s21_typed::ALL);
     all
 }
 

@@ -134,6 +134,8 @@ pub enum Press {
     Deposit(u8),
     /// The player closed the window.
     Closed,
+    /// 0.21.2 (spec 49): a limit typed into the window (`typed`).
+    Set(crate::storage::typed::Set),
 }
 
 pub fn encode_press(p: Press) -> Vec<u8> {
@@ -145,6 +147,7 @@ pub fn encode_press(p: Press) -> Vec<u8> {
         }
         Press::Deposit(slot) => vec![1, slot],
         Press::Closed => vec![2],
+        Press::Set(set) => [vec![3], crate::storage::typed::encode_set(set)].concat(),
     }
 }
 
@@ -154,6 +157,7 @@ pub fn decode_press(bytes: &[u8]) -> Option<Press> {
         [0, a, b, c, d] => Some(Press::Terminal(i32::from_le_bytes([*a, *b, *c, *d]))),
         [1, slot] if *slot < 36 => Some(Press::Deposit(*slot)),
         [2] => Some(Press::Closed),
+        [3, set @ ..] => crate::storage::typed::decode_set(set).map(Press::Set),
         _ => None,
     }
 }
@@ -218,9 +222,22 @@ mod tests {
 
     #[test]
     fn every_window_press_comes_back() {
-        for p in [Press::Terminal(-123_456), Press::Terminal(5), Press::Deposit(35), Press::Closed] {
+        // 0.21.2 (spec 49): a typed limit.
+        let set = crate::storage::typed::Set {
+            setting: crate::storage::typed::Setting::Limit,
+            item: (812, 0),
+            value: 3938,
+        };
+        for p in [
+            Press::Terminal(-123_456),
+            Press::Terminal(5),
+            Press::Deposit(35),
+            Press::Closed,
+            Press::Set(set),
+        ] {
             assert_eq!(decode_press(&encode_press(p)), Some(p));
         }
+        assert_eq!(decode_press(&[3, 0, 1]), None);
         assert_eq!(decode_press(&[1, 36]), None);
         assert_eq!(decode_press(&[9]), None);
         assert_eq!(decode_press(&[]), None);

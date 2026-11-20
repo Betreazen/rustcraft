@@ -27,6 +27,8 @@ pub mod parts;
 pub mod surplus;
 pub mod tablet;
 pub mod terminal;
+// 0.21.2 (spec 49): the terminal's numbers typed.
+pub mod typed;
 pub mod variants;
 pub mod view;
 pub mod wire;
