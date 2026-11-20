@@ -13,6 +13,8 @@
 //   channel, and takes the product into the tank on top of it and along a fluid channel (the
 //   mixer's fluid joint works both ways by default).
 // - Energy, the work mode and the speed and economy modules as the slice-8 machines have them.
+// - 0.21.1: each bucket it makes tells Path-of-craft-tree `mix` for its owner (Alchemy); a mixer
+//   nobody owns tells nothing.
 //
 // A recipe file: {"type": "rustcraft:mixing", "ingredients": [{"item": "minecraft:bone_meal"},
 // ...], "water": 1000, "result": {"fluid": "rustcraft:solution", "amount": 1000}, "time": 100}.
@@ -30,7 +32,7 @@ use horizon_world::nbt::{Compound, JavaString, Tag};
 use rustcraft_rules::{
     geom::Pos,
     machines::{
-        mixer::{INPUTS, MixRecipe, Mixer, MixerView, Shown, Spec, ingredient_sets},
+        mixer::{INPUTS, MixRecipe, Mixer, MixerView, Shown, Spec, buckets_made, ingredient_sets},
         recipes::{self, Pick},
         sheet::{Bar as SheetBar, Sheet, Status as SheetStatus, Toggle, severity_code},
         slots::{Slot, count_in},
@@ -39,6 +41,7 @@ use rustcraft_rules::{
     mining,
     net::{fluids::BUCKET, topology::Topology},
     power::SOLUTION,
+    reports::{self, Report},
     tuning::Tuning,
 };
 use std::{
@@ -458,6 +461,13 @@ pub(super) fn run(
             Shown::Off
         }
     };
+    // 0.21.1: each bucket made, an order step's too, is its owner's Alchemy in Path-of-craft-tree.
+    let made = buckets_made(&before, &mixer);
+    if made > 0
+        && let Some(owner) = base::owner_at(game, pos)
+    {
+        base::report(Report::Counted { kind: reports::MIX, owner, count: made });
+    }
     let got = if held.request > 0.0 { share * held.request } else { 0.0 };
     let named = held.pick.named().and_then(|i| all.get(i)).map(|r| r.fluid.clone());
     state().shown.insert(
