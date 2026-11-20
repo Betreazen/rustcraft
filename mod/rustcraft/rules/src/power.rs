@@ -99,7 +99,7 @@ pub fn anchor(group: &BTreeSet<Pos>) -> Pos {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Form {
     Single,
-    /// 2×1, 2×2, 3×3, 3×3×3.
+    /// 2×1, 2×2, 3×3, 3×3×3; 0.21.2 (owner: «я построил структуру 5×5×5, но она не объединилась»): 4×4×4 and 5×5×5.
     Box([i32; 3]),
     Broken,
 }
@@ -117,7 +117,7 @@ pub fn form(group: &BTreeSet<Pos>) -> Form {
     let mut size = [hi[0] - lo[0] + 1, hi[1] - lo[1] + 1, hi[2] - lo[2] + 1];
     let volume = size.iter().product::<i32>() as usize;
     size.sort_unstable();
-    let allowed = [[1, 1, 2], [1, 2, 2], [1, 3, 3], [3, 3, 3]];
+    let allowed = [[1, 1, 2], [1, 2, 2], [1, 3, 3], [3, 3, 3], [4, 4, 4], [5, 5, 5]];
     if volume == group.len() && allowed.contains(&size) {
         Form::Box(size)
     } else {
@@ -454,6 +454,9 @@ mod tests {
         assert!(close(structure_output(4, b, true, &t), 32.0));
         assert!(close(structure_output(9, b, true, &t), 108.0));
         assert_eq!(structure_output(27, b, true, &t).round(), 561.0);
+        // 0.21.2: 4×4×4 2048, 5×5×5 5590 (rounded).
+        assert!(close(structure_output(64, b, true, &t), 2048.0));
+        assert_eq!(structure_output(125, b, true, &t).round(), 5590.0);
         assert!(close(structure_output(4, b, false, &t), 4.0));
         assert!(close(structure_output(3, Form::Broken, true, &t), 4.0));
         assert_eq!(structure_shown(4, b, false, &t), Shown::NoSolution(4.0));
@@ -529,6 +532,7 @@ mod tests {
         assert_eq!(form_name(square).as_deref(), Some("2×2"));
         assert_eq!(form_name(Form::Box([1, 1, 2])).as_deref(), Some("2×1"));
         assert_eq!(form_name(Form::Box([3, 3, 3])).as_deref(), Some("3×3×3"));
+        assert_eq!(form_name(Form::Box([5, 5, 5])).as_deref(), Some("5×5×5"));
         assert_eq!(form_name(Form::Broken), None);
     }
 
