@@ -312,8 +312,12 @@ fn row_of(b: &dyn Bench, p: Pos, id: &str) -> Result<usize, String> {
 /// EW18, EW19: «Особые» shown (the pick still «Лучшее»: showing chooses nothing), then the row of
 /// Mending chosen; the window lights it and asks for ten lapis.
 fn choose_mending(b: &mut dyn Bench, p: Pos) -> Result<(), String> {
-    b.press(p, Press::Toggle(VIEW_TREASURE).id(), None)?;
+    // Pressed again in «Особые» it would page on: only from another view.
+    if b.long(p, "enchant_view") != 2 {
+        b.press(p, Press::Toggle(VIEW_TREASURE).id(), None)?;
+    }
     same("the view", b.long(p, "enchant_view"), 2)?;
+    same("the first page", b.long(p, "enchant_page"), 0)?;
     same("the pick before a row", b.long(p, "enchant_pick"), 0)?;
     let k = row_of(b, p, MENDING)?;
     same("Mending's row", k, 0)?;
@@ -323,9 +327,11 @@ fn choose_mending(b: &mut dyn Bench, p: Pos) -> Result<(), String> {
     if !s.toggles[VIEW_TREASURE].on || !s.toggles[OPTION_BUTTONS.start + k].on {
         return Err("«Особые» or Mending's row is not lit".into());
     }
-    let lapis = s.notes[enchant_notes::LAPIS].to_string();
-    if !lapis.contains(&format!("\"{TREASURE_LAPIS}\"")) {
-        return Err(format!("the lapis label: {lapis}"));
+    // «Лазурит ×%s» with the price as its argument (a number or its text).
+    let label = &s.notes[enchant_notes::LAPIS];
+    let price = label["with"][0].to_string();
+    if price.trim_matches('"') != TREASURE_LAPIS.to_string() {
+        return Err(format!("the lapis label: {label}"));
     }
     Ok(())
 }
