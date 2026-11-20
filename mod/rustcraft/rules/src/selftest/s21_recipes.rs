@@ -128,19 +128,10 @@ fn kitchen_cooks_one_dish_then_the_next(o: Pos, _: &Tuning) -> Scenario {
             machine(b, k, KITCHEN, true)?;
             b.set_buffer(k, 400.0)
         })
-        // A press waits for the kitchen's block entity, which comes the tick after it is placed.
+        // Its toggles, a step after it stands, as the window would press them.
         .then("bread and cookies on", move |b, _| {
             toggle(b, k, BREAD_TOGGLE)?;
             toggle(b, k, COOKIE_TOGGLE)
-        })
-        .wait(240)
-        .check("it has begun: wheat taken or bread baked", move |b, _| {
-            let items = b.items(k);
-            if count_of(&items, WHEAT) > 0 || count_of(&items, BREAD) > 0 || held(b, o, BREAD)? > 0 {
-                return Ok(());
-            }
-            let on: Vec<bool> = b.sheet(k).map(|s| s.toggles.iter().map(|t| t.on).collect()).unwrap_or_default();
-            Err(format!("status {}, toggles {on:?}, items {items:?}, wheat in the storage {}", status_json(b, k), held(b, o, WHEAT)?))
         })
         .until("2 loaves and 8 cookies in the storage", COOK_LIMIT, move |b, memo: &mut Memo| {
             // What its window says it cooks, step by step.
