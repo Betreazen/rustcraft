@@ -11,6 +11,8 @@ pub mod cull;
 pub mod debug;
 pub mod druses;
 pub mod explore;
+// 0.21.2: the buckets windows draw for fluids.
+pub mod fluid_icons;
 pub mod gear;
 pub mod geom;
 pub mod grow;

@@ -339,12 +339,10 @@ pub(super) fn layout() -> NativeScreen {
 
 /// An item's id; for a fluid's number (O12) the bucket item its icon is drawn with.
 fn id_of(game: &Game<'_>, item: u16) -> Option<&'static str> {
+    // The game's bucket for water, lava and milk (round 31: the storage's milk too), the mod's
+    // display bucket for the solution and the catalysts (0.21.2), the empty bucket for any other.
     match fluid_of_number(item) {
-        Some("minecraft:water") => Some("minecraft:water_bucket"),
-        Some("minecraft:lava") => Some("minecraft:lava_bucket"),
-        // Round 31: the storage lists its milk too.
-        Some("rustcraft:milk") => Some("minecraft:milk_bucket"),
-        Some(_) => Some("minecraft:bucket"),
+        Some(fluid) => Some(rustcraft_rules::fluid_icons::icon_of(fluid)),
         None => item_of_number(game, u32::from(item)),
     }
 }

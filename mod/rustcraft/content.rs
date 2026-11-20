@@ -874,6 +874,16 @@ pub fn declare_items(items: &mut Vec<Item>) {
             ..Item::default()
         });
     }
+    // 0.21.2: the buckets the storage terminal draws for the solution and the catalysts
+    // (rustcraft_rules::fluid_icons): only drawn, no recipe and no use, not in the creative tab.
+    for (_, id) in rustcraft_rules::fluid_icons::ICONS {
+        items.push(Item {
+            id: id.into(),
+            template: "minecraft:iron_ingot".into(),
+            max_stack_size: Some(1),
+            ..Item::default()
+        });
+    }
     // Round 31: the housing's higher tiers place the housing (rustcraft_pipe18 sets the tier).
     for tier in 2..=rustcraft_rules::tiers::MAX_TIER {
         items.push(Item {

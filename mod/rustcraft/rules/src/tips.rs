@@ -26,6 +26,11 @@ const ALIASES: &[(&str, &[&str])] = &[
     ("rustcraft:druse", &["grow"]),
     ("rustcraft:seed", &["grow"]),
     ("rustcraft:zip_anchor", &["zipline"]),
+    // 0.21.2: the buckets the terminal draws for the solution and the catalysts (fluid_icons).
+    ("rustcraft:solution_bucket", &["fluids"]),
+    ("rustcraft:accelerator_bucket", &["fluids"]),
+    ("rustcraft:economizer_bucket", &["fluids"]),
+    ("rustcraft:enricher_bucket", &["fluids"]),
 ];
 
 /// The stats a page's tooltip shows after its summary, by index (`.stat.<n>`): the number the
