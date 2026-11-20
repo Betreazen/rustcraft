@@ -247,7 +247,7 @@ fn draw_row(
     for (i, item) in row.items.iter().enumerate().take(FILTER_LIMIT) {
         let p = js::item_at(slot, i);
         kit::slot(game, batch, o, p);
-        let shown = if fluid { format!("{item}_bucket") } else { item.clone() };
+        let shown = if fluid { rustcraft_rules::fluid_icons::filter_icon(item) } else { item.clone() };
         game.native_item(batch, &shown, [o[0] + p[0], o[1] + p[1]], 16.0);
     }
     if row.items.len() < FILTER_LIMIT {

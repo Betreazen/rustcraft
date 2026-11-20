@@ -854,7 +854,7 @@ fn stack_of(game: &Game<'_>, ctx: &Context, cell: &Cell) -> Option<ItemStack> {
             let shown = if game.items().get(item).is_some() {
                 item.clone()
             } else {
-                format!("{item}_bucket")
+                rustcraft_rules::fluid_icons::filter_icon(item)
             };
             let mut stack = ItemStack::new(&shown, 1);
             let lore = styled(

@@ -568,3 +568,33 @@ SHARD = [
     '....kk..........',
 ]
 ICONS['crystal_shard'] = (SHARD, '#56dbe2', '#ffffff', dots([(3, 3), (13, 9), (6, 11)], 'w'))
+
+
+# ---- 0.21.2: the buckets the storage terminal draws for the mod's fluids (rustcraft_rules::
+# fluid_icons). No guide icon: the guide shows these fluids as flasks (icons.js f_sol, f_fast,
+# f_eco, f_rich), the game's windows as buckets beside its water, lava and milk buckets. A steel
+# pail full to the rim, the liquid in the colour its tanks show (rules anim::fluid_tint; a rules
+# test checks the colours here against it) and the guide flask's sign on the pail.
+BUCKET = [
+    '',
+    '.....nnnnnn.....',
+    '....n......n....',
+    '...n........n...',
+    '.kkkkkkkkkkkkkk.',
+    '.kgggggeeeeeefk.',
+    '.keeeeeeeeefffk.',
+    '.kccccccccccbbk.',
+    '..kcaaaaaaaabk..',
+    '..kcaaaaaaaabk..',
+    '..kcaaaaaaaabk..',
+    '...kcaaaaaabk...',
+    '...kcaaaaaabk...',
+    '...kcaaaaaabk...',
+    '....kbbbbbbk....',
+    '.....kkkkkk.....',
+]
+PAIL = '#8a919d'
+ICONS['solution_bucket'] = (BUCKET, PAIL, '#6cc24a', dots([(5, 9), (8, 10), (10, 9), (6, 12), (9, 12)], 'e'))
+ICONS['accelerator_bucket'] = (BUCKET, PAIL, '#f5d547', [(5, 9, ['e..e.', '.e..e', 'e..e.'])])
+ICONS['economizer_bucket'] = (BUCKET, PAIL, '#e39a2e', [(6, 9, ['..ee', '.ee.', 'ee..', 'e...'])])
+ICONS['enricher_bucket'] = (BUCKET, PAIL, '#b65fd8', [(6, 9, ['.e.', 'eee', '.e.'])] + dots([(9, 12)], 'e'))
