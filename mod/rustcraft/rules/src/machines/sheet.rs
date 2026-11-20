@@ -528,7 +528,7 @@ pub mod enchant_notes {
 
 /// The enchanting machine's work area from `y` (EW1): left, the item, lapis and result slots one
 /// under another, each with its label (the result slot's a toggle, EW17), and the condenser's
-/// levels; right, the view switch («Новые чары» / «Повысить»), the level row (−10, −1, the
+/// levels; right, the view switch («Новые | Особые | Свои»), the level row (−10, −1, the
 /// level, +1, +10) and four option rows. Its height.
 fn enchant_area(out: &mut Layout, y: f32) -> f32 {
     use crate::utility::enchanting::OPTION_ROWS;
@@ -567,9 +567,15 @@ fn enchant_area(out: &mut Layout, y: f32) -> f32 {
     let row_y = |k: usize| r + ROW_H + 2.0 + OPTION_STEP * k as f32;
     let options = (0..OPTION_ROWS).map(|k| [RIGHT_X, row_y(k), w - CROSS_W - 2.0, OPTION_H]);
     let crosses = (0..OPTION_ROWS).map(|k| [RIGHT - CROSS_W, row_y(k), CROSS_W, OPTION_H]);
-    let half = (w - 2.0) / 2.0;
-    let views = [[RIGHT_X, y, half, ROW_H], [RIGHT_X + half + 2.0, y, half, ROW_H]];
-    out.toggles = level.into_iter().chain(options).chain(views).chain(crosses).chain([keep]).collect();
+    // 0.21.2 (EW18): three segments «Новые | Особые | Свои», the middle one widest for «Особые»;
+    // its button is the last (`enchanting::VIEW_TREASURE`), the others keep their numbers.
+    const NEW_W: f32 = 37.0;
+    const OWN_W: f32 = 32.0;
+    let treasure_w = w - NEW_W - OWN_W - 4.0;
+    let new = [RIGHT_X, y, NEW_W, ROW_H];
+    let treasure = [RIGHT_X + NEW_W + 2.0, y, treasure_w, ROW_H];
+    let own = [RIGHT - OWN_W, y, OWN_W, ROW_H];
+    out.toggles = level.into_iter().chain(options).chain([new, own]).chain(crosses).chain([keep, treasure]).collect();
     out.notes = notes;
     let right_end = r + ROW_H + 2.0 + OPTION_STEP * (OPTION_ROWS - 1) as f32 + OPTION_H;
     (right_end - y).max(76.0) + 1.0
@@ -908,6 +914,19 @@ mod tests {
         assert_eq!(press_at(&l, [o[0] + 50.0, o[1] + 5.0]), Some(Press::Toggle(6)));
         let v = l.toggles[enchanting::VIEW_RAISE];
         assert_eq!(press_at(&l, [v[0] + 2.0, v[1] + 2.0]), Some(Press::Toggle(enchanting::VIEW_RAISE)));
+        // EW18: three segments on one row, «Новые | Особые | Свои», side by side within the right
+        // column, wide enough for their words (about 6 px a letter, 4 px of padding).
+        let [new, treasure, own] = [enchanting::VIEW_NEW, enchanting::VIEW_TREASURE, enchanting::VIEW_RAISE].map(|i| l.toggles[i]);
+        assert!(new[1] == treasure[1] && treasure[1] == own[1]);
+        assert!(new[0] + new[2] < treasure[0] && treasure[0] + treasure[2] < own[0]);
+        assert!(own[0] + own[2] <= RIGHT && new[0] >= l.toggles[0][0]);
+        assert!(new[2] >= 31.0 + 4.0 && treasure[2] >= 37.0 + 4.0 && own[2] >= 24.0 + 4.0, "{new:?} {treasure:?} {own:?}");
+        assert_eq!(press_at(&l, [treasure[0] + 20.0, treasure[1] + 5.0]), Some(Press::Toggle(enchanting::VIEW_TREASURE)));
+        for (i, a) in l.toggles.iter().enumerate() {
+            for b in &l.toggles[i + 1..] {
+                assert!(!overlap(*a, *b), "{a:?} overlaps {b:?}");
+            }
+        }
     }
 
     fn overlap(a: Rect, b: Rect) -> bool {

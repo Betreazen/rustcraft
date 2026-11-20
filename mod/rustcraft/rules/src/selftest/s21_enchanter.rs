@@ -15,6 +15,10 @@
 //! - 0.21.2 (EW17; the owner: «нужно сделать тумблер уносить сразу на склад или нет»): on a
 //!   storage's line with the result slot's toggle on «здесь», the enchanted book stays in the
 //!   machine and the storage gets none; switched back to «на склад», it goes to the storage.
+//! - 0.21.2 (EW18–EW21; the owner: «я хочу чтобы в зачаровательном столе можно было и уникальные
+//!   зачарования получить, например починка»): «Особые» on a diamond pickaxe lists Mending, its
+//!   row chosen the pickaxe comes out with Mending for 10 lapis; a plain book becomes an enchanted
+//!   book of Mending, and «Особые» pressed again pages its five treasures by four.
 
 use super::slice15::{build, held, terminal_at};
 use super::transport::{chest, fill};
@@ -23,10 +27,10 @@ use crate::geom::Pos;
 use crate::machines::processor::WorkMode;
 use crate::machines::sheet::{Press, enchant_notes};
 use crate::tuning::Tuning;
-use crate::utility::enchanting::{KEEP_BUTTON, OPTION_BUTTONS, REMOVE_BUTTONS, VIEW_RAISE};
+use crate::utility::enchanting::{KEEP_BUTTON, MENDING, OPTION_BUTTONS, REMOVE_BUTTONS, TREASURE_LAPIS, VIEW_RAISE, VIEW_TREASURE};
 use serde_json::Value;
 
-pub const ALL: [Build; 9] = [
+pub const ALL: [Build; 11] = [
     enchanter21_book_comes_out_enchanted,
     enchanter21_second_offer_gives_its_enchantments,
     enchanter21_boost_works_on_a_full_buffer,
@@ -36,6 +40,8 @@ pub const ALL: [Build; 9] = [
     enchanter21_a_book_with_none_left_is_plain,
     enchanter21_anvil_keeps_a_level_above_the_most,
     enchanter21_keeps_the_result_here,
+    enchanter21_mends_a_pickaxe_from_special,
+    enchanter21_makes_a_book_of_mending,
 ];
 
 const ENCHANTER: &str = "rustcraft:enchanter";
@@ -291,7 +297,7 @@ fn enchanter21_raises_an_enchantment(o: Pos, _: &Tuning) -> Scenario {
         })
 }
 
-/// The row of «Свои чары» that names `id`.
+/// The option row of the shown view («Свои чары» or «Особые») that names `id`.
 fn row_of(b: &dyn Bench, p: Pos, id: &str) -> Result<usize, String> {
     let s = b.sheet(p).ok_or("no sheet")?;
     (0..4)
@@ -300,7 +306,84 @@ fn row_of(b: &dyn Bench, p: Pos, id: &str) -> Result<usize, String> {
             named(&s.toggles[OPTION_BUTTONS.start + k].name, &mut ids);
             ids.iter().any(|i| i == id)
         })
-        .ok_or_else(|| format!("no row of «Свои чары» names {id}"))
+        .ok_or_else(|| format!("no option row names {id}"))
+}
+
+/// EW18, EW19: «Особые» shown (the pick still «Лучшее»: showing chooses nothing), then the row of
+/// Mending chosen; the window lights it and asks for ten lapis.
+fn choose_mending(b: &mut dyn Bench, p: Pos) -> Result<(), String> {
+    b.press(p, Press::Toggle(VIEW_TREASURE).id(), None)?;
+    same("the view", b.long(p, "enchant_view"), 2)?;
+    same("the pick before a row", b.long(p, "enchant_pick"), 0)?;
+    let k = row_of(b, p, MENDING)?;
+    same("Mending's row", k, 0)?;
+    b.press(p, Press::Toggle(OPTION_BUTTONS.start + k).id(), None)?;
+    same("the pick", b.long(p, "enchant_pick"), 6)?;
+    let s = b.sheet(p).ok_or("no sheet")?;
+    if !s.toggles[VIEW_TREASURE].on || !s.toggles[OPTION_BUTTONS.start + k].on {
+        return Err("«Особые» or Mending's row is not lit".into());
+    }
+    let lapis = s.notes[enchant_notes::LAPIS].to_string();
+    if !lapis.contains(&format!("\"{TREASURE_LAPIS}\"")) {
+        return Err(format!("the lapis label: {lapis}"));
+    }
+    Ok(())
+}
+
+fn enchanter21_mends_a_pickaxe_from_special(o: Pos, _: &Tuning) -> Scenario {
+    const PICKAXE: &str = "minecraft:diamond_pickaxe";
+    let p = at(o, [3, 1, 0]);
+    Scenario::new("enchanter21_mends_a_pickaxe_from_special", plot_area(o))
+        .then("a machine without energy, a diamond pickaxe, 10 lapis, a full condenser", move |b, _| {
+            machine(b, p, 0.0)?;
+            b.put(p, 0, PICKAXE, 1)?;
+            b.put(p, 1, LAPIS, TREASURE_LAPIS)
+        })
+        .then("«Особые», Mending's row, then the energy", move |b, _| {
+            choose_mending(b, p)?;
+            b.set_buffer(p, 600.0)
+        })
+        .until("the pickaxe comes out", LIMIT, move |b, _| Ok(result(b, p).is_some_and(|r| r.starts_with(PICKAXE))))
+        .check("with Mending, the ten lapis spent", move |b, _| {
+            let r = result(b, p).unwrap_or_default();
+            if !r.contains("minecraft:mending 1") {
+                return Err(format!("the pickaxe: {r}"));
+            }
+            same("lapis", count_of(&b.items(p), LAPIS), 0)
+        })
+}
+
+fn enchanter21_makes_a_book_of_mending(o: Pos, _: &Tuning) -> Scenario {
+    let p = at(o, [3, 1, 0]);
+    Scenario::new("enchanter21_makes_a_book_of_mending", plot_area(o))
+        .then("a machine without energy, a book, 10 lapis, a full condenser", move |b, _| {
+            machine(b, p, 0.0)?;
+            b.put(p, 0, BOOK, 1)?;
+            b.put(p, 1, LAPIS, TREASURE_LAPIS)
+        })
+        .then("«Особые» pages a book's five treasures by four, round", move |b, _| {
+            b.press(p, Press::Toggle(VIEW_TREASURE).id(), None)?;
+            let s = b.sheet(p).ok_or("no sheet")?;
+            if s.toggle_off[OPTION_BUTTONS.start..OPTION_BUTTONS.end].iter().any(|off| *off) {
+                return Err("a book has fewer than four treasures on the first page".into());
+            }
+            b.press(p, Press::Toggle(VIEW_TREASURE).id(), None)?;
+            same("the second page", b.long(p, "enchant_page"), 1)?;
+            same("the view stays", b.long(p, "enchant_view"), 2)?;
+            b.press(p, Press::Toggle(VIEW_TREASURE).id(), None)?;
+            same("round to the first", b.long(p, "enchant_page"), 0)
+        })
+        .then("Mending's row, then the energy", move |b, _| {
+            choose_mending(b, p)?;
+            b.set_buffer(p, 600.0)
+        })
+        .until("an enchanted book of Mending comes out", LIMIT, move |b, _| {
+            Ok(result(b, p) == Some(format!("{ENCHANTED_BOOK} x1 {MENDING} 1")))
+        })
+        .check("the book and the lapis are spent", move |b, _| {
+            same("books", count_of(&b.items(p), BOOK), 0)?;
+            same("lapis", count_of(&b.items(p), LAPIS), 0)
+        })
 }
 
 /// A machine with the book `snbt` and a lapis; «Свои чары», the «×» of `id`, then the energy.

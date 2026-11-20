@@ -92,7 +92,7 @@ PAGES = {
                'Brews potions by pages, one potion a page. Takes water bottles and ingredients from the magistral.'),
     'xp_tank': ('Experience Condenser', 'Stores experience levels. A player puts levels in and takes them back out.'),
     'enchanter': ('Enchanting Machine',
-                  'Enchants books and items for levels from an experience condenser and lapis. The player picks the level and the enchantments from the table\'s three offers, or raises one the item has.'),
+                  'Enchants books and items for levels from an experience condenser and lapis. The player picks the level and the enchantments from the table\'s three offers, raises one the item has, or gives a treasure one the table never does, such as Mending.'),
     'archeo': ('Archaeology Table', 'Brushes the suspicious sand and gravel a player brings and gives out the finds.'),
     'projector': ('Holo-Projector',
                   'A builder\'s helper. Remembers a build in an area and shows the ghost of its blocks. The player takes blocks for it from the storage right at the projector.'),

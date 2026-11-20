@@ -436,7 +436,7 @@ pub const WINDOWS: &[(&str, &[Widget])] = &[
         Widget::Slots { cols: 1, cells: &[Cell { rgb: 0x3558d6, count: "3", ghost: false }] },
         Widget::Slots { cols: 1, cells: &[Cell { rgb: 0xa184f2, count: "", ghost: false }] },
         Widget::Rows { n: 1 },
-        Widget::Chips { on: &[true, false], note: false },
+        Widget::Chips { on: &[true, false, false], note: false },
         Widget::Chips { on: &[false, false, true, false, false], note: false },
         Widget::Chips { on: &[true, false, false, false], note: false },
         Widget::Bar { pct: 100, rgb: 0xffe14a },
