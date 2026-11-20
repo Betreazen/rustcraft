@@ -82,7 +82,7 @@ pub enum Report {
         crafts: u32,
     },
     /// Slice 12: the contract's counted reports of spec 22: `repair`, `breed`, `shear`, `honey`,
-    /// `brew`, `enchant` (levels) and `brush`.
+    /// `brew`, `enchant` (levels) and `brush`; 0.21.1: `mix`, the buckets a mixer made.
     Counted {
         kind: &'static str,
         owner: u128,
@@ -135,8 +135,11 @@ pub fn gained<'a>(
         .collect()
 }
 
-/// The counted kinds of spec 22 Path-of-craft-tree takes.
-pub const COUNTED: [&str; 7] = ["repair", "breed", "shear", "honey", "brew", "enchant", "brush"];
+/// The counted kinds of spec 22 Path-of-craft-tree takes; `mix` (the mixer's buckets, Alchemy)
+/// since 0.21.1 and Path-of-craft-tree 0.5.2, which an older one refuses and logs.
+pub const COUNTED: [&str; 8] = ["repair", "breed", "shear", "honey", "brew", "enchant", "brush", "mix"];
+/// 0.21.1: the mixer's counted report.
+pub const MIX: &str = "mix";
 
 impl Report {
     /// The command line, without a slash.
@@ -248,6 +251,10 @@ mod tests {
         let f = Report::Fish { owner, item: "minecraft:cod".into(), count: 1 };
         assert_eq!(f.command(), format!("pct-machine fish {o} minecraft:cod 1"));
         assert_eq!(Report::Milk { owner, entity: 9 }.command(), format!("pct-machine milk {o} 9"));
+        let m = Report::Counted { kind: MIX, owner, count: 2 };
+        assert_eq!(m.command(), format!("pct-machine mix {o} 2"));
+        assert_eq!(m.kind(), "mix");
+        assert!(COUNTED.contains(&MIX));
         let b = Report::Build {
             owner,
             dimension: "minecraft:overworld".into(),

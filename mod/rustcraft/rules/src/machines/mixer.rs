@@ -6,6 +6,7 @@
 //! millibuckets.
 
 use crate::machines::slots::{Slot, count_in, take_from};
+use crate::net::fluids::BUCKET;
 
 /// The mixer's input slots.
 pub const INPUTS: usize = 3;
@@ -187,6 +188,22 @@ impl Mixer {
     }
 }
 
+/// 0.21.1 (owner 2026-11-20: «да сделай»): the buckets a tick made, for its owner's `mix` report to
+/// Path-of-craft-tree (Alchemy): what its product tank gained between `before` and `after`, a
+/// part of a bucket counted whole. Only a finished batch adds to the tank within a tick, so nothing
+/// else counts; a tank that kept or lost its fluid made nothing.
+pub fn buckets_made(before: &Mixer, after: &Mixer) -> u32 {
+    let amount = |m: &Mixer, fluid: &str| match &m.product {
+        Some((f, n)) if f == fluid => *n,
+        _ => 0,
+    };
+    let Some((fluid, now)) = &after.product else {
+        return 0;
+    };
+    let gained = now.saturating_sub(amount(before, fluid));
+    u32::try_from(gained.div_ceil(BUCKET)).unwrap_or(u32::MAX)
+}
+
 /// What the self-test and the window read of a mixer: its tanks and what it showed last.
 #[derive(Clone, Debug, PartialEq)]
 pub struct MixerView {
@@ -310,6 +327,35 @@ mod tests {
         let fluids: Vec<&str> = list.iter().map(|r| r.fluid.as_str()).collect();
         assert_eq!(fluids, vec![SOLUTION, "rustcraft:accelerator", "rustcraft:enricher", "aaa:other", "zzz:other"]);
         assert_eq!(ingredient_sets(&[solution()])[0].len(), 2);
+    }
+
+    #[test]
+    fn a_finished_batch_is_a_bucket_made_and_a_running_one_none() {
+        let r = [solution()];
+        let s = spec(WorkMode::Normal);
+        let mut m = Mixer {
+            water: 4000,
+            product: Some((SOLUTION.into(), 2000)),
+            ..Mixer::default()
+        };
+        let mut slots = inputs();
+        let mut made = 0;
+        for _ in 0..100 {
+            let before = m.clone();
+            m.tick(&r, &mut slots, &s, 1.0);
+            made += buckets_made(&before, &m);
+        }
+        assert_eq!(made, 1);
+        assert_eq!(m.product, Some((SOLUTION.into(), 3000)));
+        // A tank emptied by a channel, or one that only kept its fluid, made nothing.
+        let full = Mixer { product: Some((SOLUTION.into(), 3000)), ..Mixer::default() };
+        let drained = Mixer { product: Some((SOLUTION.into(), 1000)), ..Mixer::default() };
+        assert_eq!(buckets_made(&full, &drained), 0);
+        assert_eq!(buckets_made(&full, &full), 0);
+        assert_eq!(buckets_made(&full, &Mixer::default()), 0);
+        // A first batch into an empty tank; a half-bucket recipe still counts as one.
+        let half = Mixer { product: Some((SOLUTION.into(), 500)), ..Mixer::default() };
+        assert_eq!(buckets_made(&Mixer::default(), &half), 1);
     }
 
     #[test]
