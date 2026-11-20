@@ -144,6 +144,8 @@ struct Viewer {
     sent: Option<(Option<u32>, u64, u64)>,
     /// 0.21.1 (OT12): the stamp of the recipe book's items last sent on their own channel.
     orderable: Option<u32>,
+    /// 0.21.1 (OT13): the stamp of the component stacks last sent on their own channel.
+    variants: Option<u32>,
 }
 
 #[derive(Default)]
@@ -1127,7 +1129,16 @@ pub(super) fn tick(game: &mut Game<'_>, dimension: &str) {
             .collect()
     };
     for (uuid, terminal, id, version) in due {
-        let bytes = wire::encode(&listing(game, dimension, terminal, id));
+        let mut list = listing(game, dimension, terminal, id);
+        // OT13: the component stacks apart, before the list that names their stamp.
+        let sent = storages().viewers.get(&uuid).and_then(|v| v.variants);
+        let now = send_variants(game, uuid, storage::variants::CHANNEL, &mut list, sent);
+        if now != sent
+            && let Some(v) = storages().viewers.get_mut(&uuid)
+        {
+            v.variants = now;
+        }
+        let bytes = wire::encode(&list);
         if let Err(e) = game.native_net_send_to_player(uuid, CHANNEL, &bytes) {
             log::debug!("rustcraft: the terminal's list not sent to {uuid:032x}: {e}");
             continue;
@@ -1179,13 +1190,58 @@ fn send_orderable_to_viewers(game: &mut Game<'_>, dimension: &str) {
 
 /// The self-test (OT12): the messages a player who opens the terminal at `pos` gets: its list
 /// and the recipe book's items (none before the book is built).
-pub(super) fn terminal_wire(game: &Game<'_>, dimension: &str, pos: Pos) -> Option<(Vec<u8>, Vec<Vec<u8>>)> {
+pub(super) fn terminal_wire(
+    game: &Game<'_>,
+    dimension: &str,
+    pos: Pos,
+) -> Option<rustcraft_rules::selftest::TerminalWire> {
     let id = with_level(dimension, |level| level.terminals.get(&pos).copied()).flatten()?;
-    let list = wire::encode(&listing(game, dimension, pos, id));
+    let mut list = listing(game, dimension, pos, id);
+    let variants = match stamp_variants(&mut list) {
+        Some(_) => storage::variants::encode(&list.variants),
+        None => Vec::new(),
+    };
     let orderable = orders::orderable_list()
         .map(|(_, numbers)| storage::orderable::encode(&numbers))
         .unwrap_or_default();
-    Some((list, orderable))
+    Some(rustcraft_rules::selftest::TerminalWire {
+        list: wire::encode(&list),
+        orderable,
+        variants,
+    })
+}
+
+/// 0.21.1 (OT13): the list names the stamp of its component stacks; none without any.
+fn stamp_variants(list: &mut Listing) -> Option<u32> {
+    list.variants_stamp = (!list.variants.is_empty()).then(|| storage::variants::stamp(&list.variants));
+    list.variants_stamp
+}
+
+/// 0.21.1 (spec 47, OT13): a window's component stacks on `channel` in parts
+/// (rustcraft_rules::storage::variants), when the player was last sent another list of them
+/// (`sent`, a stamp); `list` then names their stamp. The stamp the player has now.
+pub(super) fn send_variants(
+    game: &mut Game<'_>,
+    uuid: u128,
+    channel: &str,
+    list: &mut Listing,
+    sent: Option<u32>,
+) -> Option<u32> {
+    let Some(stamp) = stamp_variants(list) else {
+        return sent;
+    };
+    if sent == Some(stamp) {
+        return sent;
+    }
+    for bytes in storage::variants::encode(&list.variants) {
+        if let Err(e) = game.native_net_send_to_player(uuid, channel, &bytes) {
+            log::debug!("rustcraft: the storage's component stacks not sent to {uuid:032x}: {e}");
+            // The list names no stamp: the window keeps to the stacks it carries.
+            list.variants_stamp = None;
+            return sent;
+        }
+    }
+    Some(stamp)
 }
 
 /// The self-test (OT12): `count` of `stack` straight into the record of the storage the cell or
@@ -1353,6 +1409,8 @@ fn listing(game: &Game<'_>, dimension: &str, terminal: Pos, id: Option<u32>) -> 
             .iter()
             .filter_map(|i| item_number(game, i).and_then(|n| u16::try_from(n).ok()))
             .collect(),
+        // Set when the stacks go apart (OT13).
+        variants_stamp: None,
     }
 }
 
@@ -1413,6 +1471,7 @@ pub(super) fn on_container_open(player: u128, dimension: &str, menu: &str, pos: 
             terminal,
             sent: None,
             orderable: None,
+            variants: None,
         },
     );
 }

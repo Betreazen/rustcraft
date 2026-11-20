@@ -61,6 +61,8 @@ struct Session {
     sent: Option<u64>,
     /// 0.21.1 (OT12): the stamp of the recipe book's items last sent on their own channel.
     orderable: Option<u32>,
+    /// 0.21.1 (OT13): the stamp of the component stacks last sent on their own channel.
+    variants: Option<u32>,
 }
 
 #[derive(Default)]
@@ -156,7 +158,16 @@ fn send_list(game: &mut Game<'_>, uuid: u128, force: bool) {
     if !force && sent == Some(version) {
         return;
     }
-    let bytes = wire::encode(&storage::tablet_listing(game, &dimension, id));
+    let mut list = storage::tablet_listing(game, &dimension, id);
+    // OT13: the component stacks apart, before the list that names their stamp.
+    let stacks = state().sessions.get(&uuid).and_then(|s| s.variants);
+    let now = storage::send_variants(game, uuid, rustcraft_rules::storage::variants::TABLET_CHANNEL, &mut list, stacks);
+    if now != stacks
+        && let Some(s) = state().sessions.get_mut(&uuid)
+    {
+        s.variants = now;
+    }
+    let bytes = wire::encode(&list);
     if let Err(e) = game.native_net_send_to_player(uuid, LIST_CHANNEL, &bytes) {
         log::debug!("rustcraft: the tablet list not sent to {uuid:032x}: {e}");
         return;
@@ -231,6 +242,7 @@ fn open(game: &mut Game<'_>, dimension: &str, level: &LevelNet, uuid: u128, at: 
             storage: id,
             sent: None,
             orderable: None,
+            variants: None,
         },
     );
     send_orderable(game, uuid);

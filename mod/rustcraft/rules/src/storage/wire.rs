@@ -11,6 +11,8 @@
 //! 0.21.1 (OT12): the items the book can make go to the window on a channel of their own
 //! (`storage::orderable`); the list still carries what room is left of them, last, for a client
 //! older than 0.21.1, and a newer client takes the whole list in their place.
+//! The component stacks too (OT13): the whole list goes apart (`storage::variants`), the list
+//! names its stamp in a tail section and keeps what room is left of the stacks.
 
 use crate::geom::Pos;
 use crate::orders::queue::MAX_ORDERS;
@@ -176,6 +178,9 @@ pub struct Listing {
     pub sockets: Vec<u16>,
     /// Slice 18: the items the filter module in the terminal marks (the «своя» tab), by number.
     pub own: Vec<u16>,
+    /// 0.21.1 (OT13): the stamp of the whole list of component stacks, sent apart
+    /// (`storage::variants`); `variants` holds what room is left of it. None: no list apart.
+    pub variants_stamp: Option<u32>,
 }
 
 /// A socket without a module.
@@ -199,6 +204,8 @@ const TAIL_OWN: u8 = 3;
 const TAIL_STEPS: u8 = 4;
 /// 0.21 (OT10): an empty section, sent when the orderable items were cut.
 const TAIL_ORDERABLE_CUT: u8 = 5;
+/// 0.21.1 (OT13): the stamp of the component stacks sent apart (u32).
+const TAIL_VARIANTS_STAMP: u8 = 6;
 
 /// How many lines fit in one message.
 pub const MAX_LINES: usize = (MAX_BYTES - HEADER - MAX_HOLES * HOLE - ORDERS - 2) / ENTRY;
@@ -303,6 +310,11 @@ fn encode_tail(listing: &Listing, room: usize) -> Vec<u8> {
         out.extend((body.len() as u16).to_le_bytes());
         out.extend(body);
     }
+    if let Some(stamp) = listing.variants_stamp {
+        out.push(TAIL_VARIANTS_STAMP);
+        out.extend(4u16.to_le_bytes());
+        out.extend(stamp.to_le_bytes());
+    }
     let room = room.saturating_sub(out.len());
     let mut body = Vec::new();
     let mut n: u16 = 0;
@@ -336,6 +348,8 @@ fn decode_tail(r: &mut Reader<'_>, listing: &mut Listing) {
         let mut s = Reader(section);
         if tag == TAIL_ORDERABLE_CUT {
             listing.orderable_cut = true;
+        } else if tag == TAIL_VARIANTS_STAMP {
+            listing.variants_stamp = s.u32();
         } else if tag == TAIL_STEPS {
             for o in &mut listing.orders {
                 let n = s.u8().unwrap_or(0);
@@ -532,6 +546,7 @@ pub fn decode(bytes: &[u8]) -> Option<Listing> {
         variants: Vec::new(),
         sockets: Vec::new(),
         own: Vec::new(),
+        variants_stamp: None,
     };
     decode_tail(&mut r, &mut listing);
     Some(listing)
@@ -631,6 +646,7 @@ mod tests {
             }],
             sockets: vec![NO_ITEM, 900, NO_ITEM],
             own: vec![4, 5],
+            variants_stamp: Some(0xdead_beef),
         }
     }
 
@@ -691,6 +707,7 @@ mod tests {
         l.variants.clear();
         l.sockets.clear();
         l.own.clear();
+        l.variants_stamp = None;
         for o in &mut l.orders {
             o.steps.clear();
         }
@@ -707,6 +724,7 @@ mod tests {
         l.variants.clear();
         l.sockets.clear();
         l.own.clear();
+        l.variants_stamp = None;
         for o in &mut l.orders {
             o.steps.clear();
         }

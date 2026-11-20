@@ -726,8 +726,8 @@ impl Bench for GameBench<'_, '_> {
         crate::game::rustcraft_window::asked(housing).flatten()
     }
 
-    // 0.21.1 (OT12): the recipe book's items on their own channel.
-    fn terminal_wire(&self, pos: Pos) -> Option<(Vec<u8>, Vec<Vec<u8>>)> {
+    // 0.21.1 (OT12, OT13): the recipe book's items and the component stacks on their own channels.
+    fn terminal_wire(&self, pos: Pos) -> Option<rustcraft_rules::selftest::TerminalWire> {
         storage::terminal_wire(&*self.game, DIMENSION, pos)
     }
 

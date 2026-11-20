@@ -603,10 +603,8 @@ pub trait Bench {
     }
 
     // ---- 0.21.1 (OT12): the recipe book's items on their own channel ----
-    /// What the server sends a player who opens the terminal at `pos` now: its list
-    /// (`storage::wire::encode`) and the messages of the recipe book's items
-    /// (`storage::orderable::encode`, none before the book is built); none for no terminal.
-    fn terminal_wire(&self, pos: Pos) -> Option<(Vec<u8>, Vec<Vec<u8>>)> {
+    /// What the server sends a player who opens the terminal at `pos` now; none for no terminal.
+    fn terminal_wire(&self, pos: Pos) -> Option<TerminalWire> {
         let _ = pos;
         None
     }
@@ -621,6 +619,18 @@ pub trait Bench {
         let _ = (pos, snbt, count);
         Err("no stocking on this bench".into())
     }
+}
+
+/// 0.21.1 (OT12, OT13): what the server sends a player who opens a terminal.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct TerminalWire {
+    /// Its list (`storage::wire::encode`).
+    pub list: Vec<u8>,
+    /// The messages of the recipe book's items (`storage::orderable::encode`), none before the
+    /// book is built.
+    pub orderable: Vec<Vec<u8>>,
+    /// The messages of its component stacks (`storage::variants::encode`), none without any.
+    pub variants: Vec<Vec<u8>>,
 }
 
 /// A mob as the self-test reads it.

@@ -22,10 +22,12 @@ pub mod modules;
 // Round 32 (spec 33): the terminal's «Сеть» page.
 pub mod network;
 pub mod orderable;
+pub mod parts;
 // 0.21 (round 32): the surplus over the limits.
 pub mod surplus;
 pub mod tablet;
 pub mod terminal;
+pub mod variants;
 pub mod view;
 pub mod wire;
 

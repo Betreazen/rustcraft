@@ -29,6 +29,8 @@
 // 0.21.1 (OT12): what the book can make comes on its own channel, once a window opens and again
 // when the book is built anew (rustcraft_rules::storage::orderable), and takes the place of what
 // the list had room for: on a big storage with many enchanted stacks it had none.
+// The component stacks too (OT13): the terminal's and the tablet's each come whole on their own
+// channel when they change, and a list takes them when it names their stamp.
 use crate::game::{
     Game,
     rustcraft_content::{self as content, item_of_number},
@@ -53,6 +55,7 @@ use rustcraft_rules::{
         modules as sockets,
         network::{self as net, Ask},
         orderable as book_items,
+        variants as stacks,
         terminal::{
             self as term, ItemRef, LimitChange, NO_PRESS, Part, Press, Take, cell,
             part_in,
@@ -134,17 +137,28 @@ pub(super) fn in_tablet<R>(f: impl FnOnce() -> R) -> R {
 
 /// The list the server sent the tablet's window.
 pub(super) fn set_tablet_listing(mut l: Listing) {
+    complete_list(&mut l, true);
     remember_variants(&l.variants);
-    with_orderable(&mut l);
     *TABLET_LISTING.lock().unwrap_or_else(PoisonError::into_inner) = Some(l);
 }
 
 /// 0.21.1 (OT12): the recipe book's items as their own channel last brought them whole
 /// (rustcraft_rules::storage::orderable); the terminal's and the tablet's windows share them.
 static ORDERABLE: LazyLock<Mutex<book_items::Assembler>> = LazyLock::new(Mutex::default);
+/// 0.21.1 (OT13): the component stacks of the terminal's and of the tablet's storage as their own
+/// channels last brought them whole (rustcraft_rules::storage::variants).
+static TERMINAL_STACKS: LazyLock<Mutex<stacks::Assembler>> = LazyLock::new(Mutex::default);
+static TABLET_STACKS: LazyLock<Mutex<stacks::Assembler>> = LazyLock::new(Mutex::default);
 
-/// A list with the whole list of the book's items in place of what its message had room for.
-fn with_orderable(l: &mut Listing) {
+fn stacks_of(tablet: bool) -> MutexGuard<'static, stacks::Assembler> {
+    let s = if tablet { &TABLET_STACKS } else { &TERMINAL_STACKS };
+    s.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+/// A list with the whole lists of the book's items and of its component stacks in place of what
+/// its message had room for (the stacks only when the list names their stamp).
+fn complete_list(l: &mut Listing, tablet: bool) {
+    stacks::complete(l, &stacks_of(tablet));
     let a = ORDERABLE.lock().unwrap_or_else(PoisonError::into_inner);
     book_items::complete(l, a.list());
 }
@@ -161,6 +175,20 @@ fn on_orderable(data: &[u8]) {
         if let Some(l) = slot.lock().unwrap_or_else(PoisonError::into_inner).as_mut() {
             book_items::complete(l, whole.as_deref());
         }
+    }
+}
+
+/// A part of a window's component stacks; once they are whole, its list takes them if it names
+/// their stamp.
+fn on_stacks(data: &[u8], tablet: bool) {
+    if !stacks_of(tablet).take(data) {
+        return;
+    }
+    let slot = if tablet { &TABLET_LISTING } else { &LISTING };
+    let mut l = slot.lock().unwrap_or_else(PoisonError::into_inner);
+    if let Some(l) = l.as_mut() {
+        stacks::complete(l, &stacks_of(tablet));
+        remember_variants(&l.variants);
     }
 }
 
@@ -209,13 +237,17 @@ pub(super) fn on_net(channel: &str, data: &[u8]) {
         on_orderable(data);
         return;
     }
+    if channel == stacks::CHANNEL || channel == stacks::TABLET_CHANNEL {
+        on_stacks(data, channel == stacks::TABLET_CHANNEL);
+        return;
+    }
     if channel != CHANNEL {
         return;
     }
     match wire::decode(data) {
         Some(mut l) => {
+            complete_list(&mut l, false);
             remember_variants(&l.variants);
-            with_orderable(&mut l);
             *LISTING.lock().unwrap_or_else(PoisonError::into_inner) = Some(l);
         }
         None => log::warn!("rustcraft: a terminal list that does not read"),
