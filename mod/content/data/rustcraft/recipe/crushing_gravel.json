@@ -1,0 +1,6 @@
+{
+  "type": "rustcraft:crushing",
+  "ingredient": "minecraft:gravel",
+  "result": { "id": "minecraft:sand", "count": 1 },
+  "time": 100
+}

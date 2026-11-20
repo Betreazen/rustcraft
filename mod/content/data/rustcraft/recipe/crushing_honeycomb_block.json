@@ -1,0 +1,6 @@
+{
+  "type": "rustcraft:crushing",
+  "ingredient": "minecraft:honeycomb_block",
+  "result": { "id": "minecraft:honeycomb", "count": 4 },
+  "time": 100
+}

@@ -1,0 +1,6 @@
+{
+  "type": "rustcraft:crushing",
+  "ingredient": "minecraft:prismarine",
+  "result": { "id": "minecraft:prismarine_shard", "count": 4 },
+  "time": 100
+}

@@ -1,0 +1,6 @@
+{
+  "type": "rustcraft:crushing",
+  "ingredient": "minecraft:bone_block",
+  "result": { "id": "minecraft:bone", "count": 3 },
+  "time": 100
+}

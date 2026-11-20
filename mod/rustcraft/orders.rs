@@ -392,8 +392,13 @@ fn build_book(game: &Game<'_>, recipes: &machines::MachineRecipes) -> Book {
         }
     }
     // 0.19.2: what the crusher grinds (ore and raw metal) goes to the furnace only as dust.
-    let crushed: std::collections::BTreeSet<ItemKey> =
-        recipes.crushing.iter().flat_map(|r| r.inputs.iter().cloned()).collect();
+    // 0.21.2 (spec 50): only ore; cobblestone and clay, which it takes apart, still smelt whole.
+    let crushed: std::collections::BTreeSet<ItemKey> = recipes
+        .crushing
+        .iter()
+        .filter(|r| rustcraft_rules::machines::crushing::grinds_ore(&r.result.item))
+        .flat_map(|r| r.inputs.iter().cloned())
+        .collect();
     for c in game
         .recipes()
         .cooking

@@ -652,6 +652,9 @@ struct Job {
     /// The result as the recipe makes it, components and all.
     result: ItemStack,
     spec: Spec,
+    /// 0.21.2 (spec 50, MR4): the enricher and the yield module may give one more: not for a
+    /// block the crusher takes apart.
+    lucky: bool,
 }
 
 /// What a one-input machine holds, read without changing it.
@@ -781,6 +784,7 @@ fn job_of(
     // 0.20: its owner's tree shortens the work, not the draw.
     let (ticks, energy) = ((ticks / (speed * fitted.perk)).max(1.0), energy * speed);
     let output_capacity = modules::machine_stack(&fitted.modules, max_stack(game, &result.item));
+    let lucky = machine != Machine::Crusher || rustcraft_rules::machines::crushing::crusher_lucky(&result.item);
     Some(Job {
         recipe: Recipe {
             input: input.item.to_string(),
@@ -794,6 +798,7 @@ fn job_of(
             output_capacity,
         },
         result,
+        lucky,
     })
 }
 
@@ -918,11 +923,11 @@ fn run(
         },
         |j| j.spec,
     );
-    // The enricher: each finished recipe has its chance of one more product.
-    processor.lucky = catalyst
-        .active()
-        .is_some_and(|c| roll() < c.extra_chance(tuning))
-        || modules::yield_lucky(&fitted.modules, roll());
+    // The enricher: each finished recipe has its chance of one more product. 0.21.2 (MR4): not
+    // a block the crusher takes apart.
+    processor.lucky = job.as_ref().is_some_and(|j| j.lucky)
+        && (catalyst.active().is_some_and(|c| roll() < c.extra_chance(tuning))
+            || modules::yield_lucky(&fitted.modules, roll()));
     let before = processor.clone();
     let state = processor.tick(&recipes, &spec, share);
     // Slice 18 (cross): what the electric furnace gave goes to Path-of-craft-tree (`smelt`).
@@ -1080,6 +1085,9 @@ pub(super) fn on_menu_button_v2(
 struct Accepts {
     smeltable: BTreeSet<String>,
     crushable: BTreeSet<String>,
+    /// 0.21.2 (spec 50, MR3): the crushable items it grinds into dust, which the magistral and
+    /// the storage bring it by themselves.
+    ore: BTreeSet<String>,
     alloying: BTreeSet<String>,
     fuels: BTreeSet<String>,
     /// Items that place a block: what the block placer takes.
@@ -1214,6 +1222,11 @@ pub(super) fn net_takes(
     match Machine::of(&entity.id) {
         Some(Machine::Furnace) => intake::furnace_takes(item, true, net.kept_raw),
         Some(Machine::Generator) => intake::net_fuel(item, true),
+        // 0.21.2 (spec 50, MR3): ore by itself; a block it takes apart only by a joint's name.
+        Some(Machine::Crusher) => {
+            let ore = accepts().ore.contains(item);
+            intake::crusher_net_takes(net.filters, item, ore)
+        }
         Some(Machine::Alloy) if slot == content::ALLOY_FUEL => intake::net_fuel(item, true),
         // 0.21 (round 32): the smelter's ingredients only by a joint's allow list; orders bring
         // their own. 0.21 (spec 39, RT5): the mixer's, those of its recipes turned on.
@@ -1346,6 +1359,12 @@ pub(super) fn teach_slot_rules(game: &Game<'_>, recipes: &MachineRecipes) {
         .iter()
         .flat_map(|r| r.inputs.iter().cloned())
         .collect();
+    let ore: BTreeSet<String> = recipes
+        .crushing
+        .iter()
+        .filter(|r| rustcraft_rules::machines::crushing::grinds_ore(&r.result.item))
+        .flat_map(|r| r.inputs.iter().cloned())
+        .collect();
     let alloying: BTreeSet<String> = recipes
         .alloying
         .iter()
@@ -1415,6 +1434,7 @@ pub(super) fn teach_slot_rules(game: &Game<'_>, recipes: &MachineRecipes) {
     let next = Accepts {
         smeltable,
         crushable,
+        ore,
         alloying,
         fuels,
         placeable,

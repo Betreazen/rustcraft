@@ -6,6 +6,8 @@ pub mod bucket;
 pub mod catalyst;
 pub mod charging;
 pub mod crafter;
+// 0.21.2 (spec 50): ore the crusher grinds, blocks it takes apart.
+pub mod crushing;
 pub mod extras;
 pub mod fluid_windows;
 pub mod generator;

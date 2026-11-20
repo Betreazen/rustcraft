@@ -107,6 +107,8 @@ pub mod s21_orderable;
 pub mod s21_typed;
 // 0.21.2 (spec 32, SP10–SP15): a limit never refuses what is given to the storage.
 pub mod s21_limits;
+// 0.21.2 (spec 50): more recipes for orders; the crusher takes blocks apart.
+pub mod s21_recipes_more;
 
 use std::collections::BTreeMap;
 
@@ -935,6 +937,8 @@ pub fn catalog() -> Vec<Build> {
     all.extend(s21_typed::ALL);
     // 0.21.2 (spec 32, SP10–SP15): a limit never refuses what is given; the recycling loop.
     all.extend(s21_limits::ALL);
+    // 0.21.2 (spec 50): bone meal and bones from bone blocks; the crusher keeps to ore.
+    all.extend(s21_recipes_more::ALL);
     all
 }
 

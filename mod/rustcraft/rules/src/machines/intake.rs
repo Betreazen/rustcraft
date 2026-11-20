@@ -104,6 +104,14 @@ pub fn recipe_net_takes(filters: &[Filter], item: &str) -> bool {
     named(filters, item)
 }
 
+/// 0.21.2 (spec 50, MR3): the crusher from the magistral and the storage's own feed: ore it
+/// grinds into dust (`ore`, `crushing::grinds_ore`), and what a joint's allow list names. The
+/// blocks it takes apart (bone blocks, wool, cobblestone…) ride on to the storage: an order, a
+/// hopper or a hand puts them in.
+pub fn crusher_net_takes(filters: &[Filter], item: &str, ore: bool) -> bool {
+    ore || named(filters, item)
+}
+
 /// 0.21 (round 32): the portal dock from the magistral: only what the allow list of a joint to it
 /// names. Before, on its default joint it took a share of everything that rode to the storage and
 /// sent it to the other world. A cargo worker, a hopper and a hand still give it anything.
@@ -138,6 +146,18 @@ mod tests {
         assert!(!furnace_takes("minecraft:cod", true, &kept));
         assert!(furnace_takes("minecraft:salmon", true, &kept));
         assert!(furnace_takes("rustcraft:dust_iron", true, &kept));
+    }
+
+    #[test]
+    fn the_crusher_takes_ore_by_itself_and_blocks_only_by_name() {
+        // MR3: the storage's cobblestone and wool must not all turn to gravel and string.
+        assert!(crusher_net_takes(&[], "minecraft:raw_iron", true));
+        for item in ["minecraft:cobblestone", "minecraft:white_wool", "minecraft:bone_block"] {
+            assert!(!crusher_net_takes(&[], item, false), "{item}");
+            assert!(!crusher_net_takes(&[Filter::default()], item, false), "{item}: no setting names nothing");
+        }
+        let bones = Filter { allow_only: true, items: ["minecraft:bone_block".to_owned()].into() };
+        assert!(crusher_net_takes(&[bones], "minecraft:bone_block", false));
     }
 
     #[test]

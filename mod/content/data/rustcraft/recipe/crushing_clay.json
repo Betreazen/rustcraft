@@ -1,0 +1,6 @@
+{
+  "type": "rustcraft:crushing",
+  "ingredient": "minecraft:clay",
+  "result": { "id": "minecraft:clay_ball", "count": 4 },
+  "time": 100
+}

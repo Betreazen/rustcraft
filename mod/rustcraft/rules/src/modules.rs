@@ -573,13 +573,17 @@ mod tests {
     #[test]
     fn no_recipe_takes_the_amethyst_shard() {
         // Slice 18: data.js has no amethyst; every `shard` of its recipes is the crystal shard.
+        // 0.21.2 (spec 50): the crusher makes amethyst shards of an amethyst block; none takes them.
         let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../../content/data/rustcraft/recipe");
+        let takes = |t: String| {
+            let mut json: serde_json::Value = serde_json::from_str(&t).unwrap();
+            json.as_object_mut().unwrap().remove("result");
+            json.to_string().contains("minecraft:amethyst_shard")
+        };
         let amethyst: Vec<String> = std::fs::read_dir(dir)
             .unwrap()
             .filter_map(|e| e.ok())
-            .filter(|e| {
-                std::fs::read_to_string(e.path()).is_ok_and(|t| t.contains("minecraft:amethyst_shard"))
-            })
+            .filter(|e| std::fs::read_to_string(e.path()).is_ok_and(takes))
             .map(|e| e.file_name().to_string_lossy().into_owned())
             .collect();
         assert!(amethyst.is_empty(), "{amethyst:?}");

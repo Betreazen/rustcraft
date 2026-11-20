@@ -1,0 +1,6 @@
+{
+  "type": "rustcraft:crushing",
+  "ingredient": "minecraft:sea_lantern",
+  "result": { "id": "minecraft:prismarine_crystals", "count": 5 },
+  "time": 100
+}
