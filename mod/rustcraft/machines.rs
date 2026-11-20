@@ -1092,7 +1092,8 @@ struct Accepts {
     chargeable: BTreeSet<String>,
     /// 0.18.5: what the disintegrator takes apart.
     reversible: BTreeSet<String>,
-    /// 0.18.5: what the enchanting machine enchants: what wears out, and books.
+    /// 0.18.5: what the enchanting machine enchants: what wears out, and books (0.21: enchanted
+    /// ones too).
     enchantable: BTreeSet<String>,
 }
 
@@ -1402,7 +1403,11 @@ pub(super) fn teach_slot_rules(game: &Game<'_>, recipes: &MachineRecipes) {
             .items()
             .items
             .iter()
-            .filter(|(item, info)| info.max_damage > 0 || item.to_string() == "minecraft:book")
+            // 0.21 (spec 48, EW6, EW15): an enchanted book too, by a hopper: it gets enchantments it
+            // lacks or loses one (the net's intake rule still takes only plain books).
+            .filter(|(item, info)| {
+                info.max_damage > 0 || matches!(item.to_string().as_str(), "minecraft:book" | "minecraft:enchanted_book")
+            })
             .map(|(item, _)| item.to_string())
             .collect();
         (cooking, chargeable, reversible, enchantable)
