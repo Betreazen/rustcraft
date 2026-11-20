@@ -7,7 +7,7 @@
 //! - Iron pickaxes the player puts in past a limit of 0: the disintegrator takes them apart, the
 //!   ingots past their limit and the sticks burn; the storage ends at its limits (SP10, SP12).
 //! - A chest on its default joint gives the storage only up to its limit, so it is not emptied
-//!   into the trash; a chest set «из блока» beside it empties, its surplus burnt (SP11).
+//!   into the trash (SP11).
 //! - The player's deposit past the limit is taken with no sink on the line (SP10).
 
 use super::magistral::line;
@@ -118,11 +118,11 @@ fn deposit_recycled_to_the_limits(o: Pos, _: &Tuning) -> Scenario {
 }
 
 fn default_chest_not_drained(o: Pos, _: &Tuning) -> Scenario {
-    // SP11: the player's own chest beside a line keeps what is over the storage's limit; a chest
-    // set «из блока» empties, its surplus burnt.
-    let (set, own, trash, t) = (chest(o, 1), at(o, [2, 0, 1]), trash_at(o), terminal_at(o));
+    // SP11: the player's own chest beside a line keeps what is over the storage's limit, a trash on
+    // the line or not. (A chest set «из блока» empties: surplus21_trash_without_a_filter_takes_only_surplus.)
+    let (own, trash, t) = (at(o, [2, 0, 1]), trash_at(o), terminal_at(o));
     Scenario::new("limits21_default_chest_not_drained", plot_area(o))
-        .then("a storage, a trash, a chest «из блока» and a chest on its default", move |b, _| {
+        .then("a storage, a trash and a chest on its default", move |b, _| {
             build(b, o, 2, false, true)?;
             b.place(own, "minecraft:chest", &[])
         })
@@ -135,16 +135,8 @@ fn default_chest_not_drained(o: Pos, _: &Tuning) -> Scenario {
         .wait(100)
         .check("the chest on its default keeps the other 15, nothing burnt", move |b, _| {
             same("in the chest", count_of(&b.items(own), COBBLE), 15)?;
-            same("stored", held(b, t, COBBLE)?, 5)
-        })
-        .then("10 cobblestone into the chest «из блока»", move |b, _| fill(b, set, COBBLE, 10))
-        .until("it empties and its cobblestone burns", 600, move |b, _| {
-            Ok(count_of(&b.items(set), COBBLE) == 0 && total(&b.items(trash)) == 0 && held(b, t, COBBLE)? == 5)
-        })
-        .wait(60)
-        .check("the chest on its default still keeps its 15", move |b, _| {
-            same("in the chest", count_of(&b.items(own), COBBLE), 15)?;
-            same("stored", held(b, t, COBBLE)?, 5)
+            same("stored", held(b, t, COBBLE)?, 5)?;
+            same("in the trash", total(&b.items(trash)), 0)
         })
 }
 
