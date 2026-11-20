@@ -726,6 +726,25 @@ impl Bench for GameBench<'_, '_> {
         crate::game::rustcraft_window::asked(housing).flatten()
     }
 
+    // 0.21.1 (OT12): the recipe book's items on their own channel.
+    fn terminal_wire(&self, pos: Pos) -> Option<(Vec<u8>, Vec<Vec<u8>>)> {
+        storage::terminal_wire(&*self.game, DIMENSION, pos)
+    }
+
+    fn item_number(&self, item: &str) -> Option<u16> {
+        crate::game::rustcraft_content::item_number(&*self.game, item).and_then(|n| u16::try_from(n).ok())
+    }
+
+    fn stock_snbt(&mut self, pos: Pos, snbt: &str, count: u64) -> Result<(), String> {
+        let (tag, _) = horizon_world::nbt::parse_snbt(snbt)?;
+        let stack = horizon_client::save::item_from_nbt(&tag).ok_or_else(|| format!("no item in {snbt}"))?;
+        if storage::stock_at(DIMENSION, pos, &stack, count) {
+            Ok(())
+        } else {
+            Err(format!("no storage at {pos:?} takes {snbt}"))
+        }
+    }
+
     fn testkit(&mut self, args: &str) -> String {
         let mut ran = false;
         base::on_testkit_command(self.game, &format!("rustcraft_testkit {args}"), &mut ran);

@@ -142,6 +142,8 @@ struct Viewer {
     terminal: Pos,
     /// The storage, its change count and the orders' change count last sent.
     sent: Option<(Option<u32>, u64, u64)>,
+    /// 0.21.1 (OT12): the stamp of the recipe book's items last sent on their own channel.
+    orderable: Option<u32>,
 }
 
 #[derive(Default)]
@@ -1104,6 +1106,7 @@ pub(super) fn tick(game: &mut Game<'_>, dimension: &str) {
     if !send {
         return;
     }
+    send_orderable_to_viewers(game, dimension);
     let orders_revision = orders::revision(dimension);
     let due: Vec<(u128, Pos, Option<u32>, u64)> = {
         let s = storages();
@@ -1133,6 +1136,76 @@ pub(super) fn tick(game: &mut Game<'_>, dimension: &str) {
             v.sent = Some((id, version, orders_revision));
         }
     }
+}
+
+/// 0.21.1 (spec 47, OT12): the items the recipe book can make, on their own channel
+/// (rustcraft_rules::storage::orderable), to a player whose window was last sent another list of
+/// them (`sent`, a stamp): once when a window opens, again when the book is built anew. The new
+/// stamp when they went (or nothing was due), `sent` when they did not.
+pub(super) fn send_orderable(game: &mut Game<'_>, uuid: u128, sent: Option<u32>) -> Option<u32> {
+    let Some((stamp, numbers)) = orders::orderable_list() else {
+        return sent;
+    };
+    if sent == Some(stamp) {
+        return sent;
+    }
+    for bytes in storage::orderable::encode(&numbers) {
+        if let Err(e) = game.native_net_send_to_player(uuid, storage::orderable::CHANNEL, &bytes) {
+            log::debug!("rustcraft: the recipe book's items not sent to {uuid:032x}: {e}");
+            return sent;
+        }
+    }
+    Some(stamp)
+}
+
+/// The terminals' viewers of this level get the recipe book's items when theirs are not the
+/// book's now; they go before the list in the same tick.
+fn send_orderable_to_viewers(game: &mut Game<'_>, dimension: &str) {
+    let due: Vec<(u128, Option<u32>)> = storages()
+        .viewers
+        .iter()
+        .filter(|(_, v)| v.dimension == dimension)
+        .map(|(uuid, v)| (*uuid, v.orderable))
+        .collect();
+    for (uuid, sent) in due {
+        let now = send_orderable(game, uuid, sent);
+        if now != sent
+            && let Some(v) = storages().viewers.get_mut(&uuid)
+        {
+            v.orderable = now;
+        }
+    }
+}
+
+/// The self-test (OT12): the messages a player who opens the terminal at `pos` gets: its list
+/// and the recipe book's items (none before the book is built).
+pub(super) fn terminal_wire(game: &Game<'_>, dimension: &str, pos: Pos) -> Option<(Vec<u8>, Vec<Vec<u8>>)> {
+    let id = with_level(dimension, |level| level.terminals.get(&pos).copied()).flatten()?;
+    let list = wire::encode(&listing(game, dimension, pos, id));
+    let orderable = orders::orderable_list()
+        .map(|(_, numbers)| storage::orderable::encode(&numbers))
+        .unwrap_or_default();
+    Some((list, orderable))
+}
+
+/// The self-test (OT12): `count` of `stack` straight into the record of the storage the cell or
+/// terminal at `pos` belongs to, past its room.
+pub(super) fn stock_at(dimension: &str, pos: Pos, stack: &ItemStack, count: u64) -> bool {
+    let Some(key) = key_of(stack) else {
+        return false;
+    };
+    let Some(id) = storage_id(dimension, pos) else {
+        return false;
+    };
+    with_level(dimension, |level| {
+        let Some(store) = level.stores.get_mut(&id) else {
+            return false;
+        };
+        *store.items.entry(key).or_insert(0) += count;
+        level.changed(id);
+        true
+    })
+    .unwrap_or(false)
 }
 
 /// 0.21 (spec 40, SA2): each cell shows its storage's fill and, with the terminals, whether it
@@ -1339,6 +1412,7 @@ pub(super) fn on_container_open(player: u128, dimension: &str, menu: &str, pos: 
             dimension: dimension.to_owned(),
             terminal,
             sent: None,
+            orderable: None,
         },
     );
 }

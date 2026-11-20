@@ -99,6 +99,8 @@ pub mod s21_recipes;
 pub mod s21_xp;
 // 0.21 (spec 48): the enchanting machine's window, choice, raise and lapis.
 pub mod s21_enchanter;
+// 0.21.1 (spec 47, OT12): the recipe book's items on their own channel.
+pub mod s21_orderable;
 
 use std::collections::BTreeMap;
 
@@ -597,6 +599,26 @@ pub trait Bench {
         let _ = housing;
         None
     }
+
+    // ---- 0.21.1 (OT12): the recipe book's items on their own channel ----
+    /// What the server sends a player who opens the terminal at `pos` now: its list
+    /// (`storage::wire::encode`) and the messages of the recipe book's items
+    /// (`storage::orderable::encode`, none before the book is built); none for no terminal.
+    fn terminal_wire(&self, pos: Pos) -> Option<(Vec<u8>, Vec<Vec<u8>>)> {
+        let _ = pos;
+        None
+    }
+    /// The number the terminal's messages name `item` by.
+    fn item_number(&self, item: &str) -> Option<u16> {
+        let _ = item;
+        None
+    }
+    /// `count` of the stack `snbt` (one item, components and all) straight into the record of
+    /// the storage the cell or terminal at `pos` belongs to, past its room.
+    fn stock_snbt(&mut self, pos: Pos, snbt: &str, count: u64) -> Result<(), String> {
+        let _ = (pos, snbt, count);
+        Err("no stocking on this bench".into())
+    }
 }
 
 /// A mob as the self-test reads it.
@@ -870,6 +892,8 @@ pub fn catalog() -> Vec<Build> {
     all.extend(s21_xp::ALL);
     // 0.21 (spec 48): the enchanting machine's window, choice, raise and lapis.
     all.extend(s21_enchanter::ALL);
+    // 0.21.1 (spec 47, OT12): a big storage still orders what the book makes.
+    all.extend(s21_orderable::ALL);
     all
 }
 

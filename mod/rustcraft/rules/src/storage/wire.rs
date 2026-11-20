@@ -7,6 +7,10 @@
 //! book can make (O2), as many as the message has room for after the rest. Version 3 adds an
 //! order's wait for energy; a fluid (O12) goes by its number past the item table
 //! (`orders::FLUID_NUMBERS`) wherever an item's number may stand.
+//!
+//! 0.21.1 (OT12): the items the book can make go to the window on a channel of their own
+//! (`storage::orderable`); the list still carries what room is left of them, last, for a client
+//! older than 0.21.1, and a newer client takes the whole list in their place.
 
 use crate::geom::Pos;
 use crate::orders::queue::MAX_ORDERS;
@@ -158,7 +162,8 @@ pub struct Listing {
     pub smart: Smart,
     /// O8: the storage's orders, at most MAX_ORDERS.
     pub orders: Vec<OrderLine>,
-    /// O2: items the recipe book can make, as numbers.
+    /// O2: items the recipe book can make, as numbers; since 0.21.1 only what room is left of them
+    /// (the whole list comes apart, `storage::orderable`).
     pub orderable: Vec<u16>,
     /// 0.21 (OT10): `orderable` was cut to the message's room, so an item missing from it may
     /// still be orderable.

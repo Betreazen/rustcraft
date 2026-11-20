@@ -13,6 +13,8 @@
 //   stack or one into the inventory (`native_give_stack`), a limit button, and a stack of the
 //   inventory into the storage (`native_set_inventory_slot`, checked against the stack it held).
 // - Each second the open window follows the player: out of the node's range it closes.
+// - 0.21.1 (OT12): what the recipe book makes goes to the window on its own channel once it opens
+//   and again when the book is built anew (rustcraft_storage::send_orderable), before the list.
 //
 // On the client:
 // - OPEN_CHANNEL opens or closes the screen at the next client tick (`native_mod_screen_open` with
@@ -57,6 +59,8 @@ struct Session {
     storage: u32,
     /// The storage's change count last sent.
     sent: Option<u64>,
+    /// 0.21.1 (OT12): the stamp of the recipe book's items last sent on their own channel.
+    orderable: Option<u32>,
 }
 
 #[derive(Default)]
@@ -125,6 +129,20 @@ fn send_open(game: &mut Game<'_>, uuid: u128, open: bool) {
     }
 }
 
+/// 0.21.1 (OT12): the recipe book's items to a player's window when it has not got the book's
+/// list now (rustcraft_storage::send_orderable); before the storage's list.
+fn send_orderable(game: &mut Game<'_>, uuid: u128) {
+    let Some(sent) = state().sessions.get(&uuid).map(|s| s.orderable) else {
+        return;
+    };
+    let now = storage::send_orderable(game, uuid, sent);
+    if now != sent
+        && let Some(s) = state().sessions.get_mut(&uuid)
+    {
+        s.orderable = now;
+    }
+}
+
 /// The storage's list to a player's window when it changed since it was last sent.
 fn send_list(game: &mut Game<'_>, uuid: u128, force: bool) {
     let Some((dimension, id, sent)) = state()
@@ -184,6 +202,7 @@ pub(super) fn tick(game: &mut Game<'_>, dimension: &str, level: &LevelNet) {
     }
     if level.ticks.is_multiple_of(SEND_EVERY) {
         for uuid in sessions_in(dimension) {
+            send_orderable(game, uuid);
             send_list(game, uuid, false);
         }
     }
@@ -211,8 +230,10 @@ fn open(game: &mut Game<'_>, dimension: &str, level: &LevelNet, uuid: u128, at: 
             dimension: dimension.to_owned(),
             storage: id,
             sent: None,
+            orderable: None,
         },
     );
+    send_orderable(game, uuid);
     send_list(game, uuid, true);
     send_open(game, uuid, true);
 }

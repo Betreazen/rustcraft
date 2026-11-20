@@ -108,6 +108,9 @@ const MILK: &str = "rustcraft:milk";
 pub(super) struct Book {
     recipes: Vec<PlanRecipe>,
     orderable: Vec<u16>,
+    /// 0.21.1 (OT12): what names `orderable` in its own message
+    /// (rustcraft_rules::storage::orderable::stamp).
+    stamp: u32,
 }
 
 /// A job read back from the record that has not found its machine yet.
@@ -188,6 +191,12 @@ pub(super) fn touch_all() {
 /// What the terminals of the level show of the orders last changed at this count.
 pub(super) fn revision(dimension: &str) -> u64 {
     orders().levels.get(dimension).map_or(0, |l| l.revision)
+}
+
+/// 0.21.1 (OT12): the items the recipe book can make and their stamp, for their message of their
+/// own; none until the book is built.
+pub(super) fn orderable_list() -> Option<(u32, Vec<u16>)> {
+    orders().book.as_ref().map(|b| (b.stamp, b.orderable.clone()))
 }
 
 /// The recipes changed (a rescan read them again): the book is built anew when next needed.
@@ -450,12 +459,13 @@ fn build_book(game: &Game<'_>, recipes: &machines::MachineRecipes) -> Book {
         });
     }
     let outputs: BTreeSet<&str> = book.iter().map(|r| r.output.0.as_str()).collect();
-    let orderable = outputs
+    let orderable: Vec<u16> = outputs
         .into_iter()
         .filter_map(|key| number(game, key))
         .collect();
     Book {
         recipes: book,
+        stamp: rustcraft_rules::storage::orderable::stamp(&orderable),
         orderable,
     }
 }

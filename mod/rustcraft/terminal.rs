@@ -25,6 +25,10 @@
 // mode a click chooses the item; the row under the grid orders 1, 8 or 64 of it (O3) and sets its
 // «держать N» (O14); the line under the status shows one order of the queue: what, how many done,
 // what it waits for (O6, O8, O13); a click on it shows the next, «×» cancels it (O7).
+//
+// 0.21.1 (OT12): what the book can make comes on its own channel, once a window opens and again
+// when the book is built anew (rustcraft_rules::storage::orderable), and takes the place of what
+// the list had room for: on a big storage with many enchanted stacks it had none.
 use crate::game::{
     Game,
     rustcraft_content::{self as content, item_of_number},
@@ -48,6 +52,7 @@ use rustcraft_rules::{
         Limit,
         modules as sockets,
         network::{self as net, Ask},
+        orderable as book_items,
         terminal::{
             self as term, ItemRef, LimitChange, NO_PRESS, Part, Press, Take, cell,
             part_in,
@@ -128,9 +133,35 @@ pub(super) fn in_tablet<R>(f: impl FnOnce() -> R) -> R {
 }
 
 /// The list the server sent the tablet's window.
-pub(super) fn set_tablet_listing(l: Listing) {
+pub(super) fn set_tablet_listing(mut l: Listing) {
     remember_variants(&l.variants);
+    with_orderable(&mut l);
     *TABLET_LISTING.lock().unwrap_or_else(PoisonError::into_inner) = Some(l);
+}
+
+/// 0.21.1 (OT12): the recipe book's items as their own channel last brought them whole
+/// (rustcraft_rules::storage::orderable); the terminal's and the tablet's windows share them.
+static ORDERABLE: LazyLock<Mutex<book_items::Assembler>> = LazyLock::new(Mutex::default);
+
+/// A list with the whole list of the book's items in place of what its message had room for.
+fn with_orderable(l: &mut Listing) {
+    let a = ORDERABLE.lock().unwrap_or_else(PoisonError::into_inner);
+    book_items::complete(l, a.list());
+}
+
+/// A part of the book's items; once the list is whole, the windows' lists take it.
+fn on_orderable(data: &[u8]) {
+    let mut a = ORDERABLE.lock().unwrap_or_else(PoisonError::into_inner);
+    if !a.take(data) {
+        return;
+    }
+    let whole = a.list().map(<[u16]>::to_vec);
+    drop(a);
+    for slot in [&LISTING, &TABLET_LISTING] {
+        if let Some(l) = slot.lock().unwrap_or_else(PoisonError::into_inner).as_mut() {
+            book_items::complete(l, whole.as_deref());
+        }
+    }
 }
 
 /// A fresh view for a tablet's window that opens.
@@ -174,12 +205,17 @@ fn view_for(game: &Game<'_>) -> MutexGuard<'static, View> {
 
 /// `native_net_from_server`: the terminal's list.
 pub(super) fn on_net(channel: &str, data: &[u8]) {
+    if channel == book_items::CHANNEL {
+        on_orderable(data);
+        return;
+    }
     if channel != CHANNEL {
         return;
     }
     match wire::decode(data) {
-        Some(l) => {
+        Some(mut l) => {
             remember_variants(&l.variants);
+            with_orderable(&mut l);
             *LISTING.lock().unwrap_or_else(PoisonError::into_inner) = Some(l);
         }
         None => log::warn!("rustcraft: a terminal list that does not read"),
