@@ -1396,6 +1396,7 @@
   "rustcraft.util.xp_tank.channel": "Канал опыта: зачаровательных автоматов %s · забойщиков %s",
   "rustcraft.util.enchanter.reach": "Опыт",
   "rustcraft.util.enchanter.reach_value": "%s очк. в конденсаторах: %s (нужно %s)",
+  "rustcraft.terminal.type_hint": "Кликни и впиши число · Enter: поставить · Esc: оставить",
   "rustcraft.handbook.title": "Справочник инженера",
   "rustcraft.handbook.contents": "Содержание",
   "rustcraft.handbook.sections": "Разделы",
@@ -7089,6 +7090,5 @@
   "rustcraft.handbook.page.tool_map.part.4.w.4": "Построек",
   "rustcraft.handbook.page.tool_map.part.4.w.5": "деревня, руины портала",
   "rustcraft.handbook.page.tool_map.part.5.w.0": "Работает: наносит чанки",
-  "rustcraft.handbook.page.tool_map.window": "Картограф · шасси из кристаллита",
-  "rustcraft.terminal.type_hint": "Кликни и впиши число · Enter: поставить · Esc: оставить"
+  "rustcraft.handbook.page.tool_map.window": "Картограф · шасси из кристаллита"
 }
