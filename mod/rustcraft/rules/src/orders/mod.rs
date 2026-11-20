@@ -6,8 +6,8 @@
 //!
 //! The recipe book (O1) is the game's crafting and smelting recipes and the mod's machine recipes,
 //! as `PlanRecipe`s; `PlanRecipe::crafting` builds the autocrafter's ones from a crafting grid. An
-//! input of a recipe may take any of several items (planks of any wood): the planner takes the one
-//! the storage has most of. `queue` runs the orders of one storage; `saved` writes a queue and
+//! input of a recipe may take any of several items (planks of any wood): the planner takes what
+//! the storage has or can make, mixed when one item is not enough (`gather`, spec 47). `queue` runs the orders of one storage; `saved` writes a queue and
 //! its running jobs into the storage's record and reads them back; `ship` lets a job's items ride the
 //! item channel (slice 17).
 //!
@@ -24,6 +24,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::net::items::ItemKey;
 
+mod gather;
+pub mod groups;
 pub mod held;
 pub mod queue;
 pub mod ride;
@@ -223,6 +225,11 @@ pub struct Step {
     pub inputs: Vec<(ItemKey, u32)>,
     pub output: (ItemKey, u32),
     pub times: u32,
+    /// 0.21 (OT3): the autocrafter's grid when an input mixes items (planks of two woods): each
+    /// cell the entry of `inputs` it takes, one entry per item. Empty: the recipe's cells, each
+    /// input one entry.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub cells: Vec<Option<usize>>,
 }
 
 impl Step {
@@ -238,7 +245,11 @@ impl Step {
 
     /// The autocrafter's pattern for this step: each cell the item chosen for its input.
     pub fn pattern(&self, book: &[PlanRecipe]) -> [Option<ItemKey>; 9] {
-        let cells = book.get(self.recipe).map_or(&[][..], |r| &r.cells[..]);
+        let cells = if self.cells.is_empty() {
+            book.get(self.recipe).map_or(&[][..], |r| &r.cells[..])
+        } else {
+            &self.cells[..]
+        };
         std::array::from_fn(|i| {
             cells
                 .get(i)
@@ -268,6 +279,17 @@ impl Plan {
     pub fn ready(&self) -> bool {
         self.missing.is_empty() && self.missing_machines.is_empty()
     }
+}
+
+/// 0.21 (OT8, OT9): an order for `item` can be made at all: a recipe of the book makes it whose
+/// every input takes something besides the item itself. A crystal shard, which only drops from
+/// druses and grows on a solution tank, cannot (the owner's order for 9 shards waited «ждёт
+/// ингредиентов: осколок кристалла ×9» for good), nor an item whose only recipes take it back.
+/// What a recipe takes deeper down may be in the storage, so only the item itself counts.
+pub fn can_make(item: &str, book: &[PlanRecipe]) -> bool {
+    book.iter().any(|r| {
+        r.output.0 == item && r.inputs.iter().all(|(alts, _)| alts.iter().any(|a| a != item))
+    })
 }
 
 /// Plans an order for `count` of `item`, given the storage's stock, the recipe book and the
@@ -418,18 +440,16 @@ impl Planner<'_> {
         let per_run = u64::from(recipe.output.1.max(1));
         let times = rest.div_ceil(per_run);
         self.making.push(item.to_string());
-        let mut chosen = Vec::with_capacity(recipe.inputs.len());
+        // OT3: an autocrafter's input may mix items cell by cell; a machine's, run by run.
+        let grid = recipe.machine == KINDS[0] && !recipe.cells.is_empty();
+        let mut shares = Vec::with_capacity(recipe.inputs.len());
         let mut hopeless = !recipe.inputs.is_empty();
         for (alts, n) in &recipe.inputs {
             let want = u64::from(*n) * times;
-            let pick = self.pick(alts, want);
-            let short_before = self.plan.missing.get(&pick).copied().unwrap_or(0);
-            self.need(&pick, want);
-            let short_after = self.plan.missing.get(&pick).copied().unwrap_or(0);
-            if short_after - short_before < want {
-                hopeless = false;
-            }
-            chosen.push((pick, *n));
+            let grain = if grid { 1 } else { u64::from(*n) };
+            let (share, none) = self.gather(alts, want, grain);
+            hopeless &= none;
+            shares.push(share);
         }
         self.making.pop();
         // What the runs make beyond the need is free for later needs.
@@ -437,17 +457,20 @@ impl Planner<'_> {
         if surplus > 0 {
             *self.stock.entry(item.to_string()).or_insert(0) += surplus;
         }
-        let times = u32::try_from(times).unwrap_or(u32::MAX);
-        let same = |s: &&mut Step| s.recipe == index && s.inputs == chosen;
-        match self.plan.steps.iter_mut().find(same) {
-            Some(step) => step.times = step.times.saturating_add(times),
-            None => self.plan.steps.push(Step {
-                recipe: index,
-                machine: recipe.machine.clone(),
-                inputs: chosen,
-                output: recipe.output.clone(),
-                times,
-            }),
+        for (runs, inputs, cells) in gather::segments(recipe, &shares, times) {
+            let runs = u32::try_from(runs).unwrap_or(u32::MAX);
+            let same = |s: &&mut Step| s.recipe == index && s.inputs == inputs && s.cells == cells;
+            match self.plan.steps.iter_mut().find(same) {
+                Some(step) => step.times = step.times.saturating_add(runs),
+                None => self.plan.steps.push(Step {
+                    recipe: index,
+                    machine: recipe.machine.clone(),
+                    inputs,
+                    output: recipe.output.clone(),
+                    times: runs,
+                    cells,
+                }),
+            }
         }
         hopeless
     }
@@ -481,29 +504,6 @@ impl Planner<'_> {
             (absent, cover(i))
         });
         order
-    }
-
-    /// The item of `alts` to take `want` of: the first the stock covers, else the one it has most
-    /// of, else the first a recipe makes, else the first.
-    fn pick(&self, alts: &[ItemKey], want: u64) -> ItemKey {
-        if let Some(a) = alts.iter().find(|a| self.free(a) >= want) {
-            return a.clone();
-        }
-        let mut best: Option<(&ItemKey, u64)> = None;
-        for a in alts {
-            let free = self.free(a);
-            if free > 0 && best.is_none_or(|(_, b)| free > b) {
-                best = Some((a, free));
-            }
-        }
-        if let Some((a, _)) = best {
-            return a.clone();
-        }
-        alts.iter()
-            .find(|a| !self.making.contains(a) && self.book.iter().any(|r| &r.output.0 == *a))
-            .or_else(|| alts.first())
-            .cloned()
-            .unwrap_or_default()
     }
 }
 
@@ -619,6 +619,27 @@ mod tests {
     }
 
     const ALL: &[&str] = &["crafter", "furnace", "crusher", "alloy"];
+
+    #[test]
+    fn an_item_no_recipe_makes_or_only_from_itself_cannot_be_ordered() {
+        // OT8: shards only drop from druses; an item whose only recipe takes it back (a block of
+        // 9 from itself) is no way either; a recipe that takes it or something else is.
+        let mut book = book();
+        assert!(can_make("minecraft:piston", &book));
+        assert!(can_make("minecraft:iron_ingot", &book));
+        assert!(!can_make("rustcraft:crystal_shard", &book));
+        assert!(!can_make("minecraft:cobblestone", &book));
+        book.push(r("crafter", &[("rc:block", 1)], ("rc:block", 1)));
+        assert!(!can_make("rc:block", &book));
+        let either = vec!["rc:block".to_string(), "rc:dust".to_string()];
+        book.push(PlanRecipe { inputs: vec![(either, 2)], ..r("crafter", &[], ("rc:block", 1)) });
+        assert!(can_make("rc:block", &book));
+        // A cycle through another item is a way: that item may be in the storage (diamonds
+        // from a diamond block).
+        book.push(r("crafter", &[("rc:gem_block", 1)], ("rc:gem", 9)));
+        book.push(r("crafter", &[("rc:gem", 9)], ("rc:gem_block", 1)));
+        assert!(can_make("rc:gem", &book));
+    }
 
     #[test]
     fn an_order_for_pistons_sets_their_ingredients_aside() {

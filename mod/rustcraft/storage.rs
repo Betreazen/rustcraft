@@ -1272,6 +1272,8 @@ fn listing(game: &Game<'_>, dimension: &str, terminal: Pos, id: Option<u32>) -> 
         smart: view.as_ref().map_or_else(Default::default, |v| v.smart),
         orders: view.as_ref().map_or_else(Vec::new, |v| v.orders.clone()),
         orderable: view.map_or_else(Vec::new, |v| v.orderable),
+        // The message says when it cuts the list (OT10).
+        orderable_cut: false,
         variants,
         sockets: socket_numbers(game, terminal),
         own: own_items(game, terminal)
@@ -1399,21 +1401,33 @@ pub(super) fn on_button(
     match press {
         Press::Socket(_) => {}
         Press::Order { item, count } => {
+            // A fluid (O12) by its number past the item table, in buckets.
+            let key = orders::key_of_number(game, item);
             let refused = if book {
-                // A fluid (O12) by its number past the item table, in buckets.
-                orders::key_of_number(game, item).and_then(|key| {
-                    orders::order(&dimension, storage, &key, u32::from(count)).err()
+                key.as_ref().and_then(|key| {
+                    orders::order(&dimension, storage, key, u32::from(count)).err()
                 })
             } else {
                 Some(NO_BOOK)
             };
-            if let (Some((key, fallback)), Some(player)) = (refused, crate::game::rustcraft_server::acting(game)) {
-                tell(game, player.uuid, line(key, fallback, &[]));
+            if let (Some((lang, fallback)), Some(player)) = (refused, crate::game::rustcraft_server::acting(game)) {
+                // OT8: «Осколок кристалла не делается на машинах: его только добывают».
+                let args: Vec<Text> = key.as_deref().map(|k| item_text(game, k)).into_iter().collect();
+                tell(game, player.uuid, line(lang, fallback, &args));
             }
         }
         Press::Keep { item, change } => {
             if let Some(key) = key_of_ref(game, &dimension, storage, (item, 0)).filter(|_| book) {
-                apply_keep(&dimension, storage, &key, change);
+                // OT8: no «держать N» of an item no recipe makes; clearing one still goes.
+                let raise = matches!(change, term::LimitChange::Add(n) if n > 0);
+                if raise && !orders::can_order(&key) {
+                    if let Some(player) = crate::game::rustcraft_server::acting(game) {
+                        let (lang, fallback) = orders::NOT_MADE;
+                        tell(game, player.uuid, line(lang, fallback, &[item_text(game, &key)]));
+                    }
+                } else {
+                    apply_keep(&dimension, storage, &key, change);
+                }
             }
         }
         Press::Cancel { order } => orders::cancel(&dimension, storage, order),
@@ -1431,6 +1445,17 @@ pub(super) fn on_button(
             }
         }
     }
+}
+
+/// An item's or a fluid's name for a chat line (OT8).
+fn item_text(game: &Game<'_>, key: &str) -> Text {
+    if let Some(fluid) = rustcraft_rules::orders::fluid_of(key) {
+        let name = fluid.rsplit(':').next().unwrap_or(fluid);
+        return Text::translate_with_fallback(&format!("rustcraft.fluid.{name}.name"), fluid, &[]);
+    }
+    let id = keys::item_of(key);
+    let kind = if game.items().get(id).is_some_and(|i| i.block.is_some()) { "block" } else { "item" };
+    Text::translate_with_fallback(&format!("{kind}.{}", id.replace(':', ".")), id, &[])
 }
 
 // ---- Slice 18: the terminal's three sockets ----

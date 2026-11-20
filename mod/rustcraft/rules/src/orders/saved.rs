@@ -155,6 +155,7 @@ mod tests {
             inputs: vec![(IRON.into(), 1), ("minecraft:cobblestone".into(), 4)],
             output: (PISTON.into(), 1),
             times: 3,
+            cells: Vec::new(),
         }
     }
 

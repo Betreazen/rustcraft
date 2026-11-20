@@ -285,6 +285,12 @@ impl Queue {
         running: &dyn Fn(u16) -> bool,
         fits: &mut dyn FnMut(Pos, &Step, u32) -> u32,
     ) -> Vec<Job> {
+        // OT9: an order for an item no recipe makes leaves (taken before 0.21, or a «держать»
+        // one); an empty book is no book yet, not a reason.
+        if !book.is_empty() {
+            self.orders
+                .retain(|o| running(o.id) || crate::orders::can_make(&o.item, book));
+        }
         let none = BTreeMap::new();
         let held_of = |id: u16| held.get(&id).unwrap_or(&none);
         // An order's own products count as far as the storage still holds them (a player may
@@ -572,6 +578,22 @@ mod tests {
                 ("crafter".to_owned(), PISTON.to_owned(), false),
             ]
         );
+    }
+
+    #[test]
+    fn an_order_for_an_item_no_recipe_makes_leaves_the_queue() {
+        // OT9: the owner's order for 9 crystal shards, saved by 0.20, waited for shards for
+        // good; the first round after loading drops it, and the piston order stays.
+        let mut q = Queue::default();
+        q.add("rustcraft:crystal_shard", 9, false);
+        q.add(PISTON, 1, false);
+        round(&mut q, &stock(8, 0), &[machine(1, "crafter")]);
+        assert_eq!(q.orders.len(), 1);
+        assert_eq!(q.orders[0].item, PISTON);
+        // An empty book is no book yet: nothing leaves.
+        q.add("rustcraft:crystal_shard", 9, false);
+        q.round(&stock(8, 0), &[], &["crafter"], &[], &|_| false, &mut |_, _, w| w);
+        assert_eq!(q.orders.len(), 2);
     }
 
     #[test]

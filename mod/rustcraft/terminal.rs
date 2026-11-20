@@ -43,7 +43,7 @@ use rustcraft_rules::{
     geom::Pos,
     machines::style::{self, Severity, colour},
     modules::Module,
-    orders::{KINDS, fluid_of_number},
+    orders::{KINDS, fluid_of_number, groups::group_of_number},
     storage::{
         Limit,
         modules as sockets,
@@ -269,8 +269,13 @@ pub(super) fn item_name(id: &str) -> String {
     tr(&format!("item.{key}"), &tr(&format!("block.{key}"), id))
 }
 
-/// The name of an item the list names by number, or of a fluid (`rustcraft.fluid.<name>.name`).
+/// The name of an item the list names by number, of a fluid (`rustcraft.fluid.<name>.name`) or,
+/// 0.21 (OT5), of a group an order waits for (`rustcraft.group.<name>.name`: «доски любого
+/// дерева»).
 fn name_of(game: &Game<'_>, item: u16) -> String {
+    if let Some(group) = group_of_number(item) {
+        return tr(&format!("rustcraft.group.{group}.name"), group);
+    }
     if let Some(fluid) = fluid_of_number(item) {
         let name = fluid.rsplit(':').next().unwrap_or(fluid);
         return tr(&format!("rustcraft.fluid.{name}.name"), fluid);
@@ -765,7 +770,19 @@ fn order_row(
         ]) {
             game.native_fill(batch, at(o, r), DIMMED);
         }
+    } else if !v.selected.zip(listing).is_none_or(|(key, l)| orderable(l, key)) {
+        // OT10: an item no recipe makes takes no order and no «держать N»; a «держать» set
+        // before 0.21 can still be lowered and cleared.
+        for r in term::ORDER_BUTTONS.into_iter().chain([term::KEEP_PLUS]) {
+            game.native_fill(batch, at(o, r), DIMMED);
+        }
     }
+}
+
+/// OT10: the window can order `key`: the book makes it, or the list of what it makes was cut
+/// (the server then answers).
+fn orderable(l: &Listing, key: ItemRef) -> bool {
+    l.orderable_cut || (key.1 == 0 && l.orderable.contains(&key.0))
 }
 
 /// What an order waits for, in words: «в работе», «не хватает: железный слиток ×2»…
@@ -1337,11 +1354,14 @@ fn cell_tooltip(game: &Game<'_>, i: usize, orders_mode: bool, lines: &mut Vec<St
         "In storage: %s",
         &[e.count.to_string()],
     ));
-    let orderable = listing
-        .as_ref()
-        .is_some_and(|l| l.book && e.key.1 == 0 && l.orderable.contains(&e.key.0));
-    if e.count == 0 && orderable {
+    let book = listing.as_ref().filter(|l| l.book);
+    let can = book.is_some_and(|l| orderable(l, e.key));
+    if e.count == 0 && can {
         hint(lines, "rustcraft.terminal.orderable", "Can be ordered");
+    }
+    // OT10: «не делается на машинах: его только добывают».
+    if book.is_some() && !can && e.key.1 == 0 {
+        hint(lines, "rustcraft.terminal.not_made", "Not made on machines: only gathered");
     }
     if e.key.1 > 0 && e.key.1 & term::VARIANT == 0 {
         lines.push(tr_with(

@@ -160,6 +160,9 @@ pub struct Listing {
     pub orders: Vec<OrderLine>,
     /// O2: items the recipe book can make, as numbers.
     pub orderable: Vec<u16>,
+    /// 0.21 (OT10): `orderable` was cut to the message's room, so an item missing from it may
+    /// still be orderable.
+    pub orderable_cut: bool,
     /// Slice 18: the component stacks among `lines` (a line's damage with `terminal::VARIANT`),
     /// each with its saved form so the window draws and names it.
     pub variants: Vec<Variant>,
@@ -189,6 +192,8 @@ const TAIL_VARIANTS: u8 = 1;
 const TAIL_SOCKETS: u8 = 2;
 const TAIL_OWN: u8 = 3;
 const TAIL_STEPS: u8 = 4;
+/// 0.21 (OT10): an empty section, sent when the orderable items were cut.
+const TAIL_ORDERABLE_CUT: u8 = 5;
 
 /// How many lines fit in one message.
 pub const MAX_LINES: usize = (MAX_BYTES - HEADER - MAX_HOLES * HOLE - ORDERS - 2) / ENTRY;
@@ -240,13 +245,21 @@ pub fn encode(listing: &Listing) -> Vec<u8> {
         encode_order(&mut out, o);
     }
     let tail = encode_tail(listing, MAX_BYTES.saturating_sub(out.len() + 2));
-    let room = MAX_BYTES.saturating_sub(out.len() + 2 + tail.len()) / 2;
+    let mut room = MAX_BYTES.saturating_sub(out.len() + 2 + tail.len()) / 2;
+    let cut = listing.orderable_cut || listing.orderable.len() > room;
+    if cut {
+        room = MAX_BYTES.saturating_sub(out.len() + 2 + tail.len() + 3) / 2;
+    }
     let orderable = &listing.orderable[..listing.orderable.len().min(room)];
     out.extend((orderable.len() as u16).to_le_bytes());
     for n in orderable {
         out.extend(n.to_le_bytes());
     }
     out.extend(tail);
+    if cut {
+        out.push(TAIL_ORDERABLE_CUT);
+        out.extend(0u16.to_le_bytes());
+    }
     out
 }
 
@@ -316,7 +329,9 @@ fn decode_tail(r: &mut Reader<'_>, listing: &mut Listing) {
         };
         r.0 = rest;
         let mut s = Reader(section);
-        if tag == TAIL_STEPS {
+        if tag == TAIL_ORDERABLE_CUT {
+            listing.orderable_cut = true;
+        } else if tag == TAIL_STEPS {
             for o in &mut listing.orders {
                 let n = s.u8().unwrap_or(0);
                 for _ in 0..n {
@@ -508,6 +523,7 @@ pub fn decode(bytes: &[u8]) -> Option<Listing> {
         smart,
         orders,
         orderable,
+        orderable_cut: false,
         variants: Vec::new(),
         sockets: Vec::new(),
         own: Vec::new(),
@@ -602,6 +618,7 @@ mod tests {
                 },
             ],
             orderable: vec![1, 2, 812],
+            orderable_cut: false,
             variants: vec![Variant {
                 item: 3,
                 index: 1,
@@ -653,7 +670,12 @@ mod tests {
         let bytes = encode(&small);
         assert!(bytes.len() <= MAX_BYTES);
         assert!(bytes.len() + 2 > MAX_BYTES);
-        assert!(decode(&bytes).unwrap().orderable.len() > 10_000);
+        let back = decode(&bytes).unwrap();
+        assert!(back.orderable.len() > 10_000);
+        // OT10: the window knows the list was cut, so an item missing from it may be orderable.
+        assert!(back.orderable_cut);
+        assert_eq!(back.variants, small.variants, "the tail comes before the flag");
+        assert!(!decode(&encode(&listing(100))).unwrap().orderable_cut);
     }
 
     #[test]

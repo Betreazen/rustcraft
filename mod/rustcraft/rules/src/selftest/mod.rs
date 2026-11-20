@@ -91,6 +91,8 @@ pub mod s21_channels;
 pub mod s21_tanks;
 // 0.21 (spec 43): sources burn their fuel only for the energy taken.
 pub mod s21_catalyst;
+// 0.21 (spec 47): orders take any item of a tag.
+pub mod s21_tags;
 
 use std::collections::BTreeMap;
 
@@ -844,6 +846,8 @@ pub fn catalog() -> Vec<Build> {
     all.extend(s21_loot::ALL);
     // 0.21 (spec 43): sources burn their fuel only for the energy taken.
     all.extend(s21_catalyst::ALL);
+    // 0.21 (spec 47): orders take any item of a tag.
+    all.extend(s21_tags::ALL);
     all
 }
 
