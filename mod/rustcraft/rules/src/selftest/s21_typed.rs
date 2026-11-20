@@ -5,8 +5,8 @@
 //!   (`storage::typed::encode_terminal`) makes its limit 3938; a typed 0 a limit of 0; «×» still
 //!   clears it. A limit for an item the storage does not list (bedrock: none held, no limit, no
 //!   recipe) and a number past the field's most are refused.
-//! - «250» typed into the order's count makes the «Заказ» press order 250 pistons: the queue
-//!   holds one order of 250.
+//! - «250» typed into the order's count makes the «Заказ» press carry 250 (its id reads back
+//!   250), and an order of that count queues one order of 250 pistons.
 //! - «300» typed into the pistons' «Держать» makes their N 300; a typed 0 clears it.
 
 use super::slice15::{PISTON, build, held, put_book, terminal_at};
@@ -110,9 +110,11 @@ fn typed_numbers_set_limit_keep_and_order(o: Pos, _: &Tuning) -> Scenario {
                 item: number(b, PISTON)?,
                 count,
             };
+            // The «Заказ» press carries the count; the bench orders as the press's server side
+            // does (its menu presses have no acting player to find the terminal's storage by).
             let id = terminal::encode(press).ok_or("the order has no press")?;
-            b.press(terminal, id, None)?;
-            Ok(false)
+            same("the press's count", terminal::decode(id), Some(press))?;
+            Ok(b.order(terminal, PISTON, u32::from(count)).is_ok())
         })
         .check("one order of 250 pistons", move |b, _| {
             same("orders of pistons", piston_orders(b, o), vec![250])
