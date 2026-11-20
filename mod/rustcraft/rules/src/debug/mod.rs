@@ -41,13 +41,16 @@ pub enum Command {
     Storage { pos: Pos, dimension: Option<String> },
     /// The journal's last `n` lines, only those containing `filter` when one is given.
     Log { n: usize, filter: Option<String> },
+    /// 0.21.2: every machine within `radius` of a player with no owner becomes theirs.
+    Claim { player: String, radius: i32 },
 }
 
 /// The command's words after its name.
 pub fn usage() -> String {
     format!(
         "usage: {COMMAND} at <x> <y> <z> [dimension] | near <player> [radius={NEAR_RADIUS}] | \
-         workers [player] | storage <x> <y> <z> [dimension] | log [n={LOG_LINES}] [filter]"
+         workers [player] | storage <x> <y> <z> [dimension] | log [n={LOG_LINES}] [filter] | \
+         claim <player> [radius={NEAR_RADIUS}]"
     )
 }
 
@@ -71,6 +74,16 @@ pub fn parse(args: &str) -> Result<Command, String> {
                 None => NEAR_RADIUS,
             };
             Ok(Command::Near {
+                player: (*player).to_owned(),
+                radius: radius.clamp(1, NEAR_MAX),
+            })
+        }
+        ["claim", player, rest @ ..] if rest.len() <= 1 => {
+            let radius = match rest.first() {
+                Some(r) => r.parse::<i32>().map_err(|_| format!("not a radius: {r}"))?,
+                None => NEAR_RADIUS,
+            };
+            Ok(Command::Claim {
                 player: (*player).to_owned(),
                 radius: radius.clamp(1, NEAR_MAX),
             })

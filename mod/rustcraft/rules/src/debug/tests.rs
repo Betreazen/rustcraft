@@ -23,6 +23,10 @@ fn the_command_reads_every_subcommand() {
         Ok(Command::Near { player: "Steve".into(), radius: NEAR_RADIUS })
     );
     assert_eq!(
+        parse("claim Steve 64"),
+        Ok(Command::Claim { player: "Steve".into(), radius: 64 })
+    );
+    assert_eq!(
         parse("near Steve 9999"),
         Ok(Command::Near { player: "Steve".into(), radius: NEAR_MAX })
     );

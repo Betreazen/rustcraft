@@ -451,6 +451,7 @@ pub(super) fn answer(game: &mut Game<'_>, args: &str) -> Vec<String> {
         Ok(Command::Workers { owner }) => workers_list(game, owner.as_deref()),
         Ok(Command::Storage { pos, dimension }) => storage_view(game, pos, dimension),
         Ok(Command::Log { n, filter }) => log_tail(n, filter.as_deref()),
+        Ok(Command::Claim { player, radius }) => claim(game, &player, radius),
         Err(usage) => vec![usage],
     };
     debug::clip(lines)
@@ -670,6 +671,19 @@ fn worker_row(game: &Game<'_>, dim: &str, w: &Worker) -> WorkerRow {
         note_key: note_key(w.note).0,
         loaded: loaded(game, dim, w.cell),
     }
+}
+
+/// 0.21.2: `claim`: the machines near a player with no owner become theirs.
+fn claim(game: &mut Game<'_>, player: &str, radius: i32) -> Vec<String> {
+    let Some(p) = game
+        .native_server_players()
+        .into_iter()
+        .find(|p| p.name.eq_ignore_ascii_case(player))
+    else {
+        return vec![format!("no player {player} online")];
+    };
+    let n = crate::game::rustcraft_base::claim(game, &p.dimension, p.position, radius, p.uuid);
+    vec![format!("{n} machines within {radius} of {} are theirs now", p.name)]
 }
 
 fn near(game: &mut Game<'_>, player: &str, radius: i32) -> Vec<String> {

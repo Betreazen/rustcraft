@@ -402,7 +402,44 @@ pub(super) fn sent_reports() -> Vec<String> {
 
 /// The blocks with an owner: slice 7's and slice 8's.
 fn has_owner(block: &str) -> bool {
-    Machine::of(block).is_some_and(Machine::owned)
+    Machine::of(block).is_some_and(records_owner)
+}
+
+/// 0.21.2 (owner: «почему я не получаю опыт за использование электропечи, плавильни и других
+/// машин»): every machine a player places is theirs, the furnace, crusher, alloy smelter,
+/// autocrafter, generators and pump too, not only the `owned` blocks (whose list also decides how
+/// the blocks are declared, so it stays): Path-of-craft-tree pays a machine's work to its owner.
+pub(super) fn records_owner(m: Machine) -> bool {
+    m.owned()
+        || matches!(
+            m.kind(),
+            Kind::Processor | Kind::Alloy | Kind::Crafter | Kind::Generator | Kind::Pump
+        )
+}
+
+/// The block a placed item puts down: a tier item (`rustcraft:furnace_3`) places its family's block.
+fn placed_block(item: &str) -> String {
+    rustcraft_rules::tiers::family_of_item(item).map_or_else(|| item.to_owned(), |(f, _)| f.block.to_owned())
+}
+
+/// 0.21.2: `rustcraft_debug claim <player> [radius]`: every machine within `radius` of `centre` in
+/// `dimension` with no owner becomes `owner`'s; how many did.
+pub(super) fn claim(game: &mut Game<'_>, dimension: &str, centre: [f64; 3], radius: i32, owner: u128) -> usize {
+    let found: Vec<Pos> = crate::game::rustcraft_server::with_level(dimension, |l| {
+        l.machines
+            .iter()
+            .filter(|(pos, m)| records_owner(**m) && rustcraft_rules::debug::within(centre, **pos, radius))
+            .map(|(pos, _)| *pos)
+            .collect()
+    })
+    .unwrap_or_default();
+    let mut n = 0;
+    for pos in found {
+        if owner_at(game, pos).is_none() && set_owner(game, pos, owner, now_ms()) {
+            n += 1;
+        }
+    }
+    n
 }
 
 /// The blocks whose window is a server menu: the solar panel alone since slice 9.
@@ -412,7 +449,7 @@ fn has_server_window(block: &str) -> bool {
 
 /// `native_place_block`: a slice-7 or slice-8 block placed by a player is theirs (X2).
 pub(super) fn on_place_block(game: &mut Game<'_>, stack: &ItemStack, pos: Pos) {
-    if !has_owner(&stack.item) {
+    if !has_owner(&placed_block(&stack.item)) {
         return;
     }
     let Some(player) = crate::game::rustcraft_server::acting(game) else {
