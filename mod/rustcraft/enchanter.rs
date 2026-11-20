@@ -443,7 +443,7 @@ pub(super) fn sheet(game: &Game<'_>, dimension: &str, level: &LevelNet, pos: Pos
     let cost = xp::enchant_cost(st.level);
     note(
         notes::LEVEL,
-        line("rustcraft.util.enchanter.level_short", "lv. %s", &[lit(st.level)]),
+        line("rustcraft.util.enchanter.level_short", "%s", &[lit(st.level)]),
         vec![line(
             "rustcraft.util.enchanter.level_tip",
             "Enchanting level %s of 1–30, as the table's row; costs %s levels and %s lapis",
@@ -475,7 +475,7 @@ pub(super) fn sheet(game: &Game<'_>, dimension: &str, level: &LevelNet, pos: Pos
 /// The fourteen buttons: the level steps, the option rows, the view switch, the «×» of the rows.
 fn buttons(game: &Game<'_>, st: &Settings, item: Option<&ItemStack>) -> Vec<Button> {
     let raise_view = st.view == View::Raise;
-    let mut out: Vec<Button> = ["−10", "−1", "+1", "+10"]
+    let mut out: Vec<Button> = ["-10", "-1", "+1", "+10"]
         .iter()
         .zip(["minus10", "minus1", "plus1", "plus10"])
         .map(|(t, k)| {

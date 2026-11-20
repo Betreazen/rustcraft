@@ -1040,7 +1040,7 @@
   "rustcraft.util.enchanter.tank_tip": "В конденсаторах (вплотную и на канале опыта) %s ур.; нужно не меньше %s",
   "rustcraft.util.enchanter.no_tank": "не найден",
   "rustcraft.util.enchanter.no_tank_tip": "Поставьте конденсатор опыта вплотную или на линию магистрали: опыт придёт по каналу опыта",
-  "rustcraft.util.enchanter.level_short": "ур. %s",
+  "rustcraft.util.enchanter.level_short": "%s",
   "rustcraft.util.enchanter.level_tip": "Уровень чар %s из 1–30, как в строке стола; цена %s ур. опыта и %s лазурита",
   "rustcraft.util.enchanter.level_unused": "Для «Своих чар» уровень не нужен",
   "rustcraft.util.enchanter.view_new": "Новые",

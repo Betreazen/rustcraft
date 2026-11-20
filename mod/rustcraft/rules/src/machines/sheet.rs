@@ -547,7 +547,7 @@ fn enchant_area(out: &mut Layout, y: f32) -> f32 {
     notes.push(([LEFT, y + 67.0, RIGHT_X - 2.0 - LEFT, 9.0], Note::Text));
     // The level row: −10, −1, the level, +1, +10.
     let r = y + ROW_H + 2.0;
-    let widths = [20.0, 15.0, 0.0, 15.0, 20.0];
+    let widths = [24.0, 19.0, 0.0, 19.0, 24.0];
     let middle = w - widths.iter().sum::<f32>() - 2.0 * 4.0;
     let mut x = RIGHT_X;
     let mut level = Vec::new();
@@ -887,7 +887,9 @@ mod tests {
         let (level, how) = l.notes[enchant_notes::LEVEL];
         assert_eq!(how, Note::Value);
         assert!(l.toggles[1][0] < level[0] && l.toggles[2][0] > level[0] + level[2]);
-        assert!(level[2] >= 36.0, "«ур. 30» fits: {}", level[2]);
+        assert!(level[2] >= 18.0, "«30» fits: {}", level[2]);
+        // The steps wide enough for «-10» and «-1» (bench client check: «-…» at 20 and 15).
+        assert!(l.toggles[0][2] >= 24.0 && l.toggles[1][2] >= 19.0);
         // The option rows wide enough for «Лучшее: Острота IV», under the level row.
         for (r, x) in l.toggles[enchanting::OPTION_BUTTONS].iter().zip(&l.toggles[enchanting::REMOVE_BUTTONS]) {
             assert!(r[2] >= 104.0 && r[1] > level[1]);
