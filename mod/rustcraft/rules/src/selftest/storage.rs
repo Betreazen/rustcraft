@@ -1,5 +1,6 @@
 //! Slice 5: the storage. Cells in a solid box are one storage that a terminal shows and an item
-//! net fills (S1, S2, M16); a limit holds (S5) or destroys the surplus; a box with a hole names
+//! net fills (S1, S2, M16); a limit holds against a chest on its default joint (S5, SP11) or
+//! destroys the surplus; a box with a hole names
 //! the missing cell and keeps everything it held (S8).
 
 use super::transport::{COBBLE, chest, fill, item_line, joint};
@@ -42,8 +43,15 @@ fn terminal(o: Pos) -> Pos {
 /// A chest «из блока» at housing 1, an item net of tier 2, and a storage of four cells with a
 /// terminal touching housings 3 and 4.
 fn build(b: &mut dyn Bench, o: Pos) -> Result<(), String> {
+    build_with(b, o, true)
+}
+
+/// `build`, the chest «из блока» or (0.21.2) on its default joint.
+fn build_with(b: &mut dyn Bench, o: Pos, set: bool) -> Result<(), String> {
     item_line(b, o, 2, 4, &[1])?;
-    joint(b, o, 1, Mode::From, 0)?;
+    if set {
+        joint(b, o, 1, Mode::From, 0)?;
+    }
     for c in cells(o) {
         b.place(c, CELL, &[])?;
     }
@@ -87,8 +95,10 @@ fn counts_cells(o: Pos, _: &Tuning) -> Scenario {
 
 fn limit_holds(o: Pos, _: &Tuning) -> Scenario {
     let a = chest(o, 1);
+    // 0.21.2 (SP11): a chest on its default joint gives only up to the limit; one set «из
+    // блока» would empty into the storage past it (SP10, s21_limits).
     Scenario::new("storage_limit_holds", plot_area(o))
-        .then("build a storage on a net", move |b, _| build(b, o))
+        .then("build a storage on a net, the chest on its default joint", move |b, _| build_with(b, o, false))
         .then("limit cobblestone", move |b, _| {
             b.change_limit(terminal(o), COBBLE, LimitChange::Add(LIMIT))
         })

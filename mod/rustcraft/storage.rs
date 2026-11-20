@@ -64,6 +64,7 @@ use rustcraft_rules::{
     storage::{
         self, Limit, Shape, Store, cells, keys, modules as sockets,
         terminal::{self as term, Press, Take},
+        surplus::Source,
         typed,
         wire::{self, Line, Listing, State},
     },
@@ -110,6 +111,12 @@ struct LevelStorage {
     /// Round 31 (FL5): what the tanks on each storage's fluid nets hold, mB by fluid, as
     /// rustcraft_fluids last handed it over. Not saved: the next move counts it again.
     line_fluids: HashMap<u32, BTreeMap<String, u64>>,
+    /// 0.21.2 (SP13): the items whose surplus a disintegrator or a trash on one of each storage's
+    /// item nets takes, as rustcraft_transport last handed them over. Not saved.
+    routes: HashMap<u32, BTreeSet<ItemKey>>,
+    /// 0.21.2 (SP15): the storages with a trash on one of their fluid nets, as rustcraft_fluids
+    /// last handed them over. Not saved.
+    fluid_trashes: BTreeSet<u32>,
     /// Changed since the attachment was last written.
     dirty: bool,
     ticks: u64,
@@ -775,7 +782,9 @@ pub(super) fn take_fluid(dimension: &str, id: u32, fluid: &str, amount: u64) -> 
 }
 
 /// Puts up to `amount` mB of `fluid` into the cells of the storage `id`: how much it took.
-pub(super) fn put_fluid(dimension: &str, id: u32, fluid: &str, amount: u64, cell_mb: u64) -> u64 {
+/// 0.21.2 (SP14): `amount` mB of `fluid` a machine gives into the storage `id`, past its limit as
+/// far as the cells hold it; how much went in.
+pub(super) fn put_given_fluid(dimension: &str, id: u32, fluid: &str, amount: u64, cell_mb: u64) -> u64 {
     with_level(dimension, |level| {
         if !level.works(id) {
             return 0;
@@ -783,7 +792,7 @@ pub(super) fn put_fluid(dimension: &str, id: u32, fluid: &str, amount: u64, cell
         let took = level
             .stores
             .get_mut(&id)
-            .map_or(0, |s| s.put_fluid(fluid, amount, cell_mb));
+            .map_or(0, |s| s.put_given_fluid(fluid, amount, cell_mb));
         if took > 0 {
             level.changed(id);
         }
@@ -889,45 +898,69 @@ fn key_of(stack: &ItemStack) -> Option<ItemKey> {
     Some(net_key(stack)).filter(|k| keys::storable(k))
 }
 
-/// The storage behind `anchor`: what it takes of `key` now.
-fn room_at(game: &Game<'_>, dimension: &str, anchor: Pos, key: &str) -> u64 {
+/// The storage behind `anchor`: what it takes of `key` from `source` now (0.21.2, SP10, SP11).
+fn room_at(game: &Game<'_>, dimension: &str, anchor: Pos, key: &str, source: Source) -> u64 {
+    let Some(id) = id_at(dimension, anchor) else {
+        return 0;
+    };
+    room_in(game, dimension, id, key, source)
+}
+
+/// Slice 17: what the storage `id` takes of `key` from `source` now (none while it does not
+/// work), so an order's products set off only as far as they will go in when they arrive. 0.21.2
+/// (SP10): past its limit what the player, a machine, an order or a dock gives, as far as its
+/// slots hold it.
+pub(super) fn room_in(game: &Game<'_>, dimension: &str, id: u32, key: &str, source: Source) -> u64 {
     let stack = |k: &str| max_stack(game, keys::item_of(k));
     with_level(dimension, |level| {
-        let id = level.at_anchor(anchor)?;
         level
             .works(id)
-            .then(|| level.stores.get(&id).map(|s| s.room_for(key, &stack)))
+            .then(|| level.stores.get(&id).map(|s| s.room_from(key, source, &stack)))
             .flatten()
     })
     .flatten()
     .unwrap_or(0)
 }
 
-/// Slice 17: what the storage `id` takes of `key` now (none while it does not work), so an
-/// order's products set off only as far as they will go in when they arrive.
-pub(super) fn room_in(game: &Game<'_>, dimension: &str, id: u32, key: &str) -> u64 {
-    let stack = |k: &str| max_stack(game, keys::item_of(k));
-    with_level(dimension, |level| {
-        level
-            .works(id)
-            .then(|| level.stores.get(&id).map(|s| s.room_for(key, &stack)))
-            .flatten()
-    })
-    .flatten()
-    .unwrap_or(0)
+/// 0.21.2 (SP13): a disintegrator or a trash on one of the storage's item nets takes the surplus
+/// of `key`.
+fn sent_away(level: &LevelStorage, id: u32, key: &str) -> bool {
+    level.routes.get(&id).is_some_and(|r| r.contains(key))
 }
 
-/// Puts `count` of `key` into the storage `id`; how many it took (destroyed surplus counts).
-pub(super) fn put_into(game: &Game<'_>, dimension: &str, id: u32, key: &str, count: u64) -> u64 {
+/// 0.21.2 (SP13): the items whose surplus a sink of each storage's item nets takes, by the
+/// storage's anchor, from rustcraft_transport's last move; a storage left out has none.
+pub(super) fn set_routes(dimension: &str, by_anchor: &HashMap<Pos, BTreeSet<ItemKey>>) {
+    with_level(dimension, |level| {
+        let routes = by_anchor
+            .iter()
+            .filter_map(|(anchor, items)| Some((level.at_anchor(*anchor)?, items.clone())))
+            .collect();
+        level.routes = routes;
+    });
+}
+
+/// 0.21.2 (SP15): the storages, by anchor, with a trash on one of their fluid nets.
+pub(super) fn set_fluid_trashes(dimension: &str, anchors: &BTreeSet<Pos>) {
+    with_level(dimension, |level| {
+        let ids = anchors.iter().filter_map(|a| level.at_anchor(*a)).collect();
+        level.fluid_trashes = ids;
+    });
+}
+
+/// Puts `count` of `key` from `source` into the storage `id`; how many it took (destroyed surplus
+/// counts). 0.21.2 (SP10): past its limit what the player, a machine, an order or a dock gives.
+pub(super) fn put_into(game: &Game<'_>, dimension: &str, id: u32, key: &str, count: u64, source: Source) -> u64 {
     let stack = |k: &str| max_stack(game, keys::item_of(k));
     with_level(dimension, |level| {
         if !level.works(id) {
             return 0;
         }
+        let away = sent_away(level, id, key);
         let took = level
             .stores
             .get_mut(&id)
-            .map_or(0, |s| s.put(key, count, &stack));
+            .map_or(0, |s| s.put_from(key, count, source, away, &stack));
         if took > 0 {
             level.changed(id);
         }
@@ -962,7 +995,9 @@ fn id_at(dimension: &str, anchor: Pos) -> Option<u32> {
 
 /// The net's move of `count` of `key` from the container at `from` into the storage at `anchor`:
 /// the stacks of that key come out of the container's slots through `side` as far as the storage
-/// has room, so nothing comes out that cannot go in. How many moved.
+/// has room for what `source` gives (0.21.2, SP10, SP11), so nothing comes out that cannot go in.
+/// How many moved.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn into_storage(
     game: &mut Game<'_>,
     dimension: &str,
@@ -971,11 +1006,12 @@ pub(super) fn into_storage(
     anchor: Pos,
     key: &str,
     count: u32,
+    source: Source,
 ) -> u32 {
     let Some(id) = id_at(dimension, anchor) else {
         return 0;
     };
-    let mut left = u64::from(count).min(room_at(game, dimension, anchor, key));
+    let mut left = u64::from(count).min(room_at(game, dimension, anchor, key, source));
     let Some(slots) = game.native_container_slots(dimension, from, side) else {
         return 0;
     };
@@ -995,7 +1031,7 @@ pub(super) fn into_storage(
         let Some(got) = game.native_extract_item(dimension, from, side, slot.slot, want) else {
             continue;
         };
-        let took = put_into(game, dimension, id, key, u64::from(got.count));
+        let took = put_into(game, dimension, id, key, u64::from(got.count), source);
         if took < u64::from(got.count) {
             // Cannot happen (the room was counted first); kept, never lost.
             restore_into(dimension, id, key, u64::from(got.count) - took);
@@ -1063,9 +1099,9 @@ pub(super) fn between_storages(
     let (Some(a), Some(b)) = (id_at(dimension, from), id_at(dimension, to)) else {
         return 0;
     };
-    let room = room_at(game, dimension, to, key).min(u64::from(count));
+    let room = room_at(game, dimension, to, key, Source::Storage).min(u64::from(count));
     let took = take_from(dimension, a, key, room);
-    let put = put_into(game, dimension, b, key, took);
+    let put = put_into(game, dimension, b, key, took, Source::Storage);
     restore_into(dimension, a, key, took - put);
     if put > 0 {
         let route = format!("storage#{a} -> storage#{b} net");
@@ -1332,6 +1368,14 @@ fn listing(game: &Game<'_>, dimension: &str, terminal: Pos, id: Option<u32>) -> 
             ..Listing::default()
         };
     };
+    // 0.21.2 (SP15): whether a sink of the storage's lines takes each item's surplus.
+    let (routes, fluid_trash) = id
+        .and_then(|id| {
+            with_level(dimension, |level| {
+                (level.routes.get(&id).cloned().unwrap_or_default(), level.fluid_trashes.contains(&id))
+            })
+        })
+        .unwrap_or_default();
     let mut lines: Vec<(u64, Line)> = Vec::new();
     let mut variants: Vec<wire::Variant> = Vec::new();
     let mut keys: BTreeSet<&ItemKey> = store.items.keys().collect();
@@ -1371,6 +1415,7 @@ fn listing(game: &Game<'_>, dimension: &str, terminal: Pos, id: Option<u32>) -> 
                 count,
                 limit: store.limits.get(key).copied(),
                 keep: store.keep.get(key).copied().unwrap_or(0),
+                routed: routes.contains(key),
             },
         ));
     }
@@ -1380,7 +1425,7 @@ fn listing(game: &Game<'_>, dimension: &str, terminal: Pos, id: Option<u32>) -> 
     let line_fluids = id
         .and_then(|id| with_level(dimension, |level| level.line_fluids.get(&id).cloned()).flatten())
         .unwrap_or_default();
-    let mut all: Vec<(u64, Line)> = fluid_lines(&store, &line_fluids)
+    let mut all: Vec<(u64, Line)> = fluid_lines(&store, &line_fluids, fluid_trash)
         .into_iter()
         .map(|l| (l.count, l))
         .collect();
@@ -1422,7 +1467,7 @@ fn listing(game: &Game<'_>, dimension: &str, terminal: Pos, id: Option<u32>) -> 
 /// Round 31 (FL5): a line for each fluid the storage knows: its cells' and its line's tanks'
 /// whole buckets, its limit and its «держать N»; a fluid the terminal has no number for is left
 /// out.
-fn fluid_lines(store: &Store, line: &BTreeMap<String, u64>) -> Vec<Line> {
+fn fluid_lines(store: &Store, line: &BTreeMap<String, u64>, trash: bool) -> Vec<Line> {
     use rustcraft_rules::orders::{fluid_key, fluid_number, fluid_of};
     let mut fluids: BTreeSet<String> = store.fluids.keys().chain(line.keys()).cloned().collect();
     for key in store.limits.keys().chain(store.keep.keys()) {
@@ -1444,6 +1489,7 @@ fn fluid_lines(store: &Store, line: &BTreeMap<String, u64>) -> Vec<Line> {
                 count: mb / BUCKET,
                 limit,
                 keep,
+                routed: trash,
             })
         })
         .collect()
@@ -1868,6 +1914,14 @@ fn apply_limit(dimension: &str, storage: u32, key: &ItemKey, change: term::Limit
     });
 }
 
+/// 0.21.2 (SP10): the self-test's deposit: `count` of `key` from the player into the storage of
+/// the cell or terminal at `pos`, as a shift-click puts them; how many it took, none without a
+/// storage.
+pub(super) fn deposit_at(game: &Game<'_>, dimension: &str, pos: Pos, key: &str, count: u32) -> Option<u32> {
+    let id = storage_id(dimension, pos)?;
+    Some(put_into(game, dimension, id, key, u64::from(count), Source::Player) as u32)
+}
+
 /// The self-test's limit button: the storage of the cell or terminal at `pos`; false when it
 /// belongs to none.
 pub(super) fn change_limit_at(
@@ -2026,7 +2080,7 @@ fn put_carried(
         return;
     };
     let count = if one { 1 } else { stack.count };
-    let took = put_into(game, dimension, storage, &key, u64::from(count)) as u32;
+    let took = put_into(game, dimension, storage, &key, u64::from(count), Source::Player) as u32;
     stack.count -= took.min(stack.count);
     if stack.count == 0 {
         *carried = None;
@@ -2111,7 +2165,7 @@ pub(super) fn on_quick_move(
     let Some(key) = key_of(stack) else {
         return;
     };
-    let took = put_into(game, &dimension, storage, &key, u64::from(stack.count)) as u32;
+    let took = put_into(game, &dimension, storage, &key, u64::from(stack.count), Source::Player) as u32;
     stack.count -= took.min(stack.count);
 }
 
@@ -2442,7 +2496,7 @@ pub(super) fn tablet_deposit(game: &mut Game<'_>, dimension: &str, id: u32, play
     let Some(key) = key_of(&stack) else {
         return 0;
     };
-    let room = room_in(game, dimension, id, &key).min(u64::from(stack.count)) as u32;
+    let room = room_in(game, dimension, id, &key, Source::Player).min(u64::from(stack.count)) as u32;
     if room == 0 {
         return 0;
     }
@@ -2461,7 +2515,7 @@ pub(super) fn tablet_deposit(game: &mut Game<'_>, dimension: &str, id: u32, play
     if taken.is_err() {
         return 0;
     }
-    let took = put_into(game, dimension, id, &key, u64::from(room)) as u32;
+    let took = put_into(game, dimension, id, &key, u64::from(room), Source::Player) as u32;
     if took < room {
         // Never lost: what the storage did not take after all goes back.
         let mut back = stack.clone();

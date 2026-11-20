@@ -745,6 +745,11 @@ impl Bench for GameBench<'_, '_> {
         }
     }
 
+    fn deposit(&mut self, pos: Pos, item: &str, count: u32) -> Result<u32, String> {
+        storage::deposit_at(&*self.game, DIMENSION, pos, &keys::key(item, 0), count)
+            .ok_or_else(|| format!("no storage at {pos:?}"))
+    }
+
     fn stock_snbt(&mut self, pos: Pos, snbt: &str, count: u64) -> Result<(), String> {
         let (tag, _) = horizon_world::nbt::parse_snbt(snbt)?;
         let stack = horizon_client::save::item_from_nbt(&tag).ok_or_else(|| format!("no item in {snbt}"))?;

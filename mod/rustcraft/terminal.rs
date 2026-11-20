@@ -69,7 +69,7 @@ use rustcraft_rules::{
             part_in,
         },
         typed::{self, Field, Setting, Typing},
-        view::{self, Entry, Facts, PER_PAGE, Tab},
+        view::{self, Entry, Facts, Over, PER_PAGE, Tab},
         wire::{self, Line, Listing, OrderLine, OrderWait, Smart, State},
     },
 };
@@ -401,6 +401,7 @@ fn shown(game: &Game<'_>, listing: &Listing, v: &View) -> Vec<Entry<ItemRef>> {
             key: (l.item, l.damage),
             count: l.count,
             limit: l.limit,
+            routed: l.routed,
         })
         .collect();
     if listing.book && !v.search.is_empty() {
@@ -419,6 +420,7 @@ fn shown(game: &Game<'_>, listing: &Listing, v: &View) -> Vec<Entry<ItemRef>> {
                     key: (n, 0),
                     count: 0,
                     limit: None,
+                    routed: false,
                 }),
         );
     }
@@ -719,19 +721,20 @@ fn limit_page<T>(list: &[T], page: usize) -> &[T] {
     &list[start..(start + term::LIMIT_ROWS).min(list.len())]
 }
 
-/// «лимит 512 · сверх лимита: не принимать», or «без лимита».
-fn limit_words(limit: Option<Limit>) -> String {
-    match limit {
-        Some(l) => {
-            let over = if l.destroy_surplus {
-                tr("rustcraft.terminal.over.destroy", "over the limit: destroyed")
-            } else {
-                tr("rustcraft.terminal.over.keep", "over the limit: not taken")
-            };
-            format!("{} · {over}", limit_text(Some(l)))
-        }
-        None => tr("rustcraft.terminal.limit.none", "Limit: none"),
-    }
+/// «лимит 512 · сверх лимита: в переработку», «лимит 64 · сверх лимита 6: некуда девать», or
+/// «без лимита» (0.21.2, SP15).
+fn limit_words<K>(e: &Entry<K>) -> String {
+    let Some(over) = e.over() else {
+        return tr("rustcraft.terminal.limit.none", "Limit: none");
+    };
+    let words = match over {
+        Over::Destroyed => tr("rustcraft.terminal.over.destroy", "over the limit: destroyed"),
+        Over::Recycled => tr("rustcraft.terminal.over.out", "over the limit: recycled"),
+        Over::Stays => tr("rustcraft.terminal.over.keep", "over the limit: stays"),
+        Over::Leaving(n) => tr_with("rustcraft.terminal.over.leaving", "%s over the limit: recycled", &[n.to_string()]),
+        Over::Stuck(n) => tr_with("rustcraft.terminal.over.stuck", "%s over the limit: nowhere to go", &[n.to_string()]),
+    };
+    format!("{} · {words}", limit_text(e.limit))
 }
 
 /// Slice 18 (guide `terminal`: limits as a list): each item a row with its icon, its name and
@@ -754,7 +757,7 @@ fn limit_rows(
         }
         let name = kit::fit(game, &name_of(game, e.key.0), 70.0);
         text(game, batch, &name, o, [r[0] + 12.0, r[1] + 1.0], VALUE);
-        let words = kit::fit(game, &limit_words(e.limit), r[2] - 86.0);
+        let words = kit::fit(game, &limit_words(e), r[2] - 86.0);
         let colour = if e.limit.is_some() { TEXT } else { LABEL };
         text(game, batch, &words, o, [r[0] + 84.0, r[1] + 1.0], colour);
     }
@@ -1633,16 +1636,8 @@ fn cell_tooltip(game: &Game<'_>, i: usize, orders_mode: bool, lines: &mut Vec<St
             &[e.key.1.to_string()],
         ));
     }
-    if let Some(l) = e.limit {
-        let what = if l.destroy_surplus {
-            tr(
-                "rustcraft.terminal.over.destroy",
-                "over the limit: destroyed",
-            )
-        } else {
-            tr("rustcraft.terminal.over.keep", "over the limit: not taken")
-        };
-        lines.push(format!("{} · {what}", limit_text(Some(l))));
+    if e.limit.is_some() {
+        lines.push(limit_words(&e));
     }
     if orders_mode {
         hint(

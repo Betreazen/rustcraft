@@ -134,11 +134,20 @@ pub fn stock_out(
     moved
 }
 
+/// Whether a sink of the net takes `item` from `from` as surplus (SP13): what a storage that
+/// destroys the surplus may keep past its limit, since it will be sent away.
+pub fn sent_away(joints: &[Joint], inv: &dyn Inventories, from: Pos, item: &str) -> bool {
+    let receivers = crate::net::items::receivers(joints);
+    !sinks_for(joints, &receivers, inv, from, item).is_empty()
+}
+
 /// SP2: `left` of `item` from `from` that no receiver took, while the storages `limited` of the
 /// net hold their limit of it. With `surplus` (`from` is a machine, or a container the player set
-/// «из блока»; no storage and no container on its default joint) it goes to its sinks first. What
-/// they do not take goes into a storage of `limited` that destroys the surplus (S5), from any
-/// source, as before round 32. How many moved.
+/// «из блока»; no storage and no container on its default joint) it goes to its sinks first, and
+/// (0.21.2, SP10) what they do not take now goes into a storage of `limited` past its limit, as
+/// far as its slots hold it: the storage sends it on by SP1 (`stock_out`), and the machine is
+/// never left holding it. What is left goes into a storage of `limited` that destroys the
+/// surplus (S5), from any source, as before round 32. How many moved.
 #[allow(clippy::too_many_arguments)]
 pub fn arriving(
     joints: &[Joint],
@@ -161,6 +170,24 @@ pub fn arriving(
     } else {
         0
     };
+    if surplus && gave < left {
+        let away = !sinks_for(joints, receivers, &*inv, from, item).is_empty();
+        for &r in limited {
+            let block = joints[r].block;
+            while gave < left && *available > 0 && inv.given_room(block, item) > 0 {
+                if inv.take(from, item, 1) == 0 {
+                    return gave;
+                }
+                if inv.put_given(block, item, 1, away) == 0 {
+                    inv.put(from, item, 1);
+                    break;
+                }
+                record(transfers, from, block, item);
+                gave += 1;
+                *available -= 1;
+            }
+        }
+    }
     for &r in limited {
         let block = joints[r].block;
         if !inv.destroys(block, item) {
@@ -348,21 +375,46 @@ mod tests {
     }
 
     #[test]
-    fn with_no_sink_nothing_changes() {
-        // Without a disintegrator or a trash: the storage takes no more, the rest waits (S5).
+    fn with_no_sink_the_storage_holds_past_its_limit() {
+        // 0.21.2 (SP10, SP12): without a disintegrator or a trash the storage still takes all a
+        // chest set «из блока» gives and holds it past the limit; the stock over it stays. A
+        // chest on its default joint gives only up to the limit, the rest waits (SP11).
         let mut s = line(&[(COBBLE, 4, false), (PICK, 1, false)], &[(PICK, 3)], &[(COBBLE, 10)]);
         let plain = [joint(CHEST, Mode::From), store_joint(STORE)];
         let moved = run(&plain, &mut s, 2000.0, 2);
-        assert_eq!(moved.get(&(CHEST, STORE, COBBLE.into())), Some(&4));
+        assert_eq!(moved.get(&(CHEST, STORE, COBBLE.into())), Some(&10));
         assert_eq!(moved.len(), 1, "{moved:?}");
-        assert_eq!(held(&s, CHEST, COBBLE), 6);
+        assert_eq!(held(&s, CHEST, COBBLE), 0);
+        assert_eq!(s.stores[&STORE].store.count(COBBLE), 10);
         assert_eq!(s.stores[&STORE].store.count(PICK), 3, "the stock over the limit stays");
+        let mut s = line(&[(COBBLE, 4, false)], &[], &[(COBBLE, 10)]);
+        let own = [Joint { auto: true, ..joint(CHEST, Mode::Both) }, store_joint(STORE)];
+        let moved = run(&own, &mut s, 2000.0, 2);
+        assert_eq!(moved.get(&(CHEST, STORE, COBBLE.into())), Some(&4));
+        assert_eq!(held(&s, CHEST, COBBLE), 6);
+    }
+
+    #[test]
+    fn a_full_storage_takes_nothing_past_its_limit() {
+        // SP10: past the limit only as far as the slots hold: one cell, 27 slots of cobblestone.
+        let mut s = line(&[(COBBLE, 0, false)], &[], &[(COBBLE, 64)]);
+        s.stores.get_mut(&STORE).unwrap().store.cells = 1;
+        s.stores.get_mut(&STORE).unwrap().store.restore(SEEDS, 26 * 64);
+        let plain = [joint(CHEST, Mode::From), store_joint(STORE)];
+        let moved = run(&plain, &mut s, 2000.0, 2);
+        assert_eq!(moved.get(&(CHEST, STORE, COBBLE.into())), Some(&64));
+        let mut s = line(&[(COBBLE, 0, false)], &[], &[(COBBLE, 64)]);
+        s.stores.get_mut(&STORE).unwrap().store.cells = 1;
+        s.stores.get_mut(&STORE).unwrap().store.restore(SEEDS, 27 * 64);
+        assert!(run(&plain, &mut s, 2000.0, 2).is_empty());
+        assert_eq!(held(&s, CHEST, COBBLE), 64);
     }
 
     #[test]
     fn destroying_the_surplus_comes_after_the_sinks() {
-        // S5 with SP2: with «уничтожать излишек» the sinks take first; with no room in them the
-        // storage destroys the rest, so the line never clogs. With no sink it destroys all.
+        // S5 with SP2: with «уничтожать излишек» the sinks take first; what they have no room for
+        // now the storage holds past its limit for them (0.21.2, SP13), so the line never clogs.
+        // With no sink it destroys all over the limit at once.
         let mut s = line(&[(COBBLE, 4, true)], &[], &[(COBBLE, 30)]);
         s.blocks.insert(TRASH, inputs(1, &[]));
         let moved = run(&joints(), &mut s, 2000.0, 1);
@@ -371,9 +423,14 @@ mod tests {
         s.blocks.insert(TRASH, inputs(1, &[]));
         let moved = run(&joints(), &mut s, 2000.0, 1);
         assert_eq!(moved.get(&(CHEST, TRASH, COBBLE.into())), Some(&64));
-        assert_eq!(moved.get(&(CHEST, STORE, COBBLE.into())), Some(&36), "4 kept, 32 destroyed");
-        assert_eq!(s.stores[&STORE].store.count(COBBLE), 4);
+        assert_eq!(moved.get(&(CHEST, STORE, COBBLE.into())), Some(&36), "4 kept, 32 for the trash");
+        assert_eq!(s.stores[&STORE].store.count(COBBLE), 36);
         assert_eq!(held(&s, CHEST, COBBLE), 0);
+        // The trash emptied (it burnt them): the 32 follow, down to the limit.
+        s.blocks.insert(TRASH, inputs(64, &[]));
+        let moved = run(&joints(), &mut s, 2000.0, 1);
+        assert_eq!(moved.get(&(STORE, TRASH, COBBLE.into())), Some(&32));
+        assert_eq!(s.stores[&STORE].store.count(COBBLE), 4);
         // No sink: the storage destroys what is over, as before, and says nothing is full.
         let mut s = line(&[(COBBLE, 4, true)], &[], &[(COBBLE, 30)]);
         let plain = [joint(CHEST, Mode::From), store_joint(STORE)];
@@ -486,6 +543,46 @@ mod tests {
         s.sinks.insert(DIS, sink(Sink::Disintegrator, &[STICK]));
         let moved = run(&joints(), &mut s, 2000.0, 1);
         assert_eq!(moved.get(&(DIS, TRASH, STICK.into())), Some(&3));
+    }
+
+    #[test]
+    fn the_recycling_loop_ends_with_every_item_at_its_limit() {
+        // SP10, SP12: five pickaxes the player put in past a limit of 0; the disintegrator takes
+        // them apart one at a time into an ingot and a stick (its products, a machine's), the
+        // storage keeps 2 ingots, the trash burns the rest. The loop ends: no more moves.
+        let mut s = line(&[(PICK, 0, false), (INGOT, 2, false), (STICK, 0, false)], &[(PICK, 5)], &[]);
+        let output = StockSlot { can_take: true, ..StockSlot::default() };
+        let mut dis = inputs(1, &[]);
+        dis.slots.extend([output.clone(), output]);
+        s.blocks.insert(DIS, dis);
+        s.blocks.insert(TRASH, inputs(9, &[]));
+        let mut state = NetState::default();
+        let mut quiet = 0;
+        let mut burnt: BTreeMap<String, u32> = BTreeMap::new();
+        for _ in 0..200 {
+            let r = tick(&joints(), 2000.0, 20.0, &mut state, &mut s);
+            for t in r.transfers.iter().filter(|t| t.to == TRASH) {
+                *burnt.entry(t.item.clone()).or_insert(0) += t.count;
+            }
+            quiet = if r.transfers.is_empty() { quiet + 1 } else { 0 };
+            // The disintegrator works: a pickaxe in its input gives an ingot and a stick.
+            let d = s.blocks.get_mut(&DIS).unwrap();
+            if d.slots[0].count > 0 {
+                d.slots[0] = StockSlot { can_put: true, only: Some(BTreeSet::new()), ..StockSlot::default() };
+                for (k, item) in [(1, INGOT), (2, STICK)] {
+                    d.slots[k].item = Some(item.into());
+                    d.slots[k].count += 1;
+                }
+            }
+            // The trash burns what it got.
+            s.blocks.insert(TRASH, inputs(9, &[]));
+        }
+        assert!(quiet > 100, "the loop ended long before the last tick");
+        let store = &s.stores[&STORE].store;
+        assert_eq!((store.count(PICK), store.count(INGOT), store.count(STICK)), (0, 2, 0));
+        assert_eq!(burnt.get(INGOT), Some(&3));
+        assert_eq!(burnt.get(STICK), Some(&5));
+        assert!(!burnt.contains_key(PICK), "every pickaxe went to the disintegrator");
     }
 
     #[test]

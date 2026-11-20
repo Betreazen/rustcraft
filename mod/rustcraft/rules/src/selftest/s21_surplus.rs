@@ -3,8 +3,8 @@
 //! - A storage with limits, a disintegrator and a trash on one line: iron pickaxes over their
 //!   limit are taken apart, the ingots and sticks they give past their own limits burn (SP1–SP3).
 //! - A limit lowered under what the storage holds pushes the rest into the trash (SP1).
-//! - With no disintegrator and no trash nothing changes: the stock over the limit stays, what
-//!   arrives over it waits in the chest (S5).
+//! - With no disintegrator and no trash the stock over the limit stays, and what a chest set «из
+//!   блока» gives over it goes in past the limit and stays too (0.21.2, SP10, SP12).
 //! - A trash with no filter takes only the surplus: the storage keeps the dirt it does not limit
 //!   (SP4), and the trash does not say «Фильтр не задан» once a storage limits something.
 //! - Water in the storage's cells over its limit burns in the trash of its fluid line (SP8).
@@ -28,15 +28,15 @@ use crate::tuning::Tuning;
 pub const ALL: [Build; 7] = [
     gear_taken_apart_ingots_burnt,
     lowered_limit_pushes_the_stock_out,
-    no_sink_changes_nothing,
+    no_sink_holds_past_the_limit,
     trash_without_a_filter_takes_only_surplus,
     water_over_the_limit_burns,
     wrench_opens_the_trash_joint,
     default_chest_keeps_its_items,
 ];
 
-const DISINTEGRATOR: &str = "rustcraft:disintegrator";
-const TRASH: &str = "rustcraft:trash";
+pub(super) const DISINTEGRATOR: &str = "rustcraft:disintegrator";
+pub(super) const TRASH: &str = "rustcraft:trash";
 const WRENCH: &str = "rustcraft:wrench";
 const PICK: &str = "minecraft:iron_pickaxe";
 const INGOT: &str = "minecraft:iron_ingot";
@@ -49,16 +49,16 @@ const FULL: f64 = 1000.0;
 const NO_FILTER: &str = "rustcraft.util.trash_no_filter";
 
 /// The disintegrator beside housing 3, the trash beside housing 6 (z−, as the chest at 1).
-fn dis_at(o: Pos) -> Pos {
+pub(super) fn dis_at(o: Pos) -> Pos {
     chest(o, 3)
 }
 
-fn trash_at(o: Pos) -> Pos {
+pub(super) fn trash_at(o: Pos) -> Pos {
     chest(o, 6)
 }
 
 /// A machine with an owner and a full buffer.
-fn machine(b: &mut dyn Bench, pos: Pos, block: &str) -> Result<(), String> {
+pub(super) fn machine(b: &mut dyn Bench, pos: Pos, block: &str) -> Result<(), String> {
     b.place(pos, block, &[])?;
     b.set_owner(pos, OWNER, 1)?;
     b.set_buffer(pos, FULL)
@@ -66,7 +66,7 @@ fn machine(b: &mut dyn Bench, pos: Pos, block: &str) -> Result<(), String> {
 
 /// The trash's joint as placing it beside a housing writes it (an empty allow list at the lowest
 /// priority) on the item and fluid channels of housing `k`.
-fn trash_joint(b: &mut dyn Bench, o: Pos, k: i32) -> Result<(), String> {
+pub(super) fn trash_joint(b: &mut dyn Bench, o: Pos, k: i32) -> Result<(), String> {
     for slot in [0, 1] {
         b.set_joint(housing(o, k), Face::ZNeg, slot, crate::machines::tiered::trash_joint())?;
     }
@@ -76,7 +76,7 @@ fn trash_joint(b: &mut dyn Bench, o: Pos, k: i32) -> Result<(), String> {
 /// A node and six housings of tier `tier`, a chest «из блока» at housing 1, a storage of four
 /// cells with its terminal at housings 3 to 5, and as asked a disintegrator at housing 3 and a
 /// trash at housing 6.
-fn build(b: &mut dyn Bench, o: Pos, tier: u8, dis: bool, trash: bool) -> Result<(), String> {
+pub(super) fn build(b: &mut dyn Bench, o: Pos, tier: u8, dis: bool, trash: bool) -> Result<(), String> {
     line(b, o, tier, 6, tier)?;
     b.place(chest(o, 1), "minecraft:chest", &[])?;
     joint(b, o, 1, Mode::From, 0)?;
@@ -95,7 +95,7 @@ fn build(b: &mut dyn Bench, o: Pos, tier: u8, dis: bool, trash: bool) -> Result<
 }
 
 /// The limit on `item` at the storage of the terminal `t` set to `n` (0 too).
-fn limit(b: &mut dyn Bench, t: Pos, item: &str, n: i64) -> Result<(), String> {
+pub(super) fn limit(b: &mut dyn Bench, t: Pos, item: &str, n: i64) -> Result<(), String> {
     if n == 0 {
         b.change_limit(t, item, LimitChange::Add(1))?;
         return b.change_limit(t, item, LimitChange::Add(-1));
@@ -103,7 +103,7 @@ fn limit(b: &mut dyn Bench, t: Pos, item: &str, n: i64) -> Result<(), String> {
     b.change_limit(t, item, LimitChange::Add(n))
 }
 
-fn held(b: &dyn Bench, t: Pos, item: &str) -> Result<u64, String> {
+pub(super) fn held(b: &dyn Bench, t: Pos, item: &str) -> Result<u64, String> {
     Ok(b.storage(t).ok_or("the terminal shows no storage")?.store.count(item))
 }
 
@@ -159,9 +159,9 @@ fn lowered_limit_pushes_the_stock_out(o: Pos, _: &Tuning) -> Scenario {
         })
 }
 
-fn no_sink_changes_nothing(o: Pos, _: &Tuning) -> Scenario {
+fn no_sink_holds_past_the_limit(o: Pos, _: &Tuning) -> Scenario {
     let (c, t) = (chest(o, 1), terminal_at(o));
-    Scenario::new("surplus21_no_sink_changes_nothing", plot_area(o))
+    Scenario::new("surplus21_no_sink_holds_past_the_limit", plot_area(o))
         .then("a chest of 20 cobblestone and a storage, no disintegrator, no trash", move |b, _| {
             build(b, o, 2, false, false)?;
             fill(b, c, COBBLE, 20)
@@ -172,9 +172,9 @@ fn no_sink_changes_nothing(o: Pos, _: &Tuning) -> Scenario {
             fill(b, c, COBBLE, 10)
         })
         .wait(100)
-        .check("the storage keeps all 20, the 10 wait in the chest", move |b, _| {
-            same("stored", held(b, t, COBBLE)?, 20)?;
-            same("in the chest", count_of(&b.items(c), COBBLE), 10)
+        .check("the storage takes the 10 past its limit and keeps all 30", move |b, _| {
+            same("stored", held(b, t, COBBLE)?, 30)?;
+            same("in the chest", count_of(&b.items(c), COBBLE), 0)
         })
 }
 

@@ -48,11 +48,11 @@ use rustcraft_rules::{
         items::{self, Joint, JointNote, Mode, NetState, Transfer},
         joints,
         stock::{self, SinkStock, Stock, StockSlot, Stocks},
-        surplus::Sink,
+        surplus::{self, Sink},
         topology::{ChannelKind, Layout, pipe_length},
     },
     orders::ship::{self, NetKey, Route},
-    storage::keys,
+    storage::{keys, surplus::Source},
     tuning::Tuning,
 };
 use std::collections::{BTreeMap, BTreeSet, HashMap};
@@ -398,6 +398,8 @@ pub(super) fn tick(game: &mut Game<'_>, dimension: &str, level: &mut LevelNet, t
     } = transport;
     full_until.retain(|_, until| *until > now);
     let mut sinks_now = BTreeSet::new();
+    // 0.21.2 (SP13): each storage's items whose surplus a sink of one of its nets takes.
+    let mut routes: HashMap<Pos, BTreeSet<String>> = HashMap::new();
     for (net, &per_second) in nets.iter().zip(&rates) {
         if net.joints.len() < 2 {
             continue;
@@ -413,8 +415,17 @@ pub(super) fn tick(game: &mut Game<'_>, dimension: &str, level: &mut LevelNet, t
             &mut stocks,
         );
         sinks_now.extend(stocks.sinks.keys().copied());
+        for &store in &stores {
+            let away = stocks
+                .sinks
+                .values()
+                .flat_map(|s| s.takes.iter())
+                .filter(|item| surplus::sent_away(&net.joints, &stocks, store, item))
+                .cloned();
+            routes.entry(store).or_default().extend(away);
+        }
         admit_surplus(game, &stocks.sinks, &result.transfers);
-        apply(game, dimension, &net.joints, &stores, &result.transfers);
+        apply(game, dimension, &net.joints, &stores, machines, &result.transfers);
         // Wave 2: the moves drawn in the housings (rustcraft_pipe18::show_flow, M5).
         crate::game::rustcraft_pipe18::moved(dimension, net.key, &result.transfers);
         for (j, note) in result.notes {
@@ -424,6 +435,7 @@ pub(super) fn tick(game: &mut Game<'_>, dimension: &str, level: &mut LevelNet, t
         }
     }
     *surplus_sinks = sinks_now;
+    storage::set_routes(dimension, &routes);
 }
 
 /// 0.21 (round 32): what a trash of `sinks` gets this move goes past its slot rule, which knows
@@ -480,6 +492,7 @@ fn sinks(
                     .filter(|k| {
                         slot_takes(&entity, slot, keys::item_of(k), tuning)
                             && !crate::game::rustcraft_utility::charged_key(game, k)
+                            && !crate::game::rustcraft_utility::comes_back(game, k)
                     })
                     .map(|k| (*k).clone())
                     .collect();
@@ -617,14 +630,20 @@ fn snapshot(
 }
 
 /// Makes the moves the net decided, through the sides the joints touch; a move to or from a
-/// storage (at its anchor, one of `stores`) goes through rustcraft_storage.
+/// storage (at its anchor, one of `stores`) goes through rustcraft_storage, which takes past its
+/// limit what a machine or a container the player set gives (0.21.2, SP10).
 fn apply(
     game: &mut Game<'_>,
     dimension: &str,
     joints: &[Joint],
     stores: &BTreeSet<Pos>,
+    machines: &BTreeMap<Pos, Machine>,
     transfers: &[Transfer],
 ) {
+    let source_of = |block: Pos| {
+        let auto = joints.iter().find(|j| j.block == block && j.mode.gives()).is_some_and(|j| j.auto);
+        Source::of_joint(false, auto, machines.contains_key(&block))
+    };
     let side_of = |block: Pos| joints.iter().find(|j| j.block == block).map(block_side);
     for ((from, to, item), count) in stock::totals(transfers) {
         let (Some(from_side), Some(to_side)) = (side_of(from), side_of(to)) else {
@@ -636,7 +655,7 @@ fn apply(
                 storage::out_of_storage(game, dimension, from, to, to_side, &item, count)
             }
             (false, true) => {
-                storage::into_storage(game, dimension, from, from_side, to, &item, count)
+                storage::into_storage(game, dimension, from, from_side, to, &item, count, source_of(from))
             }
             (false, false) => game.native_move_items(
                 dimension,

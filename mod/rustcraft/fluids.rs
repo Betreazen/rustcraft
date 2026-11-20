@@ -382,6 +382,23 @@ impl FluidInventories for Inventories<'_> {
         self.storages.get(&block).is_some_and(|(_, s)| s.fluid_at_limit(fluid))
     }
 
+    fn is_storage(&self, block: Pos) -> bool {
+        self.storages.contains_key(&block)
+    }
+
+    // 0.21.2 (SP14): a pump's, a machine's or a set tank's fluid goes into the cells past the
+    // limit; the trash takes it from there (SP8).
+    fn given_room(&self, block: Pos, fluid: &str) -> u64 {
+        self.storages.get(&block).map_or(0, |(_, s)| s.given_fluid_room(fluid, self.cell_mb))
+    }
+
+    fn put_given(&mut self, block: Pos, fluid: &str, amount: u64) -> u64 {
+        match self.storages.get_mut(&block) {
+            Some((_, s)) => s.put_given_fluid(fluid, amount, self.cell_mb),
+            None => self.put(block, fluid, amount),
+        }
+    }
+
     fn offered(&self, block: Pos) -> Vec<(FluidKey, u64)> {
         if let Some((_, store)) = self.storages.get(&block) {
             return store.fluids.iter().map(|(f, n)| (f.clone(), *n)).collect();
@@ -722,6 +739,8 @@ pub(super) fn tick(game: &mut Game<'_>, level: &mut LevelNet, tuning: &Tuning) {
     };
     f.no_lane.retain(|_, (_, until)| *until > now);
     let mut surplus_sinks = BTreeSet::new();
+    // 0.21.2 (SP15): the storages with a trash on one of their fluid nets.
+    let mut trashed = BTreeSet::new();
     for net in &f.nets {
         // A joint on any block of a tank group is a joint on the whole group.
         let joints: Vec<Joint> = net
@@ -745,6 +764,9 @@ pub(super) fn tick(game: &mut Game<'_>, level: &mut LevelNet, tuning: &Tuning) {
         if joints.iter().any(|j| inv.storages.get(&j.block).is_some_and(|(_, s)| !s.limits.is_empty())) {
             surplus_sinks.extend(joints.iter().map(|j| j.block).filter(|b| inv.trash.contains_key(b)));
         }
+        if joints.iter().any(|j| j.mode.takes() && inv.trash.contains_key(&j.block)) {
+            trashed.extend(joints.iter().map(|j| j.block).filter(|b| inv.storages.contains_key(b)));
+        }
         let state = f.states.entry(net.key).or_default();
         let result = fluid_net::tick(
             &joints,
@@ -760,6 +782,7 @@ pub(super) fn tick(game: &mut Game<'_>, level: &mut LevelNet, tuning: &Tuning) {
         }
     }
     f.surplus_sinks = surplus_sinks;
+    storage::set_fluid_trashes(&dimension, &trashed);
     // Slice 18: each trash pays 1 E a bucket it destroyed.
     let destroyed = std::mem::take(&mut inv.destroyed);
     for (pos, (mb, fluid)) in destroyed {
@@ -1352,7 +1375,7 @@ pub(super) fn touching_amount(game: &Game<'_>, level: &LevelNet, pos: Pos, fluid
     let store_room = net_storages(level, pos, true)
         .into_iter()
         .filter_map(|a| storage::fluid_store(dimension, a))
-        .fold(0u64, |n, (_, s)| n.saturating_add(s.fluid_room(fluid, cell_mb)));
+        .fold(0u64, |n, (_, s)| n.saturating_add(s.given_fluid_room(fluid, cell_mb)));
     // A storage that destroys its surplus has room without end; the windows add these up.
     (held + stored, room.saturating_add(store_room).min(u64::from(u32::MAX)))
 }
@@ -1394,7 +1417,8 @@ pub(super) fn put_touching(game: &mut Game<'_>, level: &LevelNet, pos: Pos, flui
             break;
         }
         if let Some((id, _)) = storage::fluid_store(&dimension, anchor) {
-            went += storage::put_fluid(&dimension, id, fluid, amount - went, cell_mb);
+            // 0.21.2 (SP14): a machine's fluid goes in past the limit as far as the cells hold it.
+            went += storage::put_given_fluid(&dimension, id, fluid, amount - went, cell_mb);
         }
     }
     went

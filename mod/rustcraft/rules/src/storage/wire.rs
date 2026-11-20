@@ -24,6 +24,8 @@ pub const MAX_BYTES: usize = 30_000;
 pub const MAX_HOLES: usize = 16;
 /// Missing items or machines an order's line names.
 pub const MAX_WANTS: usize = 3;
+/// 0.21.2 (SP15): the bit of a line's limit flag that says its surplus has somewhere to go.
+const ROUTED: u8 = 0x10;
 const VERSION: u8 = 3;
 /// Version 2 (v0.15.0) is laid out as 3 is; it only knew no wait for energy.
 const OLDER: u8 = 2;
@@ -104,6 +106,8 @@ pub struct Line {
     pub limit: Option<Limit>,
     /// O14: «держать N», 0 for none.
     pub keep: u64,
+    /// 0.21.2 (SP15): a disintegrator or a trash on the storage's line takes this item's surplus.
+    pub routed: bool,
 }
 
 /// What an order waits for, as the window shows it.
@@ -243,7 +247,8 @@ pub fn encode(listing: &Listing) -> Vec<u8> {
         out.extend(l.count.to_le_bytes());
         match l.limit {
             Some(limit) => {
-                out.push(1 + u8::from(limit.destroy_surplus));
+                // 0.21.2 (SP15): the flag's 0x10 bit says the surplus has somewhere to go.
+                out.push((1 + u8::from(limit.destroy_surplus)) | if l.routed { ROUTED } else { 0 });
                 out.extend(limit.max.to_le_bytes());
             }
             None => {
@@ -507,7 +512,8 @@ pub fn decode(bytes: &[u8]) -> Option<Listing> {
         let item = r.u16()?;
         let damage = r.u16()?;
         let count = r.u64()?;
-        let flag = r.u8()?;
+        let byte = r.u8()?;
+        let (flag, routed) = (byte & !ROUTED, byte & ROUTED != 0);
         let max = r.u64()?;
         let keep = r.u64()?;
         let limit = (flag > 0).then_some(Limit {
@@ -520,6 +526,7 @@ pub fn decode(bytes: &[u8]) -> Option<Listing> {
             count,
             limit,
             keep,
+            routed,
         });
     }
     let orders = (0..order_count)
@@ -575,6 +582,7 @@ mod tests {
                         destroy_surplus: i % 4 == 0,
                     }),
                     keep: (i % 5) as u64,
+                    routed: i % 6 == 0,
                 })
                 .collect(),
             book: true,

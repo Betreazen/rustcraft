@@ -60,6 +60,19 @@ pub trait FluidInventories {
     fn at_limit(&self, _block: Pos, _fluid: &str) -> bool {
         false
     }
+    /// 0.21.2 (SP14): the block is a storage.
+    fn is_storage(&self, _block: Pos) -> bool {
+        false
+    }
+    /// 0.21.2 (SP14): how much of `fluid` a storage at its limit takes past it from a pump, a
+    /// machine or a tank set «из блока»: its cells' room. 0 for any other block.
+    fn given_room(&self, _block: Pos, _fluid: &str) -> u64 {
+        0
+    }
+    /// 0.21.2 (SP14): puts `amount` as `given_room` counts it; how much went in.
+    fn put_given(&mut self, block: Pos, fluid: &str, amount: u64) -> u64 {
+        self.put(block, fluid, amount)
+    }
     /// 0.21 (FT1–FT3): what the tank group behind the block is kept for; no tank for any other
     /// block. The inventory keeps a free tank for the first fluid `put` gives it.
     fn pin(&self, _block: Pos) -> TankPin {
@@ -200,6 +213,40 @@ pub fn tick(
                     has_home |= free;
                 }
             }
+            // 0.21.2 (SP14): what a pump, a machine or a tank set «из блока» gives that no
+            // receiver took goes into a storage at its limit, past it as far as its cells hold
+            // it; its trash then takes it as surplus (SP8). A tank on its default joint and a
+            // storage give none so.
+            if left > 0 && available > 0 && !consumers_only && !inv.is_storage(src.block) {
+                for &r in &receivers {
+                    let dst = &joints[r];
+                    if left == 0 || available == 0 {
+                        break;
+                    }
+                    if dst.block == src.block
+                        || !dst.filter.passes(&fluid)
+                        || !inv.is_storage(dst.block)
+                        || !inv.at_limit(dst.block, &fluid)
+                    {
+                        continue;
+                    }
+                    let want = left.min(available).min(inv.given_room(dst.block, &fluid));
+                    if want == 0 {
+                        continue;
+                    }
+                    let taken = inv.take(src.block, &fluid, want);
+                    let put = inv.put_given(dst.block, &fluid, taken);
+                    if put < taken {
+                        inv.put(src.block, &fluid, taken - put);
+                    }
+                    if put > 0 {
+                        result.moved.push((src.block, dst.block, fluid.clone(), put));
+                        left -= put;
+                        available -= put;
+                        moved += put;
+                    }
+                }
+            }
             if moved > 0 {
                 places.insert(fluid.clone());
                 flowed.insert(fluid.clone());
@@ -269,6 +316,8 @@ mod tests {
         limits: HashMap<(Pos, FluidKey), u64>,
         /// 0.21 (FT1): what each tank is kept for.
         pins: HashMap<Pos, TankPin>,
+        /// 0.21.2 (SP14): a storage's cells' room past its limit, mB.
+        cells: HashMap<Pos, u64>,
     }
 
     impl Tanks {
@@ -305,6 +354,19 @@ mod tests {
         }
         fn pin(&self, b: Pos) -> TankPin {
             self.pins.get(&b).cloned().unwrap_or_default()
+        }
+        fn is_storage(&self, b: Pos) -> bool {
+            self.cells.contains_key(&b)
+        }
+        fn given_room(&self, b: Pos, _f: &str) -> u64 {
+            self.cells.get(&b).copied().unwrap_or(0)
+        }
+        fn put_given(&mut self, b: Pos, f: &str, amount: u64) -> u64 {
+            let room = self.cells.entry(b).or_default();
+            let n = (*room).min(amount);
+            *room -= n;
+            *self.got.entry(b).or_default().entry(f.into()).or_insert(0) += n;
+            n
         }
         fn room_for(&self, b: Pos, f: &str) -> u64 {
             if matches!(self.pins.get(&b), Some(TankPin::For(p)) if p != f) {
@@ -583,6 +645,34 @@ mod tests {
         tick(&joints, 100.0, ANY_KINDS, 20.0, &mut s, &mut t);
         assert_eq!(t.got(STORE_A, WATER), BUCKET);
         assert_eq!(t.got(TRASH, WATER), 0);
+    }
+
+    #[test]
+    fn a_pumps_water_past_the_limit_goes_into_the_cells_with_no_trash() {
+        // SP14: the storage at its limit takes the pump's water past it while its cells hold it,
+        // and the pump is never left holding it; a tank on its default joint gives none so.
+        let (mut joints, mut t) = trash_line();
+        joints[1].mode = Mode::Off;
+        t.holds(PUMP, WATER, 2 * BUCKET);
+        t.holds(STORE_A, WATER, 3 * BUCKET);
+        t.limits.insert((STORE_A, WATER.into()), 3 * BUCKET);
+        t.cells.insert(STORE_A, BUCKET);
+        let mut s = FluidNetState::default();
+        for _ in 0..5 {
+            tick(&joints, 100.0, ANY_KINDS, 20.0, &mut s, &mut t);
+        }
+        assert_eq!(t.got(STORE_A, WATER), BUCKET, "as far as the cells hold");
+        assert_eq!(t.got(TRASH, WATER), 0);
+        // With the trash on, the pump's water burns at once, the cells' room untouched.
+        let (joints, mut t) = trash_line();
+        t.holds(PUMP, WATER, BUCKET);
+        t.holds(STORE_A, WATER, 3 * BUCKET);
+        t.limits.insert((STORE_A, WATER.into()), 3 * BUCKET);
+        t.cells.insert(STORE_A, 8 * BUCKET);
+        t.takes(TRASH, WATER, 64 * BUCKET);
+        tick(&joints, 100.0, ANY_KINDS, 20.0, &mut s, &mut t);
+        assert_eq!(t.got(TRASH, WATER), BUCKET);
+        assert_eq!(t.got(STORE_A, WATER), 0);
     }
 
     #[test]

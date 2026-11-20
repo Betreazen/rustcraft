@@ -26,6 +26,7 @@ use horizon_client::items::ItemStack;
 use rustcraft_rules::{
     geom::Pos,
     orders::queue::Wait,
+    storage::surplus::Source,
     utility::{
         Shown,
         rods::{self, Ask, ROD, Step},
@@ -102,7 +103,7 @@ pub(super) fn served(dimension: &str, pos: Pos) {
 fn take(game: &mut Game<'_>, dimension: &str, id: u32, pos: Pos, worn: Option<&ItemStack>) -> Result<ItemStack, Lack> {
     let worn_key = worn.map(storage::net_key);
     if let Some(k) = &worn_key
-        && storage::room_in(game, dimension, id, k) == 0
+        && storage::room_in(game, dimension, id, k, Source::Machine) == 0
     {
         return Err(Lack::NoRoom);
     }
@@ -141,7 +142,7 @@ fn take(game: &mut Game<'_>, dimension: &str, id: u32, pos: Pos, worn: Option<&I
     crate::game::rustcraft_debug::flow(dimension, &route, &key, 1);
     if let Some(k) = worn_key {
         // The room was counted first; kept, never lost.
-        if storage::put_into(game, dimension, id, &k, 1) == 0 {
+        if storage::put_into(game, dimension, id, &k, 1, Source::Machine) == 0 {
             storage::restore_into(dimension, id, &k, 1);
         }
         let back = format!("rustcraft:fishery({}) -> storage#{id}", rustcraft_rules::debug::pos_text(pos));

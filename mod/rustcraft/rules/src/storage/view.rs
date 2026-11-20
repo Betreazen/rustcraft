@@ -65,6 +65,39 @@ pub struct Entry<K> {
     pub key: K,
     pub count: u64,
     pub limit: Option<Limit>,
+    /// 0.21.2 (SP15): a disintegrator or a trash on the storage's line takes its surplus.
+    pub routed: bool,
+}
+
+/// 0.21.2 (SP15): what the terminal says of an item with a limit about what is over it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Over {
+    /// «сверх лимита: уничтожать» (S5) while the storage holds no more than its limit.
+    Destroyed,
+    /// «сверх лимита: в переработку»: a disintegrator or a trash on its line takes the surplus.
+    Recycled,
+    /// «сверх лимита: остаётся»: nothing on its line takes it; it stays in the storage.
+    Stays,
+    /// «сверх лимита N: в переработку»: the storage holds N over the limit, on their way out.
+    Leaving(u64),
+    /// «сверх лимита N: некуда девать»: it holds N over the limit and nothing on its line takes
+    /// them.
+    Stuck(u64),
+}
+
+impl<K> Entry<K> {
+    /// SP15: what is over the item's limit, none without a limit.
+    pub fn over(&self) -> Option<Over> {
+        let l = self.limit?;
+        let over = self.count.saturating_sub(l.max);
+        Some(match (over > 0, self.routed, l.destroy_surplus) {
+            (true, true, _) => Over::Leaving(over),
+            (true, false, _) => Over::Stuck(over),
+            (false, _, true) => Over::Destroyed,
+            (false, true, false) => Over::Recycled,
+            (false, false, false) => Over::Stays,
+        })
+    }
 }
 
 /// Whether `search` is found in any of `names`, letters of any case alike; an empty search finds
@@ -123,6 +156,7 @@ mod tests {
             key: key.into(),
             count,
             limit: None,
+            routed: false,
         }
     }
 
@@ -156,6 +190,23 @@ mod tests {
 
     fn keys(v: Vec<&Entry<String>>) -> Vec<&str> {
         v.into_iter().map(|e| e.key.as_str()).collect()
+    }
+
+    #[test]
+    fn the_terminal_says_what_is_over_a_limit() {
+        // SP15.
+        let mut e = entry("seeds", 70);
+        assert_eq!(e.over(), None);
+        e.limit = Some(Limit { max: 64, destroy_surplus: false });
+        assert_eq!(e.over(), Some(Over::Stuck(6)), "nothing on the line takes them");
+        e.routed = true;
+        assert_eq!(e.over(), Some(Over::Leaving(6)));
+        e.count = 64;
+        assert_eq!(e.over(), Some(Over::Recycled));
+        e.routed = false;
+        assert_eq!(e.over(), Some(Over::Stays));
+        e.limit = Some(Limit { max: 64, destroy_surplus: true });
+        assert_eq!(e.over(), Some(Over::Destroyed));
     }
 
     #[test]

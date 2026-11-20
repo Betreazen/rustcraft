@@ -105,6 +105,8 @@ pub mod s21_enchanter;
 pub mod s21_orderable;
 // 0.21.2 (spec 49): the terminal's numbers typed.
 pub mod s21_typed;
+// 0.21.2 (spec 32, SP10–SP15): a limit never refuses what is given to the storage.
+pub mod s21_limits;
 
 use std::collections::BTreeMap;
 
@@ -631,6 +633,15 @@ pub trait Bench {
         let _ = message;
         Err("no typed numbers on this bench".into())
     }
+
+    // ---- 0.21.2 (SP10): a limit never refuses the player ----
+    /// `count` of `item` the player puts into the storage the cell or terminal at `pos`
+    /// belongs to, as a shift-click, the cursor or the tablet's deposit puts them
+    /// (`rustcraft_storage::put_into` from the player): how many it took.
+    fn deposit(&mut self, pos: Pos, item: &str, count: u32) -> Result<u32, String> {
+        let _ = (pos, item, count);
+        Err("no deposits on this bench".into())
+    }
 }
 
 /// 0.21.1 (OT12, OT13): what the server sends a player who opens a terminal.
@@ -922,6 +933,8 @@ pub fn catalog() -> Vec<Build> {
     all.extend(s21_orderable::ALL);
     // 0.21.2 (spec 49): a typed limit, «держать» and order count.
     all.extend(s21_typed::ALL);
+    // 0.21.2 (spec 32, SP10–SP15): a limit never refuses what is given; the recycling loop.
+    all.extend(s21_limits::ALL);
     all
 }
 

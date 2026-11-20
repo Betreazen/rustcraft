@@ -58,6 +58,30 @@ pub fn recipe_for<'a>(item: &str, recipes: &'a [Recipe], charged: bool) -> Resul
     Ok(r)
 }
 
+/// 0.21.2 (SP12): whether taking `item` apart, and what that gives apart in turn, may give `item`
+/// again. Such an item is no disintegrator's surplus: a storage's surplus of it goes to the trash,
+/// so nothing goes round between a storage and its disintegrator for ever. What the disintegrator
+/// takes apart as surplus then only ever gives items it has not taken apart on the way (each pass
+/// gives at most 75% too, DS5); the trash ends the loop.
+pub fn comes_back(item: &str, recipes: &[Recipe]) -> bool {
+    let mut seen: std::collections::BTreeSet<&str> = std::collections::BTreeSet::new();
+    let mut next = vec![item];
+    while let Some(i) = next.pop() {
+        let Ok(r) = recipe_for(i, recipes, false) else {
+            continue;
+        };
+        for (ing, _) in &r.ingredients {
+            if ing == item {
+                return true;
+            }
+            if seen.insert(ing) {
+                next.push(ing);
+            }
+        }
+    }
+    false
+}
+
 /// What one item gives: whole items now, the fractions (thousandths) added to `kept`. `durability`
 /// is the share of its life left, 0..=1 (DS2), 1 for an item without durability.
 pub fn take_apart(
@@ -188,6 +212,28 @@ mod tests {
         assert_eq!(share_percent(0), 50);
         assert_eq!(share_percent(2), 70);
         assert_eq!(share_percent(9), 75);
+    }
+
+    #[test]
+    fn an_item_its_own_parts_give_back_is_no_surplus_of_the_disintegrator() {
+        // SP12: a modded pair that takes each other apart (A from 4 B, B from 4 A, no recipe
+        // undoes the other at the table) would grow on each pass: both go to the trash. A chain
+        // that ends (pickaxe → ingots and sticks; a stick is made of planks, many a craft) does not.
+        let recipes = vec![
+            r("mod:a", 1, &[("mod:b", 4), ("minecraft:stick", 1)]),
+            r("mod:b", 1, &[("mod:c", 2)]),
+            r("mod:c", 1, &[("mod:a", 1), ("minecraft:dirt", 1)]),
+            r("minecraft:iron_pickaxe", 1, &[("minecraft:iron_ingot", 3), ("minecraft:stick", 2)]),
+            r("minecraft:stick", 4, &[("minecraft:oak_planks", 2)]),
+            r("minecraft:iron_block", 1, &[("minecraft:iron_ingot", 9)]),
+            r("minecraft:iron_ingot", 9, &[("minecraft:iron_block", 1)]),
+        ];
+        for item in ["mod:a", "mod:b", "mod:c"] {
+            assert!(comes_back(item, &recipes), "{item}");
+        }
+        for item in ["minecraft:iron_pickaxe", "minecraft:stick", "minecraft:iron_block", "minecraft:dirt"] {
+            assert!(!comes_back(item, &recipes), "{item}");
+        }
     }
 
     #[test]

@@ -802,6 +802,18 @@ pub(super) fn charged_key(game: &Game<'_>, key: &str) -> bool {
         && charged(game, &crate::game::rustcraft_storage::stored_stack(key, 1))
 }
 
+/// 0.21.2 (SP12): whether the item a storage's `key` names comes back when taken apart, and its
+/// parts in turn (rustcraft_rules::utility::disassembly::comes_back): its surplus goes to the
+/// trash, not to the disintegrator.
+pub(super) fn comes_back(game: &Game<'_>, key: &str) -> bool {
+    if state().recipes.is_none() {
+        let r = crafting_recipes(game);
+        state().recipes = Some(r);
+    }
+    let s = state();
+    disassembly::comes_back(rustcraft_rules::storage::keys::item_of(key), s.recipes.as_deref().unwrap_or_default())
+}
+
 fn disintegrate(game: &mut Game<'_>, pos: Pos, cost: f64) -> Shown {
     let Some(input) = items(game, pos).first().cloned().flatten() else {
         return Shown::Idle("dis_empty");

@@ -4,7 +4,8 @@
 //! fit; so a snapshot that is slightly off moves less, never loses an item.
 //!
 //! A storage on the net (S1) is no block with slots: it keeps counts (`storage::Store`), takes
-//! what it has room for under its limits (S5) and gives everything it holds. While its shape is
+//! what it has room for under its limits (S5), and past them what a machine or a container the
+//! player set gives (0.21.2, SP10), and gives everything it holds. While its shape is
 //! broken (S8) it does neither.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
@@ -12,6 +13,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use crate::geom::Pos;
 use crate::net::items::{Inventories, ItemKey};
 use crate::net::surplus::Sink;
+use crate::storage::surplus::Source;
 use crate::storage::{Store, keys};
 
 /// The stack size of an item the snapshot was not told about.
@@ -162,6 +164,32 @@ impl Inventories for Stocks {
 
     fn is_store(&self, block: Pos) -> bool {
         self.stores.contains_key(&block)
+    }
+
+    fn given_room(&self, block: Pos, item: &str) -> u32 {
+        if let Some(s) = self.stores.get(&block) {
+            let stack = |k: &str| stack_in(&self.max_stack, k);
+            // 0.21.2 (SP10): a machine's products and a set container's go in past the limit.
+            return if s.works && keys::storable(item) {
+                clamp(s.store.room_from(item, Source::Machine, &stack))
+            } else {
+                0
+            };
+        }
+        self.room_for(block, item)
+    }
+
+    fn put_given(&mut self, block: Pos, item: &str, count: u32, sent_away: bool) -> u32 {
+        if let Some(s) = self.stores.get_mut(&block) {
+            let max_stack = &self.max_stack;
+            let stack = |k: &str| stack_in(max_stack, k);
+            return if s.works && keys::storable(item) {
+                clamp(s.store.put_from(item, u64::from(count), Source::Machine, sent_away, &stack))
+            } else {
+                0
+            };
+        }
+        self.put(block, item, count)
     }
 
     fn surplus(&self, block: Pos) -> Vec<(ItemKey, u32)> {
@@ -524,24 +552,37 @@ mod tests {
 
     #[test]
     fn a_storage_takes_from_a_chest_line_up_to_its_limit() {
-        // In-game checks: a storage takes items from a chest line; a limit stops intake (S5).
-        let mut stocks = Stocks::default();
-        stocks.blocks.insert(A, filled(chest(2), RAW, &[64, 30]));
-        let mut s = storage(4, true);
-        s.store.limits.insert(
-            RAW.into(),
-            crate::storage::Limit {
-                max: 50,
-                destroy_surplus: false,
-            },
-        );
-        stocks.stores.insert(B, s);
-        let joints = [joint(A, Mode::From), joint(B, Mode::Into)];
+        // In-game checks: a storage takes items from a chest line; a limit stops what it pulls
+        // from a chest on its default joint (S5, SP11).
+        let line = || {
+            let mut stocks = Stocks::default();
+            stocks.blocks.insert(A, filled(chest(2), RAW, &[64, 30]));
+            let mut s = storage(4, true);
+            s.store.limits.insert(
+                RAW.into(),
+                crate::storage::Limit {
+                    max: 50,
+                    destroy_surplus: false,
+                },
+            );
+            stocks.stores.insert(B, s);
+            stocks
+        };
+        let mut stocks = line();
+        let auto = Joint { auto: true, ..joint(A, Mode::Both) };
+        let joints = [auto, joint(B, Mode::Into)];
         let mut state = NetState::default();
         let r = tick(&joints, 2000.0, 20.0, &mut state, &mut stocks);
         assert_eq!(totals(&r.transfers).get(&(A, B, RAW.into())), Some(&50));
         assert_eq!(stocks.stores[&B].store.count(RAW), 50);
         assert_eq!(stocks.room_for(B, RAW), 0);
+        // 0.21.2 (SP10): a chest the player set «из блока» empties into it past the limit.
+        let mut stocks = line();
+        let joints = [joint(A, Mode::From), joint(B, Mode::Into)];
+        let r = tick(&joints, 2000.0, 20.0, &mut NetState::default(), &mut stocks);
+        assert_eq!(totals(&r.transfers).get(&(A, B, RAW.into())), Some(&94));
+        assert_eq!(stocks.stores[&B].store.count(RAW), 94);
+        assert!(r.notes.is_empty(), "{:?}", r.notes);
     }
 
     #[test]

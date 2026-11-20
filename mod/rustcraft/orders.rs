@@ -85,6 +85,7 @@ use rustcraft_rules::{
     },
     storage::{
         keys,
+        surplus::Source,
         wire::{MAX_WANTS, OrderLine, OrderWait, Smart},
     },
 };
@@ -1260,10 +1261,10 @@ fn pull(
             .filter(|(i, _)| i == item)
             .map(|(_, n)| u64::from(*n))
             .sum();
-        let room = storage::room_in(game, dimension, storage_id, item).saturating_sub(on_the_way);
+        let room = storage::room_in(game, dimension, storage_id, item, Source::Order).saturating_sub(on_the_way);
         u32::try_from(room).unwrap_or(u32::MAX).min(plain)
     } else {
-        let took = storage::put_into(game, dimension, storage_id, item, u64::from(plain));
+        let took = storage::put_into(game, dimension, storage_id, item, u64::from(plain), Source::Order);
         u32::try_from(took).unwrap_or(plain).min(plain)
     };
     if took == 0 {
@@ -1454,7 +1455,7 @@ fn land(
     for (item, n) in &s.items {
         let n = u64::from(*n);
         let took = match own {
-            Some(false) => storage::put_into(game, dimension, s.storage, item, n),
+            Some(false) => storage::put_into(game, dimension, s.storage, item, n, Source::Order),
             _ => 0,
         };
         if took < n {

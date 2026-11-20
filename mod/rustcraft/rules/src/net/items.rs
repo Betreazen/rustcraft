@@ -12,6 +12,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::geom::{Face, Pos};
 use crate::net::surplus::{self, Sink};
+use crate::storage::surplus::Source;
 
 /// An item kind as the game names it, with any components that keep stacks apart.
 pub type ItemKey = String;
@@ -175,6 +176,17 @@ pub trait Inventories {
     fn surplus_room(&self, _block: Pos, _item: &str) -> u32 {
         0
     }
+    /// 0.21.2 (SP10): how many of `item` a storage takes from a source its limit never refuses
+    /// (a machine, a container the player set): what its slots hold, past the limit too. Any
+    /// other block: `room_for`.
+    fn given_room(&self, block: Pos, item: &str) -> u32 {
+        self.room_for(block, item)
+    }
+    /// 0.21.2 (SP10, SP13): puts `count` of `item` from such a source as `given_room` counts it;
+    /// `sent_away`: a sink of the net takes its surplus. How many fitted.
+    fn put_given(&mut self, block: Pos, item: &str, count: u32, _sent_away: bool) -> u32 {
+        self.put(block, item, count)
+    }
     /// Takes up to `count` of `item` out of the block; returns how many it took.
     fn take(&mut self, block: Pos, item: &str, count: u32) -> u32;
     /// Puts up to `count` of `item` into the block; returns how many fitted.
@@ -279,6 +291,10 @@ pub fn tick(
         let src = &joints[sources[(start + k) % sources.len()]];
         // A storage gives only to the load docks (`Joint::store`), what their room takes.
         let pulled = src.store && !src.mode.gives();
+        // 0.21.2 (SP10, SP11): a machine's products and what a container the player set gives
+        // go into a storage past its limit; what a container on its default joint or another
+        // storage gives stops at it.
+        let given = Source::of_joint(inv.is_store(src.block), src.auto, inv.is_machine(src.block)).over_limit();
         for (item, count) in inv.offered(src.block) {
             if pulled && available == 0 {
                 break;
@@ -340,23 +356,28 @@ pub fn tick(
                 if left > 0 && available > 0 {
                     // Items waited and every receiver of this priority had no room; a storage
                     // that destroys the surplus takes the rest below (0.21), it is not full.
+                    // 0.21.2: nor is one at its limit that takes this source's items past it.
                     let item = &item;
-                    full.extend(candidates.into_iter().filter(|&r| !inv.destroys(joints[r].block, item)));
+                    full.extend(candidates.into_iter().filter(|&r| {
+                        let block = joints[r].block;
+                        !inv.destroys(block, item)
+                            && !(given && inv.at_limit(block, item) && inv.given_room(block, item) > 0)
+                    }));
                 }
             }
             // 0.21 (round 32, SP2): what no receiver took of an item a storage of the net holds
-            // its limit of is surplus: its sinks take it, else a storage that destroys it (S5).
-            // A storage's stock is no such surplus (SP1 has its own), nor what a vanilla container
-            // on its default joint gives (the player's chests beside any line keep it): only a
-            // machine's products and a container the player set «из блока». A storage that
-            // destroys the surplus takes from any source, as before.
+            // its limit of is surplus: its sinks take it, then (0.21.2, SP10) the storage takes
+            // the rest past its limit and sends it on later (SP1). A storage's stock is no such
+            // surplus, nor what a vanilla container on its default joint gives (the player's
+            // chests beside any line keep it): only a machine's products and a container the
+            // player set «из блока». A storage that destroys the surplus takes from any source,
+            // as before.
             if left > 0 && available > 0 {
                 let limited: Vec<usize> = receivers
                     .iter()
                     .copied()
                     .filter(|&r| open(r) && inv.at_limit(joints[r].block, &item))
                     .collect();
-                let gives_surplus = !src.auto && !inv.is_store(src.block);
                 moved += surplus::arriving(
                     joints,
                     &receivers,
@@ -366,7 +387,7 @@ pub fn tick(
                     src.block,
                     &item,
                     left,
-                    gives_surplus,
+                    given,
                     &mut available,
                     &mut result.transfers,
                 );
@@ -455,6 +476,11 @@ fn nearest_first(joints: &[Joint], candidates: &[usize], from: Pos, nearest: boo
         by_far.entry(far(r)).or_default().push(r);
     }
     by_far.into_values().collect()
+}
+
+/// The first taking joint on each block: the net's receivers (`net::surplus::sent_away`).
+pub(crate) fn receivers(joints: &[Joint]) -> Vec<usize> {
+    first_per_block(joints, Mode::takes)
 }
 
 /// The first joint on each block whose mode passes `wanted`: two joints on one block are one inventory.
